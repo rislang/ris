@@ -405,6 +405,22 @@ struct Conn
     @state.value.socket
   end
 
+  def configure(socket : IyiSocket, stream : TlsStream? = nil) : Nil
+    @state.value.socket = socket
+    @state.value.stream = stream
+    @state.value.h2 = nil
+    @state.value.made_under = nil
+    @state.value.start = 0
+    @state.value.stop = 0
+    @state.value.searched = 0
+    @state.value.ended = false
+    @state.value.failure_kind = 0
+    @state.value.handed_over = false
+    @state.value.deadline = 0_i64
+    @state.value.deadline_whole = false
+    @state.value.gap = nil
+  end
+
   # How long a stopping server's close_notify may wait to be written: a
   # client that reads nothing, its socket's buffer full, holds the stop
   # this long and no longer.
@@ -674,13 +690,27 @@ struct Conn
   # says whether it failed, and `available` whether part of a head had
   # come - and an error past *limit* bytes.
   def read_head(limit : Int32, what : String, blank_first : Bool = false) : String | HTTPError | Nil
+    at = head_end(limit, blank_first)
+    return nil if at == -1
+    return HTTPError.new("#{what} headers past #{limit} bytes", 431) if at == -2
+    # Made after the search, so the String is the def's own result.
+    head = String.new(at - @state.value.start) do |buf|
+      buf.copy_from(data_bytes + @state.value.start.to_i64, at - @state.value.start)
+    end
+    consume(at + 4 - @state.value.start)
+    head
+  end
+
+  # Where the held head's blank line starts; -1 when the connection
+  # ends first, -2 past *limit* bytes.
+  private def head_end(limit : Int32, blank_first : Bool) : Int32
     while true
       if blank_first
         while available >= 2 && peek(0) == 13_u8 && peek(1) == 10_u8
           consume(2)
         end
         if available == 1 && peek(0) == 13_u8
-          return nil unless fill
+          return -1 unless fill
           next
         end
       end
@@ -689,18 +719,15 @@ struct Conn
       at = from
       while at + 3 < @state.value.stop
         if data_bytes[at] == 13_u8 && data_bytes[at + 1] == 10_u8 && data_bytes[at + 2] == 13_u8 && data_bytes[at + 3] == 10_u8
-          head = String.new(at - @state.value.start) do |buf|
-            buf.copy_from(data_bytes + @state.value.start.to_i64, at - @state.value.start)
-          end
-          consume(at + 4 - @state.value.start)
-          return head
+          return at
         end
         at = at + 1
       end
       @state.value.searched = @state.value.stop
-      return HTTPError.new("#{what} headers past #{limit} bytes", 431) if available > limit
-      return nil unless fill
+      return -2 if available > limit
+      return -1 unless fill
     end
+    -1
   end
 
   # A line ended by CRLF, taken with it: a chunk's size, a trailer. An
@@ -840,9 +867,12 @@ end
 # keep the types they have over a plain socket.
 pub class TlsStream
   @tls : TlsConnection
-  @host : String
 
-  def initialize(@tls : TlsConnection, @host : String)
+  def initialize(@tls : TlsConnection, host : String)
+  end
+
+  def configure(tls : TlsConnection, host : String) : Nil
+    @tls = tls
   end
 
   # The peer's certificate chain, leaf first, as the handshake checked it:
@@ -895,20 +925,20 @@ pub class TlsStream
   # after either - and anything else carries TLS's sentence.
   private def failed_read(error : TlsError) : Cancelled | SocketError
     return Cancelled.new if error.cancelled?
-    return SocketError.timed_out("read from #{@host}") if error.timed_out?
-    SocketError.layered("read from #{@host}", error.message)
+    return SocketError.timed_out("read from #{@tls.place}") if error.timed_out?
+    SocketError.layered("read from #{@tls.place}", error.message)
   end
 
   def write(text : String) : Int32 | Cancelled | SocketError
     sent = @tls.write(text)
-    return SocketError.layered("write to #{@host}", sent.message) if sent.is_a?(TlsError)
+    return SocketError.layered("write to #{@tls.place}", sent.message) if sent.is_a?(TlsError)
     sent
   end
 
   # *text* from the caller's tape, sealed with no string made.
   def write(text : String) : Int32 | Cancelled | SocketError
     sent = @tls.write(text)
-    return SocketError.layered("write to #{@host}", sent.message) if sent.is_a?(TlsError)
+    return SocketError.layered("write to #{@tls.place}", sent.message) if sent.is_a?(TlsError)
     sent
   end
 
@@ -923,7 +953,7 @@ pub class TlsStream
   # own (`TlsConnection#close_write`).
   def close_write : SocketError?
     shut = @tls.close_write
-    return SocketError.layered("close the writing to #{@host}", shut.message) if shut
+    return SocketError.layered("close the writing to #{@tls.place}", shut.message) if shut
     nil
   end
 
@@ -1015,7 +1045,11 @@ pub class BodyReader
   @inflater : Inflater?
   @zstd : ZstdReader? = nil
 
-  def initialize(@fault_text : String::Builder, @conn : Conn?, @kind : Int32, length : Int64, @limit : Int64, @text : String = "", continue_pending : Bool = false, coding : Int32 = CODED_NONE, frames : H2Connection? = nil, frames_id : Int32 = 0)
+  @inflater_slot : Inflater? = nil
+  @zstd_slot : ZstdReader? = nil
+  @feed : BodyFeed? = nil
+
+  def initialize(@fault_text : String::Builder, @conn : Conn?, @kind : Int32, length : Int64, @limit : Int64, @text : String = "", continue_pending : Bool = false, coding : Int32 = CODED_NONE, frames : H2Connection? = nil, frames_id : Int32 = 0, client_decode : Bool = false)
     @frames = frames
     @frames_id = frames_id
     @left = @kind == CHUNKED ? -1_i64 : length
@@ -1026,6 +1060,14 @@ pub class BodyReader
     @at = 0
     @continue_pending = continue_pending
     @inflater = nil
+    if client_decode
+      feed = BodyFeed.new(self)
+      @feed = feed
+      inflater_slot = Inflater.new(Envelope::Raw, feed)
+      zstd_slot = ZstdReader.new(feed)
+      @inflater_slot = inflater_slot
+      @zstd_slot = zstd_slot
+    end
     unless @finished
       if coding == CODED_ZSTD
         zstd = ZstdReader.new(BodyFeed.new(self), Zstd::WINDOW_LIMIT)
@@ -1039,9 +1081,46 @@ pub class BodyReader
     end
   end
 
+  def configure(conn : Conn?, kind : Int32, length : Int64,
+                limit : Int64, coding : Int32 = CODED_NONE,
+                frames : H2Connection? = nil, frames_id : Int32 = 0) : Nil
+    @conn = conn
+    @frames = frames
+    @frames_id = frames_id
+    @kind = kind
+    @left = kind == CHUNKED ? -1_i64 : length
+    @declared = length
+    @limit = limit
+    @total = 0_i64
+    @finished = kind == EMPTY || (kind == LENGTH && length == 0_i64)
+    @fault = nil
+    @cancelled = false
+    @text = ""
+    @at = 0
+    @continue_pending = false
+    @inflater = nil
+    @zstd = nil
+    unless @finished
+      if coding == CODED_ZSTD
+        decoder = @zstd_slot.as(ZstdReader)
+        decoder.configure(@feed)
+        @zstd = decoder
+      elsif coding == CODED_GZIP || coding == CODED_ZLIB
+        decoder = @inflater_slot.as(Inflater)
+        decoder.configure(coding == CODED_GZIP ? Envelope::Gzip : Envelope::Zlib, @feed)
+        decoder.sniff_bare if coding == CODED_ZLIB
+        @inflater = decoder
+      end
+    end
+  end
+
   # Whether a decoder undoes the body's coding.
   def decoding? : Bool
     !@inflater.nil? || !@zstd.nil?
+  end
+
+  def self.borrow(reader : BodyReader) : BodyReader
+    reader
   end
 
   # A body that is a string already in hand.
@@ -1626,15 +1705,67 @@ end
 # `body` whole, or `body_io` as it arrives inside `HTTP.open`'s block.
 class RisHttpResponseBody
   getter headers : Hash(String, String)
-  property apart : Hash(String, Array(String))?
+  property apart : Hash(String, Array(String)) | Hash(String, Array::View(String)) | Nil
 
-  def initialize(@headers : Hash(String, String), @apart : Hash(String, Array(String))? = nil)
+  def initialize(@headers : Hash(String, String), @apart : Hash(String, Array(String)) | Hash(String, Array::View(String)) | Nil = nil)
   end
 
   getter text : String::Builder = String::Builder.new(4096)
   # A coded body (`Server.compressed`) and the header texts made for it.
   getter coded : String::Builder = String::Builder.new(4096)
   getter notes : String::Builder = String::Builder.new(64)
+
+  getter client_fields : Bool = false
+  getter flat_lines : Bool = false
+  getter client_lines : Hash(String, Array::View(String)) = Hash(String, Array::View(String)).new
+  @line_values : Array(String) = Array(String).new(32)
+
+  def begin_client : Nil
+    @client_fields = true
+    @flat_lines = true
+    @apart = nil
+    @headers.clear
+    @client_lines.clear
+    @line_values.clear
+    @notes.clear
+    @text.clear
+    @coded.clear
+  end
+
+  def client_header(name : String, value : String) : String
+    ensure_lines
+    spelled = name
+    @headers.each_key { |key| spelled = key if HTTP.same_name?(key, name) }
+    kept_name = note(spelled)
+    kept_value = note(value)
+    if existing = @headers[kept_name]?
+      start = @line_values.size
+      if previous = @client_lines[kept_name]?
+        previous.each { |line| @line_values << line }
+      else
+        @line_values << existing
+      end
+      @line_values << kept_value
+      @client_lines[kept_name] = @line_values[start, @line_values.size - start]
+      @headers[kept_name] = note(existing + ", " + kept_value)
+    else
+      @headers[kept_name] = kept_value
+    end
+    kept_name
+  end
+
+  private def ensure_lines : Nil
+    return if @flat_lines
+    if apart = @apart
+      apart.each do |name, values|
+        start = @line_values.size
+        values.each { |value| @line_values << note(value) }
+        @client_lines[note(name)] = @line_values[start, values.size]
+        nil
+      end
+    end
+    @flat_lines = true
+  end
 
   # *text* copied into `notes`: a view of this holder's own bytes.
   def note(text : String) : String
@@ -1646,7 +1777,15 @@ end
 
 pub class Response
   getter status : Int32
-  getter reason : String
+  @client_reason_at : Int32 = 0
+  @client_reason_size : Int32 = 0
+  @client_url_at : Int32 = 0
+  @client_url_size : Int32 = -1
+  @client_loaded : Bool = false
+
+  def reason : String
+    @held.client_fields ? @held.notes.finish[@client_reason_at, @client_reason_size] : @reason
+  end
   def headers : Hash(String, String)
     @held.headers
   end
@@ -1663,7 +1802,7 @@ pub class Response
   @decoded : Bool
   @tls_resumed : Bool = false
 
-  def initialize(@status : Int32, @reason : String, headers : Hash(String, String), @body : String, apart : Hash(String, Array(String))? = nil)
+  def initialize(@status : Int32, @reason : String, headers : Hash(String, String), @body : String, apart : Hash(String, Array(String)) | Hash(String, Array::View(String)) | Nil = nil)
     held = RisHttpResponseBody.new(headers, apart)
     @held = held
     @source = nil
@@ -1673,9 +1812,62 @@ pub class Response
     @decoded = false
   end
 
+  @client_state : RisHttpClientExchange? = nil
+  getter request_error : Cancelled | SocketError | HTTPError | Nil = nil
+
+  def initialize(method : String, url : String,
+                 headers : Hash(String, String), body : String | IyiIO,
+                 redirects : Int32, jar : CookieStore?, decompress : Bool,
+                 client : HTTPClient?, timeout_ms : Int32, proxy : String?)
+    @status = 0
+    @reason = ""
+    @body = ""
+    held = RisHttpResponseBody.new(Hash(String, String).new)
+    @held = held
+    @source = nil
+    @writer = nil
+    @reader = nil
+    @url = nil
+    @decoded = false
+    state = RisHttpClientExchange.new(self)
+    @client_state = state
+    @request_error = state.read_into(method, url, headers, body,
+      redirects, jar, decompress, client, timeout_ms, proxy)
+  end
+
+  def self.request_result(response : Response) : Response | Cancelled | SocketError | HTTPError
+    response.request_error || response
+  end
+
+  def begin_client(status : Int32, reason : String) : Nil
+    @body = ""
+    @reader = nil
+    @url = nil
+    @reason = ""
+    @client_loaded = false
+    @client_url_size = -1
+    @held.begin_client
+    @status = status
+    @client_reason_at = @held.notes.bytesize
+    @client_reason_size = reason.bytesize
+    @held.notes << reason
+  end
+
+  def client_header(name : String, value : String) : String
+    @held.client_header(name, value)
+  end
+
+  def client_reader(reader : BodyReader, url : String, decoded : Bool) : Nil
+    @reader = reader
+    @client_url_at = @held.notes.bytesize
+    @client_url_size = url.bytesize
+    @held.notes << url
+    @decoded = decoded
+  end
+
   # A response a client read: its body comes from *reader*, and *url* is
   # where it came from.
-  def initialize(@status : Int32, @reason : String, headers : Hash(String, String), apart : Hash(String, Array(String))?, reader : BodyReader, url : String, @decoded : Bool)
+  def initialize(@status : Int32, @reason : String, headers : Hash(String, String), apart : Hash(String, Array(String)) | Hash(String, Array::View(String)) | Nil, reader : BodyReader, url : String, @decoded : Bool)
     held = RisHttpResponseBody.new(headers, apart)
     @held = held
     @body = ""
@@ -1727,9 +1919,21 @@ pub class Response
   # the connection's own scope, a call the tape checks follow; the
   # connection closes when it returns.
   def self.upgrade(headers : Hash(String, String)) : Response
-    response = Response.new(101, "", headers)
-    response.upgrading = true
-    response
+    Response.new(headers)
+  end
+
+  def initialize(headers : Hash(String, String))
+    @status = 101
+    @reason = HTTP.reason_for(101)
+    @body = ""
+    held = RisHttpResponseBody.new(headers)
+    @held = held
+    @source = nil
+    @writer = nil
+    @reader = nil
+    @url = nil
+    @decoded = false
+    @upgrading = true
   end
 
   # A block kept in the response would run where no check can follow
@@ -1764,7 +1968,11 @@ pub class Response
   # The URL the answer came from, after any redirects; nil for one a
   # program made.
   def url : String?
-    @url
+    if @held.client_fields
+      @client_url_size < 0 ? nil : @held.notes.finish[@client_url_at, @client_url_size]
+    else
+      @url
+    end
   end
 
   # Whether the client undid the body's `gzip`, `deflate` or `zstd`
@@ -1792,18 +2000,23 @@ pub class Response
     if @reader
       got = @reader.as(BodyReader).read_all_into(@held.text)
       raise got.message if got
-      @body = @held.text.finish
+      if @held.client_fields
+        @client_loaded = true
+      else
+        @body = @held.text.finish
+      end
       @reader = nil
     end
-    @body
+    @client_loaded ? @held.text.finish : @body
   end
 
   # The body as it arrives. For a response a program made, its string.
   def body_io : BodyReader
     if reader = @reader
-      return reader
+      BodyReader.borrow(reader)
+    else
+      BodyReader.text(String::Builder.new(256), body)
     end
-    BodyReader.text(String::Builder.new(256), @body)
   end
 
   # The body read whole into the response, which is answered; why not,
@@ -1812,7 +2025,11 @@ pub class Response
     if @reader
       got = @reader.as(BodyReader).read_all_into(@held.text)
       return got if got
-      @body = @held.text.finish
+      if @held.client_fields
+        @client_loaded = true
+      else
+        @body = @held.text.finish
+      end
       @reader = nil
     end
     self
@@ -1834,9 +2051,14 @@ pub class Response
   # read as "a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT, b=2", which no
   # split takes back apart. Empty for a field that is not there.
   def header_values(name : String) : Array(String)
+    if @held.flat_lines
+      @held.client_lines.each do |key, values|
+        return values.to_a if HTTP.same_name?(key, name)
+      end
+    end
     if apart = @held.apart
       apart.each do |key, values|
-        return values.dup if HTTP.same_name?(key, name)
+        return values.to_a if HTTP.same_name?(key, name)
       end
     end
     found = header(name)
@@ -1847,25 +2069,18 @@ pub class Response
   # two `Set-Cookie`s need, since the ", " a field's lines are joined with
   # is part of a cookie's date.
   def add_header(name : String, value : String) : Nil
-    spelled = name
-    @held.headers.each do |key, _|
-      spelled = key if HTTP.same_name?(key, name)
-    end
-    apart = @held.apart || {} of String => Array(String)
-    @held.apart = apart
-    if existing = @held.headers[spelled]?
-      apart[spelled] = [existing] unless apart.has_key?(spelled)
-      apart[spelled] << value
-      @held.headers[spelled] = existing + ", " + value
-    else
-      @held.headers[spelled] = value
-    end
+    @held.client_header(name, value)
+    nil
   end
 
   # The lines of each field written on more than one, by its name in
   # `headers`; nil when every field is on one line.
-  def apart : Hash(String, Array(String))?
-    @held.apart
+  def apart : Hash(String, Array(String)) | Hash(String, Array::View(String)) | Nil
+    if @held.flat_lines
+      @held.client_lines.empty? ? nil : @held.client_lines
+    else
+      @held.apart
+    end
   end
 
   # The headers of a body coded in *coding* (`gzip`, `zstd`), changed in
@@ -1897,6 +2112,44 @@ pub class Response
 
   def success? : Bool
     @status >= 200 && @status < 300
+  end
+end
+
+@[OnTape]
+struct RisHttpFields
+  getter held : RisHttpResponseBody
+  getter why : String?
+
+  def initialize(lines : Array(String), unfold : Bool)
+    held = RisHttpResponseBody.new(Hash(String, String).new)
+    @held = held
+    @held.begin_client
+    @why = HTTP.fields_into(@held, lines, unfold)
+  end
+
+  def self.result(fields : RisHttpFields) : {Hash(String, String), Hash(String, Array::View(String))} | String
+    if why = fields.why
+      why
+    else
+      {fields.held.headers, fields.held.client_lines}
+    end
+  end
+end
+
+@[OnTape]
+struct RisHttpHeaderCopy
+  getter headers : Hash(String, String)
+
+  def initialize(source : Hash(String, String), names : Array(String))
+    @headers = Hash(String, String).new
+    source.each do |name, value|
+      @headers[name] = value unless names.any? { |drop| HTTP.same_name?(name, drop) }
+      nil
+    end
+  end
+
+  def self.result(copy : RisHttpHeaderCopy) : Hash(String, String)
+    copy.headers
   end
 end
 
@@ -3089,6 +3342,18 @@ class Exchange
     @response.tls_resumed = @conn.resumed?
   end
 
+  def configure(conn : Conn, response : Response, client : HTTPClient?,
+                key : String, keep : Bool) : Nil
+    @conn = conn
+    @response = response
+    @client = client
+    @key = key
+    @keep = keep
+    @reader = response.body_io
+    @response.tls_resumed = conn.resumed?
+    @h2_id = 0
+  end
+
   # The connection closed, or handed back to its client once the body has
   # been read to its end - what the caller left of it read past, up to
   # 64 KiB, and the connection closed past that, as Go's client does. An
@@ -3116,6 +3381,97 @@ class Exchange
     else
       @conn.close_now
     end
+  end
+end
+
+# A client's response, decoders and unpooled transport share its scope.
+class RisHttpClientExchange
+  getter response : Response
+  getter conn : Conn
+  getter tls : TlsClient
+  getter stream : TlsStream
+  getter snapshot : TlsMadeUnder
+  getter upgrade_config : TlsConfig
+  # What an `https://` request without a client is checked against and
+  # offers: the system's roots and ALPN's `http/1.1`.
+  getter default_tls : TlsConfig
+  getter h2 : H2Connection
+  getter reader : BodyReader
+  getter exchange : Exchange
+  @key : String::Builder
+
+  def initialize(@response : Response)
+    socket = IyiSocket.new(-1)
+    config = TlsConfig.new
+    conn = Conn.new(socket)
+    tls = TlsClient.new(socket, "", config)
+    stream = TlsStream.new(tls, "")
+    snapshot = TlsMadeUnder.new(config)
+    h2 = H2Connection.new(conn, false)
+    @conn = conn
+    @tls = tls
+    @stream = stream
+    @snapshot = snapshot
+    upgrade_config = TlsConfig.new
+    upgrade_config.alpn << "http/1.1"
+    @upgrade_config = upgrade_config
+    default_tls = TlsConfig.new
+    default_tls.alpn << "http/1.1"
+    @default_tls = default_tls
+    @h2 = h2
+    fault = String::Builder.new(256)
+    reader = BodyReader.new(fault, nil, BodyReader::EMPTY, 0_i64,
+      9223372036854775807_i64, client_decode: true)
+    @reader = reader
+    @response.client_reader(reader, "", false)
+    exchange = Exchange.new(conn, @response)
+    @exchange = exchange
+    @key = String::Builder.new(256)
+  end
+
+  def exchange(dialer : D, method : String, url : String,
+               headers : Hash(String, String), body : String | IyiIO,
+               jar : CookieStore?, decompress : Bool, upgrade : String?,
+               client : HTTPClient?, timeout_ms : Int32,
+               route : ProxyRoute?) : Exchange | Cancelled | SocketError | HTTPError forall D
+    HTTP.exchange(self, dialer, method, url, headers, body, jar,
+      decompress, upgrade, client, timeout_ms, route)
+  end
+
+  def read_into(method : String, url : String, headers : Hash(String, String),
+                body : String | IyiIO, redirects : Int32, jar : CookieStore?,
+                decompress : Bool, client : HTTPClient?, timeout_ms : Int32,
+                proxy : String?) : Cancelled | SocketError | HTTPError | Nil
+    HTTP.read_into(self, method, url, headers, body, redirects, jar,
+      decompress, client, timeout_ms, proxy)
+  end
+
+  def h2_answer(conn : Conn, h2 : H2Connection, method : String,
+                scheme : String, authority : String, path : String,
+                sent : Hash(String, String), body : String | IyiIO,
+                url : String, head : Bool, asked : Bool, jar : CookieStore?,
+                client : HTTPClient?, key : String) : Exchange | Cancelled | SocketError | HTTPError
+    HTTP.h2_exchange(self, conn, h2, method, scheme, authority, path,
+      sent, body, url, head, asked, jar, client, key)
+  end
+
+  def answer(conn : Conn, url : String, method : String, head : Bool,
+             asked : Bool, jar : CookieStore?, client : HTTPClient?,
+             key : String) : Exchange | Cancelled | SocketError | HTTPError | Nil
+    HTTP.read_answer(self, conn, url, method, head, asked, jar, client, key)
+  end
+
+  def read_head(text : String) : HTTPError?
+    HTTP.read_head_into(self, text)
+  end
+
+  def ready(conn : Conn, client : HTTPClient?, key : String,
+            keep : Bool, h2_id : Int32 = 0) : Exchange
+    start = @key.bytesize
+    @key << key
+    @exchange.configure(conn, @response, client, @key.finish[start, key.bytesize], keep)
+    @exchange.h2_id = h2_id
+    @exchange
   end
 end
 
@@ -3238,7 +3594,8 @@ end
 # and port, which is the program's to ask for.
 pub class HTTPClient
   # The kept connections, a key's together: a few origins, scanned.
-  @idle : Array(KeptConns)
+  @idle : Array({String, Conn})
+  @idle_keys : String::Builder
   @limit : Int32
   @timeout_ms : Int32
   @made : Int32
@@ -3251,6 +3608,7 @@ pub class HTTPClient
   # The configurations HTTPS records made, the one an origin's last
   # connection by them was made under at the end.
   @bound : Array(HttpsBound)
+  @bound_tick : Int64 = 0_i64
   # `http://` spoken as HTTP/2 from the first byte, without asking: for a
   # server known to take it.
   getter prior_knowledge : Bool
@@ -3260,6 +3618,9 @@ pub class HTTPClient
   # What this client's `https://` requests are checked against and offer,
   # instead of `HTTP.tls_config`: roots of its own, or ALPN's `h2` first.
   getter tls : TlsConfig?
+  # The configuration used without *tls*: the system's roots, and ALPN's
+  # `http/1.1`. A program may change it in place.
+  getter default_tls : TlsConfig
   # What turns a host name into addresses for this client's connections,
   # instead of `Resolver.system`: encrypted upstreams, or a hosts text
   # alone that pins a name to an address, as std/secure_dns's
@@ -3279,13 +3640,21 @@ pub class HTTPClient
     raise "HTTP: a timeout of #{@timeout_ms} ms" if @timeout_ms < 0
     raise "HTTP: a client keeps 0 to #{TlsSession::MAX_TICKETS} tickets an origin, not #{@origin_tickets}" if @origin_tickets < 0 || @origin_tickets > TlsSession::MAX_TICKETS
     raise "HTTP: a client keeps 0 or more tickets, not #{@tickets}" if @tickets < 0
-    @idle = [] of KeptConns
+    @idle = [] of {String, Conn}
+    @idle_keys = String::Builder.new(256)
     @limit = idle
     @made = 0
     @reused = 0
     @resumed = 0
     @sessions = [] of HeldSession
-    @bound = [] of HttpsBound
+    default_tls = TlsConfig.new
+    default_tls.alpn << "http/1.1"
+    @default_tls = default_tls
+    @bound = Array(HttpsBound).new(BOUND)
+    BOUND.times do
+      @bound << HttpsBound.new
+      nil
+    end
   end
 
   # Connections this client has opened, and requests sent over one it
@@ -3316,7 +3685,8 @@ pub class HTTPClient
   end
 
   def request(method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", redirects : Int32 = 10, jar : CookieStore? = nil, decompress : Bool = true) : Response | Cancelled | SocketError | HTTPError
-    HTTP.open(method, url, headers, body, redirects, jar, decompress, self, @timeout_ms, @proxy) { |response| response.load }
+    Response.request_result(Response.new(method, url, headers, body,
+      redirects, jar, decompress, self, @timeout_ms, @proxy))
   end
 
   def open(method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", redirects : Int32 = 10, jar : CookieStore? = nil, decompress : Bool = true, &block : Response -> R) : R | Cancelled | SocketError | HTTPError forall R
@@ -3346,10 +3716,9 @@ pub class HTTPClient
   # Every idle connection closed. The client may be used after; it opens
   # new ones.
   def close : Nil
-    @idle.each do |kept|
-      kept.conns.each { |conn| conn.close }
-      kept.conns.clear
-    end
+    @idle.each { |kept| kept[1].close }
+    @idle.clear
+    @idle_keys.clear
   end
 
   # A kept connection to *key*, nil when none waits. An HTTP/2 connection
@@ -3360,23 +3729,20 @@ pub class HTTPClient
   # against one set of roots carried requests after `HTTP.tls_config=`
   # named others that would have refused it.
   protected def take(key : String, tls : TlsConfig? = nil) : Conn?
-    at = kept_at(key)
-    if at >= 0
-      waiting = @idle[at].conns
-      while conn = waiting.pop?
+    at = @idle.size - 1
+    while at >= 0
+      if @idle[at][0] == key
+        conn = @idle.delete_at(at)[1]
         h2 = conn.h2
-        if h2 && !h2.usable?
-          conn.close
-          next
-        end
         under = conn.made_under
-        if tls && !(under && under.same?(tls))
+        if (h2 && !h2.usable?) || (tls && !(under && under.same?(tls)))
           conn.close
-          next
+        else
+          @reused = @reused + 1
+          return conn
         end
-        @reused = @reused + 1
-        return conn
       end
+      at = at - 1
     end
     nil
   end
@@ -3417,34 +3783,22 @@ pub class HTTPClient
   end
 
   protected def give_back(key : String, conn : Conn) : Nil
-    at = kept_at(key)
-    if at < 0
-      @idle << KeptConns.new(key)
-      at = @idle.size - 1
-    end
-    conns = @idle[at].conns
-    if conns.size >= @limit
+    count = 0
+    @idle.each { |kept| count = count + 1 if kept[0] == key }
+    if count >= @limit
       conn.close
       return
     end
-    conns << conn
-  end
-
-  # Where *key*'s connections are in `@idle`, -1 when nowhere.
-  private def kept_at(key : String) : Int32
-    at = 0
-    while at < @idle.size
-      return at if @idle[at].key == key
-      at = at + 1
-    end
-    -1
+    start = @idle_keys.bytesize
+    @idle_keys << key
+    @idle << {@idle_keys.finish[start, key.bytesize], conn}
   end
 
   # The most configurations HTTPS records make an origin hold - a
   # record's, its retry_configs' and ECH turned off - and the most in
   # all, past which the one longest unused goes.
-  ORIGIN_BOUND =   4
-  BOUND        = 256
+  ORIGIN_BOUND = 4
+  BOUND        = 8
 
   # The configuration a connection to *origin* is made under by a record
   # whose `ech` is *ech* (nil: none) and whose protocols put *alpn* in its
@@ -3458,47 +3812,43 @@ pub class HTTPClient
   protected def https_config(origin : String, base : TlsConfig,
                          ech : Array::View(UInt8)?,
                          alpn : Array::View(String)) : TlsConfig
-    kept = [] of HttpsBound
     found = nil.as(HttpsBound?)
+    count = 0
     @bound.each do |held|
-      if origin != held.origin
-        kept << held
-      elsif held.under.same?(base)
-        if found.nil? && held.ech == ech && held.alpn == alpn
-          found = held
-        else
-          kept << held
-        end
+      next unless held.used? && held.origin == origin
+      if !held.under.same?(base)
+        held.drop
+      elsif found.nil? && held.matches?(ech, alpn)
+        found = held
+      else
+        count += 1
       end
+      nil
     end
-    held = found
-    unless held
-      config = base
-      unless ech == base.ech_configs && alpn == base.alpn
-        config = base.dup
-        config.ech_configs = ech ? ech.to_a : nil
-        config.alpn = alpn.to_a
-      end
-      held = HttpsBound.new(origin, TlsMadeUnder.new(base), ech, alpn, config)
+    @bound_tick += 1
+    if held = found
+      held.touch(@bound_tick)
+      return held.config(base)
     end
-    kept << held
-    over = kept.count { |other| other.origin == origin } - ORIGIN_BOUND
-    if over > 0
-      trimmed = [] of HttpsBound
-      kept.each do |other|
-        if over > 0 && other.origin == origin
-          over = over - 1
-        else
-          trimmed << other
-        end
-      end
-      kept = trimmed
+    # The origin's oldest goes past ORIGIN_BOUND; else a free slot, else
+    # the one longest unused.
+    slot = count >= ORIGIN_BOUND ? oldest_bound(origin) : nil
+    slot ||= @bound.find { |held| !held.used? }
+    slot ||= oldest_bound(nil)
+    slot ||= @bound[0]
+    slot.fill(origin, base, ech, alpn, @bound_tick)
+    slot.config(base)
+  end
+
+  private def oldest_bound(origin : String?) : HttpsBound?
+    oldest = nil.as(HttpsBound?)
+    @bound.each do |held|
+      next unless held.used?
+      next if origin && held.origin != origin
+      oldest = held if oldest.nil? || held.tick < oldest.tick
+      nil
     end
-    while kept.size > BOUND
-      kept.shift
-    end
-    @bound = kept
-    held.config
+    oldest
   end
 
   # The configuration *origin*'s last connection by HTTPS records was made
@@ -3507,26 +3857,85 @@ pub class HTTPClient
   # must have been made under to be taken. Nil when none was made by them
   # under *base*, and then none is taken.
   protected def https_current(origin : String, base : TlsConfig) : TlsConfig?
-    at = @bound.size - 1
-    while at >= 0
-      held = @bound[at]
-      return held.under.same?(base) ? held.config : nil if held.origin == origin
-      at = at - 1
+    latest = nil.as(HttpsBound?)
+    @bound.each do |held|
+      next unless held.used? && held.origin == origin
+      latest = held if latest.nil? || held.tick > latest.tick
+      nil
+    end
+    if held = latest
+      return held.under.same?(base) ? held.config(base) : nil
     end
     nil
   end
 end
 
 # A configuration an `HTTPClient` made for an origin from an HTTPS
-# record's `ech` and protocols, and the base it was made from.
+# record's `ech` and protocols, and the base it was made from: a slot the
+# client builds with itself and refills (SPEC 2.1).
 class HttpsBound
-  getter origin : String
   getter under : TlsMadeUnder
-  getter ech : Array::View(UInt8)?
-  getter alpn : Array::View(String)
-  getter config : TlsConfig
+  getter tick : Int64 = 0_i64
+  @own : TlsConfig
+  @origin : String::Builder
+  @is_base : Bool = true
+  @used : Bool = false
 
-  def initialize(@origin : String, @under : TlsMadeUnder, @ech : Array::View(UInt8)?, @alpn : Array::View(String), @config : TlsConfig)
+  def initialize
+    @own = TlsConfig.new
+    @under = TlsMadeUnder.new(@own)
+    @origin = String::Builder.new(128)
+  end
+
+  def used? : Bool
+    @used
+  end
+
+  def origin : String
+    @origin.finish
+  end
+
+  def drop : Nil
+    @used = false
+    nil
+  end
+
+  def touch(tick : Int64) : Nil
+    @tick = tick
+    nil
+  end
+
+  def matches?(ech : Array::View(UInt8)?, alpn : Array::View(String)) : Bool
+    HttpsBound.same?(@own, ech, alpn)
+  end
+
+  def self.same?(config : TlsConfig, ech : Array::View(UInt8)?,
+                 alpn : Array::View(String)) : Bool
+    return false unless config.alpn.view == alpn
+    list = config.ech_configs
+    if list && ech
+      list.view == ech
+    else
+      list.nil? && ech.nil?
+    end
+  end
+
+  # *base* itself where *ech* and *alpn* are its own, else this slot's
+  # copy of it with them.
+  def config(base : TlsConfig) : TlsConfig
+    @is_base ? base : @own
+  end
+
+  def fill(origin : String, base : TlsConfig, ech : Array::View(UInt8)?,
+           alpn : Array::View(String), tick : Int64) : Nil
+    @is_base = HttpsBound.same?(base, ech, alpn)
+    @own.refill(base, ech, alpn)
+    @under.configure(base)
+    @origin.clear
+    @origin << origin
+    @tick = tick
+    @used = true
+    nil
   end
 end
 
@@ -3545,15 +3954,6 @@ pub struct HttpsEndpoint
   end
 end
 
-# The connections an `HTTPClient` keeps idle under one key.
-class KeptConns
-  getter key : String
-  getter conns : Array(Conn) = [] of Conn
-
-  def initialize(@key : String)
-  end
-end
-
 # The tickets an `HTTPClient` keeps for one origin, and the configuration
 # they were taken under.
 class HeldSession
@@ -3569,11 +3969,35 @@ end
 # caller's now - the socket, and the bytes the server sent after its head.
 pub class Upgraded
   getter response : Response
-  # The connection: the socket, or for `https://` the `TlsStream` over it.
   getter socket : IyiSocket | TlsStream
-  getter leftover : String
+  @leftover : String::Builder
+  @state : RisHttpClientExchange
 
-  def initialize(@response : Response, @socket : IyiSocket | TlsStream, @leftover : String)
+  def initialize
+    response = Response.new(0)
+    state = RisHttpClientExchange.new(response)
+    @response = response
+    @state = state
+    @socket = IyiSocket.new(-1)
+    @leftover = String::Builder.new(16384)
+  end
+
+  def leftover : String
+    @leftover.finish
+  end
+
+  def connect(url : String, protocol : String,
+              headers : Hash(String, String) = {} of String => String,
+              timeout_ms : Int32 = 0, proxy : String? = nil,
+              client : HTTPClient? = nil) : Cancelled | SocketError | HTTPError | Nil
+    HTTP.upgrade_into(self, @state, url, protocol, headers,
+      timeout_ms, proxy, client)
+  end
+
+  def ready(socket : IyiSocket | TlsStream, leftover : String) : Nil
+    @socket = socket
+    @leftover.clear
+    @leftover << leftover
   end
 end
 
@@ -3638,10 +4062,12 @@ struct ByName
   end
 
   def connect(client : HTTPClient?, host : String, port : Int32, wait : Int32) : IyiSocket | Cancelled | SocketError
-    through = nil.as(Resolver?)
-    through = client.resolver if client
-    return IyiSocket.connect(host, port, through, wait) if through
-    IyiSocket.connect(host, port, wait)
+    # A choice of two calls, so the socket is made in the caller's scope.
+    (through = ByName.resolver_of(client)) ? IyiSocket.connect(host, port, through, wait) : IyiSocket.connect(host, port, wait)
+  end
+
+  def self.resolver_of(client : HTTPClient?) : Resolver?
+    client ? client.resolver : nil
   end
 
   def by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
@@ -3674,8 +4100,6 @@ struct AtAddress
 end
 
 pub struct HTTP
-  @@tls : TlsConfig? = nil
-
   # What an `https://` request is checked against and offers: the
   # system's roots, and ALPN's `http/1.1`, unless a program sets its own -
   # roots of its own for a server it runs, say.
@@ -3684,13 +4108,12 @@ pub struct HTTP
   # client to requests. Autocert flights use this form; server workers
   # build AutocertView from their copied AutocertConfig, then expose
   # view.tls_config.
-  def self.tls_config : TlsConfig
-    if held = @@tls
-      return held
-    end
-    config = TlsConfig.on_program(["http/1.1"].copy_to(Program.tape))
-    @@tls = config
-    config
+  # A program-wide configuration would be every task's: an HTTPClient
+  # carries its own, `HTTPClient#default_tls` unless given *tls*.
+  macro tls_config
+    {% raise "HTTP.tls_config is gone: a request without a client uses " \
+             "its own default; pass HTTPClient.new(tls: config) for one " \
+             "of the program's, or read client.default_tls" %}
   end
 
   # A task's configuration would outlive its tape here, and every other
@@ -3798,7 +4221,7 @@ pub struct HTTP
   # reason, the fields, and the lines of those on more than one. A line
   # that begins with a blank continues the field above it (obs-fold, RFC
   # 9112 §5.2), which a user agent joins on with one space.
-  def self.parse_response_head(text : String) : {Int32, String, Hash(String, String), Hash(String, Array(String))?} | HTTPError
+  def self.parse_response_head(text : String) : {Int32, String, Hash(String, String), Hash(String, Array::View(String))?} | HTTPError
     lines = split_crlf(text)
     return HTTPError.new("empty response") if lines.size == 0
     line = status_line(lines[0])
@@ -3830,7 +4253,8 @@ pub struct HTTP
   # `Cancelled`; what the server does wrong answers `HTTPError`. `!`
   # passes any of them up, `.or_panic` refuses it.
   def self.request(method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", redirects : Int32 = 10, jar : CookieStore? = nil, decompress : Bool = true, timeout_ms : Int32 = 0, proxy : String? = nil) : Response | Cancelled | SocketError | HTTPError
-    open(method, url, headers, body, redirects, jar, decompress, nil, timeout_ms, proxy) { |response| response.load }
+    Response.request_result(Response.new(method, url, headers, body,
+      redirects, jar, decompress, nil, timeout_ms, proxy))
   end
 
   # One request, and the block's answer to the response, its body still
@@ -3902,13 +4326,21 @@ pub struct HTTP
   # (`ByName`) or at an address (`AtAddress`). Each kind is its own
   # specialization, so one at an address calls no `Resolver`.
   private def self.open_by(dialer : D, method : String, url : String, headers : Hash(String, String), body : String | IyiIO, redirects : Int32, jar : CookieStore?, decompress : Bool, client : HTTPClient?, timeout_ms : Int32, route : ProxyRoute?, &block : Response -> R) : R | Cancelled | SocketError | HTTPError forall D, R
-    current = url
+    response = Response.new(0)
+    state = RisHttpClientExchange.new(response)
+    open_by_into(state, dialer, method, url, headers, body, redirects,
+      jar, decompress, client, timeout_ms, route) { |answer| yield answer }
+  end
+
+  private def self.open_by_into(state : RisHttpClientExchange, dialer : D, method : String, url : String, headers : Hash(String, String), body : String | IyiIO, redirects : Int32, jar : CookieStore?, decompress : Bool, client : HTTPClient?, timeout_ms : Int32, route : ProxyRoute?, &block : Response -> R) : R | Cancelled | SocketError | HTTPError forall D, R
+    current = String::Builder.new(url.bytesize)
+    current << url
     verb = method
-    sent = headers
+    sent = headers.dup
     payload = body
     hops = 0
     while true
-      exchange = exchange(dialer, verb, current, sent, payload, jar, decompress, nil, client, timeout_ms, route)
+      exchange = state.exchange(dialer, verb, current.finish, sent, payload, jar, decompress, nil, client, timeout_ms, route)
       return exchange unless exchange.is_a?(Exchange)
       response = exchange.response
       location = response.header("Location")
@@ -3917,22 +4349,45 @@ pub struct HTTP
       keeps = status == 307 || status == 308
       if redirect && location && redirects > 0 && !(keeps && payload.is_a?(IyiIO))
         exchange.close
-        return HTTPError.new("stopped after #{redirects} redirects, at #{current}") if hops == redirects
-        target = redirected(current, location)
+        return HTTPError.new("stopped after #{redirects} redirects, at #{current.finish}") if hops == redirects
+        target = redirected(current.finish, location)
         return target if target.is_a?(HTTPError)
         unless keeps || (status != 303 && !same_name?(verb, "POST")) || same_name?(verb, "HEAD")
           verb = "GET"
           payload = ""
-          sent = without(sent, ["Content-Type", "Content-Encoding"])
+          remove_headers(sent, ["Content-Type", "Content-Encoding"])
         end
-        sent = without(sent, ["Authorization", "Proxy-Authorization", "Cookie"]) unless same_authority?(current, target)
-        current = target
+        remove_headers(sent, ["Authorization", "Proxy-Authorization", "Cookie"]) unless same_authority?(current.finish, target)
+        current.clear
+        current << target
         hops = hops + 1
         next
       end
       # The block is yielded, not kept: a caller's tape values stay in
       # its scope (SPEC 5.1).
       return handed(exchange) { |response| yield response }
+    end
+  end
+
+  def self.read_into(state : RisHttpClientExchange, method : String,
+                     url : String, headers : Hash(String, String),
+                     body : String | IyiIO, redirects : Int32,
+                     jar : CookieStore?, decompress : Bool,
+                     client : HTTPClient?, timeout_ms : Int32,
+                     proxy : String?) : Cancelled | SocketError | HTTPError | Nil
+    raise "HTTP: a negative timeout" if timeout_ms < 0
+    route = ProxyRoute.of(proxy)
+    return route if route.is_a?(HTTPError)
+    open_by_into(state, ByName.new, method, url, headers, body,
+      redirects, jar, decompress, client, timeout_ms, route) do |response|
+      loaded = response.load
+      loaded.is_a?(Response) ? nil : loaded
+    end
+  end
+
+  private def self.remove_headers(headers : Hash(String, String), names : Array(String)) : Nil
+    headers.keys.each do |key|
+      headers.delete(key) if names.any? { |name| same_name?(key, name) }
     end
   end
 
@@ -3954,12 +4409,18 @@ pub struct HTTP
   # server, at best, as a plain GET: the gate's proxy, which drops
   # `Connection`, leaves std/websocket's server a request it answers 400.
   # A *client* sends it under its own `tls:` configuration.
-  def self.upgrade(url : String, protocol : String, headers : Hash(String, String) = {} of String => String, timeout_ms : Int32 = 0, proxy : String? = nil, client : HTTPClient? = nil) : Upgraded | Cancelled | SocketError | HTTPError
+  def self.upgrade(*args, **options)
+    {% raise "HTTP.upgrade returns no owner: declare up = Upgraded.new,
+" +
+      "then up.connect(url, protocol, headers, ...)." %}
+  end
+
+  def self.upgrade_into(upgraded : Upgraded, state : RisHttpClientExchange, url : String, protocol : String, headers : Hash(String, String) = {} of String => String, timeout_ms : Int32 = 0, proxy : String? = nil, client : HTTPClient? = nil) : Nil | Cancelled | SocketError | HTTPError
     route = ProxyRoute.of(proxy)
     return route if route.is_a?(HTTPError)
     sent = headers.dup
     sent["Upgrade"] = protocol
-    exchange = exchange(ByName.new, "GET", url, sent, "", nil, false, "Upgrade", client, timeout_ms, route)
+    exchange = state.exchange(ByName.new, "GET", url, sent, "", nil, false, "Upgrade", client, timeout_ms, route)
     return exchange unless exchange.is_a?(Exchange)
     response = exchange.response
     if response.status != 101
@@ -3968,7 +4429,7 @@ pub struct HTTP
     end
     # The protocol after it waits as it likes.
     exchange.conn.unlimited
-    Upgraded.new(response, exchange.conn.transport, exchange.conn.leftover)
+    upgraded.ready(exchange.conn.transport, exchange.conn.leftover)
   end
 
   # *location* read against *current*: a redirect's target, or why it is
@@ -3999,13 +4460,7 @@ pub struct HTTP
   end
 
   private def self.without(headers : Hash(String, String), names : Array(String)) : Hash(String, String)
-    kept = {} of String => String
-    headers.each do |name, value|
-      dropped = false
-      names.each { |n| dropped = true if same_name?(name, n) }
-      kept[name] = value unless dropped
-    end
-    kept
+    RisHttpHeaderCopy.result(RisHttpHeaderCopy.new(headers, names))
   end
 
   # Connect - or take a connection *client* kept - write the request, read
@@ -4013,7 +4468,7 @@ pub struct HTTP
   # still to come. *upgrade* is `Upgrade` for `HTTP.upgrade`; otherwise
   # the request says `close`, or `keep-alive` for a client. With *route*
   # the connection is the proxy's, and for `https://` a tunnel through it.
-  private def self.exchange(dialer : D, method : String, url : String, headers : Hash(String, String), body : String | IyiIO, jar : CookieStore?, decompress : Bool, upgrade : String?, client : HTTPClient?, timeout_ms : Int32, route : ProxyRoute?) : Exchange | Cancelled | SocketError | HTTPError forall D
+  def self.exchange(state : RisHttpClientExchange, dialer : D, method : String, url : String, headers : Hash(String, String), body : String | IyiIO, jar : CookieStore?, decompress : Bool, upgrade : String?, client : HTTPClient?, timeout_ms : Int32, route : ProxyRoute?) : Exchange | Cancelled | SocketError | HTTPError forall D
     uri = URI.parse?(url)
     return HTTPError.new("not a URL: #{url.inspect}") unless uri
     scheme = uri.scheme
@@ -4090,15 +4545,25 @@ pub struct HTTP
     retry = body.is_a?(String) && (head || same_name?(method, "GET") || same_name?(method, "PUT") || same_name?(method, "DELETE") || same_name?(method, "OPTIONS") || same_name?(method, "TRACE"))
     refused_before = false
     # The client's own TLS configuration and resolver, when it has them.
-    under = tls_config
+    under = state.default_tls
     if keeping = client
-      under = keeping.tls || under
+      under = keeping.tls || keeping.default_tls
     end
     # A client that asks connects to an `https://` origin by its HTTPS
     # records, and takes a kept connection only when it was made under the
     # configuration its last connection by them was
     # (`HTTPClient#https_current`): one made before it asked is not.
+    upgrade_config = state.upgrade_config
+    upgrade_config.roots = under.roots
+    upgrade_config.now = under.now
+    upgrade_config.identity = under.identity
     recorded = dialer.records? && secure && route.nil? && upgrade.nil? && !client.nil? && client.use_https_records
+    connection_slot = state.conn
+    tls_slot = state.tls
+    tls_stream = state.stream
+    snapshot = state.snapshot
+    snapshot.configure(under)
+    h2_slot = state.h2
     while true
       conn = nil.as(Conn?)
       if (keeping = client) && !upgrade
@@ -4121,9 +4586,11 @@ pub struct HTTP
         if by = made
           socket, tls, config = by
           client.resumed if client && tls.resumed?
-          conn = Conn.new(socket, stream: TlsStream.new(tls, host))
-          made_under = TlsMadeUnder.new(config)
-          conn.made_under = made_under
+          tls_stream.configure(tls, tls.host)
+          connection_slot.configure(socket, tls_stream)
+          conn = connection_slot
+          snapshot.configure(config)
+          conn.made_under = snapshot
           speaks_h2 = tls.alpn_protocol == "h2"
         else
           socket = dialer.connect(client, dial_host, dial_port, wait)!
@@ -4141,16 +4608,7 @@ pub struct HTTP
               socket.read_timeout_ms = timeout_ms
               socket.write_timeout_ms = timeout_ms
             end
-            offered = under
-            if upgrade
-              # An upgrade is HTTP/1.1's: ALPN offers that alone, as RFC
-              # 8441's way over HTTP/2 (an extended CONNECT) is not here.
-              offered = TlsConfig.new
-              offered.roots = under.roots
-              offered.now = under.now
-              offered.identity = under.identity
-              offered.alpn = ["http/1.1"]
-            end
+            offered = upgrade ? upgrade_config : under
             # The tickets a client keeps for this origin under this
             # configuration (`HTTPClient#session_for`); an upgrade, which no
             # client carries, keeps none. Nothing goes early (0-RTT), whatever
@@ -4159,22 +4617,27 @@ pub struct HTTP
             if keeping = client
               session = keeping.session_for(origin, under) unless upgrade
             end
-            tls = TlsClient.over(socket, host, offered, timeout_ms > 0 ? timeout_ms : TlsClient::HANDSHAKE_TIMEOUT_MS, session)
-            return HTTPError.new(tls.message) if tls.is_a?(TlsError)
+            tls = tls_slot
+            tls.configure(socket, host, offered, session)
+            problem = tls.over(timeout_ms > 0 ? timeout_ms : TlsClient::HANDSHAKE_TIMEOUT_MS)
+            return HTTPError.new(problem.message) if problem
             client.resumed if client && tls.resumed?
-            conn = Conn.new(socket, stream: TlsStream.new(tls, host))
-            made_under_tls = TlsMadeUnder.new(under)
-            conn.made_under = made_under_tls
+            tls_stream.configure(tls, tls.host)
+            connection_slot.configure(socket, tls_stream)
+            conn = connection_slot
+            snapshot.configure(under)
+            conn.made_under = snapshot
             speaks_h2 = upgrade.nil? && tls.alpn_protocol == "h2"
           else
-            conn = Conn.new(socket)
+            connection_slot.configure(socket)
+            conn = connection_slot
             # Through a proxy the request is HTTP/1.1's absolute form.
             speaks_h2 = upgrade.nil? && !client.nil? && client.prior_knowledge && route.nil?
           end
         end
         conn.gap = timeout_ms if timeout_ms > 0
         if speaks_h2
-          h2 = H2Connection.new(conn, false)
+          h2 = h2_slot
           conn.h2 = h2
           unless h2.start
             conn.close
@@ -4183,7 +4646,7 @@ pub struct HTTP
         end
       end
       if h2 = conn.h2
-        answer = h2_exchange(conn, h2, method, secure ? "https" : "http", host_line, path, sent, body, url, head, asked, jar, client, key)
+        answer = state.h2_answer(conn, h2, method, secure ? "https" : "http", host_line, path, sent, body, url, head, asked, jar, client, key)
         return answer if answer.is_a?(Exchange)
         refused = h2.refused?
         if h2.usable?
@@ -4214,7 +4677,7 @@ pub struct HTTP
         next if reused && retry
         return failed
       end
-      answer = read_answer(conn, url, method, head, asked, jar, client, key)
+      answer = state.answer(conn, url, method, head, asked, jar, client, key)
       if answer.is_a?(Nil)
         conn.close
         next if reused && retry
@@ -4304,7 +4767,10 @@ pub struct HTTP
       socket.write_timeout_ms = timeout_ms
     end
     shake_ms = timeout_ms > 0 ? timeout_ms : TlsClient::HANDSHAKE_TIMEOUT_MS
-    TlsClient.over(socket, host, config, shake_ms, client.session_for(origin, config))
+    tls = TlsClient.new(socket, host, config, client.session_for(origin, config))
+    problem = tls.over(shake_ms)
+    return problem if problem
+    tls
   end
 
   # The endpoints *answer*'s ServiceMode records name for a client whose
@@ -4565,7 +5031,7 @@ pub struct HTTP
   # back as an HTTP/1.1 answer's do, a name on several fields one field
   # with its values joined by ", " and kept apart in `header_values`; an
   # HTTP/2 answer has no reason phrase, so the status's own is given.
-  private def self.h2_exchange(conn : Conn, h2 : H2Connection, method : String, scheme : String, authority : String, path : String, sent : Hash(String, String), body : String | IyiIO, url : String, head : Bool, asked : Bool, jar : CookieStore?, client : HTTPClient?, key : String) : Exchange | Cancelled | SocketError | HTTPError
+  def self.h2_exchange(state : RisHttpClientExchange, conn : Conn, h2 : H2Connection, method : String, scheme : String, authority : String, path : String, sent : Hash(String, String), body : String | IyiIO, url : String, head : Bool, asked : Bool, jar : CookieStore?, client : HTTPClient?, key : String) : Exchange | Cancelled | SocketError | HTTPError
     id = h2.send_request(method, scheme, authority, path, sent, body)
     return id unless id.is_a?(Int32)
     fields = h2.answer_head(id)
@@ -4574,46 +5040,30 @@ pub struct HTTP
       return fields
     end
     status = 0
-    headers = {} of String => String
-    apart = {} of String => Array(String)
-    # A repeated name's first value is found again in *fields*: a view of
-    # the Hash's String would not outlive its next store.
-    fields.each do |f|
-      if f.name == ":status"
-        status = f.value.to_i
-        next
-      end
-      if headers.has_key?(f.name)
-        if apart.has_key?(f.name)
-          apart[f.name] << f.value
-        else
-          first = ""
-          k = fields.size - 1
-          while k >= 0
-            first = fields[k].value if fields[k].name == f.name
-            k = k - 1
-          end
-          apart[f.name] = [first, f.value]
-        end
-      else
-        headers[f.name] = f.value
-      end
+    fields.each do |field|
+      status = field.value.to_i if field.name == ":status"
+      nil
     end
-    apart.each { |name, values| headers[name] = values.join(", ") }
-    s = h2.stream(id)
+    response = state.response
+    response.begin_client(status, reason_for(status))
+    fields.each do |field|
+      response.client_header(field.name, field.value) unless field.name == ":status"
+      nil
+    end
+    stream = h2.stream(id)
     unlimited = 9223372036854775807_i64
-    empty = head || bodiless?(status) || (!s.nil? && s.ended && s.drained?)
-    coding = asked && !empty ? coding_of(headers) : BodyReader::CODED_NONE
-    reader = empty ? BodyReader.new(String::Builder.new(256), nil, BodyReader::EMPTY, 0_i64, unlimited) : BodyReader.frames(String::Builder.new(256), h2, id, unlimited, coding)
+    empty = head || bodiless?(status) || (!stream.nil? && stream.ended && stream.drained?)
+    coding = asked && !empty ? coding_of(response.headers) : BodyReader::CODED_NONE
+    reader = state.reader
+    reader.configure(nil, empty ? BodyReader::EMPTY : BodyReader::FRAMES,
+      0_i64, unlimited, coding, h2, id)
     decoded = reader.decoding?
-    drop_coding_fields(headers) if decoded
-    response = Response.new(status, reason_for(status), headers, apart.empty? ? nil : apart, reader, url, decoded)
+    drop_coding_fields(response.headers) if decoded
+    response.client_reader(reader, url, decoded)
     if keeper = jar
       keeper.update(url, response)
     end
-    exchange = Exchange.new(conn, response, client, key, true)
-    exchange.h2_id = id
-    exchange
+    state.ready(conn, client, key, true, id)
   end
 
   # The request on *socket*: its head, and a string body with it or an
@@ -4648,7 +5098,41 @@ pub struct HTTP
   # The answer on *conn*: its head read past any 1xx and its body framed.
   # Nil when the connection ends before a byte of one, which on a kept
   # connection is the server having closed it while it waited.
-  private def self.read_answer(conn : Conn, url : String, method : String, head : Bool, asked : Bool, jar : CookieStore?, client : HTTPClient?, key : String) : Exchange | Cancelled | SocketError | HTTPError | Nil
+  def self.read_head_into(state : RisHttpClientExchange,
+                                  text : String) : HTTPError?
+    lines = split_crlf(text)
+    return HTTPError.new("empty response") if lines.empty?
+    parsed = status_line(lines[0])
+    return parsed if parsed.is_a?(HTTPError)
+    state.response.begin_client(parsed[0], parsed[1])
+    # A field's folded lines are joined before it is set.
+    joined = String::Builder.new(256)
+    i = 1
+    while i < lines.size
+      line = lines[i]
+      break if line.empty?
+      return HTTPError.new("a folded header without a field") if folded?(line)
+      colon = line.index(':')
+      return HTTPError.new("header without a colon: #{line.inspect}") unless colon
+      name = line[0, colon]
+      value = trim(line[colon + 1, line.bytesize - colon - 1])
+      return HTTPError.new("not a header name: #{name.inspect}") unless token?(name)
+      return HTTPError.new("a control character in a header") if control?(value)
+      i += 1
+      joined.clear
+      joined << value
+      while i < lines.size && folded?(lines[i])
+        more = trim(lines[i])
+        return HTTPError.new("a control character in a header") if control?(more)
+        joined << " " << more
+        i += 1
+      end
+      state.response.client_header(name, joined.finish)
+    end
+    nil
+  end
+
+  def self.read_answer(state : RisHttpClientExchange, conn : Conn, url : String, method : String, head : Bool, asked : Bool, jar : CookieStore?, client : HTTPClient?, key : String) : Exchange | Cancelled | SocketError | HTTPError | Nil
     while true
       # As far as the server's limit on a request's head, and no further: a
       # head that did not end was read for as long as it came, 256 MB of one
@@ -4664,16 +5148,21 @@ pub struct HTTP
       in HTTPError
         return got
       in String
-        parsed = parse_response_head(got)
-        return parsed if parsed.is_a?(HTTPError)
-        status, reason, fields, apart = parsed
+        problem = state.read_head(got)
+        return problem if problem
+        response = state.response
+        status = response.status
+        fields = response.headers
         next if status >= 100 && status < 200 && status != 101
         coding = asked ? coding_of(fields) : BodyReader::CODED_NONE
-        reader = body_framing(conn, status, fields, head, coding)
-        return reader if reader.is_a?(HTTPError)
+        framing = framing_kind(status, fields, head)
+        return framing if framing.is_a?(HTTPError)
+        reader = state.reader
+        reader.configure(conn, framing[0], framing[1],
+          9223372036854775807_i64, coding)
         decoded = reader.decoding?
         drop_coding_fields(fields) if decoded
-        response = Response.new(status, reason, fields, apart, reader, url, decoded)
+        response.client_reader(reader, url, decoded)
         if keeper = jar
           keeper.update(url, response)
         end
@@ -4682,13 +5171,30 @@ pub struct HTTP
           said = header_in(fields, "Connection")
           keep = got.starts_with?("HTTP/1.1 ") && !reader.to_close? && status != 101 && (said.nil? || !has_token?(said, "close"))
         end
-        return Exchange.new(conn, response, client, key, keep)
+        return state.ready(conn, client, key, keep)
       end
     end
   end
 
   # How an answer's body is framed (RFC 9112 §6.3): none for a HEAD, a
   # 1xx, a 204 or a 304; chunks; a length; or the connection's close.
+  private def self.framing_kind(status : Int32, fields : Hash(String, String),
+                               head : Bool) : Tuple(Int32, Int64) | HTTPError
+    return {BodyReader::EMPTY, 0_i64} if head || bodiless?(status) || status == 101
+    if te = header_in(fields, "Transfer-Encoding")
+      if refused = coding_refused(te)
+        return HTTPError.new(refused)
+      end
+      return {BodyReader::CHUNKED, 0_i64}
+    end
+    if cl = header_in(fields, "Content-Length")
+      n = content_length(cl)
+      return HTTPError.new("Content-Length is not a number: #{cl.inspect}") unless n
+      return {BodyReader::LENGTH, n}
+    end
+    {BodyReader::CLOSE, 0_i64}
+  end
+
   private def self.body_framing(conn : Conn, status : Int32, fields : Hash(String, String), head : Bool, coding : Int32) : BodyReader | HTTPError
     unlimited = 9223372036854775807_i64
     return BodyReader.new(String::Builder.new(256), conn, BodyReader::EMPTY, 0_i64, unlimited) if head || bodiless?(status) || status == 101
@@ -4903,48 +5409,39 @@ pub struct HTTP
   # `parse_fields`, and each repeated field's values by the name in the
   # answer, a line each, before they were joined. The second Hash is made
   # here: one handed in and grown would move under its caller's view.
-  def self.fields_apart(lines : Array(String), unfold : Bool = false) : {Hash(String, String), Hash(String, Array(String))} | String
-    lines = unfolded(lines) if unfold
-    headers = {} of String => String
-    # The name as it was first spelled, by its lowercase, and the values
-    # after the first, joined once at the end: joining line by line copied
-    # the value so far per line.
-    spelled = {} of String => Int32
-    more = {} of String => Array(String)
+  def self.fields_apart(lines : Array(String), unfold : Bool = false) : {Hash(String, String), Hash(String, Array::View(String))} | String
+    RisHttpFields.result(RisHttpFields.new(lines, unfold))
+  end
+
+  def self.fields_into(held : RisHttpResponseBody, lines : Array(String),
+                       unfold : Bool) : String?
+    # A field's folded lines are joined here, before it is set: a field
+    # once set is not replaced.
+    joined = String::Builder.new(256)
     i = 1
     while i < lines.size
       line = lines[i]
-      i = i + 1
-      next if line.bytesize == 0
+      i += 1
+      next if line.empty?
+      # A folded line with no field above it.
+      return "header without a colon: #{line.inspect}" if unfold && folded?(line)
       colon = line.index(':')
       return "header without a colon: #{line.inspect}" unless colon
       name = line[0, colon]
       return "not a header name: #{name.inspect}" unless token?(name)
       value = trim(line[colon + 1, line.bytesize - colon - 1])
-      if control?(value)
-        return "header #{name} contains a control character"
+      return "header #{name} contains a control character" if control?(value)
+      joined.clear
+      joined << value
+      while unfold && i < lines.size && folded?(lines[i])
+        more = trim(lines[i])
+        return "header #{name} contains a control character" if control?(more)
+        joined << " " << more
+        i += 1
       end
-      key = name.downcase
-      if at = spelled[key]?
-        # The line where the name was first spelled: an index, as a view
-        # of the Hash's String would not outlive its next store.
-        was = lines[at]
-        split = was.index(':') || 0
-        first = was[0, split]
-        if more.has_key?(first)
-          more[first] << value
-        else
-          more[first] = [trim(was[split + 1, was.bytesize - split - 1]), value]
-        end
-      else
-        spelled[key] = i - 1
-        headers[name] = value
-      end
+      held.client_header(name, joined.finish)
     end
-    more.each do |name, values|
-      headers[name] = values.join(", ")
-    end
-    {headers, more}
+    nil
   end
 
   # *lines* with each field's folded lines joined onto it, one space for

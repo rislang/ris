@@ -1,0 +1,22 @@
+class Holder(T)
+  getter value : T
+  def initialize(@value : T)
+  end
+end
+class Buffers
+  getter first : Array(Int32) = [1, 2]
+  getter second : Array(Int32) = [3, 4]
+end
+buffers = Buffers.new
+h0 = Holder.new(buffers)
+h1 = Holder.new(h0)
+h2 = Holder.new(h1)
+h3 = Holder.new(h2)
+h4 = Holder.new(h3)
+h5 = Holder.new(h4)
+h6 = Holder.new(h5)
+h7 = Holder.new(h6)
+h8 = Holder.new(h7)
+view = h8.value.value.value.value.value.value.value.value.value.first[0, 1]
+h8.value.value.value.value.value.value.value.value.value.second.clear
+puts view[0]

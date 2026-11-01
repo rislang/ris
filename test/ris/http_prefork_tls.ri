@@ -2,7 +2,7 @@
 module test/ris/http_prefork_tls
 
 import std/http::{Server, Request, Response}
-import std/tls::{TlsIdentity, TlsServerConfig}
+import std/tls::{TlsIdentity, TlsServerConfig, TlsError}
 import std/socket::{IyiSocket}
 import std/signal::{Signal}
 import std/time::{Time}
@@ -15,11 +15,12 @@ class Handler
   @calls : Int32 = 0
 
   def initialize(paths : Tuple(String, String))
-    identity = TlsIdentity.from_pem(
-      File.read(paths[0].to_heap), File.read(paths[1].to_heap)).or_panic
+    identity = TlsIdentity.new(
+      File.read(paths[0]), File.read(paths[1]))
+    raise identity.error.as(TlsError).message if identity.error
     config = TlsServerConfig.new(identity)
     @tls_config = config
-    @tls_config.alpn = ::Array(String){"h2".to_heap, "http/1.1".to_heap}
+    @tls_config.alpn = ["h2", "http/1.1"]
   end
 
   def listening(port : Int32) : Nil
@@ -27,14 +28,18 @@ class Handler
   end
 
   def call(req : Request) : Response
+    Response.new(200, answer_text(req))
+  end
+
+  def answer_text(req : Request) : String
     raise "TLS request panic" if req.path == "/panic"
     @calls += 1
     started = Time.monotonic_nanoseconds
     sleep(100) if req.path == "/hold"
-    body = "#{IyiScheduler.current.object_id} #{@calls} " +
+    "#{IyiScheduler.current.object_id} #{@calls} " +
       "#{started} #{Time.monotonic_nanoseconds}"
-    Response.new(200, body.to_heap)
   end
+
 end
 
 port = Program.arguments[0].to_i

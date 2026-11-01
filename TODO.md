@@ -44,15 +44,15 @@ Fix a checker hole below only when a cluster hits it.
    struct or Tuple of texts and plain values moves down whole.
    Left, by cluster:
    * HTTP client and websocket (http_coding, websocket_handshake,
-     http_prefork's TLS half): `TlsClient.over` and
-     `connect`, `TlsEchOffer`, `WebSocket.connect` and the ACME/TLS
-     factories return owners made in a def (SPEC 2.1): make the caller
-     declare them (`x = T.new`, then a method that fills it, as
-     `TlsServer#accept` does) and keep a client's pooled connections in
-     an owner built where the pool lives. ECH also reaches HPKE and
-     P-256/P-384 key factories returning scratch; migrate those holders
-     before the TLS client gate. TLS server identities need the big
-     cluster.
+     http_prefork's TLS half). Done: HPKE/P-256/P-384 holders, TLS
+     configs refilled, HTTPClient's HTTPS-record configs in slots, the
+     default TlsConfig per client. Left: TlsClient's handshake builds
+     its ClientHello and ECH parts with `+` and returns them after other
+     work (client_hello, TlsEch.parts, encode_inner, outer_extensions,
+     ech_grease): write them into a refilled field. Then the exchange
+     loop's fresh stores (an H2Stream per request, BodyReader and
+     socket per round) and WebSocket.connect. TLS server identities
+     need the big cluster.
    * socket_pair, socket_pieces, socket_race, smtp, mail: connect's
      attempt list (socket.iyi 248, 1066), ResolvConf parsing (dns.iyi
      1340s), `Resolver.system` made in a def.
@@ -68,10 +68,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   inside a union (`IyiSocket | SocketError`), unrefused; the socket was
   freed with the def and every worker accepted on fd 0. Refuse a class
   instance made in a def and answered in a union after other work.
-* A field set to `nil` or to a flat value (`Cancelled.new`) is a store
-  with no roots, which a caller's summary reads as a fresh store into a
-  field of a non-flat union type: refused at the caller, though nothing
-  was kept. Judge the stored value's type, not the field's.
 * `x.copy_to(RisCurrentTape.new)` in a callee reads as a store into an
   untyped root outside every scope, so a loop round calling it is
   refused. Model it as a value on the running scope.
@@ -94,9 +90,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   though every String it answers views the parser (toml's
   basic_string now writes into the parser's @texts): scalar's
   `TapeAny.new(basic_string!)` is refused. Narrow by summary.
-* Field paths fold at FIELD_DEPTH (now 6, was 4): a deeper path through
-  a reader's own fields (entry.@reader.@inflater.@core.@chunk) conflates
-  a refill with views of its siblings. Fold by type, not depth.
 * A String local's `<<` is lowered to `__ris_append` unless the local is
   growing; that result views the argument, so a block appending to an
   outer String is refused. Lend the local to a builder parameter.

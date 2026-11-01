@@ -411,6 +411,14 @@ pub struct RsaPrivateKey
   # An RSAPrivateKey (appendix A.1.2) of two primes: version 0 and the
   # eight numbers.
   def self.from_pkcs1(der : Array::View(UInt8)) : RsaPrivateKey | RsaError
+    if error = check_pkcs1(der)
+      RsaBytes.borrow_error(error)
+    else
+      RsaPrivateKey.new(der, false)
+    end
+  end
+
+  private def self.check_pkcs1(der : Array::View(UInt8)) : RsaError?
     fields = RsaBytes.asn1_values(RsaBytes.asn1_value(Der.parse(der))!.sequence)!
     version = fields.empty? ? nil : fields[0].integer
     if version.is_a?(Int64) && version == 1_i64
@@ -418,14 +426,30 @@ pub struct RsaPrivateKey
     end
     return RsaError.new("an RSAPrivateKey of #{fields.size} values, not 9") unless fields.size == 9
     return RsaError.new("an RSAPrivateKey of version #{version.is_a?(Int64) ? version : "?"}, not 0") unless version == 0_i64
-    numbers = fields[1, 8].map { |field| RsaBytes.asn1_bytes(field.unsigned_integer)! }
-    RsaPrivateKey.new(numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5], numbers[6], numbers[7])
+    numbers = {RsaBytes.asn1_bytes(fields[1].unsigned_integer)!,
+      RsaBytes.asn1_bytes(fields[2].unsigned_integer)!,
+      RsaBytes.asn1_bytes(fields[3].unsigned_integer)!,
+      RsaBytes.asn1_bytes(fields[4].unsigned_integer)!,
+      RsaBytes.asn1_bytes(fields[5].unsigned_integer)!,
+      RsaBytes.asn1_bytes(fields[6].unsigned_integer)!,
+      RsaBytes.asn1_bytes(fields[7].unsigned_integer)!,
+      RsaBytes.asn1_bytes(fields[8].unsigned_integer)!}
+    key = RsaPrivateKey.new(numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5], numbers[6], numbers[7])
+    key.is_a?(RsaError) ? key : nil
   end
 
   # A PKCS #8 PrivateKeyInfo or OneAsymmetricKey (RFC 5958) naming
   # rsaEncryption, its privateKey an RSAPrivateKey. Attributes are passed
   # over; a public key, which version 1 may carry, must be the key's own.
   def self.from_pkcs8(der : Array::View(UInt8)) : RsaPrivateKey | RsaError
+    if error = check_pkcs8(der)
+      RsaBytes.borrow_error(error)
+    else
+      RsaPrivateKey.new(der, true)
+    end
+  end
+
+  private def self.check_pkcs8(der : Array::View(UInt8)) : RsaError?
     fields = RsaBytes.asn1_values(RsaBytes.asn1_value(Der.parse(der))!.sequence)!
     return RsaError.new("a PrivateKeyInfo of #{fields.size} values") if fields.size < 3
     version = fields[0].integer
@@ -455,7 +479,35 @@ pub struct RsaPrivateKey
       end
       i = i + 1
     end
-    key
+    nil
+  end
+
+  def initialize(der : Array::View(UInt8), pkcs8 : Bool)
+    source = der
+    if pkcs8
+      outer = RsaBytes.asn1_values(RsaBytes.asn1_value(Der.parse(der)).or_panic.sequence).or_panic
+      source = RsaBytes.asn1_bytes(outer[2].octet_string).or_panic.view
+    end
+    fields = RsaBytes.asn1_values(RsaBytes.asn1_value(Der.parse(source)).or_panic.sequence).or_panic
+    numbers = {RsaBytes.asn1_bytes(fields[1].unsigned_integer).or_panic,
+      RsaBytes.asn1_bytes(fields[2].unsigned_integer).or_panic,
+      RsaBytes.asn1_bytes(fields[3].unsigned_integer).or_panic,
+      RsaBytes.asn1_bytes(fields[4].unsigned_integer).or_panic,
+      RsaBytes.asn1_bytes(fields[5].unsigned_integer).or_panic,
+      RsaBytes.asn1_bytes(fields[6].unsigned_integer).or_panic,
+      RsaBytes.asn1_bytes(fields[7].unsigned_integer).or_panic,
+      RsaBytes.asn1_bytes(fields[8].unsigned_integer).or_panic}
+    value = RsaPrivateKey.new(numbers[0], numbers[1], numbers[2], numbers[3],
+      numbers[4], numbers[5], numbers[6], numbers[7]).or_panic
+    @public_key = value.public_key
+    @n = value.@n
+    @e = value.@e
+    @p = value.@p
+    @q = value.@q
+    @dp = value.@dp
+    @dq = value.@dq
+    @qi = value.@qi
+    @prf = value.@prf
   end
 
   # The modulus's length in bits, and in bytes: a signature's length.
@@ -630,8 +682,15 @@ struct RsaBytes
     mask
   end
 
-  def self.of(message : Array::View(UInt8) | String) : Array::View(UInt8)
-    return message if message.is_a?(Array::View(UInt8))
+  def self.borrow_error(error : RsaError) : RsaError
+    error
+  end
+
+  def self.of(message : Array::View(UInt8)) : Array::View(UInt8)
+    message
+  end
+
+  def self.of(message : String) : Array::View(UInt8)
     Array(UInt8).new(message.bytesize) { |i| message[i] }.view
   end
 

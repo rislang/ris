@@ -112,6 +112,19 @@ class Iyi::TapeShrinkChecker
   # Per solved def, the node that wrote each stored root; while a call
   # applies a callee's stores, the callee's site for the current root.
   @store_sites = Hash(UInt64, Hash(UInt64, ASTNode)).new
+  # An empty provenance value may be a scalar/nil store or a fresh tape
+  # value. Keep every store's kind; mixed paths remain conservative.
+  @store_kinds = Hash(UInt64, Hash(UInt64, UInt8)).new
+
+  private def plain_store?(node : ASTNode) : Bool
+    source = case node
+             when Assign then node.value
+             when Call
+               node.name.ends_with?("=") ? node.args.last? : nil
+             end
+    source ? !reference?(source) : false
+  end
+
   @store_site : ASTNode? = nil
   @checking = false
   @unproved = [] of Call
@@ -237,7 +250,7 @@ class Iyi::TapeShrinkChecker
   end
 
   private def store(roots : Array(UInt64), v : Value, env : Env,
-                    node : ASTNode, replace = true)
+                    node : ASTNode, replace = true, store_kind : UInt8? = nil)
     roots = roots.flat_map do |root|
       if parent = @parents[root]?
         aliases(parent[0], env).map { |base| field_root(base, parent[1]) }
@@ -249,7 +262,12 @@ class Iyi::TapeShrinkChecker
     # store itself, or the deeper one a call here carries.
     if solving = @solving
       sites = @store_sites[solving] ||= Hash(UInt64, ASTNode).new
-      roots.each { |root| sites[root] ||= @store_site || node }
+      kinds = @store_kinds[solving] ||= Hash(UInt64, UInt8).new
+      kind = store_kind || (plain_store?(@store_site || node) ? 1_u8 : 2_u8)
+      roots.each do |root|
+        sites[root] ||= @store_site || node
+        kinds[root] = (kinds[root]? || 0_u8) | kind
+      end
     end
     # Copy a by-value holder's slots, rather than baking its aggregate
     # roots into the parent. This lets an emptied nested field forget its
@@ -347,6 +365,7 @@ class Iyi::TapeShrinkChecker
         next if struct_value?(source) && !@handed.includes?(source)
         scope = source_scope(source)
         unless scope.all? { |part| destinations.includes?(part) }
+          STDERR.puts "DBG scope source=#{root_name(source)} type=#{@root_types[source]?} scope=#{scope} dest=#{root_name(root)} type=#{@root_types[root]?} scope=#{destinations} at #{node.location}" if ENV["RIS_DBG"]?
           node.raise "cannot store a view beyond its owner scope; " \
                      "copy it with copy_to(owner) before storing it"
         end
@@ -624,7 +643,7 @@ class Iyi::TapeShrinkChecker
     @next_root += 1
   end
 
-  # Field paths deeper than this fold onto their ancestor at this depth.
+  # Unknown field paths fold at this depth; known paths fold by type.
   FIELD_DEPTH = 6
 
   @folded_roots = Set(UInt64).new
@@ -651,7 +670,7 @@ class Iyi::TapeShrinkChecker
       ancestor = parent[0]
       depth += 1
     end
-    if depth >= FIELD_DEPTH
+    if depth >= FIELD_DEPTH && !field_type(root)
       @folded_roots << root
       return root
     end
@@ -919,22 +938,10 @@ class Iyi::TapeShrinkChecker
       target.owner?.as?(ProcInstanceType).try(&.arg_types[index]?)
   end
 
-  # A handed object's field, bounded by depth as `field_root` is but not
-  # folded onto an ancestor of the same name: a socket's `@state` is not
-  # the connection's.
+  # Known owner types distinguish repeated names while recursive paths
+  # fold onto the same typed ancestor, just as ordinary field roots do.
   private def handed_field(root : UInt64, name : String) : UInt64
-    depth = 0
-    ancestor = root
-    while parent = @parents[ancestor]?
-      ancestor = parent[0]
-      depth += 1
-    end
-    return root if depth >= FIELD_DEPTH
-    @fields[{root, name}] ||= begin
-      id = fresh
-      @parents[id] = {root, name}
-      id
-    end
+    field_root(root, name)
   end
 
   private def owned_defs : Hash(Type, Array(Def))
@@ -1000,6 +1007,7 @@ class Iyi::TapeShrinkChecker
         @root_sets.clear
         @solving = target.object_id
         old = summary(target).not_nil!
+        old_kinds = @store_kinds[target.object_id]?.try(&.dup)
         @uses.clear
         @shrinks.clear
         @returns = EMPTY
@@ -1029,7 +1037,7 @@ class Iyi::TapeShrinkChecker
         end
         updated = Summary.new(old.seeds, effects, merge(old.result, result), stores,
           (old.retains + @retains).uniq, grows)
-        if updated != old
+        if updated != old || @store_kinds[target.object_id]? != old_kinds
           changed = true
           callers[target.object_id]?.try { |ids| dirty.concat(ids) }
           @summary_callers[target.object_id]?.try { |ids| dirty.concat(ids) }
@@ -2169,7 +2177,8 @@ class Iyi::TapeShrinkChecker
               # reservation: its growth, not a store of what the callee made.
               builder = summary_root_type(root, summary, target).try { |t| type_name(t.remove_typedef) == "String::Builder" }
               STDERR.puts "DBG fresh-store #{node.name} root=#{root} type=#{summary_root_type(root, summary, target)} at #{node.location}" if ENV["RIS_DBG"]? && contents.roots.empty? && contents.views.empty?
-              refuse_fresh_store(destinations, node) if contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root) && !builder
+              store_kind = @store_kinds[target.object_id]?.try &.[root]?
+              refuse_fresh_store(destinations, node) if store_kind != 1_u8 && contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root) && !builder
               incoming = translated(contents, summary, actuals, node.object_id)
               # A marked callee's own scratch cannot reach its stores: it
               # refused that itself. What it made and stored is not this
@@ -2195,7 +2204,7 @@ class Iyi::TapeShrinkChecker
               end
               @store_site = @store_sites[target.object_id]?.try &.[root]?
               begin
-                store(destinations, incoming, call_env, node)
+                store(destinations, incoming, call_env, node, store_kind: store_kind)
               ensure
                 @store_site = nil
               end

@@ -87,7 +87,7 @@ pub enum EcdsaHash
   SHA384
   SHA512
 
-  def digest(data : Array(UInt8)) : Array(UInt8)
+  def digest(data : Array::View(UInt8)) : Array(UInt8)
     case self
     when EcdsaHash::SHA256 then Std::Digest::SHA256.hash_bytes(data)
     when EcdsaHash::SHA384 then Std::Digest::SHA384.hash_bytes(data)
@@ -262,7 +262,7 @@ pub struct EcdsaPublicKey
 
   # Whether *signature*, the DER of an Ecdsa-Sig-Value, is this key's
   # signature of *message* under *hash*.
-  def verify(hash : EcdsaHash, message : Array(UInt8) | String, signature : Array(UInt8)) : Bool
+  def verify(hash : EcdsaHash, message : Array::View(UInt8) | String, signature : Array(UInt8)) : Bool
     parsed = Der.parse(signature)
     return false if parsed.is_a?(Asn1Error)
     fields = parsed.sequence
@@ -1306,9 +1306,12 @@ struct EcdsaBytes
     value
   end
 
-  def self.of(message : Array(UInt8) | String) : Array(UInt8)
-    return message if message.is_a?(Array(UInt8))
-    Array(UInt8).new(message.bytesize) { |i| message.byte_at(i) }
+  def self.of(message : Array::View(UInt8)) : Array::View(UInt8)
+    message
+  end
+
+  def self.of(message : String) : Array::View(UInt8)
+    Array(UInt8).new(message.bytesize) { |i| message.byte_at(i) }.view
   end
 
   # One helper a type, as std/rsa has: an Asn1Error read as a key's

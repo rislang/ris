@@ -1,0 +1,16 @@
+import std/hpke::{HpkePrivateKey, HpkeKem, HpkeSuite, HpkeKdf, HpkeAead, HpkeSender, HpkeRecipient}
+[HpkeKem::X25519Sha256, HpkeKem::P256Sha256, HpkeKem::P384Sha384].each do |kem|
+  key = HpkePrivateKey.derive(kem, "\x01" * 48)
+  suite = HpkeSuite.new(kem, HpkeKdf::HkdfSha256, HpkeAead::Aes128Gcm)
+  sender = HpkeSender.new
+  reader = HpkeRecipient.new
+  2.times do
+    sender.setup(suite, key.public_key, "info", "\x02" * 48).or_panic
+    reader.setup(suite, key, sender.enc, "info").or_panic
+    sealed = sender.seal("hello").or_panic
+    raise "round trip" unless reader.open(sealed).or_panic == "hello"
+    nil
+  end
+  puts key.public_key.bytes.size
+  nil
+end

@@ -162,7 +162,7 @@ class SystemRootsCollector
   end
 
   # One certificate's DER: kept, unless it was seen or denied.
-  def add(der : Array(UInt8)) : Nil
+  def add(der : Array::View(UInt8)) : Nil
     key = SystemRootsCollector.key(der)
     return if @seen.has_key?(key) || @denied.has_key?(key)
     certificate = Certificate.parse(der)
@@ -209,7 +209,7 @@ class SystemRootsCollector
   end
 
   # A certificate's identity: its DER, as text a Hash can key.
-  def self.key(der : Array(UInt8)) : String
+  def self.key(der : Array::View(UInt8)) : String
     io = ""
     der.each do |b|
       io << "0123456789abcdef"[b.to_i32 >> 4]

@@ -224,7 +224,7 @@ pub class Certificate
   end
 
   # Validate with scratch only, then construct on the caller's tape.
-  def self.parse(der : Array(UInt8)) : Certificate | X509Error
+  def self.parse(der : Array::View(UInt8)) : Certificate | X509Error
     if why = check(der)
       X509Error.new(why)
     else
@@ -251,7 +251,7 @@ pub class Certificate
     end
   end
 
-  private def self.check(der : Array(UInt8)) : String?
+  private def self.check(der : Array::View(UInt8)) : String?
     outer = check_value(X509Asn1.tape_values(check_value(X509Asn1.value(Der.parse(der))).tape_sequence))
     return "a Certificate of #{outer.size} values, not 3" unless outer.size == 3
     tbs = check_value(X509Asn1.tape_values(outer[0].tape_sequence))
@@ -284,7 +284,7 @@ pub class Certificate
     not_after = check_value(X509Asn1.time(validity[1].time))
     key = check_value(X509Keys.read(tbs[at + 5]))
     key_bits = check_value(X509Asn1.bytes(check_value(X509Asn1.tape_values(tbs[at + 5].tape_sequence))[1].bit_string))
-    extensions = X509Extensions.new(der)
+    extensions = X509Extensions.new(der.to_a)
     rest = at + 6
     # RFC 5280 section 4.1: issuerUniqueID [1], subjectUniqueID [2] and
     # extensions [3], each at most once and in that order. A second
@@ -313,7 +313,8 @@ pub class Certificate
     nil
   end
 
-  def initialize(der : Array(UInt8))
+  def initialize(source : Array::View(UInt8))
+    der = source.to_a
     outer = read_value(X509Asn1.tape_values(read_value(X509Asn1.value(Der.parse(der))).tape_sequence))
     raise("a Certificate of #{outer.size} values, not 3") unless outer.size == 3
     tbs = read_value(X509Asn1.tape_values(outer[0].tape_sequence))
@@ -346,7 +347,7 @@ pub class Certificate
     not_after = read_value(X509Asn1.time(validity[1].time))
     key = read_value(X509Keys.read(tbs[at + 5]))
     key_bits = read_value(X509Asn1.bytes(read_value(X509Asn1.tape_values(tbs[at + 5].tape_sequence))[1].bit_string))
-    extensions = X509Extensions.new(der)
+    extensions = X509Extensions.new(der.to_a)
     rest = at + 6
     # RFC 5280 section 4.1: issuerUniqueID [1], subjectUniqueID [2] and
     # extensions [3], each at most once and in that order. A second
@@ -388,7 +389,7 @@ pub class Certificate
 
   # The DER of every CERTIFICATE block in a PEM text, unread: a store
   # can keep what it can read and count the rest.
-  def self.pem_blocks(text : String) : Array(Array(UInt8)) | X509Error
+  def self.pem_blocks(text : String) : Array(Array::View(UInt8)) | X509Error
     X509Pem.blocks(text)
   end
 
@@ -500,7 +501,7 @@ pub struct X509
 
   # The DER of every block labelled *label* in a PEM text - `"CERTIFICATE"`
   # or `"PRIVATE KEY"` - each checked to be base64 before it is decoded.
-  def self.pem(text : String, label : String) : Array(Array(UInt8)) | X509Error
+  def self.pem(text : String, label : String) : Array(Array::View(UInt8)) | X509Error
     X509Pem.blocks(text, label)
   end
 
@@ -1279,29 +1280,71 @@ end
 # and its END line, checked before they are decoded, as std/base64 panics
 # on what is not base64. Text outside the blocks is passed over, as a
 # bundle's comments are.
+@[OnTape]
 struct X509Pem
-  def self.blocks(text : String, label : String = "CERTIFICATE") : Array(Array(UInt8)) | X509Error
-    opening = "-----BEGIN #{label}-----"
-    closing = "-----END #{label}-----"
-    found = [] of Array(UInt8)
-    body = nil
-    text.lines.each do |raw_line|
-      line = raw_line.strip
-      current = body
-      if current.nil?
-        body = String::Builder.new if line == opening
-      elsif line == closing
-        found << decode(current.to_s, label)!
-        body = nil
-      else
-        current << line
-      end
-    end
-    return X509Error.new("a #{label} block with no END line") unless body.nil?
-    found
+  getter blocks : Array(Array::View(UInt8))
+  @why : String = ""
+  @notes : String::Builder = String::Builder.new(128)
+
+  def error : X509Error?
+    @why.empty? ? nil : X509Error.new(@why)
   end
 
-  private def self.decode(text : String, label : String) : Array(UInt8) | X509Error
+  def self.blocks(text : String, label : String = "CERTIFICATE") : Array(Array::View(UInt8)) | X509Error
+    X509Pem.result(X509Pem.new(text, label))
+  end
+
+  def self.result(value : X509Pem) : Array(Array::View(UInt8)) | X509Error
+    if value.@why.empty?
+      borrow(value.blocks)
+    else
+      X509Error.new(value.@why)
+    end
+  end
+
+  private def self.borrow(blocks : Array(Array::View(UInt8))) : Array(Array::View(UInt8))
+    blocks
+  end
+
+  def initialize(text : String, label : String)
+    @blocks = Array(Array::View(UInt8)).new(4)
+    bytes = Array(UInt8).new(text.bytesize)
+    body = String::Builder.new(text.bytesize)
+    opening = "-----BEGIN #{label}-----"
+    closing = "-----END #{label}-----"
+    body_start = 0
+    inside = false
+    text.each_line do |raw_line|
+      line = raw_line.strip
+      if !inside
+        if line == opening
+          body_start = body.bytesize
+          inside = true
+        end
+      elsif line == closing
+        decoded = X509Pem.decode(body.finish[body_start, body.bytesize - body_start], label)
+        if decoded.is_a?(X509Error)
+          message = decoded.message
+          @notes << message[6, message.bytesize - 6]
+          @why = @notes.finish
+          break
+        end
+        start = bytes.size
+        bytes.concat(decoded)
+        @blocks << bytes[start, decoded.size]
+        inside = false
+      else
+        body << line
+      end
+      nil
+    end
+    if inside && @why.empty?
+      @notes << "a #{label} block with no END line"
+      @why = @notes.finish
+    end
+  end
+
+  def self.decode(text : String, label : String) : Array(UInt8) | X509Error
     return X509Error.new("a #{label} block whose base64 is #{text.bytesize} bytes, not a multiple of 4") unless text.bytesize % 4 == 0 && text.bytesize > 0
     padding = 0
     padding = 1 if text.ends_with?("=")

@@ -574,35 +574,70 @@ pub class TlsConfig
   # On by default, as Chrome and Firefox send it.
   property ech_grease : Bool = true
 
+  @owned_alpn : Array(String) = Array(String).new(4)
+  @owned_names : String::Builder = String::Builder.new(128)
+  @owned_ech : Array(UInt8) = Array(UInt8).new(4096)
+
   def initialize
   end
 
-  # The default configuration, made on the program tape: *alpn* must be
-  # there too (`copy_to(Program.tape)`).
-  def self.on_program(alpn : Array(String)) : TlsConfig
-    config = RisRegion.program_object(TlsConfig)
-    config.initialize
-    config.alpn = alpn
-    config
+  def initialize(alpn : Array::View(String))
+    @alpn = alpn.to_a
   end
 
-  # A new configuration holding what this one holds - the same roots and
-  # identity objects, a copy of `alpn` - for a part to be changed in it
-  # and not here: std/http's client makes the configuration an HTTPS
-  # record's `ech` and protocols ask for so. It is another object, and
-  # what was made under this one (`TlsMadeUnder`) is not carried under it.
-  def dup : TlsConfig
-    made = TlsConfig.new
-    made.roots = @roots
-    made.alpn = @alpn.dup
-    made.now = @now
-    made.identity = @identity
-    made.min_version = @min_version
-    made.post_quantum = @post_quantum
-    made.require_staple = @require_staple
-    made.ech_configs = @ech_configs
-    made.ech_grease = @ech_grease
-    made
+  # A reusable configuration owns its protocol texts and ECH bytes. Read
+  # the input before resetting: a caller may pass this config's own views.
+  def refill(source : TlsConfig,
+             ech : Array::View(UInt8)? = source.ech_configs.try(&.view),
+             protocols : Array::View(String) = source.alpn.view) : Nil
+    names = ""
+    spans = Array({Int32, Int32}).new(protocols.size)
+    protocols.each do |text|
+      start = names.bytesize
+      TlsConfig.append_name(names, text)
+      spans << {start, text.bytesize}
+      nil
+    end
+    copied = ech ? Array(UInt8).new(ech.size) { |i| ech[i] } : nil
+    @roots = source.roots
+    @identity = source.identity
+    @now = source.now
+    @min_version = source.min_version
+    @post_quantum = source.post_quantum
+    @require_staple = source.require_staple
+    @ech_grease = source.ech_grease
+    @alpn = @owned_alpn
+    @owned_alpn.clear
+    @owned_names.clear
+    @owned_names << names
+    spans.each do |span|
+      @owned_alpn << @owned_names.finish[span[0], span[1]]
+      nil
+    end
+    @ech_configs = nil
+    @owned_ech.clear
+    if copied
+      @owned_ech.concat(copied)
+      @ech_configs = @owned_ech
+    end
+    nil
+  end
+
+  def self.append_name(writer : String::Builder, text : String) : Nil
+    writer << text
+    nil
+  end
+
+  def self.on_program(*args)
+    {% raise "Declare config = TlsConfig.new(alpn), then use
+" +
+      "config.copy_to(Program.tape), or declare a program constant." %}
+  end
+
+  def dup(*args)
+    {% raise "A config is an owner: declare copy = TlsConfig.new,
+" +
+      "then copy.refill(config)." %}
   end
 
   # The system's roots are read on the caller's tape at each call: a
@@ -627,8 +662,13 @@ pub class TlsKeySchedule
     @hash_size = @sha384 ? 48 : 32
   end
 
+  def configure(sha384 : Bool) : Nil
+    @sha384 = sha384
+    @hash_size = sha384 ? 48 : 32
+  end
+
   def hash(data : Array::View(UInt8)) : Array(UInt8)
-    @sha384 ? SHA384.hash_bytes(data) : SHA256.hash_bytes(data)
+    (@sha384 ? SHA384.hash_bytes(data) : SHA256.hash_bytes(data)).dup
   end
 
   def extract(salt : Array::View(UInt8), ikm : Array::View(UInt8)) : Array(UInt8)
@@ -649,7 +689,7 @@ pub class TlsKeySchedule
 
   # Derive-Secret over the messages so far.
   def derive_secret(secret : Array::View(UInt8), label : String, transcript : Array::View(UInt8)) : Array(UInt8)
-    expand_label(secret, label, hash(transcript), @hash_size)
+    expand_label(secret, label, hash(transcript), @hash_size).dup
   end
 
   def zeros : Array(UInt8)
@@ -1014,9 +1054,86 @@ end
 # written under them, alerts, KeyUpdate, close_notify. `TlsClient` and
 # `TlsServer` are its two ends; each runs its own half of the handshake.
 module RisTlsConnectionState
+  def place : String
+    @place
+  end
+
+  protected def reset_connection(socket : IyiSocket) : Nil
+    @socket = socket
+    @alpn_protocol_size = -1
+    @alpn_protocol_text.clear
+    @cipher_suite_size = 0
+    @cipher_suite_text.clear
+    @version = "TLSv1.3"
+    @named_group_size = 0
+    @named_group_text.clear
+    @peer_certificates.clear
+    @ocsp_response = nil
+    @ocsp_status = nil
+    @error_text.clear
+    @resumed = false
+    @resumption_secret.clear
+    @ech_accepted = false
+    @inbox_at = 0
+    @inbox_end = 0
+    @handshake.clear
+    @handshake_at = 0
+    @ccs_seen = 0
+    @deadline_ns = 0_i64
+    @transcript_start = 0
+    @transcript_data.clear
+    @reader = nil
+    @writer = nil
+    @read_secret.clear
+    @write_secret.clear
+    @suite = 0
+    @closed = false
+    @eof = false
+    @write_closed = false
+    @handshaking = true
+    @early_left = 0
+    @tls12 = false
+    @master12.clear
+    @randoms12.clear
+    @renegotiation_refused = false
+    @plain_in.clear
+    @plain_at = 0
+    @plain_left = 0
+    @update_owed = false
+    @exporter_secret.clear
+    @holding = false
+    @schedule.configure(false)
+  end
+
   # The protocol chosen by ALPN, if one was.
-  getter alpn_protocol : String? = nil
-  getter cipher_suite : String = ""
+  @alpn_protocol_text : String::Builder = String::Builder.new(64)
+  @alpn_protocol_at : Int32 = 0
+  @alpn_protocol_size : Int32 = -1
+
+  def alpn_protocol : String?
+    @alpn_protocol_size < 0 ? nil : @alpn_protocol_text.finish[@alpn_protocol_at, @alpn_protocol_size]
+  end
+
+  protected def keep_alpn_protocol(text : String?) : Nil
+    @alpn_protocol_size = -1
+    return unless text
+    @alpn_protocol_at = @alpn_protocol_text.bytesize
+    @alpn_protocol_text << text
+    @alpn_protocol_size = text.bytesize
+  end
+  @cipher_suite_text : String::Builder = String::Builder.new(64)
+  @cipher_suite_at : Int32 = 0
+  @cipher_suite_size : Int32 = 0
+
+  def cipher_suite : String
+    @cipher_suite_text.finish[@cipher_suite_at, @cipher_suite_size]
+  end
+
+  protected def keep_cipher_suite(text : String) : Nil
+    @cipher_suite_at = @cipher_suite_text.bytesize
+    @cipher_suite_text << text
+    @cipher_suite_size = text.bytesize
+  end
   # The version negotiated: "TLSv1.3", or "TLSv1.2" where one end asked
   # for it and the other spoke nothing newer.
   getter version : String = "TLSv1.3"
@@ -1024,7 +1141,19 @@ module RisTlsConnectionState
   # "X25519", "secp256r1" or "secp384r1". One name for it, the one RFC
   # 8446 gives the field (NamedGroup); `key_exchange`, which the P-384 work
   # first called it, is KeyShareEntry's name for the share's bytes.
-  getter named_group : String = ""
+  @named_group_text : String::Builder = String::Builder.new(64)
+  @named_group_at : Int32 = 0
+  @named_group_size : Int32 = 0
+
+  def named_group : String
+    @named_group_text.finish[@named_group_at, @named_group_size]
+  end
+
+  protected def keep_named_group(text : String) : Nil
+    @named_group_at = @named_group_text.bytesize
+    @named_group_text << text
+    @named_group_size = text.bytesize
+  end
   # The chain the peer's certificate was checked through, leaf first: the
   # server's, for a client; the client's, for a server that asked for one.
   getter peer_certificates : Array(Certificate) = [] of Certificate
@@ -1092,7 +1221,12 @@ module RisTlsConnectionState
   # timeout - which bounds each wait of the socket, where one record a
   # byte at a time is many waits.
   @deadline_ns : Int64 = 0_i64
-  @transcript : Array(UInt8) = [] of UInt8
+  @transcript_data : Array(UInt8) = Array(UInt8).new(65536)
+  @transcript_start : Int32 = 0
+
+  protected def transcript : Array::View(UInt8)
+    @transcript_data[@transcript_start, @transcript_data.size - @transcript_start]
+  end
   @schedule : TlsKeySchedule = TlsKeySchedule.new(false)
   @read_cipher : TlsRecordCipher
   @write_cipher : TlsRecordCipher
@@ -1466,14 +1600,15 @@ module RisTlsConnectionState
 
   # *count* bytes at *bytes* written, or held with the rest of a flight.
   private def put_at(bytes : Array(UInt8), count : Int32) : TlsError?
-    if held = @held
+    if @holding
+      held = @held_storage
       count.times { |i| held << bytes[i] }
       return nil
     end
     return tls_error("the socket under the connection is closed") if @socket.closed?
     sent = @socket.write(bytes, 0, count)
-    return tls_error("the write to #{@place} failed: #{sent.message}") if sent.is_a?(SocketError)
-    return tls_error("the write to #{@place} was cancelled") unless sent.is_a?(Int32)
+    return tls_error("the write to #{place} failed: #{sent.message}") if sent.is_a?(SocketError)
+    return tls_error("the write to #{place} was cancelled") unless sent.is_a?(Int32)
     nil
   end
 
@@ -1587,12 +1722,12 @@ module RisTlsConnectionState
     return tls_error("the connection is closed") if @closed
     return nil if @write_closed
     @write_closed = true
-    @held = nil
+    @holding = false
     sent = send_protected(TlsRecords::ALERT, [1_u8, 0_u8])
     return sent if sent
     return tls_error("the socket under the connection is closed") if @socket.closed?
     shut = @socket.close_write
-    return tls_error("the end of the writing to #{@place} failed: #{shut.message}") if shut
+    return tls_error("the end of the writing to #{place} failed: #{shut.message}") if shut
     nil
   end
 
@@ -1762,7 +1897,7 @@ module RisTlsConnectionState
   # from the client's buffer before it is read - a client refused for its
   # certificate would read "reset", not why.
   protected def fail(error : TlsError) : TlsError
-    @held = nil
+    @holding = false
     code = error.alert
     if code && !@closed && !@write_closed && !@socket.closed?
       content = [code == TlsAlert::NO_RENEGOTIATION ? 1_u8 : 2_u8, code]
@@ -1805,7 +1940,7 @@ module RisTlsConnectionState
     if (usage = leaf.key_usage) && (usage >> Certificate::KEY_DIGITAL_SIGNATURE) & 1 == 0
       return tls_error("#{@peer}'s certificate does not allow digitalSignature, which a CertificateVerify is", TlsAlert::BAD_CERTIFICATE)
     end
-    signed = Array(UInt8).new(64, 0x20_u8) + TlsBytes.of("TLS 1.3, #{side} CertificateVerify") + [0_u8] + @schedule.hash(@transcript)
+    signed = Array(UInt8).new(64, 0x20_u8) + TlsBytes.of("TLS 1.3, #{side} CertificateVerify") + [0_u8] + @schedule.hash(transcript)
     key = leaf.public_key
     ok = case scheme
          when 0x0403, 0x0503, 0x0603
@@ -1859,7 +1994,7 @@ module RisTlsConnectionState
   # take, *what* naming the message. PKCS #1 v1.5 is taken, as 1.2 permits
   # it there, and ECDSA with the hash the scheme names on the key's own
   # curve: in 1.2 a scheme names a hash and not a curve.
-  private def signed12?(what : String, leaf : Certificate, scheme : Int32, signed : Array(UInt8), signature : Array(UInt8)) : Bool | TlsError
+  private def signed12?(what : String, leaf : Certificate, scheme : Int32, signed : Array::View(UInt8), signature : Array(UInt8)) : Bool | TlsError
     key = leaf.public_key
     ok = case scheme
          when 0x0401, 0x0501, 0x0601
@@ -1887,12 +2022,14 @@ module RisTlsConnectionState
   # with both randoms for the exporter (RFC 5705); and from its key block
   # (RFC 5246 section 6.3) the client's write cipher, then the server's.
   private def keys12(secret : Array(UInt8), client_random : Array(UInt8), server_random : Array(UInt8), client_cipher : TlsRecordCipher, server_cipher : TlsRecordCipher) : {Array(UInt8), TlsRecordCipher, TlsRecordCipher}
-    master = @schedule.prf(secret, "extended master secret", @schedule.hash(@transcript), 48)
+    master = @schedule.prf(secret, "extended master secret", @schedule.hash(transcript), 48)
     size = TlsSuites.key_size(@suite)
     iv = TlsSuites.chacha?(@suite) ? 12 : 4
     block = @schedule.prf(master, "key expansion", server_random + client_random, 2 * size + 2 * iv)
-    @master12 = master
-    @randoms12 = client_random + server_random
+    @master12.clear
+    @master12.concat(master)
+    @randoms12.clear
+    @randoms12.concat(client_random + server_random)
     client_cipher.configure(@suite, block[0, size], block[2 * size, iv])
     server_cipher.configure(@suite, block[size, size], block[2 * size + iv, iv])
     {master, client_cipher, server_cipher}
@@ -1901,7 +2038,7 @@ module RisTlsConnectionState
   # A TLS 1.2 Finished's verify_data (RFC 5246 section 7.4.9) over the
   # transcript so far: the client's, or the server's.
   private def finished12(master : Array(UInt8), client : Bool) : Array(UInt8)
-    @schedule.prf(master, client ? "client finished" : "server finished", @schedule.hash(@transcript), 12)
+    @schedule.prf(master, client ? "client finished" : "server finished", @schedule.hash(transcript), 12)
   end
 
   # --- Records (section 5) ---
@@ -1970,7 +2107,7 @@ module RisTlsConnectionState
   # ClientHello, which is the first thing a client sends, and not past
   # `MAX_CCS` of them.
   private def pass_over_ccs : TlsError?
-    return tls_error("a ChangeCipherSpec before the ClientHello", TlsAlert::UNEXPECTED_MESSAGE) if server_side? && @transcript.empty?
+    return tls_error("a ChangeCipherSpec before the ClientHello", TlsAlert::UNEXPECTED_MESSAGE) if server_side? && transcript.empty?
     @ccs_seen = @ccs_seen + 1
     return tls_error("more than #{MAX_CCS} ChangeCipherSpec records", TlsAlert::UNEXPECTED_MESSAGE) if @ccs_seen > MAX_CCS
     nil
@@ -2105,9 +2242,9 @@ module RisTlsConnectionState
       # A wait past the socket's timeout, or a cancelled one, takes nothing
       # from the stream: what came so far stays in the inbox, and a read
       # after it goes on from there.
-      return tls_error("the connection to #{@place} failed: #{got.message}", timed_out: got.timed_out?) if got.is_a?(SocketError)
-      return tls_error("the read from #{@place} was cancelled", cancelled: true) unless got.is_a?(Int32)
-      return tls_error("#{@place} closed the connection without close_notify") if got == 0
+      return tls_error("the connection to #{place} failed: #{got.message}", timed_out: got.timed_out?) if got.is_a?(SocketError)
+      return tls_error("the read from #{place} was cancelled", cancelled: true) unless got.is_a?(Int32)
+      return tls_error("#{place} closed the connection without close_notify") if got == 0
       @inbox_end = @inbox_end + got
     end
     nil
@@ -2118,7 +2255,7 @@ module RisTlsConnectionState
   private def read_socket(buffer : Array(UInt8), at : Int32, count : Int32) : Int32 | Cancelled | SocketError | TlsError
     return @socket.read(buffer, at, count) if @deadline_ns == 0_i64
     left = (@deadline_ns - Time.monotonic_nanoseconds.to_i64) // 1000000_i64
-    return tls_error("#{@place} took past the time given to #{@handshaking ? "the handshake" : "the read"}", timed_out: true) if left <= 0
+    return tls_error("#{place} took past the time given to #{@handshaking ? "the handshake" : "the read"}", timed_out: true) if left <= 0
     timeout = @socket.read_timeout_ms
     cut = timeout.nil? || timeout <= 0 || timeout > left
     @socket.read_timeout_ms = left.to_i32 if cut
@@ -2126,7 +2263,7 @@ module RisTlsConnectionState
     @socket.read_timeout_ms = timeout
     # A wait the deadline cut short ends at the deadline, not the socket's.
     if cut && got.is_a?(SocketError) && got.timed_out?
-      return tls_error("#{@place} took past the time given to #{@handshaking ? "the handshake" : "the read"}", timed_out: true)
+      return tls_error("#{place} took past the time given to #{@handshaking ? "the handshake" : "the read"}", timed_out: true)
     end
     got
   end
@@ -2182,16 +2319,19 @@ module RisTlsConnectionState
   # for the Finished delays: 40 ms on Linux. std/socket now turns Nagle
   # off; this is the other half, fewer writes. `fail` and `close_write`
   # drop what is held, a flight cut short, and send their alert alone.
-  @held : Array(UInt8)? = nil
+  @holding : Bool = false
+  @held_storage : Array(UInt8) = Array(UInt8).new(16384)
 
   private def hold : Nil
-    @held = [] of UInt8
+    @held_storage.clear
+    @holding = true
   end
 
   private def release : TlsError?
-    held = @held
-    @held = nil
-    return nil if held.nil? || held.empty?
+    holding = @holding
+    @holding = false
+    held = @held_storage
+    return nil if !holding || held.empty?
     put(held)
   end
 
@@ -2237,11 +2377,13 @@ end
 # A connection to a server, its handshake done.
 pub class TlsClient < TlsConnection
   include RisTlsConnectionState
-  @host : String
+  @host_text : String::Builder
+  @name_text : String::Builder
+  @public_name : Bool = false
+  @early_storage : Array(UInt8)
   @config : TlsConfig
   # *host* as server_name carries it and the certificate is checked for
   # (`server_name_for`), set when the handshake starts.
-  @name : String = ""
   # Where this connection's tickets are kept and a resumption's was taken
   # from: the caller's, none when nil.
   @session : TlsSession?
@@ -2253,13 +2395,18 @@ pub class TlsClient < TlsConnection
   # receives are kept under (`TlsSession`).
   @port : Int32 = 0
   @made_under : TlsMadeUnder? = nil
+  @made_under_slot : TlsMadeUnder
   # When the certificates this session rests on were checked (monotonic
   # ms): this handshake's, or the full one's that a resumption carries on.
   @authenticated_ms : Int64 = TlsTime.now_ms
   # What the caller gave to send early, and what came of it: whether the
   # ClientHello offered it (early_data, and the records after it), whether
   # the server's EncryptedExtensions took it, and the key it went under.
-  @early_bytes : Array(UInt8)? = nil
+  @has_early : Bool = false
+
+  private def early_bytes : Array(UInt8)?
+    @has_early ? @early_storage : nil
+  end
   @early_sent : Bool = false
   @early_taken : Bool = false
   @early_cipher : TlsRecordCipher
@@ -2271,13 +2418,14 @@ pub class TlsClient < TlsConnection
   # The encrypted ClientHello offered (`TlsConfig#ech_configs`), and what
   # became of it; or whether a GREASE one went instead.
   @ech : TlsEchOffer? = nil
+  @ech_slot : TlsEchOffer
   @grease_ech : Bool = false
   # What became of the early data given to `connect` or `over`.
   getter early_data : TlsEarlyData = TlsEarlyData::Unused
 
   SIGNATURE_SCHEMES = StaticArray[0x0403, 0x0503, 0x0603, 0x0807, 0x0804, 0x0805, 0x0806, 0x0401, 0x0501, 0x0601]
 
-  def initialize(socket : IyiSocket, @host : String, @config : TlsConfig, @session : TlsSession? = nil)
+  def initialize(socket : IyiSocket, host : String, @config : TlsConfig, @session : TlsSession? = nil)
     @socket = socket
     read_cipher = TlsRecordCipher.new
     write_cipher = TlsRecordCipher.new
@@ -2286,7 +2434,81 @@ pub class TlsClient < TlsConnection
     @peer = "the server"
     early_cipher = TlsRecordCipher.new
     @early_cipher = early_cipher
-    @place = @host
+    @host_text = String::Builder.new(host.bytesize)
+    @host_text << host
+    @name_text = String::Builder.new(256)
+    @early_storage = Array(UInt8).new(16384)
+    @place = "the server"
+    ech_slot = TlsEchOffer.new
+    @ech_slot = ech_slot
+    made_under = TlsMadeUnder.new(@config)
+    @made_under_slot = made_under
+  end
+
+  def initialize(host : String, @config : TlsConfig, @session : TlsSession? = nil)
+    @socket = IyiSocket.new(-1)
+    read_cipher = TlsRecordCipher.new
+    write_cipher = TlsRecordCipher.new
+    @read_cipher = read_cipher
+    @write_cipher = write_cipher
+    @peer = "the server"
+    early_cipher = TlsRecordCipher.new
+    @early_cipher = early_cipher
+    @host_text = String::Builder.new(host.bytesize)
+    @host_text << host
+    @name_text = String::Builder.new(256)
+    @early_storage = Array(UInt8).new(16384)
+    @place = "the server"
+    ech_slot = TlsEchOffer.new
+    @ech_slot = ech_slot
+    made_under = TlsMadeUnder.new(@config)
+    @made_under_slot = made_under
+  end
+
+  def host : String
+    @host_text.finish
+  end
+
+  # The name the certificate is checked for: the host's, or the ECH
+  # config's public_name after the server turned the inner down.
+  def name : String
+    offer = @ech
+    @public_name && offer ? offer.config.public_name : @name_text.finish
+  end
+
+  def place : String
+    host
+  end
+
+  def configure(socket : IyiSocket, host : String, config : TlsConfig,
+                session : TlsSession? = nil) : Nil
+    reset_connection(socket)
+    @host_text.clear
+    @host_text << host
+    @place = "the server"
+    @name_text.clear
+    @public_name = false
+    @config = config
+    @session = session
+    @offered = nil
+    @port = 0
+    @made_under = nil
+    @authenticated_ms = TlsTime.now_ms
+    @has_early = false
+    @early_storage.clear
+    @early_sent = false
+    @early_taken = false
+    @early_writer = nil
+    @retried = false
+    @early_alpn = nil
+    @ech = nil
+    @grease_ech = false
+    @early_data = TlsEarlyData::Unused
+    @certificate_request = nil
+    @requested_schemes.clear
+    @stapled = nil
+    @status_acked = false
+    @certificate_types = nil
   end
 
   # *host* in the form RFC 6066 section 3 gives server_name: "the
@@ -2324,36 +2546,53 @@ pub class TlsClient < TlsConnection
   # it must not be resent for; `early_data` says which. Early data can be
   # replayed by whoever sees it (section 8): send nothing early that is not
   # safe to run twice.
-  def self.connect(host : String, port : Int32, config : TlsConfig = TlsConfig.new, timeout_ms : Int32 = -1, session : TlsSession? = nil,
-                   early_data : String | Array(UInt8) | Nil = nil) : TlsClient | TlsError
+  def connect(port : Int32, timeout_ms : Int32 = -1,
+              early_data : String | Array(UInt8) | Nil = nil) : TlsError?
     socket = IyiSocket.connect(host, port, timeout_ms)
     return TlsError.new("could not connect to #{host}:#{port}: #{socket.message}") if socket.is_a?(SocketError)
     return TlsError.new("the connection to #{host}:#{port} was cancelled") unless socket.is_a?(IyiSocket)
-    over(socket, host, config, timeout_ms > 0 ? timeout_ms : HANDSHAKE_TIMEOUT_MS, session, early_data)
+    @socket = socket
+    over(timeout_ms > 0 ? timeout_ms : HANDSHAKE_TIMEOUT_MS, early_data)
   end
 
-  # The handshake over a connected *socket*, for *host*, done within
-  # *timeout_ms* (none when 0); *session* and *early_data* as for
-  # `connect`.
-  def self.over(socket : IyiSocket, host : String, config : TlsConfig = TlsConfig.new, timeout_ms : Int32 = HANDSHAKE_TIMEOUT_MS, session : TlsSession? = nil,
-                early_data : String | Array(UInt8) | Nil = nil) : TlsClient | TlsError
-    client = TlsClient.new(socket, host, config, session)
-    client.early_bytes = early_data.is_a?(String) ? TlsBytes.of(early_data) : early_data
-    problem = client.within(timeout_ms) { client.handshake }
-    return client.fail(problem) if problem
-    client
+  # Construct with the socket, host and config in the caller's scope,
+  # then do the handshake without replacing any owner.
+  def over(timeout_ms : Int32 = HANDSHAKE_TIMEOUT_MS,
+           early_data : String | Array(UInt8) | Nil = nil) : TlsError?
+    @has_early = false
+    @early_storage.clear
+    if early_data
+      if early_data.is_a?(String)
+        early_data.each_byte { |byte| @early_storage << byte }
+      else
+        @early_storage.concat(early_data)
+      end
+      @has_early = true
+    end
+    problem = within(timeout_ms) { handshake }
+    problem ? fail(problem) : nil
   end
 
-  protected def early_bytes=(bytes : Array(UInt8)?) : Array(UInt8)?
-    @early_bytes = bytes
+  def self.over(*args, **options)
+    {% raise "TlsClient.over returns no owner: declare client =
+" +
+      "TlsClient.new(socket, host, config, session), then client.over(timeout_ms)." %}
+  end
+
+  def self.connect(*args, **options)
+    {% raise "TlsClient.connect returns no owner: declare client =
+" +
+      "TlsClient.new(host, config, session), then client.connect(port, timeout_ms)." %}
   end
 
   # --- The handshake (section 4) ---
 
   def handshake : TlsError?
-    name = TlsClient.server_name_for(@host)
+    name = TlsClient.server_name_for(host)
     return name if name.is_a?(TlsError)
-    @name = name
+    @name_text.clear
+    @name_text << name
+    @public_name = false
     problem = shake
     return problem if problem
     deliver_early
@@ -2363,7 +2602,7 @@ pub class TlsClient < TlsConnection
   # server took it, nothing when it refused it for a protocol not the
   # ticket's (section 4.2.10), and written now otherwise.
   private def deliver_early : TlsError?
-    data = @early_bytes
+    data = early_bytes
     return nil unless data
     if @early_taken
       @early_data = TlsEarlyData::Accepted
@@ -2372,7 +2611,7 @@ pub class TlsClient < TlsConnection
     if @early_sent
       # Section 4.2.10: never sent again unasked for another protocol than
       # the one it was written for, the ticket's.
-      if @early_alpn != @alpn_protocol
+      if @early_alpn != alpn_protocol
         @early_data = TlsEarlyData::Withheld
         return nil
       end
@@ -2392,13 +2631,14 @@ pub class TlsClient < TlsConnection
     ephemeral = nil.as(P256PrivateKey | P384PrivateKey | Nil)
     if held = @session
       @port = @socket.unix? ? 0 : (@socket.remote_port || 0)
-      made_under = TlsMadeUnder.new(@config)
+      made_under = @made_under_slot
+      made_under.configure(@config)
       @made_under = made_under
-      @offered = held.take(@host, @port, @config, TlsTime.now_ms)
+      @offered = held.take(host, @port, @config, TlsTime.now_ms)
     end
     # Early data goes when the ticket allows that much (section 4.6.1's
     # max_early_data_size), and not otherwise.
-    if (data = @early_bytes) && (offered = @offered) && !data.empty? && data.size <= offered.max_early_data
+    if (data = early_bytes) && (offered = @offered) && !data.empty? && data.size <= offered.max_early_data
       @early_sent = true
       @early_alpn = offered.alpn
     end
@@ -2423,10 +2663,10 @@ pub class TlsClient < TlsConnection
     ech = nil.as(TlsEchOffer?)
     grease = nil.as(Array(UInt8)?)
     if list = @config.ech_configs
-      made = ech_offer(list)
-      return made if made.is_a?(TlsError)
-      ech = made
-      @ech = made
+      problem = ech_offer(list)
+      return problem if problem
+      ech = @ech_slot
+      @ech = ech
     elsif @config.ech_grease
       grease = ech_grease(client_hello(random, session, shares, nil, Array(UInt8).new, TlsEch::INNER))
       @grease_ech = true
@@ -2442,7 +2682,8 @@ pub class TlsClient < TlsConnection
     hold
     sent = send_plain(TlsRecords::HANDSHAKE, wire, first: true)
     return sent if sent
-    @transcript = hello.dup
+    @transcript_start = @transcript_data.size
+    @transcript_data.concat(hello.dup)
     if @early_sent
       # Under keys made over the ClientHelloInner when there is one: a
       # server that takes it reads them so, and one that does not passes
@@ -2471,7 +2712,7 @@ pub class TlsClient < TlsConnection
       cookie = reply.cookie
       @retried = true
       return tls_error("a HelloRetryRequest asking for nothing new", TlsAlert::ILLEGAL_PARAMETER) unless cookie || reply.named_group != 0
-      @schedule = TlsKeySchedule.new(reply.suite == TlsSuites::AES_256_GCM)
+      @schedule.configure(reply.suite == TlsSuites::AES_256_GCM)
       if ech
         # RFC 9849 section 6.1.4: the server took the ClientHelloInner when
         # the HelloRetryRequest's encrypted_client_hello is section 7.2.1's
@@ -2489,7 +2730,8 @@ pub class TlsClient < TlsConnection
         end
       end
       first = @schedule.hash(hello)
-      @transcript = [254_u8, 0_u8, 0_u8, first.size.to_u8] + first + server
+      @transcript_start = @transcript_data.size
+      @transcript_data.concat([254_u8, 0_u8, 0_u8, first.size.to_u8] + first + server)
       # Section 4.1.2: a ticket whose hash is not the suite's goes; one
       # kept is offered again, its age and binder made anew.
       if (offered = @offered) && TlsSuites.sha384?(offered.suite) != TlsSuites.sha384?(reply.suite)
@@ -2504,7 +2746,7 @@ pub class TlsClient < TlsConnection
       # The second ClientHelloInner goes in a second ClientHelloOuter,
       # sealed by the same HPKE context, its enc empty (section 6.1.5); a
       # GREASE extension goes again as it was (section 6.2.1).
-      hello = client_hello(random, session, shares, cookie, @transcript, ech ? TlsEch::INNER : grease)
+      hello = client_hello(random, session, shares, cookie, transcript, ech ? TlsEch::INNER : grease)
       wire = hello
       if ech
         outer = ech_outer(ech, hello)
@@ -2514,7 +2756,7 @@ pub class TlsClient < TlsConnection
       end
       sent = send_plain(TlsRecords::HANDSHAKE, wire, first: false)
       return sent if sent
-      @transcript = @transcript + hello
+      @transcript_data.concat(hello)
       retry_suite = reply.suite
       server = handshake_message(plain: true)
       return server if server.is_a?(TlsError)
@@ -2529,8 +2771,8 @@ pub class TlsClient < TlsConnection
     # record.
     return tls_error("handshake bytes after the ServerHello in its record", TlsAlert::UNEXPECTED_MESSAGE) unless handshake_left == 0
     @suite = reply.suite
-    @cipher_suite = TlsSuites.name(@suite)
-    @schedule = TlsKeySchedule.new(@suite == TlsSuites::AES_256_GCM)
+    keep_cipher_suite(TlsSuites.name(@suite))
+    @schedule.configure(@suite == TlsSuites::AES_256_GCM)
     peer = reply.share
     return tls_error("a ServerHello with no key share", TlsAlert::MISSING_EXTENSION) unless peer
     unless shares.any? { |s| s[0] == reply.named_group }
@@ -2546,13 +2788,14 @@ pub class TlsClient < TlsConnection
       # the inner, that is a server breaking the protocol.
       zeroed = server.dup
       zeroed.fill(0_u8, 30, 8)
-      if Subtle.constant_time_compare(server[30, 8], TlsEch.confirmation(@schedule, random, @transcript + zeroed, false))
+      if Subtle.constant_time_compare(server[30, 8], TlsEch.confirmation(@schedule, random, transcript + zeroed, false))
         ech.accepted = true
         @ech_accepted = true
       else
         return tls_error("a ServerHello that does not confirm the ClientHelloInner its HelloRetryRequest took", TlsAlert::ILLEGAL_PARAMETER) if ech.hrr_accepted
         ech.rejected = true
-        @transcript = wire.dup
+        @transcript_start = @transcript_data.size
+        @transcript_data.concat(wire.dup)
       end
     end
     if ech && ech.rejected
@@ -2562,10 +2805,10 @@ pub class TlsClient < TlsConnection
       # outer's pre_shared_key is GREASE (section 6.1.2), so a server that
       # resumes by it is illegal_parameter.
       return tls_error("a ServerHello resuming by the ClientHelloOuter's pre_shared_key, which is GREASE", TlsAlert::ILLEGAL_PARAMETER) if reply.psk_identity >= 0
-      @name = ech.config.public_name
+      @public_name = true
     end
-    @transcript = @transcript + server
-    @named_group = group_name(reply.named_group)
+    @transcript_data.concat(server)
+    keep_named_group(group_name(reply.named_group))
     psk = nil.as(Array(UInt8)?)
     if reply.psk_identity >= 0
       # Section 4.2.11: the identity chosen one of those offered, and the
@@ -2574,7 +2817,7 @@ pub class TlsClient < TlsConnection
       return tls_error("a ServerHello choosing PSK identity #{reply.psk_identity}, of none offered", TlsAlert::ILLEGAL_PARAMETER) unless offered
       return tls_error("a ServerHello choosing PSK identity #{reply.psk_identity}, of one offered", TlsAlert::ILLEGAL_PARAMETER) unless reply.psk_identity == 0
       unless TlsSuites.sha384?(offered.suite) == TlsSuites.sha384?(@suite)
-        return tls_error("a ServerHello resuming under #{@cipher_suite}, whose hash is not the ticket's", TlsAlert::ILLEGAL_PARAMETER)
+        return tls_error("a ServerHello resuming under #{cipher_suite}, whose hash is not the ticket's", TlsAlert::ILLEGAL_PARAMETER)
       end
       psk = offered.psk
       @resumed = true
@@ -2601,8 +2844,8 @@ pub class TlsClient < TlsConnection
       secret = TlsBytes.of(shared)
     end
     handshake_secret = @schedule.handshake_secret(secret, psk)
-    client_secret = @schedule.derive_secret(handshake_secret, "c hs traffic", @transcript)
-    server_secret = @schedule.derive_secret(handshake_secret, "s hs traffic", @transcript)
+    client_secret = @schedule.derive_secret(handshake_secret, "c hs traffic", transcript)
+    server_secret = @schedule.derive_secret(handshake_secret, "s hs traffic", transcript)
     @read_cipher.configure(@suite, @schedule, server_secret)
     @reader = @read_cipher
     # Written under from here, should the server's flight be refused: its
@@ -2615,9 +2858,9 @@ pub class TlsClient < TlsConnection
     @handshaking = false
 
     master = @schedule.master_secret(handshake_secret)
-    client_application = @schedule.derive_secret(master, "c ap traffic", @transcript)
-    server_application = @schedule.derive_secret(master, "s ap traffic", @transcript)
-    @exporter_secret = @schedule.derive_secret(master, "exp master", @transcript)
+    client_application = @schedule.derive_secret(master, "c ap traffic", transcript)
+    server_application = @schedule.derive_secret(master, "s ap traffic", transcript)
+    @exporter_secret = @schedule.derive_secret(master, "exp master", transcript)
 
     # The client's flight: a ChangeCipherSpec for middleboxes (appendix
     # D.4), unless it went with the early data; EndOfEarlyData under the
@@ -2634,7 +2877,7 @@ pub class TlsClient < TlsConnection
       ended = TlsBytes.message(5, [] of UInt8)
       sent = put(early.seal(TlsRecords::HANDSHAKE, ended))
       return sent if sent
-      @transcript = @transcript + ended
+      @transcript_data.concat(ended)
     end
     if (context = @certificate_request)
       # RFC 9849 section 6.1.7: a server that turned the encrypted
@@ -2647,43 +2890,42 @@ pub class TlsClient < TlsConnection
         presented = TlsBytes.message(11, [context.size.to_u8] + context + TlsBytes.u24(entries.size) + entries)
         sent = send_flight(presented)
         return sent if sent
-        @transcript = @transcript + presented
-        signed = Array(UInt8).new(64, 0x20_u8) + TlsBytes.of("TLS 1.3, client CertificateVerify") + [0_u8] + @schedule.hash(@transcript)
+        @transcript_data.concat(presented)
+        signed = Array(UInt8).new(64, 0x20_u8) + TlsBytes.of("TLS 1.3, client CertificateVerify") + [0_u8] + @schedule.hash(transcript)
         signature = identity.sign(scheme, signed)
         verify = TlsBytes.message(15, TlsBytes.u16(scheme) + TlsBytes.u16(signature.size) + signature)
         sent = send_protected(TlsRecords::HANDSHAKE, verify)
         return sent if sent
-        @transcript = @transcript + verify
+        @transcript_data.concat(verify)
       else
         empty = TlsBytes.message(11, [context.size.to_u8] + context + [0_u8, 0_u8, 0_u8])
         sent = send_protected(TlsRecords::HANDSHAKE, empty)
         return sent if sent
-        @transcript = @transcript + empty
+        @transcript_data.concat(empty)
       end
     end
-    finished = TlsBytes.message(20, @schedule.finished(client_secret, @transcript))
+    finished = TlsBytes.message(20, @schedule.finished(client_secret, transcript))
     sent = send_protected(TlsRecords::HANDSHAKE, finished)
     return sent if sent
     sent = release
     return sent if sent
-    @resumption_secret = @schedule.derive_secret(master, "res master", @transcript + finished)
+    @resumption_secret.clear
+    @resumption_secret.concat(@schedule.derive_secret(master, "res master", transcript + finished))
 
     @read_cipher.configure(@suite, @schedule, server_application)
 
     @reader = @read_cipher
     @write_cipher.configure(@suite, @schedule, client_application)
     @writer = @write_cipher
-    @read_secret = server_application
-    @write_secret = client_application
+    @read_secret.clear
+    @read_secret.concat(server_application)
+    @write_secret.clear
+    @write_secret.concat(client_application)
     # RFC 9849 section 6.1.6: a handshake on the ClientHelloOuter, done,
     # authenticated the server for the public_name and not the host: it
     # ends with ech_required, under the application keys, before any data,
     # and the refusal carries the configurations to retry with.
-    if (ech = @ech) && ech.rejected
-      configs = ech.retry_configs
-      return tls_error("#{@host} did not take the encrypted ClientHello: the server, its certificate checked for #{ech.config.public_name}, sent " +
-                          (configs ? "configurations to retry with" : "none to retry with, which turns ECH off there"), TlsAlert::ECH_REQUIRED, retry_configs: configs)
-    end
+    return ech_turned_down if (ech = @ech) && ech.rejected
     nil
   end
 
@@ -2694,7 +2936,7 @@ pub class TlsClient < TlsConnection
   # ClientHello - in records of at most 2^14 bytes.
   private def send_early(hello : Array(UInt8)) : TlsError?
     offered = @offered
-    data = @early_bytes
+    data = early_bytes
     return nil unless offered && data
     schedule = TlsKeySchedule.new(TlsSuites.sha384?(offered.suite))
     writer = @early_cipher
@@ -2713,13 +2955,22 @@ pub class TlsClient < TlsConnection
 
   # --- Encrypted Client Hello (RFC 9849), the client's half ---
 
+  # The refusal of a handshake whose server turned the encrypted
+  # ClientHello down, with the configurations it sent to retry with.
+  private def ech_turned_down : TlsError
+    ech = @ech_slot
+    configs = ech.retry_configs
+    tls_error("#{host} did not take the encrypted ClientHello: the server, its certificate checked for #{ech.config.public_name}, sent " +
+              (configs ? "configurations to retry with" : "none to retry with, which turns ECH off there"), TlsAlert::ECH_REQUIRED, retry_configs: configs)
+  end
+
   # The encrypted ClientHello *list* lets this client offer (section 6.1):
   # the first ECHConfig of a version, a KEM and a suite std/hpke has, with
   # a public_name that is a host name, and the HPKE context sealing under
   # its key - or why there is none, before anything is sent. TLS 1.2 beside
   # it is refused: the inner must not offer it (section 6.1), and a server
   # that answered the outer in it would leave no room for a confirmation.
-  private def ech_offer(list : Array(UInt8)) : TlsEchOffer | TlsError
+  private def ech_offer(list : Array(UInt8)) : TlsError?
     return tls_error("ech_configs asks for an encrypted ClientHello, which is TLS 1.3's alone, and min_version for TLS 1.2 too") if @config.min_version == TlsVersion::TLS12
     configs = TlsEchConfig.read_list(list)
     return tls_error("ech_configs is not an ECHConfigList: #{configs}") if configs.is_a?(String)
@@ -2728,9 +2979,9 @@ pub class TlsClient < TlsConnection
       next unless suite
       key = HpkePublicKey.from_bytes(suite.kem, config.public_key)
       next if key.is_a?(HpkeError)
-      sender = suite.sender(key, TlsEch.info(config), Random::Secure.random_bytes(suite.kem.private_key_size))
-      next if sender.is_a?(HpkeError)
-      return TlsEchOffer.new(config, suite, sender, Random::Secure.random_bytes(32))
+      problem = @ech_slot.configure(config, suite, key)
+      next if problem
+      return nil
     end
     tls_error("ech_configs holds no ECHConfig this client can use: version 0xfe0d, a KEM, a KDF and an AEAD std/hpke has, and a public_name that is a host name")
   end
@@ -2773,7 +3024,7 @@ pub class TlsClient < TlsConnection
     sealed = ech.sender.seal(encoded, blank[4, blank.size - 4])
     return tls_error("the ClientHelloInner could not be sealed: #{sealed.message}", TlsAlert::INTERNAL_ERROR) if sealed.is_a?(HpkeError)
     body = head + TlsBytes.u16(size) + TlsBytes.of(sealed)
-    ech.extension = body if ech.extension.empty?
+    ech.extension.concat(body) if ech.extension.empty?
     TlsEch.outer_message(parts, ech.outer_random, before + TlsBytes.extension(TlsEch::EXTENSION, body) + after)
   end
 
@@ -2813,7 +3064,7 @@ pub class TlsClient < TlsConnection
     return nil if lifetime == 0_i64 || ticket.size > TlsSession::MAX_TICKET
     lifetime = TlsSession::MAX_LIFETIME if lifetime > TlsSession::MAX_LIFETIME
     psk = @schedule.resumption_psk(@resumption_secret, nonce)
-    session.keep(TlsHeldTicket.new(ticket, psk, @suite, TlsTime.now_ms, lifetime * 1000_i64, age_add, @host, @port, under, @alpn_protocol,
+    session.keep(TlsHeldTicket.new(ticket, psk, @suite, TlsTime.now_ms, lifetime * 1000_i64, age_add, host, @port, under, alpn_protocol,
       @peer_certificates, @authenticated_ms, early))
     nil
   end
@@ -2848,7 +3099,8 @@ pub class TlsClient < TlsConnection
     end
     return tls_error("a CertificateRequest with no signature_algorithms", TlsAlert::MISSING_EXTENSION) unless schemes
     @certificate_request = context
-    @requested_schemes = schemes
+    @requested_schemes.clear
+    @requested_schemes.concat(schemes)
     nil
   end
 
@@ -2862,7 +3114,7 @@ pub class TlsClient < TlsConnection
     return tls_error("#{TlsBytes.handshake_name(message[0])} where EncryptedExtensions belongs", TlsAlert::UNEXPECTED_MESSAGE) unless message[0] == 8_u8
     problem = encrypted_extensions(message)
     return problem if problem
-    @transcript = @transcript + message
+    @transcript_data.concat(message)
 
     message = handshake_message(plain: false)
     return message if message.is_a?(TlsError)
@@ -2870,7 +3122,7 @@ pub class TlsClient < TlsConnection
     if message[0] == 13_u8
       problem = certificate_request(message)
       return problem if problem
-      @transcript = @transcript + message
+      @transcript_data.concat(message)
       message = handshake_message(plain: false)
       return message if message.is_a?(TlsError)
     end
@@ -2879,14 +3131,14 @@ pub class TlsClient < TlsConnection
     return chain if chain.is_a?(TlsError)
     problem = judge_staple
     return problem if problem
-    @transcript = @transcript + message
+    @transcript_data.concat(message)
 
     message = handshake_message(plain: false)
     return message if message.is_a?(TlsError)
     return tls_error("#{TlsBytes.handshake_name(message[0])} where CertificateVerify belongs", TlsAlert::UNEXPECTED_MESSAGE) unless message[0] == 15_u8
     problem = certificate_verify(message, chain[0], "server")
     return problem if problem
-    @transcript = @transcript + message
+    @transcript_data.concat(message)
 
     message = handshake_message(plain: false)
     return message if message.is_a?(TlsError)
@@ -2897,11 +3149,11 @@ pub class TlsClient < TlsConnection
     unless message[0] == 20_u8
       return tls_error("#{TlsBytes.handshake_name(message[0])} where Finished belongs#{@resumed ? ", in a resumed handshake" : ""}", TlsAlert::UNEXPECTED_MESSAGE)
     end
-    expected = @schedule.finished(server_secret, @transcript)
+    expected = @schedule.finished(server_secret, transcript)
     unless Subtle.constant_time_compare(message[4, message.size - 4], expected)
       return tls_error("the server's Finished does not match the handshake", TlsAlert::DECRYPT_ERROR)
     end
-    @transcript = @transcript + message
+    @transcript_data.concat(message)
     return tls_error("handshake bytes left after the server's Finished", TlsAlert::UNEXPECTED_MESSAGE) unless handshake_left == 0
     nil
   end
@@ -2912,7 +3164,7 @@ pub class TlsClient < TlsConnection
   # ClientHello to its binders (section 4.2.11.2). With *ech*, an
   # encrypted_client_hello of that body before them: the inner one's
   # marker, or GREASE.
-  private def client_hello(random : Array(UInt8), session : Array(UInt8), shares : Array({Int32, Array::View(UInt8)}), cookie : Array(UInt8)?, prefix : Array(UInt8),
+  private def client_hello(random : Array(UInt8), session : Array(UInt8), shares : Array({Int32, Array::View(UInt8)}), cookie : Array(UInt8)?, prefix : Array::View(UInt8),
                            ech = nil) : Array(UInt8)
     tls12 = @config.min_version == TlsVersion::TLS12
     body = [3_u8, 3_u8] + random + [32_u8] + session
@@ -2921,8 +3173,8 @@ pub class TlsClient < TlsConnection
     TlsSuites::TLS12.each { |suite| suites = suites + TlsBytes.u16(suite) } if tls12
     body = body + TlsBytes.u16(suites.size) + suites + [1_u8, 0_u8]
     extensions = [] of UInt8
-    unless TlsBytes.ip_literal?(@name)
-      name = TlsBytes.of(@name)
+    unless TlsBytes.ip_literal?(self.name)
+      name = TlsBytes.of(self.name)
       entry = [0_u8] + TlsBytes.u16(name.size) + name
       extensions = extensions + TlsBytes.extension(0, TlsBytes.u16(entry.size) + entry)
     end
@@ -3197,7 +3449,7 @@ pub class TlsClient < TlsConnection
   # server_name's acknowledgement (RFC 6066 section 3): empty, and only of
   # a name this client sent - none goes for an address.
   private def server_name_ack(data : Array::View(UInt8)) : TlsError?
-    return tls_error("a server_name acknowledgement of a name not sent", TlsAlert::UNSUPPORTED_EXTENSION) if TlsBytes.ip_literal?(@name)
+    return tls_error("a server_name acknowledgement of a name not sent", TlsAlert::UNSUPPORTED_EXTENSION) if TlsBytes.ip_literal?(self.name)
     return tls_error("a server_name acknowledgement that is not empty", TlsAlert::DECODE_ERROR) unless data.empty?
     nil
   end
@@ -3210,7 +3462,7 @@ pub class TlsClient < TlsConnection
     chosen = TlsBytes.text(names.bytes(names.u8))
     return tls_error("an ALPN answer that is not one protocol", TlsAlert::DECODE_ERROR) if field.short? || names.short? || !names.done? || !field.done?
     return tls_error("the server chose #{chosen.inspect} by ALPN, which was not offered", TlsAlert::NO_APPLICATION_PROTOCOL) unless @config.alpn.includes?(chosen)
-    @alpn_protocol = chosen
+    keep_alpn_protocol(chosen)
     nil
   end
 
@@ -3241,7 +3493,7 @@ pub class TlsClient < TlsConnection
     return tls_error("the server sent no certificate", TlsAlert::DECODE_ERROR) if chain.empty?
     roots = @config.trusted_roots
     return roots if roots.is_a?(TlsError)
-    verified = X509.verify(chain[0], chain[1, chain.size - 1], roots, @name, @config.now || Time.utc)
+    verified = X509.verify(chain[0], chain[1, chain.size - 1], roots, self.name, @config.now || Time.utc)
     return tls_error("the server's certificate is not trusted: #{verified.message}", TlsAlert::BAD_CERTIFICATE) if verified.is_a?(X509Error)
     @peer_certificates = verified
     chain
@@ -3331,9 +3583,10 @@ pub class TlsClient < TlsConnection
     @tls12 = true
     @version = "TLSv1.2"
     @suite = reply.suite
-    @cipher_suite = TlsSuites.name(@suite)
-    @schedule = TlsKeySchedule.new(TlsSuites.sha384?(@suite))
-    @transcript = hello + server
+    keep_cipher_suite(TlsSuites.name(@suite))
+    @schedule.configure(TlsSuites.sha384?(@suite))
+    @transcript_start = @transcript_data.size
+    @transcript_data.concat(hello + server)
     server_random = reply.random
 
     message = message12
@@ -3341,13 +3594,13 @@ pub class TlsClient < TlsConnection
     return tls_error("#{TlsBytes.handshake_name(message[0])} where Certificate belongs", TlsAlert::UNEXPECTED_MESSAGE) unless message[0] == 11_u8
     chain = certificates(message)
     return chain if chain.is_a?(TlsError)
-    @transcript = @transcript + message
+    @transcript_data.concat(message)
     leaf = chain[0]
     key = leaf.public_key
     if TlsSuites.rsa?(@suite)
-      return tls_error("#{@cipher_suite} with a certificate whose key is not RSA", TlsAlert::UNSUPPORTED_CERTIFICATE) unless key.is_a?(RsaPublicKey)
+      return tls_error("#{cipher_suite} with a certificate whose key is not RSA", TlsAlert::UNSUPPORTED_CERTIFICATE) unless key.is_a?(RsaPublicKey)
     elsif !(key.is_a?(EcdsaPublicKey) || key.is_a?(Ed25519PublicKey))
-      return tls_error("#{@cipher_suite} with a certificate whose key is neither ECDSA nor Ed25519", TlsAlert::UNSUPPORTED_CERTIFICATE)
+      return tls_error("#{cipher_suite} with a certificate whose key is neither ECDSA nor Ed25519", TlsAlert::UNSUPPORTED_CERTIFICATE)
     end
     if (usage = leaf.key_usage) && ((usage >> Certificate::KEY_DIGITAL_SIGNATURE) & 1) == 0
       return tls_error("the server's certificate does not allow digitalSignature, which a ServerKeyExchange is", TlsAlert::BAD_CERTIFICATE)
@@ -3362,7 +3615,7 @@ pub class TlsClient < TlsConnection
       staple = TlsClient.certificate_status(message[4, message.size - 4])
       return staple if staple.is_a?(TlsError)
       @stapled = staple
-      @transcript = @transcript + message
+      @transcript_data.concat(message)
       message = message12
       return message if message.is_a?(TlsError)
     end
@@ -3371,24 +3624,24 @@ pub class TlsClient < TlsConnection
     return tls_error("#{TlsBytes.handshake_name(message[0])} where ServerKeyExchange belongs", TlsAlert::UNEXPECTED_MESSAGE) unless message[0] == 12_u8
     exchange = server_key_exchange(message, leaf, client_random + server_random)
     return exchange if exchange.is_a?(TlsError)
-    @transcript = @transcript + message
+    @transcript_data.concat(message)
 
     message = message12
     return message if message.is_a?(TlsError)
     if message[0] == 13_u8
       problem = certificate_request12(message)
       return problem if problem
-      @transcript = @transcript + message
+      @transcript_data.concat(message)
       message = message12
       return message if message.is_a?(TlsError)
     end
     return tls_error("#{TlsBytes.handshake_name(message[0])} where ServerHelloDone belongs", TlsAlert::UNEXPECTED_MESSAGE) unless message[0] == 14_u8
     return tls_error("a ServerHelloDone with a body", TlsAlert::DECODE_ERROR) unless message.size == 4
-    @transcript = @transcript + message
+    @transcript_data.concat(message)
     return tls_error("handshake bytes after the ServerHelloDone", TlsAlert::UNEXPECTED_MESSAGE) unless handshake_left == 0
 
     group, point = exchange
-    @named_group = group_name(group)
+    keep_named_group(group_name(group))
     if group == GROUP_X25519
       private_key = Random::Secure.random_bytes(32)
       shared = X25519.shared(private_key, point)
@@ -3420,24 +3673,24 @@ pub class TlsClient < TlsConnection
       identity.chain.each { |der| entries = entries + TlsBytes.u24(der.size) + der } if identity
       presented = TlsBytes.message(11, TlsBytes.u24(entries.size) + entries)
       flight = flight + presented
-      @transcript = @transcript + presented
+      @transcript_data.concat(presented)
     end
     key_exchange = TlsBytes.message(16, [public.size.to_u8] + public)
     flight = flight + key_exchange
-    @transcript = @transcript + key_exchange
+    @transcript_data.concat(key_exchange)
     master, writer, reader = keys12(secret, client_random, server_random, @write_cipher, @read_cipher)
     if identity && scheme
-      signature = identity.sign(scheme, @transcript)
+      signature = identity.sign(scheme, transcript)
       verify = TlsBytes.message(15, TlsBytes.u16(scheme) + TlsBytes.u16(signature.size) + signature)
       flight = flight + verify
-      @transcript = @transcript + verify
+      @transcript_data.concat(verify)
     end
     finished = TlsBytes.message(20, finished12(master, true))
     @writer = writer
     sent = put(plain_records(TlsRecords::HANDSHAKE, flight) + [TlsRecords::CHANGE_CIPHER_SPEC, 3_u8, 3_u8, 0_u8, 1_u8, 1_u8] +
                writer.seal(TlsRecords::HANDSHAKE, finished))
     return sent if sent
-    @transcript = @transcript + finished
+    @transcript_data.concat(finished)
 
     changed = change_cipher_spec12
     return changed if changed
@@ -3500,7 +3753,8 @@ pub class TlsClient < TlsConnection
     reader.bytes(reader.u16)
     return tls_error("a CertificateRequest cut short", TlsAlert::DECODE_ERROR) if reader.short? || !reader.done? || schemes.nil? || types.empty?
     @certificate_types = types
-    @requested_schemes = schemes
+    @requested_schemes.clear
+    @requested_schemes.concat(schemes)
     nil
   end
 end
@@ -3556,15 +3810,43 @@ pub class TlsMadeUnder
   getter now : Time?
   getter min_version : TlsVersion
   getter require_staple : Bool
-  getter ech_configs : Array(UInt8)?
+  @has_ech : Bool = false
+
+  def ech_configs : Array::View(UInt8)?
+    @has_ech ? @ech_storage.view : nil
+  end
+
+  @ech_storage : Array(UInt8)
 
   def initialize(@config : TlsConfig)
+    @ech_storage = Array(UInt8).new(4096)
     @roots = @config.roots
     @identity = @config.identity
     @now = @config.now
     @min_version = @config.min_version
     @require_staple = @config.require_staple
-    @ech_configs = (list = @config.ech_configs) ? list.dup : nil
+    @has_ech = false
+    if list = @config.ech_configs
+      @ech_storage.concat(list)
+      @has_ech = true
+    end
+  end
+
+  def configure(config : TlsConfig) : Nil
+    source = config.ech_configs
+    copied = source ? Array(UInt8).new(source.size) { |i| source[i] } : nil
+    @config = config
+    @roots = config.roots
+    @identity = config.identity
+    @now = config.now
+    @min_version = config.min_version
+    @require_staple = config.require_staple
+    @has_ech = false
+    @ech_storage.clear
+    if list = copied
+      @ech_storage.concat(list)
+      @has_ech = true
+    end
   end
 
   def same?(config : TlsConfig) : Bool
@@ -3575,7 +3857,7 @@ pub class TlsMadeUnder
     identity = config.identity
     mine = @identity
     return false unless mine.nil? ? identity.nil? : (!identity.nil? && mine.object_id == identity.object_id)
-    return false unless @ech_configs == config.ech_configs
+    return false unless ech_configs == config.ech_configs
     @now == config.now && @min_version == config.min_version && @require_staple == config.require_staple
   end
 
@@ -3899,18 +4181,23 @@ end
 # presents when a server asks.
 pub class TlsIdentity
   # The chain as sent, leaf first, each certificate's DER.
-  getter chain : Array(Array(UInt8))
-  getter leaf : Certificate
+  getter chain : (Array(Array(UInt8)) | Array(Array::View(UInt8))) = [] of Array::View(UInt8)
+  @leaf : Certificate? = nil
+  getter error : TlsError? = nil
+
+  def leaf : Certificate
+    @leaf.as(Certificate)
+  end
   # The schemes CertificateVerify can be signed under, by the key's kind:
   # ed25519 (0x0807), ecdsa_secp256r1_sha256 (0x0403),
   # ecdsa_secp384r1_sha384 (0x0503), or for an RSA key rsa_pss_rsae_sha256,
   # -384 and -512 (0x0804 to 0x0806). PKCS #1 v1.5 is never one: RFC 8446
   # section 4.2.3 keeps it out of CertificateVerify.
-  getter schemes : Array(Int32)
-  @seed : Array(UInt8)?
-  @p256 : P256PrivateKey?
-  @p384 : P384PrivateKey?
-  @rsa : RsaPrivateKey?
+  getter schemes : Array(Int32) = Array(Int32).new(6)
+  @seed : Array(UInt8)? = nil
+  @p256 : P256PrivateKey? = nil
+  @p384 : P384PrivateKey? = nil
+  @rsa : RsaPrivateKey? = nil
   # The OCSP response a server staples for this chain
   # (`TlsServerConfig#staple`),
   # its DER and the SingleResponse for the leaf.
@@ -3929,7 +4216,7 @@ pub class TlsIdentity
   # sign, for a client that takes no RSA-PSS (`scheme12_for`).
   RSA_PKCS1 = StaticArray[0x0401, 0x0501, 0x0601]
 
-  def initialize(@chain : Array(Array(UInt8)), @leaf : Certificate, @schemes : Array(Int32), @seed : Array(UInt8)?, @p256 : P256PrivateKey?, @p384 : P384PrivateKey?, @rsa : RsaPrivateKey?)
+  def initialize(@chain : (Array(Array(UInt8)) | Array(Array::View(UInt8))), @leaf : Certificate, @schemes : Array(Int32), @seed : Array(UInt8)?, @p256 : P256PrivateKey?, @p384 : P384PrivateKey?, @rsa : RsaPrivateKey?)
   end
 
   # *der* kept as this chain's OCSP response, to be stapled for a client
@@ -3940,8 +4227,8 @@ pub class TlsIdentity
   def staple(der : Array(UInt8)) : TlsError?
     response = OcspResponse.parse(der)
     return TlsError.new("the OCSP response: #{response.message}") if response.is_a?(OcspError)
-    single = response.responses.find { |s| s.cert_id.serial == @leaf.serial && s.cert_id.issuer_name_hash == s.cert_id.hash.digest(@leaf.issuer) }
-    return TlsError.new("the OCSP response has no SingleResponse for #{@leaf.subject_name}") unless single
+    single = response.responses.find { |s| s.cert_id.serial == leaf.serial && s.cert_id.issuer_name_hash == s.cert_id.hash.digest(leaf.issuer) }
+    return TlsError.new("the OCSP response has no SingleResponse for #{leaf.subject_name}") unless single
     @ocsp_staple = der
     @ocsp_response = response
     @ocsp_single = single
@@ -3966,120 +4253,176 @@ pub class TlsIdentity
   # RFC 5915 does, or an RSA one), an EC PRIVATE KEY block (SEC 1) or an
   # RSA PRIVATE KEY block (PKCS #1) - or why they are not a certificate
   # and key.
-  def self.from_pem(certificates : String, private_key : String) : TlsIdentity | TlsError
+  def initialize(certificates : String, private_key : String)
     chain = X509.pem(certificates, "CERTIFICATE")
-    return TlsError.new("the certificates: #{chain.message}") if chain.is_a?(X509Error)
+    return refuse("the certificates: #{chain.message}") if chain.is_a?(X509Error)
     pkcs8 = X509.pem(private_key, "PRIVATE KEY")
-    return TlsError.new("the private key: #{pkcs8.message}") if pkcs8.is_a?(X509Error)
+    return refuse("the private key: #{pkcs8.message}") if pkcs8.is_a?(X509Error)
     sec1 = X509.pem(private_key, "EC PRIVATE KEY")
-    return TlsError.new("the private key: #{sec1.message}") if sec1.is_a?(X509Error)
+    return refuse("the private key: #{sec1.message}") if sec1.is_a?(X509Error)
     pkcs1 = X509.pem(private_key, "RSA PRIVATE KEY")
-    return TlsError.new("the private key: #{pkcs1.message}") if pkcs1.is_a?(X509Error)
+    return refuse("the private key: #{pkcs1.message}") if pkcs1.is_a?(X509Error)
     count = pkcs8.size + sec1.size + pkcs1.size
-    return TlsError.new("the private key: #{count} blocks of PRIVATE KEY, EC PRIVATE KEY or RSA PRIVATE KEY, not one") unless count == 1
-    return from_ec(chain, sec1[0], false) if sec1.size == 1
+    return refuse("the private key: #{count} blocks of PRIVATE KEY, EC PRIVATE KEY or RSA PRIVATE KEY, not one") unless count == 1
+    if sec1.size == 1
+      initialize_ec(chain, sec1[0], false)
+      return
+    end
     if pkcs1.size == 1
       rsa = RsaPrivateKey.from_pkcs1(pkcs1[0])
-      return TlsError.new("the private key: #{rsa.message}") if rsa.is_a?(RsaError)
-      return from_der(chain, rsa)
+      return refuse("the private key: #{rsa.message}") if rsa.is_a?(RsaError)
+      initialize(chain, rsa)
+      return
     end
     algorithm = TlsKeys.algorithm(pkcs8[0])
-    return algorithm if algorithm.is_a?(TlsError)
+    if algorithm.is_a?(TlsError)
+      @error = algorithm
+      return
+    end
     case algorithm
     when "1.3.101.112"
       seed = TlsKeys.ed25519_seed(pkcs8[0])
-      return seed if seed.is_a?(TlsError)
-      from_der(chain, seed)
+      if seed.is_a?(TlsError)
+        @error = seed
+        return
+      end
+      initialize(chain, seed)
     when "1.2.840.10045.2.1"
-      from_ec(chain, pkcs8[0], true)
+      initialize_ec(chain, pkcs8[0], true)
     when RsaPublicKey::RSA_ENCRYPTION
       rsa = RsaPrivateKey.from_pkcs8(pkcs8[0])
-      return TlsError.new("the private key: #{rsa.message}") if rsa.is_a?(RsaError)
-      from_der(chain, rsa)
+      return refuse("the private key: #{rsa.message}") if rsa.is_a?(RsaError)
+      initialize(chain, rsa)
     else
-      TlsError.new("the private key is for #{algorithm}, not Ed25519 (1.3.101.112), an EC key (1.2.840.10045.2.1) or RSA (#{RsaPublicKey::RSA_ENCRYPTION})")
+      refuse("the private key is for #{algorithm}, not Ed25519 (1.3.101.112), an EC key (1.2.840.10045.2.1) or RSA (#{RsaPublicKey::RSA_ENCRYPTION})")
     end
   end
 
-  # The identity for an EC private key, PKCS #8 (*pkcs8*) or SEC 1, read
-  # on the curve it names: P-256 or P-384.
-  private def self.from_ec(chain : Array(Array(UInt8)), der : Array(UInt8), pkcs8 : Bool) : TlsIdentity | TlsError
+  private def refuse(message : String) : Nil
+    @error = TlsError.new(message)
+    nil
+  end
+
+  def self.from_pem(*args, **options)
+    {% raise "TlsIdentity.from_pem returns no owner: declare identity =
+" +
+      "TlsIdentity.new(certificates, private_key), then check identity.error." %}
+  end
+
+  def self.from_der(*args, **options)
+    {% raise "TlsIdentity.from_der returns no owner: declare identity =
+" +
+      "TlsIdentity.new(chain, key), then check identity.error." %}
+  end
+
+  private macro initialize_ec(chain, der, pkcs8)
+    initialize({{chain}}, {{der}}, {{pkcs8}})
+  end
+
+  def initialize(chain : (Array(Array(UInt8)) | Array(Array::View(UInt8))),
+                 der : Array::View(UInt8), pkcs8 : Bool)
     curve = TlsKeys.ec_curve(der, pkcs8)
-    return curve if curve.is_a?(TlsError)
+    if curve.is_a?(TlsError)
+      @error = curve
+      return
+    end
     if curve == EcdsaCurve::P384.oid
       wide = pkcs8 ? P384PrivateKey.from_pkcs8(der) : P384PrivateKey.from_sec1(der)
-      return TlsError.new(wide.message) if wide.is_a?(EcdsaError)
-      return from_der(chain, wide)
+      return refuse(wide.message) if wide.is_a?(EcdsaError)
+      initialize(chain, wide)
+      return
     end
     unless curve == EcdsaCurve::P256.oid
-      return TlsError.new("the private key is on #{curve}, not prime256v1 (#{EcdsaCurve::P256.oid}) or secp384r1 (#{EcdsaCurve::P384.oid})")
+      return refuse("the private key is on #{curve}, not prime256v1 (#{EcdsaCurve::P256.oid}) or secp384r1 (#{EcdsaCurve::P384.oid})")
     end
     key = pkcs8 ? P256PrivateKey.from_pkcs8(der) : P256PrivateKey.from_sec1(der)
-    return TlsError.new(key.message) if key.is_a?(EcdsaError)
-    from_der(chain, key)
+    return refuse(key.message) if key.is_a?(EcdsaError)
+    initialize(chain, key)
   end
 
   # *chain*'s certificates, leaf first, and the 32-byte Ed25519 *seed*
   # that is the leaf's private key.
-  def self.from_der(chain : Array(Array(UInt8)), seed : Array(UInt8)) : TlsIdentity | TlsError
-    return TlsError.new("the private key: an Ed25519 seed is 32 bytes, not #{seed.size}") unless seed.size == 32
-    leaf = leaf_of(chain)
-    return leaf if leaf.is_a?(TlsError)
+  def initialize(chain : (Array(Array(UInt8)) | Array(Array::View(UInt8))), seed : Array(UInt8))
+    return refuse("the private key: an Ed25519 seed is 32 bytes, not #{seed.size}") unless seed.size == 32
+    leaf = TlsIdentity.leaf_of(chain)
+    if leaf.is_a?(TlsError)
+      @error = leaf
+      return
+    end
     key = leaf.public_key
-    return TlsError.new("the certificate's key is not Ed25519, as the private key is") unless key.is_a?(Ed25519PublicKey)
-    return TlsError.new("the private key is not the certificate's") unless TlsBytes.of(Ed25519.public_key(seed)) == key.bytes
-    TlsIdentity.new(chain, leaf, [ED25519], seed.dup, nil, nil, nil)
+    return refuse("the certificate's key is not Ed25519, as the private key is") unless key.is_a?(Ed25519PublicKey)
+    return refuse("the private key is not the certificate's") unless TlsBytes.of(Ed25519.public_key(seed)) == key.bytes
+    initialize(chain, leaf, [ED25519], seed.dup, nil, nil, nil)
   end
 
   # *chain*'s certificates, leaf first, and the P-256 *key* that is the
   # leaf's.
-  def self.from_der(chain : Array(Array(UInt8)), key : P256PrivateKey) : TlsIdentity | TlsError
-    leaf = leaf_of(chain)
-    return leaf if leaf.is_a?(TlsError)
+  def initialize(chain : (Array(Array(UInt8)) | Array(Array::View(UInt8))), key : P256PrivateKey)
+    leaf = TlsIdentity.leaf_of(chain)
+    if leaf.is_a?(TlsError)
+      @error = leaf
+      return
+    end
     public = leaf.public_key
     unless public.is_a?(EcdsaPublicKey) && public.curve == EcdsaCurve::P256
-      return TlsError.new("the certificate's key is not P-256, as the private key is")
+      return refuse("the certificate's key is not P-256, as the private key is")
     end
-    return TlsError.new("the private key is not the certificate's") unless public.x == key.public_key.x && public.y == key.public_key.y
-    TlsIdentity.new(chain, leaf, [P256], nil, key, nil, nil)
+    return refuse("the private key is not the certificate's") unless public.x == key.public_key.x && public.y == key.public_key.y
+    initialize(chain, leaf, [P256], nil, key, nil, nil)
   end
 
   # *chain*'s certificates, leaf first, and the P-384 *key* that is the
   # leaf's.
-  def self.from_der(chain : Array(Array(UInt8)), key : P384PrivateKey) : TlsIdentity | TlsError
-    leaf = leaf_of(chain)
-    return leaf if leaf.is_a?(TlsError)
+  def initialize(chain : (Array(Array(UInt8)) | Array(Array::View(UInt8))), key : P384PrivateKey)
+    leaf = TlsIdentity.leaf_of(chain)
+    if leaf.is_a?(TlsError)
+      @error = leaf
+      return
+    end
     public = leaf.public_key
     unless public.is_a?(EcdsaPublicKey) && public.curve == EcdsaCurve::P384
-      return TlsError.new("the certificate's key is not P-384, as the private key is")
+      return refuse("the certificate's key is not P-384, as the private key is")
     end
-    return TlsError.new("the private key is not the certificate's") unless public.x == key.public_key.x && public.y == key.public_key.y
-    TlsIdentity.new(chain, leaf, [P384], nil, nil, key, nil)
+    return refuse("the private key is not the certificate's") unless public.x == key.public_key.x && public.y == key.public_key.y
+    initialize(chain, leaf, [P384], nil, nil, key, nil)
   end
 
   # *chain*'s certificates, leaf first, and the RSA *key* that is the
   # leaf's (2048 bits or more, std/rsa's floor for signing).
-  def self.from_der(chain : Array(Array(UInt8)), key : RsaPrivateKey) : TlsIdentity | TlsError
-    leaf = leaf_of(chain)
-    return leaf if leaf.is_a?(TlsError)
-    public = leaf.public_key
-    return TlsError.new("the certificate's key is not RSA, as the private key is") unless public.is_a?(RsaPublicKey)
-    unless public.modulus == key.public_key.modulus && public.exponent == key.public_key.exponent
-      return TlsError.new("the private key is not the certificate's")
+  def initialize(chain : (Array(Array(UInt8)) | Array(Array::View(UInt8))), key : RsaPrivateKey)
+    leaf = TlsIdentity.leaf_of(chain)
+    if leaf.is_a?(TlsError)
+      @error = leaf
+      return
     end
-    TlsIdentity.new(chain, leaf, [RSA_PSS_SHA256, RSA_PSS_SHA384, RSA_PSS_SHA512], nil, nil, nil, key)
+    public = leaf.public_key
+    return refuse("the certificate's key is not RSA, as the private key is") unless public.is_a?(RsaPublicKey)
+    unless public.modulus == key.public_key.modulus && public.exponent == key.public_key.exponent
+      return refuse("the private key is not the certificate's")
+    end
+    initialize(chain, leaf, [RSA_PSS_SHA256, RSA_PSS_SHA384, RSA_PSS_SHA512], nil, nil, nil, key)
   end
 
-  private def self.leaf_of(chain : Array(Array(UInt8))) : Certificate | TlsError
-    return TlsError.new("the certificates: none") if chain.empty?
-    leaf = nil
+  def self.leaf_of(chain : (Array(Array(UInt8)) | Array(Array::View(UInt8)))) : Certificate | TlsError
+    if why = check_chain(chain)
+      TlsError.new(why)
+    else
+      checked_leaf(Certificate.parse(chain[0]))
+    end
+  end
+
+  private def self.checked_leaf(value : Certificate | X509Error) : Certificate | TlsError
+    value.is_a?(X509Error) ? TlsError.new(value.message) : value
+  end
+
+  private def self.check_chain(chain : (Array(Array(UInt8)) | Array(Array::View(UInt8)))) : String?
+    return "the certificates: none" if chain.empty?
     chain.each_with_index do |der, i|
       certificate = Certificate.parse(der)
-      return TlsError.new("the certificates: certificate #{i}: #{certificate.message}") if certificate.is_a?(X509Error)
-      leaf = certificate if i == 0
+      return "the certificates: certificate #{i}: #{certificate.message}" if certificate.is_a?(X509Error)
+      nil
     end
-    return TlsError.new("the certificates: none") unless leaf
-    leaf
+    nil
   end
 
   # The scheme to sign under for a peer that takes *offered* (its
@@ -4116,7 +4459,7 @@ pub class TlsIdentity
   # The leaf key's signature of *content* under *scheme*, one of
   # `schemes` - or for an RSA key in TLS 1.2, PKCS #1 v1.5's: what
   # CertificateVerify and a ServerKeyExchange carry.
-  def sign(scheme : Int32, content : Array(UInt8)) : Array(UInt8)
+  def sign(scheme : Int32, content : Array::View(UInt8)) : Array(UInt8)
     pkcs1 = @rsa ? RSA_PKCS1.index(scheme) : nil
     raise "tls: a signature under scheme 0x#{scheme.to_s(16)}, which this identity's key does not make" unless @schemes.includes?(scheme) || pkcs1
     if key = @p256
@@ -4346,18 +4689,18 @@ pub class TlsServerConfig
   def self.from_pem(certificates : String, private_key : String)
     {% raise "TlsServerConfig.from_pem is gone: a config is an owner, made\n" +
       "at a named declaration (SPEC 2.1). Write\n" +
-      "identity = TlsIdentity.from_pem(certificates, private_key)\n" +
+      "identity = TlsIdentity.new(certificates, private_key)\n" +
       "and then config = TlsServerConfig.new(identity)." %}
   end
 
-  def self.from_der(chain : Array(Array(UInt8)), key)
+  def self.from_der(chain : (Array(Array(UInt8)) | Array(Array::View(UInt8))), key)
     {% raise "TlsServerConfig.from_der is gone: a config is an owner, made\n" +
       "at a named declaration (SPEC 2.1). Write\n" +
-      "identity = TlsIdentity.from_der(chain, key)\n" +
+      "identity = TlsIdentity.new(chain, key)\n" +
       "and then config = TlsServerConfig.new(identity)." %}
   end
 
-  def chain : Array(Array(UInt8))
+  def chain : (Array(Array(UInt8)) | Array(Array::View(UInt8)))
     @identity.chain
   end
 
@@ -4538,14 +4881,14 @@ pub class TlsTicket
   getter server_name : String?
   getter alpn : String?
   getter identity : Int32
-  getter chain : Array(Array(UInt8))
+  getter chain : (Array(Array(UInt8)) | Array(Array::View(UInt8)))
   getter authenticated_ms : Int64
   getter max_early_data : Int64
 
   VERSION = 2_u8
 
   def initialize(@suite : Int32, @issued_ms : Int64, @lifetime : Int64, @age_add : Int64, @psk : Array(UInt8),
-                 @server_name : String?, @alpn : String?, @identity : Int32, @chain : Array(Array(UInt8)), @authenticated_ms : Int64,
+                 @server_name : String?, @alpn : String?, @identity : Int32, @chain : (Array(Array(UInt8)) | Array(Array::View(UInt8))), @authenticated_ms : Int64,
                  @max_early_data : Int64 = 0_i64)
   end
 
@@ -4597,7 +4940,7 @@ end
 # A PKCS #8 private key read (RFC 5958; RFC 8410 section 7 for Ed25519).
 struct TlsKeys
   # The algorithm a PKCS #8 OneAsymmetricKey names, by its OID.
-  def self.algorithm(der : Array(UInt8)) : String | TlsError
+  def self.algorithm(der : Array::View(UInt8)) : String | TlsError
     top = Der.parse(der)
     return TlsError.new("the private key: #{top.message}") if top.is_a?(Asn1Error)
     fields = top.sequence
@@ -4615,7 +4958,7 @@ struct TlsKeys
   # that names none the curve its private key's width is (48 bytes,
   # P-384's; else P-256's). A key too malformed to say is P-256's, whose
   # reader says what is wrong with it.
-  def self.ec_curve(der : Array(UInt8), pkcs8 : Bool) : String | TlsError
+  def self.ec_curve(der : Array::View(UInt8), pkcs8 : Bool) : String | TlsError
     p256 = EcdsaCurve::P256.oid
     top = Der.parse(der)
     return TlsError.new("the private key: #{top.message}") if top.is_a?(Asn1Error)
@@ -4633,6 +4976,7 @@ struct TlsKeys
       inner = field.explicit(0)
       named = inner.is_a?(Asn1Error) ? inner : inner.oid
       return named.is_a?(String) ? named : p256
+      nil
     end
     secret = fields.size < 2 ? nil : fields[1].octet_string
     secret.is_a?(Array(UInt8)) && secret.size == 48 ? EcdsaCurve::P384.oid : p256
@@ -4643,7 +4987,7 @@ struct TlsKeys
   # STRING of 32 bytes - inside the privateKey OCTET STRING. Attributes and
   # a public key, which version 1 may carry, are passed over; a public key
   # is checked against the seed's.
-  def self.ed25519_seed(der : Array(UInt8)) : Array(UInt8) | TlsError
+  def self.ed25519_seed(der : Array::View(UInt8)) : Array(UInt8) | TlsError
     top = Der.parse(der)
     return TlsError.new("the private key: #{top.message}") if top.is_a?(Asn1Error)
     fields = top.sequence
@@ -4800,6 +5144,8 @@ pub class TlsServer < TlsConnection
     @peer = "the client"
     @place = "the client"
     @identity = @config.identity
+    ech_context = HpkeRecipient.new
+    @ech_context_slot = ech_context
   end
 
   def server_side? : Bool
@@ -4854,6 +5200,7 @@ pub class TlsServer < TlsConnection
   # must name again (section 7.1.1); and whether a ClientHelloOuter's was
   # opened by none of the keys, which retry_configs then answers.
   @ech_context : HpkeRecipient? = nil
+  @ech_context_slot : HpkeRecipient
   @ech_named : {Int32, Int32, Int32} = {0, 0, 0}
   @ech_rejected : Bool = false
   # The ClientHelloOuter's server_name when its encrypted ClientHelloInner
@@ -4971,7 +5318,7 @@ pub class TlsServer < TlsConnection
         # Section 5.1: the keys change after it, so nothing follows it in
         # its record.
         return tls_error("handshake bytes after EndOfEarlyData in its record", TlsAlert::UNEXPECTED_MESSAGE) unless handshake_left == 0
-        @transcript = @transcript + message
+        @transcript_data.concat(message)
         @read_cipher.configure(@suite, @schedule, @client_handshake)
         @reader = @read_cipher
         @early_open = false
@@ -5005,9 +5352,10 @@ pub class TlsServer < TlsConnection
     return handshake12(hello, offer) if offer.is_a?(TlsOffer12)
     @early_left = EARLY_ALLOWANCE if offer.early_data
     @suite = offer.suites.find { |s| SUITES.includes?(s) } || 0
-    @cipher_suite = TlsSuites.name(@suite)
-    @schedule = TlsKeySchedule.new(@suite == TlsSuites::AES_256_GCM)
-    @transcript = hello
+    keep_cipher_suite(TlsSuites.name(@suite))
+    @schedule.configure(@suite == TlsSuites::AES_256_GCM)
+    @transcript_start = @transcript_data.size
+    @transcript_data.concat(hello)
 
     preferred = @config.group_codes
     group = offer.chosen_group(preferred)
@@ -5037,7 +5385,8 @@ pub class TlsServer < TlsConnection
       sent = middlebox_ccs(offer)
       return sent if sent
       first = @schedule.hash(hello)
-      @transcript = [254_u8, 0_u8, 0_u8, first.size.to_u8] + first + retry
+      @transcript_start = @transcript_data.size
+      @transcript_data.concat([254_u8, 0_u8, 0_u8, first.size.to_u8] + first + retry)
       hello = handshake_message(plain: true)
       return hello if hello.is_a?(TlsError)
       return tls_error("#{TlsBytes.handshake_name(hello[0])} where the second ClientHello belongs", TlsAlert::UNEXPECTED_MESSAGE) unless hello[0] == 1_u8
@@ -5056,7 +5405,7 @@ pub class TlsServer < TlsConnection
       return tls_error("a second ClientHello with another session id", TlsAlert::ILLEGAL_PARAMETER) unless again.session == offer.session
       return tls_error("a second ClientHello that leaves out the suite chosen", TlsAlert::ILLEGAL_PARAMETER) unless again.suites.includes?(@suite)
       return tls_error("a second ClientHello offering early data", TlsAlert::ILLEGAL_PARAMETER) if again.early_data
-      @transcript = @transcript + hello
+      @transcript_data.concat(hello)
       offer = again
     end
     # Section 5.1: the client's keys come next, so nothing may follow its
@@ -5118,7 +5467,7 @@ pub class TlsServer < TlsConnection
       secret = got
       public = ephemeral.public_point
     end
-    @named_group = group_name(group)
+    keep_named_group(group_name(group))
     random = Random::Secure.random_bytes(32)
     # RFC 9849 section 7.2: with the ClientHelloInner taken, the random's
     # last eight bytes are the confirmation, over the inner transcript and
@@ -5126,7 +5475,7 @@ pub class TlsServer < TlsConnection
     random.fill(0_u8, 24, 8) if @ech_accepted
     reply = server_hello(random, offer.session, group, public, psk_identity)
     if @ech_accepted
-      reply = reply[0, 30] + TlsEch.confirmation(@schedule, hello[6, 32], @transcript + reply, false) + reply[38, reply.size - 38]
+      reply = reply[0, 30] + TlsEch.confirmation(@schedule, hello[6, 32], transcript + reply, false) + reply[38, reply.size - 38]
     end
     # The ServerHello, a ChangeCipherSpec and the encrypted flight, in one
     # write.
@@ -5135,11 +5484,11 @@ pub class TlsServer < TlsConnection
     return sent if sent
     sent = middlebox_ccs(offer)
     return sent if sent
-    @transcript = @transcript + reply
+    @transcript_data.concat(reply)
 
     handshake_secret = @schedule.handshake_secret(secret, psk)
-    client_secret = @schedule.derive_secret(handshake_secret, "c hs traffic", @transcript)
-    server_secret = @schedule.derive_secret(handshake_secret, "s hs traffic", @transcript)
+    client_secret = @schedule.derive_secret(handshake_secret, "c hs traffic", transcript)
+    server_secret = @schedule.derive_secret(handshake_secret, "s hs traffic", transcript)
     @write_cipher.configure(@suite, @schedule, server_secret)
     @writer = @write_cipher
     @read_cipher.configure(@suite, @schedule, client_secret)
@@ -5149,27 +5498,31 @@ pub class TlsServer < TlsConnection
     # as few records as hold them; in a resumption, EncryptedExtensions
     # and Finished, the PSK the authentication (section 2.2).
     flight = encrypted_extensions
-    @transcript = @transcript + flight
+    @transcript_data.concat(flight)
     flight = flight + certificate_flight unless @resumed
-    finished = TlsBytes.message(20, @schedule.finished(server_secret, @transcript))
-    @transcript = @transcript + finished
+    finished = TlsBytes.message(20, @schedule.finished(server_secret, transcript))
+    @transcript_data.concat(finished)
     sent = send_flight(flight + finished)
     return sent if sent
     sent = release
     return sent if sent
 
     master = @schedule.master_secret(handshake_secret)
-    @master = master
-    @client_handshake = client_secret
-    @client_application = @schedule.derive_secret(master, "c ap traffic", @transcript)
-    server_application = @schedule.derive_secret(master, "s ap traffic", @transcript)
-    @exporter_secret = @schedule.derive_secret(master, "exp master", @transcript)
+    @master.clear
+    @master.concat(master)
+    @client_handshake.clear
+    @client_handshake.concat(client_secret)
+    @client_application.clear
+    @client_application.concat(@schedule.derive_secret(master, "c ap traffic", transcript))
+    server_application = @schedule.derive_secret(master, "s ap traffic", transcript)
+    @exporter_secret = @schedule.derive_secret(master, "exp master", transcript)
     # This side's Finished is sent: what it writes from here, an alert
     # included, is under the application keys (section 7.3), as a client
     # reads it.
     @write_cipher.configure(@suite, @schedule, server_application)
     @writer = @write_cipher
-    @write_secret = server_application
+    @write_secret.clear
+    @write_secret.concat(server_application)
     if early = early_secret
       # The early data is read as the program asks (`read_early`), and
       # the client's Finished after it (`finish`).
@@ -5197,20 +5550,22 @@ pub class TlsServer < TlsConnection
       return message if message.is_a?(TlsError)
     end
     return tls_error("#{TlsBytes.handshake_name(message[0])} where the client's Finished belongs", TlsAlert::UNEXPECTED_MESSAGE) unless message[0] == 20_u8
-    expected = @schedule.finished(@client_handshake, @transcript)
+    expected = @schedule.finished(@client_handshake, transcript)
     unless Subtle.constant_time_compare(message[4, message.size - 4], expected)
       return tls_error("the client's Finished does not match the handshake", TlsAlert::DECRYPT_ERROR)
     end
     return tls_error("handshake bytes left after the client's Finished", TlsAlert::UNEXPECTED_MESSAGE) unless handshake_left == 0
     @handshaking = false
     @early_left = 0
-    @transcript = @transcript + message
-    @resumption_secret = @schedule.derive_secret(@master, "res master", @transcript)
+    @transcript_data.concat(message)
+    @resumption_secret.clear
+    @resumption_secret.concat(@schedule.derive_secret(@master, "res master", transcript))
 
     @read_cipher.configure(@suite, @schedule, @client_application)
 
     @reader = @read_cipher
-    @read_secret = @client_application
+    @read_secret.clear
+    @read_secret.concat(@client_application)
     send_tickets
   end
 
@@ -5230,7 +5585,7 @@ pub class TlsServer < TlsConnection
     return false if ticket.max_early_data > @config.early_limit
     return false unless index == 0
     return false unless ticket.suite == @suite
-    return false unless ticket.alpn == @alpn_protocol
+    return false unless ticket.alpn == alpn_protocol
     now = TlsTime.now_ms
     return false unless TlsReplayGuard.fresh?((offer.identities[index][1] - ticket.age_add) & 0xFFFFFFFF_i64, now - ticket.issued_ms)
     @config.replay_guard.admit(offer.binders[index], now)
@@ -5243,12 +5598,12 @@ pub class TlsServer < TlsConnection
     request = [] of UInt8
     if @config.client_roots
       request = certificate_request
-      @transcript = @transcript + request
+      @transcript_data.concat(request)
     end
     certificate = certificate_message
-    @transcript = @transcript + certificate
+    @transcript_data.concat(certificate)
     verify = certificate_verify
-    @transcript = @transcript + verify
+    @transcript_data.concat(verify)
     request + certificate + verify
   end
 
@@ -5287,8 +5642,8 @@ pub class TlsServer < TlsConnection
       next unless chain.size == ticket.chain.size
       # The binder is over the messages before this ClientHello and the
       # ClientHello up to its binders.
-      transcript = @transcript[0, @transcript.size - hello.size] + hello[0, hello.size - offer.binders_size]
-      unless Subtle.constant_time_compare(offer.binders[index], @schedule.binder(ticket.psk, transcript))
+      binder_transcript = transcript[0, transcript.size - hello.size] + hello[0, hello.size - offer.binders_size]
+      unless Subtle.constant_time_compare(offer.binders[index], @schedule.binder(ticket.psk, binder_transcript))
         return tls_error("the client's PSK binder does not match its ClientHello", TlsAlert::DECRYPT_ERROR)
       end
       return {ticket, index, chain}
@@ -5323,7 +5678,7 @@ pub class TlsServer < TlsConnection
       nonce = TlsBytes.u32(0_i64) + TlsBytes.u32(i.to_i64)
       age_add = TlsReader.new(Random::Secure.random_bytes(4)).u32
       psk = @schedule.resumption_psk(@resumption_secret, nonce)
-      state = TlsTicket.new(@suite, now, lifetime, age_add, psk, @server_name, @alpn_protocol, identity, chain, @authenticated_ms, early)
+      state = TlsTicket.new(@suite, now, lifetime, age_add, psk, @server_name, alpn_protocol, identity, chain, @authenticated_ms, early)
       sealed = @config.ticket_keys.seal(state.encode, now, @config.lifetime_ms)
       return nil if sealed.size > TlsServerConfig::MAX_TICKET
       flight.concat(TlsBytes.message(4, TlsBytes.u32(lifetime) + TlsBytes.u32(age_add) + [nonce.size.to_u8] + nonce +
@@ -5365,8 +5720,9 @@ pub class TlsServer < TlsConnection
       next unless key.config.config_id == id && key.config.suites.includes?({kdf, aead}) && aead != HpkeAead::ExportOnly.value
       suite = HpkeSuite.from_ids(key.config.kem_id, kdf, aead)
       next if suite.is_a?(HpkeError)
-      context = suite.recipient(key.private_key, enc, TlsEch.info(key.config))
-      next if context.is_a?(HpkeError)
+      context = @ech_context_slot
+      problem = context.setup(suite, key.private_key, enc, TlsEch.info(key.config))
+      next if problem
       opened = context.open(payload, aad)
       next if opened.is_a?(HpkeError)
       inner = TlsEch.decode_inner(TlsBytes.of(opened), parts)
@@ -5413,8 +5769,8 @@ pub class TlsServer < TlsConnection
   # The protocol agreed by ALPN, or the refusal of a client that offers
   # protocols and none of this server's (RFC 7301 section 3.2).
   private def agree_alpn(offered : Array(String)?) : TlsError?
-    @alpn_protocol = choose_alpn(offered)
-    if (wanted = offered) && !@config.alpn.empty? && @alpn_protocol.nil?
+    keep_alpn_protocol(choose_alpn(offered))
+    if (wanted = offered) && !@config.alpn.empty? && alpn_protocol.nil?
       return tls_error("the client offers #{wanted.join(", ")} by ALPN and this server speaks #{@config.alpn.join(", ")}", TlsAlert::NO_APPLICATION_PROTOCOL)
     end
     nil
@@ -5718,7 +6074,7 @@ pub class TlsServer < TlsConnection
       return tls_error("the client's certificate #{chain.size}: #{certificate.message}", TlsAlert::BAD_CERTIFICATE) if certificate.is_a?(X509Error)
       chain << certificate
     end
-    @transcript = @transcript + message
+    @transcript_data.concat(message)
     if chain.empty?
       # TLS 1.2 has no certificate_required: RFC 5246 section 7.4.6 names
       # handshake_failure.
@@ -5736,7 +6092,7 @@ pub class TlsServer < TlsConnection
     return tls_error("#{TlsBytes.handshake_name(verify[0])} where the client's CertificateVerify belongs", TlsAlert::UNEXPECTED_MESSAGE) unless verify[0] == 15_u8
     problem = certificate_verify(verify, chain[0], "client")
     return problem if problem
-    @transcript = @transcript + verify
+    @transcript_data.concat(verify)
     @peer_certificates = verified
     nil
   end
@@ -5757,7 +6113,7 @@ pub class TlsServer < TlsConnection
   # ALPN's answer (RFC 7301 section 3.1): the protocol chosen, in
   # EncryptedExtensions or a TLS 1.2 ServerHello; nothing when none was.
   private def alpn_answer : Array(UInt8)
-    chosen = @alpn_protocol
+    chosen = alpn_protocol
     return [] of UInt8 unless chosen
     name = TlsBytes.of(chosen)
     names = [name.size.to_u8] + name
@@ -5794,7 +6150,7 @@ pub class TlsServer < TlsConnection
   # CertificateVerify (section 4.4.3) under the key's scheme: 64 spaces,
   # the server's context string, a zero and the transcript's hash, signed.
   private def certificate_verify : Array(UInt8)
-    signed = Array(UInt8).new(64, 0x20_u8) + TlsBytes.of("TLS 1.3, server CertificateVerify") + [0_u8] + @schedule.hash(@transcript)
+    signed = Array(UInt8).new(64, 0x20_u8) + TlsBytes.of("TLS 1.3, server CertificateVerify") + [0_u8] + @schedule.hash(transcript)
     signature = @identity.sign(@scheme, signed)
     TlsBytes.message(15, TlsBytes.u16(@scheme) + TlsBytes.u16(signature.size) + signature)
   end
@@ -5820,9 +6176,9 @@ pub class TlsServer < TlsConnection
     judged = judge12(offer)
     return judged if judged.is_a?(TlsError)
     group, scheme = judged
-    @named_group = group_name(group)
-    @cipher_suite = TlsSuites.name(@suite)
-    @schedule = TlsKeySchedule.new(TlsSuites.sha384?(@suite))
+    keep_named_group(group_name(group))
+    keep_cipher_suite(TlsSuites.name(@suite))
+    @schedule.configure(TlsSuites.sha384?(@suite))
     @server_name = offer.server_name
     @status_requested = offer.status_request
     problem = agree_alpn(offer.alpn)
@@ -5861,7 +6217,8 @@ pub class TlsServer < TlsConnection
     exchange = TlsBytes.message(12, params + TlsBytes.u16(scheme) + TlsBytes.u16(signature.size) + signature)
     request = @config.client_roots ? request12 : [] of UInt8
     flight = server_hello + certificate + exchange + request + TlsBytes.message(14, [] of UInt8)
-    @transcript = hello + flight
+    @transcript_start = @transcript_data.size
+    @transcript_data.concat(hello + flight)
     sent = put(plain_records(TlsRecords::HANDSHAKE, flight))
     return sent if sent
 
@@ -5889,7 +6246,7 @@ pub class TlsServer < TlsConnection
       return tls_error("the client's X25519 point gives no secret", TlsAlert::ILLEGAL_PARAMETER) if shared.is_a?(CurveError)
       secret = TlsBytes.of(shared)
     end
-    @transcript = @transcript + message
+    @transcript_data.concat(message)
     master, client_keys, server_keys = keys12(secret, offer.random, random, @read_cipher, @write_cipher)
     unless @chain12.empty?
       verify = handshake_message(plain: true)
@@ -5897,7 +6254,7 @@ pub class TlsServer < TlsConnection
       return tls_error("#{TlsBytes.handshake_name(verify[0])} where the client's TLS 1.2 CertificateVerify belongs", TlsAlert::UNEXPECTED_MESSAGE) unless verify[0] == 15_u8
       problem = certificate_verify12(verify, @chain12[0])
       return problem if problem
-      @transcript = @transcript + verify
+      @transcript_data.concat(verify)
       @peer_certificates = @chain12
     end
 
@@ -5912,12 +6269,12 @@ pub class TlsServer < TlsConnection
       return tls_error("the client's TLS 1.2 Finished does not match the handshake", TlsAlert::DECRYPT_ERROR)
     end
     return tls_error("handshake bytes left after the client's TLS 1.2 Finished", TlsAlert::UNEXPECTED_MESSAGE) unless handshake_left == 0
-    @transcript = @transcript + message
+    @transcript_data.concat(message)
     finished = TlsBytes.message(20, finished12(master, false))
     @writer = server_keys
     sent = put([TlsRecords::CHANGE_CIPHER_SPEC, 3_u8, 3_u8, 0_u8, 1_u8, 1_u8] + server_keys.seal(TlsRecords::HANDSHAKE, finished))
     return sent if sent
-    @transcript = @transcript + finished
+    @transcript_data.concat(finished)
     @handshaking = false
     nil
   end
@@ -6038,7 +6395,7 @@ pub class TlsServer < TlsConnection
     if (usage = leaf.key_usage) && ((usage >> Certificate::KEY_DIGITAL_SIGNATURE) & 1) == 0
       return tls_error("the client's certificate does not allow digitalSignature, which a CertificateVerify is", TlsAlert::BAD_CERTIFICATE)
     end
-    ok = signed12?("a client's CertificateVerify", leaf, scheme, @transcript, signature)
+    ok = signed12?("a client's CertificateVerify", leaf, scheme, transcript, signature)
     return ok if ok.is_a?(TlsError)
     return tls_error("the client's TLS 1.2 CertificateVerify is not its key's signature", TlsAlert::DECRYPT_ERROR) unless ok
     nil
@@ -6050,86 +6407,87 @@ end
 # One ECHConfig (RFC 9849 section 4), of version 0xfe0d, as read from an
 # ECHConfigList: what a client encrypts its ClientHello under, and what a
 # server's `TlsEchKey` publishes.
-pub class TlsEchConfig
+@[OnTape]
+pub struct TlsEchConfig
   # The version read and written: the extension's code point, as section
   # 4 has it.
   VERSION = 0xfe0d
   # The whole ECHConfig - version, length and contents - as it came: what
   # the HPKE info is made of (section 6.1), and a list of them.
-  getter raw : Array(UInt8)
+  getter raw : Array::View(UInt8)
   getter config_id : Int32
   getter kem_id : Int32
-  getter public_key : Array(UInt8)
+  getter public_key : Array::View(UInt8)
   # The HPKE KDF and AEAD a client may seal under, by their code points.
-  getter suites : Array({Int32, Int32})
+  getter suites : Array::View({Int32, Int32})
   getter maximum_name_length : Int32
   getter public_name : String
   # Its extensions (section 4.2), each its type and data.
-  getter extensions : Array({Int32, Array::View(UInt8)})
+  getter extensions : Array::View({Int32, Array::View(UInt8)})
 
-  def initialize(@raw : Array(UInt8), @config_id : Int32, @kem_id : Int32, @public_key : Array(UInt8), @suites : Array({Int32, Int32}),
-                 @maximum_name_length : Int32, @public_name : String, @extensions : Array({Int32, Array::View(UInt8)}))
-  end
+  @why : String = ""
 
-  # The ECHConfigs of version 0xfe0d an ECHConfigList holds, in its order -
-  # one of another version passed over by its length, as section 4 says -
-  # or a decode_error naming what does not read: a list cut short or with
-  # bytes after it, an empty one, or a config of this version whose fields
-  # break their bounds.
   def self.parse_list(list : Array(UInt8)) : Array(TlsEchConfig) | TlsError
-    read = read_list(list)
-    return TlsError.new("an ECHConfigList: #{read}", TlsAlert::DECODE_ERROR) if read.is_a?(String)
-    read
+    RisTlsEchConfigList.parsed(RisTlsEchConfigList.new(list))
   end
 
-  # `parse_list`'s answer, its refusal a sentence.
   def self.read_list(list : Array(UInt8)) : Array(TlsEchConfig) | String
-    reader = TlsReader.new(list)
-    body = reader.bytes(reader.u16)
-    return "cut short, or bytes after its end" if reader.short? || !reader.done?
-    return "#{body.size} bytes, where one ECHConfig takes 4 at least" if body.size < 4
-    configs = [] of TlsEchConfig
-    entries = TlsReader.new(body)
-    until entries.done?
-      version = entries.u16
-      contents = entries.bytes(entries.u16)
-      return "an ECHConfig cut short" if entries.short?
-      next unless version == VERSION
-      config = read_contents(TlsBytes.u16(version) + TlsBytes.u16(contents.size) + contents, contents)
-      return config if config.is_a?(String)
-      configs << config
-    end
-    configs
+    RisTlsEchConfigList.read(RisTlsEchConfigList.new(list))
   end
 
-  private def self.read_contents(raw : Array(UInt8), contents : Array(UInt8)) : TlsEchConfig | String
+  def initialize(@raw : Array::View(UInt8), contents : Array::View(UInt8),
+                 suites : Array({Int32, Int32}),
+                 extensions : Array({Int32, Array::View(UInt8)}),
+                 text : String::Builder)
+    @config_id = 0
+    @kem_id = 0
+    @maximum_name_length = 0
+    @public_key = contents[0, 0]
+    @public_name = ""
+    first_suite = suites.size
+    first_extension = extensions.size
+    @suites = suites[first_suite, 0]
+    @extensions = extensions[first_extension, 0]
     field = TlsReader.new(contents)
-    id = field.u8
-    kem = field.u16
-    key = field.bytes(field.u16)
-    suite_bytes = field.bytes(field.u16)
-    longest = field.u8
-    name = field.bytes(field.u8)
-    extension_bytes = field.bytes(field.u16)
-    return "an ECHConfig's contents cut short, or bytes after them" if field.short? || !field.done?
-    return "an ECHConfig with an empty public key" if key.empty?
-    return "an ECHConfig whose cipher_suites are #{suite_bytes.size} bytes, not whole pairs" if suite_bytes.empty? || suite_bytes.size % 4 != 0
-    return "an ECHConfig with an empty public_name" if name.empty?
-    suites = [] of {Int32, Int32}
+    @config_id = field.u8
+    @kem_id = field.u16
+    @public_key = field.view(field.u16)
+    suite_bytes = field.view(field.u16)
+    @maximum_name_length = field.u8
+    name = field.view(field.u8)
+    extension_bytes = field.view(field.u16)
+    return refuse(text, "an ECHConfig's contents cut short, or bytes after them") if field.short? || !field.done?
+    return refuse(text, "an ECHConfig with an empty public key") if @public_key.empty?
+    return refuse(text, "an ECHConfig whose cipher_suites are #{suite_bytes.size} bytes, not whole pairs") if suite_bytes.empty? || suite_bytes.size % 4 != 0
+    return refuse(text, "an ECHConfig with an empty public_name") if name.empty?
+    start = text.bytesize
+    name.each { |byte| text.push(byte) }
+    @public_name = text.finish[start, name.size]
     i = 0
     while i < suite_bytes.size
-      suites << {(suite_bytes[i].to_i32 << 8) | suite_bytes[i + 1].to_i32, (suite_bytes[i + 2].to_i32 << 8) | suite_bytes[i + 3].to_i32}
-      i = i + 4
+      suites << {(suite_bytes[i].to_i32 << 8) | suite_bytes[i + 1].to_i32,
+        (suite_bytes[i + 2].to_i32 << 8) | suite_bytes[i + 3].to_i32}
+      i += 4
     end
-    extensions = [] of {Int32, Array::View(UInt8)}
+    @suites = suites[first_suite, suites.size - first_suite]
     list = TlsReader.new(extension_bytes)
     until list.done?
       type = list.u16
-      data = list.bytes(list.u16)
-      return "an ECHConfig's extensions cut short" if list.short?
-      extensions << {type, data[0, data.size]}
+      data = list.view(list.u16)
+      return refuse(text, "an ECHConfig's extensions cut short") if list.short?
+      extensions << {type, data}
     end
-    TlsEchConfig.new(raw, id, kem, key, suites, longest, TlsBytes.text(name), extensions)
+    @extensions = extensions[first_extension, extensions.size - first_extension]
+  end
+
+  def why : String
+    @why
+  end
+
+  private def refuse(text : String::Builder, message : String) : Nil
+    start = text.bytesize
+    text << message
+    @why = text.finish[start, message.bytesize]
   end
 
   # The suite a client seals under: the first of `suites` std/hpke has (the
@@ -6175,6 +6533,62 @@ pub class TlsEchConfig
       return false if last[2, last.size - 2].all? { |c| (c >= 0x30_u8 && c <= 0x39_u8) || (c >= 0x61_u8 && c <= 0x66_u8) || (c >= 0x41_u8 && c <= 0x46_u8) }
     end
     true
+  end
+end
+
+@[OnTape]
+struct RisTlsEchConfigList
+  getter configs : Array(TlsEchConfig)
+  getter why : String
+
+  def initialize(bytes : Array(UInt8))
+    @configs = Array(TlsEchConfig).new(4)
+    @why = ""
+    suites = Array({Int32, Int32}).new(8)
+    extensions = Array({Int32, Array::View(UInt8)}).new(4)
+    text = String::Builder.new(bytes.size)
+    reader = TlsReader.new(bytes)
+    body = reader.view(reader.u16)
+    if reader.short? || !reader.done?
+      @why = "cut short, or bytes after its end"
+      return
+    end
+    if body.size < 4
+      @why = "#{body.size} bytes, where one ECHConfig takes 4 at least"
+      return
+    end
+    entries = TlsReader.new(body)
+    offset = 0
+    until entries.done?
+      version = entries.u16
+      contents = entries.view(entries.u16)
+      if entries.short?
+        @why = "an ECHConfig cut short"
+        return
+      end
+      if version == TlsEchConfig::VERSION
+        config = TlsEchConfig.new(body[offset, contents.size + 4], contents,
+          suites, extensions, text)
+        unless config.why.empty?
+          @why = config.why
+          return
+        end
+        @configs << config
+      end
+      offset += contents.size + 4
+    end
+  end
+
+  def self.read(list : RisTlsEchConfigList) : Array(TlsEchConfig) | String
+    list.why.empty? ? list.configs : list.why
+  end
+
+  def self.parsed(list : RisTlsEchConfigList) : Array(TlsEchConfig) | TlsError
+    if list.why.empty?
+      list.configs
+    else
+      TlsError.new("an ECHConfigList: #{list.why}", TlsAlert::DECODE_ERROR)
+    end
   end
 end
 
@@ -6253,22 +6667,70 @@ end
 
 # An encrypted ClientHello a client offered, and what came of it.
 class TlsEchOffer
-  getter config : TlsEchConfig
-  getter suite : HpkeSuite
-  # The HPKE context both ClientHelloInners are sealed in (section 6.1.5).
+  @config : TlsEchConfig? = nil
+  @suite : HpkeSuite? = nil
   getter sender : HpkeSender
   getter outer_random : Array(UInt8)
-  # The first ClientHelloOuter's encrypted_client_hello: a second one,
-  # after a HelloRetryRequest that turned the first down, carries it again.
-  property extension : Array(UInt8) = [] of UInt8
-  # Taken by the HelloRetryRequest's confirmation, then the ServerHello's;
-  # turned down; and the retry_configs that came then.
+  getter extension : Array(UInt8)
+  @raw : Array(UInt8)
+  @suites : Array({Int32, Int32})
+  @extensions : Array({Int32, Array::View(UInt8)})
+  @names : String::Builder
+  @retry : Array(UInt8)
   property hrr_accepted : Bool = false
   property accepted : Bool = false
   property rejected : Bool = false
-  property retry_configs : Array(UInt8)? = nil
+  getter retry_configs : Array(UInt8)? = nil
 
-  def initialize(@config : TlsEchConfig, @suite : HpkeSuite, @sender : HpkeSender, @outer_random : Array(UInt8))
+  def initialize
+    @raw = Array(UInt8).new(4096)
+    @suites = Array({Int32, Int32}).new(8)
+    @extensions = Array({Int32, Array::View(UInt8)}).new(4)
+    @names = String::Builder.new(256)
+    @outer_random = Array(UInt8).new(32, 0_u8)
+    @extension = Array(UInt8).new(4096)
+    @retry = Array(UInt8).new(4096)
+    sender = HpkeSender.new
+    @sender = sender
+  end
+
+  def configure(config : TlsEchConfig, suite : HpkeSuite,
+                key : HpkePublicKey) : HpkeError?
+    @config = nil
+    @suites.clear
+    @extensions.clear
+    @names.clear
+    @raw.clear
+    @raw.concat(config.raw)
+    @config = TlsEchConfig.new(@raw.view, @raw[4, @raw.size - 4],
+      @suites, @extensions, @names)
+    @suite = suite
+    @extension.clear
+    @retry_configs = nil
+    @retry.clear
+    @hrr_accepted = false
+    @accepted = false
+    @rejected = false
+    Random::Secure.random_bytes(@outer_random)
+    @sender.setup(suite, key, TlsEch.info(self.config),
+      Random::Secure.random_bytes(suite.kem.private_key_size))
+  end
+
+  def config : TlsEchConfig
+    @config.as(TlsEchConfig)
+  end
+
+  def suite : HpkeSuite
+    @suite.as(HpkeSuite)
+  end
+
+  def retry_configs=(bytes : Array(UInt8)?) : Nil
+    @retry_configs = nil
+    @retry.clear
+    if bytes
+      @retry.concat(bytes)
+      @retry_configs = @retry
+    end
   end
 end
 
@@ -6584,7 +7046,7 @@ struct TlsEch
   # ClientHelloInner's random) over the hash of *transcript* - the inner
   # handshake to this ServerHello or HelloRetryRequest, its confirmation's
   # bytes zero - eight bytes, under *schedule*'s hash.
-  def self.confirmation(schedule : TlsKeySchedule, inner_random : Array::View(UInt8), transcript : Array(UInt8), hrr : Bool) : Array(UInt8)
+  def self.confirmation(schedule : TlsKeySchedule, inner_random : Array::View(UInt8), transcript : Array::View(UInt8), hrr : Bool) : Array(UInt8)
     secret = schedule.extract(schedule.zeros, inner_random)
     schedule.expand_label(secret, hrr ? "hrr ech accept confirmation" : "ech accept confirmation", schedule.hash(transcript), 8)
   end
@@ -6654,6 +7116,11 @@ class TlsReader
 
   def u64 : Int64
     (u32 << 32) | u32
+  end
+
+  def view(count : Int32) : Array::View(UInt8)
+    start = take(count)
+    start ? @data[start, count] : @data[0, 0]
   end
 
   def bytes(count : Int32) : Array(UInt8)

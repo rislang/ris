@@ -120,6 +120,7 @@ pub class DnsOverTls
   # What the connection has delivered and no answer has taken yet.
   @pending : Array(UInt8) = [] of UInt8
   @session : TlsSession
+  @slot : TlsClient
 
   # *name* is what the server's certificate is checked for and *address*
   # where it is; *config* holds the roots it must chain to (the system's
@@ -129,13 +130,17 @@ pub class DnsOverTls
   def initialize(@name : String, @address : String, @port : Int32 = PORT, config : TlsConfig? = nil, @idle_ms : Int32 = IDLE_MS)
     session = TlsSession.new
     @session = session
+    own = TlsConfig.new
+    chosen = config || own
+    @config = chosen
+    slot = TlsClient.new(@name, chosen, session)
+    @slot = slot
     why = DnsName.why(@name)
     raise "DNS over TLS: #{@name.inspect} is not a name to check the server by: #{why}" if why.is_a?(String)
     read = @address.includes?(":") ? IyiSocket.read_ipv6(@address) : IyiSocket.read_ipv4(@address)
     raise "DNS over TLS: #{@address.inspect} is not an address: #{read}" if read.is_a?(String)
     raise "DNS over TLS: port #{@port} is not a port: 1 to 65535" if @port < 1 || @port > 65535
     raise "DNS over TLS: an idle timeout of #{@idle_ms} ms" if @idle_ms < 0
-    @config = config || TlsConfig.new
   end
 
   def label : String
@@ -190,11 +195,14 @@ pub class DnsOverTls
     socket.read_timeout_ms = timeout_ms
     socket.write_timeout_ms = timeout_ms
     @connections_made = @connections_made + 1
-    tls = TlsClient.over(socket, @name, @config, timeout_ms, @session)
-    if tls.is_a?(TlsError)
+    # The connection is this upstream's own, refilled per connection.
+    tls = @slot
+    tls.configure(socket, @name, @config, @session)
+    problem = tls.over(timeout_ms)
+    if problem
       socket.close unless socket.closed?
-      return Cancelled.new if tls.cancelled?
-      return failed(tls.timed_out?, tls.message)
+      return Cancelled.new if problem.cancelled?
+      return failed(problem.timed_out?, problem.message)
     end
     @tls = tls
     @used_ms = Resolver.now_ms

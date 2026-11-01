@@ -409,7 +409,8 @@ module RisAutocertViewState
     now = Time.utc
     # Neither can fail on a key made here and a name that is a host's.
     der = X509.self_signed(SigningKey.new(made.key), ["autocert.invalid"], now - Span.days(1), now + Span.days(3650)).or_panic
-    identity = TlsIdentity.from_der([der], made.key).or_panic
+    identity = TlsIdentity.new([der], made.key)
+    raise identity.error.as(TlsError).message if identity.error
     @placeholder = identity
     identity
   end
@@ -420,8 +421,8 @@ module RisAutocertViewState
     if alpn && alpn.size == 1 && alpn[0] == AcmeTlsAlpn01::PROTOCOL
       text = @cache.get("challenge-tls-#{name}")
       if text.is_a?(String)
-        challenge = TlsIdentity.from_pem(text, text)
-        return challenge if challenge.is_a?(TlsIdentity)
+        challenge = TlsIdentity.new(text, text)
+        return challenge unless challenge.error
       end
       return TlsError.new("autocert: no tls-alpn-01 challenge is up for #{name}", TlsAlert::UNRECOGNIZED_NAME)
     end
@@ -503,8 +504,10 @@ module RisAutocertViewState
   end
 
   def held_of(name : String, text : String) : AutocertHeld | AutocertError
-    identity = TlsIdentity.from_pem(text, text)
-    return AutocertError.new("the certificate for #{name}: #{identity.message}") if identity.is_a?(TlsError)
+    identity = TlsIdentity.new(text, text)
+    if problem = identity.error
+      return AutocertError.new("the certificate for #{name}: #{problem.message}")
+    end
     return AutocertError.new("the certificate issued for #{name} does not name it") unless identity.leaf.matches_host?(name)
     chain = Certificate.from_pem(text)
     return AutocertError.new("the certificate for #{name}: #{chain.message}") if chain.is_a?(X509Error)

@@ -60,6 +60,36 @@ else
   echo "FAILED   parallel_first_spawn_scope: $out"; status=1
 fi
 
+# Deep, distinct holder types keep sibling fields separate, and still
+# refuse shrinking the field whose view is live.
+out=$("$RIS" run test/ris/deep_holder_fields.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '1' ]; then
+  echo 'runs     deep_holder_fields'
+else
+  echo "FAILED   deep_holder_fields: $out"; status=1
+fi
+expect deep_holder_shrink 'cannot shrink tape storage with a live view'
+
+# Scalar/nil union stores do not retain a callee's scratch.
+out=$("$RIS" run test/ris/plain_union_stores.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'true' ]; then
+  echo 'runs     plain_union_stores'
+else
+  echo "FAILED   plain_union_stores: $out"; status=1
+fi
+expect union_store_fresh 'cannot store data made in this def'
+# HPKE owners refill their contexts for all three supported KEMs.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/hpke_owners.ri 2>&1)
+want='32
+65
+97
+ris heap: 0 allocations, 0 bytes'
+if [ "$?" -eq 0 ] && [ "$out" = "$want" ]; then
+  echo 'runs     hpke_owners'
+else
+  echo "FAILED   hpke_owners: $out"; status=1
+fi
+
 # Two types' fields of one name stay two fields in the shrink checker.
 out=$("$RIS" run test/ris/field_fold_owner.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'kept' ]; then

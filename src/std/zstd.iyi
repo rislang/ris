@@ -294,7 +294,6 @@ class Decoder
   @nc_log : Int32
   @nc_syms : Int32
   @failed : Bool
-  @error : ZstdError
   @message : String::Builder = String::Builder.new(128)
 
   # The whole-string form until `over_io`: *data* is all the input there
@@ -355,7 +354,47 @@ class Decoder
     @nc_log = 0
     @nc_syms = 0
     @failed = false
-    @error = ZstdError.new("")
+  end
+
+  def configure(io : IyiIO?, head : String) : Nil
+    @input = ""
+    @chunk.clear
+    @chunk << head
+    @carry.clear
+    @streamed = true
+    @in_pos = 0
+    @in_end = head.bytesize
+    @pos = 0
+    @given = 0
+    @origin = 0
+    @state = MAGIC
+    @frames = 0
+    @window = 0
+    @block_max = 0
+    @checked = false
+    @sized = false
+    @content_size = 0_u64
+    @produced = 0_u64
+    @last = false
+    @left = 0
+    @fill = 0
+    @block_start = 0
+    @skip = 0_i64
+    @hash.reset
+    @huf_bits = 0
+    @have.size.times { |i| @have[i] = false }
+    @cur.size.times { |i| @cur[i] = @pre[i] }
+    @rep1 = 1_i64
+    @rep2 = 4_i64
+    @rep3 = 8_i64
+    @rb = @block
+    @rb_at = 0
+    @rpos = 0
+    @nc_log = 0
+    @nc_syms = 0
+    @failed = false
+    @message.clear
+    over_io(io)
   end
 
   def failed? : Bool
@@ -363,7 +402,7 @@ class Decoder
   end
 
   def error : ZstdError
-    @error
+    ZstdError.new(@message.finish)
   end
 
   # Every byte written, for the whole-string form.
@@ -373,9 +412,9 @@ class Decoder
 
   def read(max : Int32) : String | ZstdError
     raise "ZstdReader: read wants at least one byte, not #{max}" if max < 1
-    return @error if @failed
+    return error if @failed
     run if @pos == @given
-    return @error if @failed
+    return error if @failed
     n = @pos - @given
     n = max if n > max
     from = @given
@@ -421,7 +460,6 @@ class Decoder
     # The message is the decoder's, in its own builder: a decoder fails
     # once, so the builder is never cleared.
     @message << message
-    @error = ZstdError.new(@message.finish)
     nil
   end
 
@@ -1328,6 +1366,10 @@ pub class ZstdReader
     core = Decoder.new(head, max_window)
     @core = core
     @core.over_io(io)
+  end
+
+  def configure(io : IyiIO?, head : String = "") : Nil
+    @core.configure(io, head)
   end
 
   # Up to *max* decompressed bytes; "" once the last frame has ended and

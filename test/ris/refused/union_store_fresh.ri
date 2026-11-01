@@ -1,0 +1,21 @@
+import std/time::{Time}
+
+class State
+  property value : String | Cancelled | Nil = "old"
+end
+
+def fill(state : State, plain : Bool) : Nil
+  if plain
+    state.value = Cancelled.new
+  else
+    state.value = "fresh #{Time.monotonic_nanoseconds}"
+  end
+  nil
+end
+
+state = State.new
+3.times do
+  fill(state, false)
+  nil
+end
+puts state.value

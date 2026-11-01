@@ -236,6 +236,146 @@ struct Extension
   end
 end
 
+class RisWebSocketExtensions
+  getter list : Array(Extension)
+  @params : Array({String, String?})
+  @texts : String::Builder
+  @error : String::Builder
+
+  def initialize(value : String)
+    @list = Array(Extension).new(value.bytesize // 2)
+    @params = Array({String, String?}).new(value.bytesize // 2)
+    @texts = String::Builder.new(value.bytesize)
+    @error = String::Builder.new(128)
+    n = value.bytesize
+    k = 0
+    while k < n
+      return fail("a byte that is not text") if value.byte_at(k) >= 127_u8 || (value.byte_at(k) < 32_u8 && value.byte_at(k) != 9_u8)
+      k = k + 1
+    end
+
+    i = 0
+    while true
+      i = WebSocket.blanks(value, n, i)
+      break if i >= n
+      if value.byte_at(i) == 44_u8
+        # An empty element of the list (RFC 9110 §5.6.1).
+        i = i + 1
+        next
+      end
+      stop = WebSocket.word(value, n, i)
+      name = value[i, stop - i]
+      return fail("an extension's name #{name.inspect} is not a token") unless HTTP.token?(name)
+      i = stop
+      params_start = @params.size
+      while true
+        i = WebSocket.blanks(value, n, i)
+        break if i >= n || value.byte_at(i) == 44_u8
+        return fail("#{value[i, 1].inspect} after #{name}, where a ; or a , goes") unless value.byte_at(i) == 59_u8
+        i = WebSocket.blanks(value, n, i + 1)
+        stop = WebSocket.word(value, n, i)
+        param = value[i, stop - i]
+        return fail("a parameter of #{name}, #{param.inspect}, is not a token") unless HTTP.token?(param)
+        i = WebSocket.blanks(value, n, stop)
+        given = nil.as(String?)
+        if i < n && value.byte_at(i) == 61_u8
+          i = WebSocket.blanks(value, n, i + 1)
+          start = @texts.bytesize
+          if i < n && value.byte_at(i) == 34_u8
+            # A quoted string, its backslashes taken off (RFC 9110 §5.6.4).
+            i = i + 1
+            closed = false
+            while i < n
+              if value.byte_at(i) == 34_u8
+                closed = true
+                i = i + 1
+                break
+              end
+              i = i + 1 if value.byte_at(i) == 92_u8 && i + 1 < n
+              @texts << value[i, 1]
+              i = i + 1
+            end
+            return fail("the quoted value of #{param} is not closed") unless closed
+          else
+            stop = WebSocket.word(value, n, i)
+            @texts << value[i, stop - i]
+            i = stop
+          end
+          text = @texts.finish[start, @texts.bytesize - start]
+          return fail("the value of #{param}, #{text.inspect}, is not a token") unless HTTP.token?(text)
+          given = text
+        end
+        @params << {param, given}
+      end
+      @list << Extension.new(name, @params[params_start, @params.size - params_start])
+      # Past the comma.
+      i = i + 1
+    end
+  end
+
+  def error : String
+    @error.finish
+  end
+
+  private def fail(message : String) : Nil
+    @error << message
+  end
+end
+
+@[OnTape]
+struct RisWebSocketHandshake
+  getter response : Response
+
+  def initialize(req : Request, protocols : Array(String), deflate : Bool)
+    @response = Response.new(400)
+    protocols.each do |name|
+      raise "WebSocket: protocol #{name.inspect} is not a token" unless HTTP.token?(name)
+    end
+    if refused = WebSocket.refusal(req)
+      @response = Response.new(refused.status, refused.reason,
+        refused.status == 426 ? {"Sec-WebSocket-Version" => "13"} : {} of String => String)
+      return
+    end
+    key = HTTP.trim(req.header("Sec-WebSocket-Key") || "")
+    chosen = nil.as(String?)
+    if offered = req.header("Sec-WebSocket-Protocol")
+      names = offered.split(',').map { |part| HTTP.trim(part) }
+      protocols.each do |name|
+        chosen = name if chosen.nil? && names.includes?(name)
+      end
+    end
+    agreed = false
+    answer = ""
+    if deflate && (extensions = req.header("Sec-WebSocket-Extensions"))
+      parsed = RisWebSocketExtensions.new(extensions)
+      unless parsed.error.empty?
+        @response = Response.new(400, "Sec-WebSocket-Extensions is not a list of extensions: #{parsed.error}\n")
+        return
+      end
+      parsed.list.each do |offer|
+        next unless !agreed && HTTP.same_name?(offer.name, "permessage-deflate")
+        # An offer this end cannot keep is declined (RFC 7692 §7), and
+        # the next one is looked at.
+        terms = WebSocket.deflate_terms(offer.params, false)
+        next if terms.is_a?(String)
+        bits = terms.server_max_window_bits
+        agreed = true
+        WebSocket.deflate_answer(terms, answer)
+      end
+    end
+    headers = {"Upgrade" => "websocket", "Connection" => "Upgrade", "Sec-WebSocket-Accept" => WebSocket.accept(key)}
+    if name = chosen
+      headers["Sec-WebSocket-Protocol"] = name
+    end
+    headers["Sec-WebSocket-Extensions"] = answer unless answer.empty?
+    @response = Response.upgrade(headers)
+  end
+
+  def self.result(value : RisWebSocketHandshake) : Response
+    value.response
+  end
+end
+
 # What one permessage-deflate offer or answer says: a window bits of 0
 # for one not named, and -1 for `client_max_window_bits` named without a
 # value, as an offer may.
@@ -280,7 +420,14 @@ pub class WebSocket
   # ends in a flush, and the compressor's window grows to hold a piece.
   DEFLATE_SLICE = 262144
 
-  getter protocol : String?
+  @protocol : String?
+  @protocol_text : String::Builder
+  @connected_protocol : Bool = false
+  @upgrade_slot : Upgraded? = nil
+
+  def protocol : String?
+    @connected_protocol ? @protocol_text.finish : @protocol
+  end
   # The permessage-deflate agreed; nil for none.
   getter deflate : PerMessageDeflate?
   @socket : IyiSocket | TlsStream
@@ -311,7 +458,7 @@ pub class WebSocket
   # first frame): its fragments are then compressed bytes.
   @parts_compressed : Bool
 
-  def initialize(@socket : IyiSocket | TlsStream, leftover : String, @client : Bool, @protocol : String? = nil, @max_message : Int32 = MAX_MESSAGE, @deflate : PerMessageDeflate? = nil)
+  def initialize(@socket : IyiSocket | TlsStream = IyiSocket.new(-1), leftover : String = "", @client : Bool = true, @protocol : String? = nil, @max_message : Int32 = MAX_MESSAGE, @deflate : PerMessageDeflate? = nil)
     raise "WebSocket: max_message is a count of bytes, not #{@max_message}" if @max_message < 0
     @in_room = leftover.bytesize > ROOM ? leftover.bytesize : ROOM
     @in = Array(UInt8).new(@in_room, 0_u8)
@@ -326,6 +473,9 @@ pub class WebSocket
     @close_code = nil
     @close_reason = String::Builder.new(123)
     @writing = false
+    @protocol_text = String::Builder.new(64)
+    up = Upgraded.new
+    @upgrade_slot = up
     terms = @deflate
     deflater = Deflater.new(Envelope::Raw, terms ? terms.level : 1,
       terms ? (@client ? terms.client_max_window_bits : terms.server_max_window_bits) : 15)
@@ -341,46 +491,16 @@ pub class WebSocket
   # takes. *protocols* are the subprotocols the server speaks, in its
   # order of preference. With *deflate* the first permessage-deflate
   # offer this end can keep is accepted.
-  def self.upgrade(req : Request, protocols : Array(String) = [] of String, deflate : Bool = true) : Response
-    protocols.each do |name|
-      raise "WebSocket: protocol #{name.inspect} is not a token" unless HTTP.token?(name)
-    end
-    if refused = WebSocket.refusal(req)
-      return refused
-    end
-    key = HTTP.trim(req.header("Sec-WebSocket-Key") || "")
-    chosen = nil.as(String?)
-    if offered = req.header("Sec-WebSocket-Protocol")
-      names = offered.split(',').map { |part| HTTP.trim(part) }
-      protocols.each do |name|
-        chosen = name if chosen.nil? && names.includes?(name)
-      end
-    end
-    agreed = false
-    answer = ""
-    if deflate && (extensions = req.header("Sec-WebSocket-Extensions"))
-      list = WebSocket.extensions(extensions)
-      return Response.new(400, "Sec-WebSocket-Extensions is not a list of extensions: #{list}\n") if list.is_a?(String)
-      list.each do |offer|
-        next unless !agreed && HTTP.same_name?(offer.name, "permessage-deflate")
-        # An offer this end cannot keep is declined (RFC 7692 §7), and
-        # the next one is looked at.
-        terms = WebSocket.deflate_terms(offer.params, false)
-        next if terms.is_a?(String)
-        bits = terms.server_max_window_bits
-        agreed = true
-        answer = "permessage-deflate"
-        answer = answer + "; server_no_context_takeover" if terms.server_no_context_takeover
-        answer = answer + "; client_no_context_takeover" if terms.client_no_context_takeover
-        answer = answer + "; server_max_window_bits=#{bits}" if bits > 0
-      end
-    end
-    headers = {"Upgrade" => "websocket", "Connection" => "Upgrade", "Sec-WebSocket-Accept" => WebSocket.accept(key)}
-    if name = chosen
-      headers["Sec-WebSocket-Protocol"] = name
-    end
-    headers["Sec-WebSocket-Extensions"] = answer unless answer.empty?
-    Response.upgrade(headers)
+  def self.upgrade(req : Request, protocols : Array(String) = [] of String,
+                   deflate : Bool = true) : Response
+    RisWebSocketHandshake.result(RisWebSocketHandshake.new(req, protocols, deflate))
+  end
+
+  def self.deflate_answer(terms : DeflateTerms, writer : String::Builder) : Nil
+    writer << "permessage-deflate"
+    writer << "; server_no_context_takeover" if terms.server_no_context_takeover
+    writer << "; client_no_context_takeover" if terms.client_no_context_takeover
+    writer << "; server_max_window_bits=#{terms.server_max_window_bits}" if terms.server_max_window_bits > 0
   end
 
   # The old form kept its block in the response, where no check follows
@@ -399,9 +519,9 @@ pub class WebSocket
     raise "WebSocket: a deflate level is 0 to 9, not #{deflate_level}" if deflate_level < 0 || deflate_level > 9
     agreed = nil.as(PerMessageDeflate?)
     if said = response.header("Sec-WebSocket-Extensions")
-      list = WebSocket.extensions(said)
-      if list.is_a?(Array)
-        list.each do |offer|
+      parsed = RisWebSocketExtensions.new(said)
+      if parsed.error.empty?
+        parsed.list.each do |offer|
           next unless agreed.nil? && HTTP.same_name?(offer.name, "permessage-deflate")
           terms = WebSocket.deflate_terms(offer.params, false)
           next if terms.is_a?(String)
@@ -413,80 +533,14 @@ pub class WebSocket
     ws = WebSocket.new(socket, leftover, false, response.header("Sec-WebSocket-Protocol"), max_message, agreed)
     yield ws
     ws.close unless ws.closed?
+    nil
   end
 
   # *value* as a list of extensions (RFC 6455 §9.1): each a token, with
   # parameters after `;`, a parameter's value a token or a quoted string
   # that is one once unescaped. Why it is not one, otherwise.
-  protected def self.extensions(value : String) : Array(Extension) | String
-    n = value.bytesize
-    k = 0
-    while k < n
-      return "a byte that is not text" if value.byte_at(k) >= 127_u8 || (value.byte_at(k) < 32_u8 && value.byte_at(k) != 9_u8)
-      k = k + 1
-    end
-    list = [] of Extension
-    i = 0
-    while true
-      i = WebSocket.blanks(value, n, i)
-      break if i >= n
-      if value.byte_at(i) == 44_u8
-        # An empty element of the list (RFC 9110 §5.6.1).
-        i = i + 1
-        next
-      end
-      stop = WebSocket.word(value, n, i)
-      name = value[i, stop - i]
-      return "an extension's name #{name.inspect} is not a token" unless HTTP.token?(name)
-      i = stop
-      params = [] of {String, String?}
-      while true
-        i = WebSocket.blanks(value, n, i)
-        break if i >= n || value.byte_at(i) == 44_u8
-        return "#{value[i, 1].inspect} after #{name}, where a ; or a , goes" unless value.byte_at(i) == 59_u8
-        i = WebSocket.blanks(value, n, i + 1)
-        stop = WebSocket.word(value, n, i)
-        param = value[i, stop - i]
-        return "a parameter of #{name}, #{param.inspect}, is not a token" unless HTTP.token?(param)
-        i = WebSocket.blanks(value, n, stop)
-        given = nil.as(String?)
-        if i < n && value.byte_at(i) == 61_u8
-          i = WebSocket.blanks(value, n, i + 1)
-          text = ""
-          if i < n && value.byte_at(i) == 34_u8
-            # A quoted string, its backslashes taken off (RFC 9110 §5.6.4).
-            i = i + 1
-            closed = false
-            while i < n
-              if value.byte_at(i) == 34_u8
-                closed = true
-                i = i + 1
-                break
-              end
-              i = i + 1 if value.byte_at(i) == 92_u8 && i + 1 < n
-              text = text + value[i, 1]
-              i = i + 1
-            end
-            return "the quoted value of #{param} is not closed" unless closed
-          else
-            stop = WebSocket.word(value, n, i)
-            text = value[i, stop - i]
-            i = stop
-          end
-          return "the value of #{param}, #{text.inspect}, is not a token" unless HTTP.token?(text)
-          given = text
-        end
-        params << {param, given}
-      end
-      list << Extension.new(name, params.view)
-      # Past the comma.
-      i = i + 1
-    end
-    list
-  end
-
   # Past the spaces and tabs from *i*.
-  protected def self.blanks(p : String, n : Int32, i : Int32) : Int32
+  def self.blanks(p : String, n : Int32, i : Int32) : Int32
     while i < n && (p.byte_at(i) == 32_u8 || p.byte_at(i) == 9_u8)
       i = i + 1
     end
@@ -494,7 +548,7 @@ pub class WebSocket
   end
 
   # The end of the word from *i*: up to a blank or one of `,;="`.
-  protected def self.word(p : String, n : Int32, i : Int32) : Int32
+  def self.word(p : String, n : Int32, i : Int32) : Int32
     while i < n
       c = p.byte_at(i)
       break if c == 32_u8 || c == 9_u8 || c == 44_u8 || c == 59_u8 || c == 61_u8 || c == 34_u8
@@ -508,7 +562,7 @@ pub class WebSocket
   # once, the two `no_context_takeover`s without a value, the two
   # `max_window_bits` with 8 to 15 in decimal - and `client_max_window_bits`
   # without one in an offer, as a client says it can be held to one.
-  protected def self.deflate_terms(params : Array::View({String, String?}), answer : Bool) : DeflateTerms | String
+  def self.deflate_terms(params : Array::View({String, String?}), answer : Bool) : DeflateTerms | String
     server_reset = false
     client_reset = false
     server_bits = 0
@@ -517,8 +571,8 @@ pub class WebSocket
     params.each do |param|
       name = param[0].downcase
       given = param[1]
-      return "#{param[0]} is named twice" if seen.includes?(name)
-      seen << name
+      return "#{param[0]} is named twice" if seen.any? { |prior| HTTP.same_name?(prior, name) }
+      seen << param[0]
       if name == "server_no_context_takeover" || name == "client_no_context_takeover"
         if given
           return "#{param[0]} takes no value, and was given #{given.inspect}"
@@ -561,27 +615,27 @@ pub class WebSocket
 
   # Why *req* is not a handshake this server answers 101, as the answer;
   # nil when it is one.
-  protected def self.refusal(req : Request) : Response?
-    return Response.new(400, "a WebSocket handshake is a GET, not #{req.method}\n") unless req.method == "GET"
-    return Response.new(400, "a WebSocket handshake is HTTP/1.1, not #{req.version}\n") unless req.version == "HTTP/1.1"
+  def self.refusal(req : Request) : HTTPError?
+    return HTTPError.new("a WebSocket handshake is a GET, not #{req.method}\n", 400) unless req.method == "GET"
+    return HTTPError.new("a WebSocket handshake is HTTP/1.1, not #{req.version}\n", 400) unless req.version == "HTTP/1.1"
     upgrade = req.header("Upgrade")
-    return Response.new(400, "Upgrade does not name websocket\n") unless upgrade && HTTP.has_token?(upgrade, "websocket")
+    return HTTPError.new("Upgrade does not name websocket\n", 400) unless upgrade && HTTP.has_token?(upgrade, "websocket")
     connection = req.header("Connection")
-    return Response.new(400, "Connection does not hold upgrade\n") unless connection && HTTP.has_token?(connection, "upgrade")
+    return HTTPError.new("Connection does not hold upgrade\n", 400) unless connection && HTTP.has_token?(connection, "upgrade")
     version = req.header("Sec-WebSocket-Version")
-    return Response.new(400, "no Sec-WebSocket-Version\n") unless version
+    return HTTPError.new("no Sec-WebSocket-Version\n", 400) unless version
     unless HTTP.trim(version) == "13"
-      return Response.new(426, "Sec-WebSocket-Version #{version} is not 13\n", {"Sec-WebSocket-Version" => "13"})
+      return HTTPError.new("Sec-WebSocket-Version #{version} is not 13\n", 426)
     end
     key = req.header("Sec-WebSocket-Key")
-    return Response.new(400, "no Sec-WebSocket-Key\n") unless key
-    return Response.new(400, "Sec-WebSocket-Key is not 16 bytes in base64\n") unless WebSocket.key?(HTTP.trim(key))
+    return HTTPError.new("no Sec-WebSocket-Key\n", 400) unless key
+    return HTTPError.new("Sec-WebSocket-Key is not 16 bytes in base64\n", 400) unless WebSocket.key?(HTTP.trim(key))
     nil
   end
 
   # Whether *key* is what §4.1 has a client send: 16 bytes in base64,
   # which is 22 characters of the alphabet and `==`.
-  protected def self.key?(key : String) : Bool
+  def self.key?(key : String) : Bool
     return false unless key.bytesize == 24
     p = key
     return false unless p[22] == 61_u8 && p[23] == 61_u8
@@ -615,7 +669,7 @@ pub class WebSocket
   # *deflate* permessage-deflate is offered, and messages are compressed
   # at *deflate_level*. *client* is `HTTP.upgrade`'s: its `tls:` config
   # for `wss://`.
-  def self.connect(url : String, headers : Hash(String, String) = {} of String => String, protocols : Array(String) = [] of String, max_message : Int32 = MAX_MESSAGE, proxy : String? = nil, deflate : Bool = true, deflate_level : Int32 = 1, client : HTTPClient? = nil) : WebSocket | Cancelled | SocketError | HTTPError | WebSocketError
+  def connect(url : String, headers : Hash(String, String) = {} of String => String, protocols : Array(String) = [] of String, max_message : Int32 = MAX_MESSAGE, proxy : String? = nil, deflate : Bool = true, deflate_level : Int32 = 1, client : HTTPClient? = nil) : WebSocket | Cancelled | SocketError | HTTPError | WebSocketError
     raise "WebSocket: a deflate level is 0 to 9, not #{deflate_level}" if deflate_level < 0 || deflate_level > 9
     headers.each do |name, _|
       ["Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version", "Sec-WebSocket-Protocol", "Sec-WebSocket-Extensions"].each do |own|
@@ -641,7 +695,9 @@ pub class WebSocket
     # `client_max_window_bits` says the server may hold this end to a
     # smaller window, which the compressor keeps to.
     sent["Sec-WebSocket-Extensions"] = "permessage-deflate; client_max_window_bits" if deflate
-    up = HTTP.upgrade(target, "websocket", sent, proxy: proxy, client: client)!
+    up = @upgrade_slot.as(Upgraded)
+    problem = up.connect(target, "websocket", sent, proxy: proxy, client: client)
+    return problem if problem
     agreed = WebSocket.agreed(up, key, protocols)
     if agreed.is_a?(WebSocketError)
       up.socket.close
@@ -652,7 +708,24 @@ pub class WebSocket
       up.socket.close
       return terms
     end
-    WebSocket.new(up.socket, up.leftover, true, agreed, max_message, terms)
+    @socket = up.socket
+    @protocol = nil
+    @protocol_text.clear
+    @connected_protocol = !agreed.nil?
+    @protocol_text << agreed if agreed
+    @max_message = max_message
+    @deflate = terms
+    @deflater.configure(terms ? terms.level : 1,
+      terms ? terms.client_max_window_bits : 15)
+    @inflater.reset
+    @in_start = 0
+    @in_stop = up.leftover.bytesize
+    while @in.size < @in_stop
+      @in << 0_u8
+    end
+    @in_room = @in.size
+    @in_stop.times { |i| @in[i] = up.leftover.byte_at(i) }
+    self
   end
 
   # The protocol a server's 101 agreed to (nil for none), or why the
@@ -682,10 +755,10 @@ pub class WebSocket
   protected def self.answered(value : String?, offered : Bool, level : Int32) : PerMessageDeflate | Nil | WebSocketError
     return nil unless value
     return WebSocketError.new("the server agreed to extensions #{value.inspect}, and none were offered") unless offered
-    list = WebSocket.extensions(value)
-    return WebSocketError.new("the server's Sec-WebSocket-Extensions #{value.inspect} is not a list of extensions: #{list}") if list.is_a?(String)
+    parsed = RisWebSocketExtensions.new(value)
+    return WebSocketError.new("the server's Sec-WebSocket-Extensions #{value.inspect} is not a list of extensions: #{parsed.error}") unless parsed.error.empty?
     found = nil.as(PerMessageDeflate?)
-    list.each do |extension|
+    parsed.list.each do |extension|
       return WebSocketError.new("the server agreed to extension #{extension.name.inspect}, which was not offered") unless HTTP.same_name?(extension.name, "permessage-deflate")
       return WebSocketError.new("the server agreed to permessage-deflate twice") if found
       terms = WebSocket.deflate_terms(extension.params, true)

@@ -446,7 +446,6 @@ class Inflate
   @size : UInt32
   @hcrc : UInt32
   @failed : Bool
-  @error : CompressError
   @message : String::Builder
 
   # The whole-string form until `over_io` or `by_pieces`: *data* from
@@ -491,7 +490,6 @@ class Inflate
     @size = 0_u32
     @hcrc = 0_u32
     @failed = false
-    @error = CompressError.new("")
     @message = String::Builder.new(128)
   end
 
@@ -511,7 +509,7 @@ class Inflate
   end
 
   def error : CompressError
-    @error
+    CompressError.new(@message.finish)
   end
 
   def done? : Bool
@@ -545,7 +543,7 @@ class Inflate
   end
 
   private def answer(text : String) : String | CompressError
-    return @error if @failed
+    return error if @failed
     text
   end
 
@@ -626,11 +624,26 @@ class Inflate
     @final = false
     @stored = 0
     @failed = false
-    @error = CompressError.new("")
     @message.clear
     @lit = @fixed_lit
     @dist = @fixed_dist
     by_pieces
+  end
+
+  def configure(envelope : Envelope, io : IyiIO?, head : String) : Nil
+    reset_pieces
+    @envelope = envelope
+    @pieces = false
+    @grow = false
+    @state = envelope == Envelope::Raw ? BLOCK : HEAD
+    @check = envelope == Envelope::Zlib ? 1_u32 : 0_u32
+    @size = 0_u32
+    @hcrc = 0_u32
+    @sniff = false
+    @chunk << head
+    @streamed = true
+    @in_end = head.bytesize
+    over_io(io)
   end
 
   def pieces? : Bool
@@ -658,7 +671,7 @@ class Inflate
   # blocks; nil once more than *limit* bytes have come out of it, which
   # fails the stream.
   def piece(data : String, limit : Int32) : String | CompressError | Nil
-    return @error if @failed
+    return error if @failed
     # The last piece ended between blocks with nothing loaded ahead, so
     # there is nothing of it to keep.
     @chunk.clear
@@ -673,7 +686,7 @@ class Inflate
     total = 0
     while true
       run(STREAM - WINDOW - MATCH)
-      return @error if @failed
+      return error if @failed
       n = @pos - @given
       break if n == 0
       if n > limit - total
@@ -697,7 +710,6 @@ class Inflate
     # The message is the decoder's, in its own builder, not the caller's
     # scratch. A decoder fails once: the builder is never cleared.
     @message.append(message)
-    @error = CompressError.new(@message.finish)
     nil
   end
 
@@ -1277,10 +1289,14 @@ pub class Inflater
   # hand for what it must read next, so it is never asked for anything
   # past the end of the stream - except that a gzip stream ends only
   # where no member follows, which takes a look at the next two bytes.
-  def self.new(envelope : Envelope, io : IyiIO?, head : String = "") : Inflater
+  def initialize(envelope : Envelope, io : IyiIO?, head : String = "")
     core = Inflate.new(envelope, head, 0, Inflate::STREAM)
     core.over_io(io)
-    new(core)
+    @core = core
+  end
+
+  def configure(envelope : Envelope, io : IyiIO?, head : String = "") : Nil
+    @core.configure(envelope, io, head)
   end
 
   protected def initialize(@core : Inflate)
@@ -1365,6 +1381,13 @@ pub class Deflater
     @finished = false
     @check = @envelope == Envelope::Zlib ? 1_u32 : 0_u32
     @size = 0_u32
+  end
+
+  def configure(level : Int32, window_bits : Int32) : Nil
+    raise "Deflater: invalid window bits" if window_bits < 8 || window_bits > 15
+    @level = level
+    @core.configure(level, 1 << window_bits)
+    reset
   end
 
   # Start another stream in the same window and output storage.
@@ -1840,6 +1863,16 @@ class Encoder
     end
     made_out = BitWriter.new(hint >= 0 ? hint // 2 + 64 : 1024)
     @out = made_out
+  end
+
+  def configure(level : Int32, reach : Int32) : Nil
+    raise "Deflate: invalid level" if level < 0 || level > 9
+    @level = level
+    @reach = reach
+    @good = GOOD[level]
+    @lazy = LAZY[level]
+    @nice = NICE[level]
+    @chain = CHAIN[level]
   end
 
   def reset : Nil

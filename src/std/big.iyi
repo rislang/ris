@@ -97,6 +97,69 @@ private struct RisMulFrame
   end
 end
 
+class RisBigScratch
+  @limbs : Array(UInt64)
+
+  def initialize(capacity : Int32 = 128)
+    @limbs = Array(UInt64).new(capacity)
+  end
+
+  def keep(value : BigInt) : BigInt
+    BigInt.new(value.sign, keep_limbs(value.limbs))
+  end
+
+  def keep_limbs(value : Array(UInt64) | Array::View(UInt64)) : Array::View(UInt64)
+    start = @limbs.size
+    @limbs.concat(value)
+    @limbs[start, value.size]
+  end
+
+  def zeros(count : Int32) : Array::View(UInt64)
+    start = @limbs.size
+    count.times { @limbs << 0_u64 }
+    @limbs[start, count]
+  end
+
+  def pair(value : Tuple(BigInt, BigInt)) : Tuple(BigInt, BigInt)
+    {keep(value[0]), keep(value[1])}
+  end
+end
+
+@[OnTape]
+struct RisBigDivision
+  getter pair : Tuple(BigInt, BigInt)
+
+  def initialize(left : BigInt, right : BigInt)
+    scratch = RisBigScratch.new(left.limbs.size + right.limbs.size)
+    @pair = left.divmod_into(right, scratch)
+  end
+
+  def self.result(value : RisBigDivision) : Tuple(BigInt, BigInt)
+    value.pair
+  end
+end
+
+struct RisBigAdd
+end
+
+struct RisBigSubtract
+end
+
+struct RisBigMultiply
+end
+
+struct RisBigShiftLeft
+end
+
+struct RisBigShiftRight
+end
+
+struct RisBigBits
+end
+
+struct RisBigLcm
+end
+
 @[OnTape]
 pub struct BigInt
   getter sign : Int32
@@ -117,6 +180,11 @@ pub struct BigInt
     end
     @sign = count == 0 ? 0 : (sign < 0 ? -1 : (sign > 0 ? 1 : 0))
     @limbs = limbs[0, count]
+  end
+
+  def initialize(value : BigInt)
+    @sign = value.sign
+    @limbs = value.limbs
   end
 
   # Constructs a BigInt from an Int64.
@@ -398,13 +466,12 @@ pub struct BigInt
 
   # Returns the absolute value of self.
   def abs : BigInt
-    @sign < 0 ? BigInt.new(1, @limbs.dup) : self
+    BigInt.new(@sign < 0 ? 1 : @sign, @limbs)
   end
 
   # Returns the negated value of self (-self).
   def negate : BigInt
-    return self if zero?
-    BigInt.new(-@sign, @limbs.dup)
+    BigInt.new(-@sign, @limbs)
   end
 
   def - : BigInt
@@ -495,21 +562,27 @@ pub struct BigInt
 
   # Addition
   def +(other : BigInt) : BigInt
-    return other if zero?
-    return self if other.zero?
+    BigInt.new(self, other, RisBigAdd.new)
+  end
+
+  def initialize(left : BigInt, other : BigInt, operation : RisBigAdd)
+    @sign = left.sign
+    @limbs = left.limbs
+    return initialize(other) if zero?
+    return if other.zero?
     if @sign == other.sign
       res_limbs = add_abs_limbs(@limbs, other.limbs)
-      BigInt.new(@sign, res_limbs)
+      initialize(@sign, res_limbs)
     else
       c = cmp_abs(other)
       if c == 0
-        BigInt.zero
+        initialize(BigInt.zero)
       elsif c > 0
         res_limbs = sub_abs_limbs(@limbs, other.limbs)
-        BigInt.new(@sign, res_limbs)
+        initialize(@sign, res_limbs)
       else
         res_limbs = sub_abs_limbs(other.limbs, @limbs)
-        BigInt.new(other.sign, res_limbs)
+        initialize(other.sign, res_limbs)
       end
     end
   end
@@ -524,18 +597,24 @@ pub struct BigInt
 
   # Subtraction: the sum with the other's sign turned, without copying it.
   def -(other : BigInt) : BigInt
-    return self if other.zero?
-    return other.negate if zero?
+    BigInt.new(self, other, RisBigSubtract.new)
+  end
+
+  def initialize(left : BigInt, other : BigInt, operation : RisBigSubtract)
+    @sign = left.sign
+    @limbs = left.limbs
+    return if other.zero?
+    return initialize(other.negate) if zero?
     if @sign != other.sign
-      BigInt.new(@sign, add_abs_limbs(@limbs, other.limbs))
+      initialize(@sign, add_abs_limbs(@limbs, other.limbs))
     else
       c = cmp_abs(other)
       if c == 0
-        BigInt.zero
+        initialize(BigInt.zero)
       elsif c > 0
-        BigInt.new(@sign, sub_abs_limbs(@limbs, other.limbs))
+        initialize(@sign, sub_abs_limbs(@limbs, other.limbs))
       else
-        BigInt.new(-@sign, sub_abs_limbs(other.limbs, @limbs))
+        initialize(-@sign, sub_abs_limbs(other.limbs, @limbs))
       end
     end
   end
@@ -606,7 +685,13 @@ pub struct BigInt
 
   # Multiplication
   def *(other : BigInt) : BigInt
-    return BigInt.zero if zero? || other.zero?
+    BigInt.new(self, other, RisBigMultiply.new)
+  end
+
+  def initialize(left : BigInt, other : BigInt, operation : RisBigMultiply)
+    @sign = left.sign
+    @limbs = left.limbs
+    return initialize(BigInt.zero) if zero? || other.zero?
     sign = @sign == other.sign ? 1 : -1
 
     res_limbs = if @limbs.size < KARATSUBA_THRESHOLD || other.limbs.size < KARATSUBA_THRESHOLD
@@ -614,7 +699,7 @@ pub struct BigInt
                 else
                   mul_karatsuba(@limbs, other.limbs, KARATSUBA_THRESHOLD)
                 end
-    BigInt.new(sign, res_limbs)
+    initialize(sign, res_limbs)
   end
 
   def *(other : Int64) : BigInt
@@ -695,7 +780,9 @@ pub struct BigInt
   # holds fixed views; no growing local crosses a recursive call.
   private def mul_karatsuba(a : Array(UInt64) | Array::View(UInt64),
                            b : Array(UInt64) | Array::View(UInt64),
-                           threshold : Int32) : Array::View(UInt64)
+                           threshold : Int32) : Array(UInt64)
+    scratch = RisBigScratch.new(a.size + b.size)
+    output = Array(UInt64).new(a.size + b.size)
     frames = Array(RisMulFrame).new(32, RisMulFrame.new(a.view, b.view))
     depth = 1
     result = a.view[0, 0]
@@ -705,7 +792,7 @@ pub struct BigInt
       y = frame.b
       if frame.stage == 0
         if x.size < threshold || y.size < threshold || x.empty? || y.empty?
-          result = mul_schoolbook(x, y).view
+          result = scratch.keep_limbs(mul_schoolbook(x, y))
           depth -= 1
           next
         end
@@ -716,7 +803,7 @@ pub struct BigInt
             frame.a = y
             frame.b = x
           end
-          frame.res = Array(UInt64).new(n + frame.a.size, 0_u64).view
+          frame.res = scratch.zeros(n + frame.a.size)
           frame.stage = 10
           frames[depth - 1] = frame
           count = frame.a.size < frame.b.size ? frame.a.size : frame.b.size
@@ -739,15 +826,15 @@ pub struct BigInt
         frame.z2 = result
         frame.stage = 3
         frames[depth - 1] = frame
-        xsum = add_abs_limbs(x[0, frame.k], x[frame.k, x.size - frame.k])
-        ysum = add_abs_limbs(y[0, frame.k], y[frame.k, y.size - frame.k])
+        xsum = scratch.keep_limbs(add_abs_limbs(x[0, frame.k], x[frame.k, x.size - frame.k]))
+        ysum = scratch.keep_limbs(add_abs_limbs(y[0, frame.k], y[frame.k, y.size - frame.k]))
         frames[depth] = RisMulFrame.new(xsum.view, ysum.view)
         depth += 1
       elsif frame.stage == 3
         middle = sub_abs_limbs(sub_abs_limbs(result, frame.z0), frame.z2)
         high = shift_limbs_left(frame.z2, 2 * frame.k)
         mid = shift_limbs_left(middle, frame.k)
-        result = add_abs_limbs(add_abs_limbs(frame.z0, mid), high).view
+        result = scratch.keep_limbs(add_abs_limbs(add_abs_limbs(frame.z0, mid), high))
         depth -= 1
       else
         r = frame.res
@@ -782,7 +869,8 @@ pub struct BigInt
         end
       end
     end
-    result
+    output.concat(result)
+    output
   end
 
   # Division and Modulo. Returns {quotient, remainder}.
@@ -796,30 +884,34 @@ pub struct BigInt
   # and one of 2,097,152 bits 4,929 ms, four times over per doubling,
   # where these take 179 and 1,964.
   def divmod(other : BigInt) : Tuple(BigInt, BigInt)
+    RisBigDivision.result(RisBigDivision.new(self, other))
+  end
+
+  protected def divmod_into(other : BigInt, scratch : RisBigScratch) : Tuple(BigInt, BigInt)
     raise "division by zero" if other.zero?
     divisor_bits = BigInt.bit_length(other)
     if divisor_bits > DIVIDE_RECURSIVE_BITS && BigInt.bit_length(self) - divisor_bits > DIVIDE_SPLIT_BITS
-      q, r = abs.divmod_recursive(other.abs)
-      return {@sign == other.sign ? q : q.negate, @sign < 0 ? r.negate : r}
+      q, r = abs.divmod_recursive_into(other.abs, scratch)
+      return scratch.pair({@sign == other.sign ? q : q.negate, @sign < 0 ? r.negate : r})
     end
-    divmod_long(other)
+    divmod_long_into(other, scratch)
   end
 
   # Knuth's Algorithm D, with the signs `divmod` gives.
-  protected def divmod_long(other : BigInt) : Tuple(BigInt, BigInt)
+  protected def divmod_long_into(other : BigInt, scratch : RisBigScratch) : Tuple(BigInt, BigInt)
     raise "division by zero" if other.zero?
-    return {BigInt.zero, BigInt.zero} if zero?
+    return scratch.pair({BigInt.zero, BigInt.zero}) if zero?
 
     q_sign = @sign == other.sign ? 1 : -1
     r_sign = @sign # remainder sign follows dividend
 
     c = cmp_abs(other)
     if c < 0
-      return {BigInt.zero, self}
+      return scratch.pair({BigInt.zero, self})
     elsif c == 0
       arr = Array(UInt64).new
       arr << 1_u64
-      return {BigInt.new(q_sign, arr), BigInt.zero}
+      return scratch.pair({BigInt.new(q_sign, arr), BigInt.zero})
     end
 
     # Single-limb divisor optimization: O(m) division
@@ -840,7 +932,7 @@ pub struct BigInt
       r_limbs << rem if rem > 0_u64
       q = BigInt.new(q_sign, q_limbs)
       r = BigInt.new(r_sign, r_limbs)
-      return {q, r}
+      return scratch.pair({q, r})
     end
 
     # A quotient under 2^32, which is what each step of Euclid's algorithm
@@ -851,7 +943,7 @@ pub struct BigInt
     # that inverted a 2048-bit RSA signature's blinding factor went from
     # 592 us to 281 with it (std/rsa now takes `inverse_mod_secret`).
     shift = BigInt.bit_length(other) - 32
-    return divmod_one_limb(other, shift, q_sign, r_sign) if BigInt.bit_length(self) - shift <= 63
+    return divmod_one_limb_into(other, shift, q_sign, r_sign, scratch) if BigInt.bit_length(self) - shift <= 63
 
     # Knuth Algorithm D for n >= 2 limbs
     n = other.limbs.size
@@ -960,7 +1052,7 @@ pub struct BigInt
 
     q = BigInt.new(q_sign, q_limbs)
     r = BigInt.new(r_sign, unnorm_rem)
-    {q, r}
+    scratch.pair({q, r})
   end
 
   # |self| divided by |other|, two limbs or more, for a quotient under
@@ -970,7 +1062,7 @@ pub struct BigInt
   # quotient and short of it by less than A / B^2 + 1, at most three; a - q
   # b is taken in one pass and the divisor taken off what is left while it
   # is not below it.
-  protected def divmod_one_limb(other : BigInt, shift : Int32, q_sign : Int32, r_sign : Int32) : Tuple(BigInt, BigInt)
+  protected def divmod_one_limb_into(other : BigInt, shift : Int32, q_sign : Int32, r_sign : Int32, scratch : RisBigScratch) : Tuple(BigInt, BigInt)
     q = BigInt.window(@limbs, shift) // (BigInt.window(other.limbs, shift) + 1_u64)
     n = @limbs.size
     m = other.limbs.size
@@ -1014,7 +1106,7 @@ pub struct BigInt
     q_limbs = Array(UInt64).new(2, 0_u64)
     q_limbs[0] = q & 0xFFFFFFFF_u64
     q_limbs[1] = q.unsafe_shr(32_u64)
-    {BigInt.new(q_sign, q_limbs), BigInt.new(r_sign, res)}
+    scratch.pair({BigInt.new(q_sign, q_limbs), BigInt.new(r_sign, res)})
   end
 
   # |value| over 2^shift, for one under 2^64: the limbs from bit *shift*.
@@ -1168,8 +1260,14 @@ pub struct BigInt
 
   # Least Common Multiple
   def lcm(other : BigInt) : BigInt
-    return BigInt.zero if zero? || other.zero?
-    (self.abs // gcd(other)) * other.abs
+    BigInt.new(self, other, RisBigLcm.new)
+  end
+
+  def initialize(left : BigInt, other : BigInt, operation : RisBigLcm)
+    @sign = left.sign
+    @limbs = left.limbs
+    return initialize(BigInt.zero) if zero? || other.zero?
+    initialize((self.abs // gcd(other)) * other.abs)
   end
 
   def lcm(other : Int64) : BigInt
@@ -1282,8 +1380,14 @@ pub struct BigInt
 
   # Bitwise Left Shift: a << count
   def <<(count : Int32) : BigInt
-    return self >> (-count) if count < 0
-    return self if count == 0 || zero?
+    BigInt.new(self, count, RisBigShiftLeft.new)
+  end
+
+  def initialize(left : BigInt, count : Int32, operation : RisBigShiftLeft)
+    @sign = left.sign
+    @limbs = left.limbs
+    return initialize(self >> (-count)) if count < 0
+    return if count == 0 || zero?
 
     limb_shift = count // 32
     bit_shift = (count % 32).to_u64
@@ -1304,17 +1408,23 @@ pub struct BigInt
     end
     r[n] = carry
     res_limbs.truncate(carry > 0_u64 ? n + limb_shift + 1 : n + limb_shift)
-    BigInt.new(@sign, res_limbs)
+    initialize(@sign, res_limbs)
   end
 
   # Bitwise Right Shift (arithmetic): a >> count
   def >>(count : Int32) : BigInt
-    return self << (-count) if count < 0
-    return self if count == 0 || zero?
+    BigInt.new(self, count, RisBigShiftRight.new)
+  end
+
+  def initialize(left : BigInt, count : Int32, operation : RisBigShiftRight)
+    @sign = left.sign
+    @limbs = left.limbs
+    return initialize(self << (-count)) if count < 0
+    return if count == 0 || zero?
 
     if positive?
       limb_shift = count // 32
-      return BigInt.zero if limb_shift >= @limbs.size
+      return initialize(BigInt.zero) if limb_shift >= @limbs.size
 
       bit_shift = (count % 32).to_u64
       res_size = @limbs.size - limb_shift
@@ -1338,7 +1448,7 @@ pub struct BigInt
           i = i - 1
         end
       end
-      BigInt.new(1, res_limbs)
+      initialize(1, res_limbs)
     else
       # Two's complement arithmetic right shift for negative numbers: floor(self / 2^count)
       # For a < 0, let a = -m.
@@ -1568,9 +1678,10 @@ pub struct BigInt
         per = per + 1
       end
       # chunk, chunk ** 2, chunk ** 4, ... up to about half this value.
+      scratch = RisBigScratch.new(@limbs.size * 2)
       powers = [BigInt.new(chunk.to_i64)]
       while powers.last.limbs.size * 2 <= @limbs.size
-        powers << powers.last * powers.last
+        powers << scratch.keep(powers.last * powers.last)
       end
       abs.append_digits(base.to_u64, chunk, per, powers, powers.size - 1, 0, digits)
     end
@@ -1620,7 +1731,7 @@ pub struct BigInt
         append_digits(radix, chunk, per, powers, level - 1, width, sink)
       else
         split = per.unsafe_shl(level)
-        halves = divmod_recursive(powers[level])
+        halves = divmod(powers[level])
         halves[1].append_digits(radix, chunk, per, powers, level - 1, split, sink)
         halves[0].append_digits(radix, chunk, per, powers, level - 1, width > 0 ? width - split : 0, sink)
       end
@@ -1676,13 +1787,13 @@ pub struct BigInt
   # first, as long division takes a digit at a time; the rest is shifted so
   # that the divisor's length halves evenly down to where long division is
   # the faster, and the remainder shifted back.
-  protected def divmod_recursive(divisor : BigInt) : Tuple(BigInt, BigInt)
+  protected def divmod_recursive_into(divisor : BigInt, scratch : RisBigScratch) : Tuple(BigInt, BigInt)
     n = BigInt.bit_length(divisor)
     high = self >> n
     if high.cmp_abs(divisor) >= 0
-      q, r = high.divmod_recursive(divisor)
-      low, r = ((r << n) + bits(0, n)).divmod_recursive(divisor)
-      return {(q << n) + low, r}
+      q, r = high.divmod_recursive_into(divisor, scratch)
+      low, r = ((r << n) + bits(0, n)).divmod_recursive_into(divisor, scratch)
+      return scratch.pair({(q << n) + low, r})
     end
     m = n
     k = 0
@@ -1691,8 +1802,8 @@ pub struct BigInt
       k = k + 1
     end
     pad = (m << k) - n
-    q, r = (self << pad).div_two_by_one(divisor << pad, m << k)
-    {q, r >> pad}
+    q, r = (self << pad).div_two_by_one_into(divisor << pad, m << k, scratch)
+    scratch.pair({q, r >> pad})
   end
 
   # This value, under `divisor * 2^n`, by `divisor`, exactly `n` bits long
@@ -1700,36 +1811,43 @@ pub struct BigInt
   # `n + n/2` bits by the divisor, then the remainder and the next `n/2`.
   # Each is a division by the divisor's top half, a product by its bottom
   # half, and at most two corrections, the divisor's top bit being set.
-  protected def div_two_by_one(divisor : BigInt, n : Int32) : Tuple(BigInt, BigInt)
-    return divmod_long(divisor) if BigInt.bit_length(self) - n <= DIVIDE_SPLIT_BITS
+  protected def div_two_by_one_into(divisor : BigInt, n : Int32, scratch : RisBigScratch) : Tuple(BigInt, BigInt)
+    return divmod_long_into(divisor, scratch) if BigInt.bit_length(self) - n <= DIVIDE_SPLIT_BITS
     half = n >> 1
     top = divisor >> half
     bottom = divisor.bits(0, half)
-    high, r = (self >> n).div_three_by_two(bits(half, half), divisor, top, bottom, half)
-    low, r = r.div_three_by_two(bits(0, half), divisor, top, bottom, half)
-    {(high << half) + low, r}
+    high, r = (self >> n).div_three_by_two_into(bits(half, half), divisor, top, bottom, half, scratch)
+    low, r = r.div_three_by_two_into(bits(0, half), divisor, top, bottom, half, scratch)
+    scratch.pair({(high << half) + low, r})
   end
 
   # This value's `2n` bits and `low`'s `n` by `b`, `top` and `bottom` its
   # halves of `n` bits each.
-  protected def div_three_by_two(low : BigInt, b : BigInt, top : BigInt, bottom : BigInt, n : Int32) : Tuple(BigInt, BigInt)
+  protected def div_three_by_two_into(low : BigInt, b : BigInt, top : BigInt, bottom : BigInt, n : Int32, scratch : RisBigScratch) : Tuple(BigInt, BigInt)
     if (self >> n).cmp_abs(top) == 0
       q = (BigInt.one << n) - BigInt.one
       r = self - (top << n) + top
     else
-      q, r = div_two_by_one(top, n)
+      q, r = div_two_by_one_into(top, n, scratch)
     end
-    r = (r << n) + low - q * bottom
+    q = scratch.keep(q)
+    r = scratch.keep((r << n) + low - q * bottom)
     while r.negative?
-      q = q - BigInt.one
-      r = r + b
+      q = scratch.keep(q - BigInt.one)
+      r = scratch.keep(r + b)
     end
-    {q, r}
+    scratch.pair({q, r})
   end
 
   # `count` bits of this value, not negative, from bit `from` up, in one
   # copy.
   protected def bits(from : Int32, count : Int32) : BigInt
+    BigInt.new(self, from, count, RisBigBits.new)
+  end
+
+  def initialize(left : BigInt, from : Int32, count : Int32, operation : RisBigBits)
+    @sign = left.sign
+    @limbs = left.limbs
     size = (count + 31) >> 5
     res = Array(UInt64).new(size)
     start = from >> 5
@@ -1743,7 +1861,7 @@ pub struct BigInt
       i = i + 1
     end
     res[size - 1] = res[size - 1] & (1_u64.unsafe_shl((count & 31).to_u64) - 1_u64) if count & 31 != 0
-    BigInt.new(1, res)
+    initialize(1, res)
   end
 
   # The bits |value| takes to write.
@@ -1864,9 +1982,7 @@ impl Num for BigInt
   end
 
   def self.one : self
-    arr = Array(UInt64).new
-    arr << 1_u64
-    BigInt.new(1, arr)
+    BigInt.new(1, [1_u64])
   end
 
   def add(other : self) : self

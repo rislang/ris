@@ -305,7 +305,12 @@ pub class AcmeClient
   MAX_BODY   = 1048576_i64
   USER_AGENT = "iyi-acme"
 
-  getter directory : AcmeDirectory
+  @directory : AcmeDirectory? = nil
+  getter error : AcmeError? = nil
+
+  def directory : AcmeDirectory
+    directory.as(AcmeDirectory)
+  end
   getter key : SigningKey
   # The account's URL, the `kid` every request after newAccount carries.
   getter account_url : String? = nil
@@ -334,18 +339,33 @@ pub class AcmeClient
   # session that kept it need not register again. Both are `https://`.
   # Supply a task-owned HTTPClient as http for independent TLS trust
   # and transport state; the caller closes that client after the session.
-  def self.new(url : String, key : SigningKey, timeout_ms : Int32 = 30000, account_url : String? = nil, http : HTTPClient? = nil) : AcmeClient | AcmeError
-    raise "acme: a timeout is a count of milliseconds, at least 1, not #{timeout_ms}" if timeout_ms < 1
+  def initialize(@directory_url : String, @key : SigningKey,
+                 @timeout_ms : Int32 = 30000, account_url : String? = nil,
+                 @http : HTTPClient? = nil)
+    @thumbprint = AcmeJws.thumbprint(@key.public_key)
+    @account_url = account_url
+    raise "acme: a timeout must be at least 1 ms" if @timeout_ms < 1
     if account_url
-      refused = https(account_url, "the account")
-      return refused if refused
+      if refused = AcmeClient.https(account_url, "the account")
+        @error = refused
+        return
+      end
     end
-    response = AcmeClient.exchange("GET", url, "", nil, timeout_ms, http)!
-    problem = response.problem("the directory")
-    return problem if problem
-    client = AcmeClient.new(url, key, AcmeDirectory.parse(response.body)!, timeout_ms, http)
-    client.account = account_url
-    client
+    response = AcmeClient.exchange("GET", @directory_url, "", nil, @timeout_ms, @http)
+    if response.is_a?(AcmeError)
+      @error = response
+      return
+    end
+    if problem = response.problem("the directory")
+      @error = problem
+      return
+    end
+    parsed = AcmeDirectory.parse(response.body)
+    if parsed.is_a?(AcmeError)
+      @error = parsed
+    else
+      @directory = parsed
+    end
   end
 
   # Nil when *url* is an `https://` URL with a host, else the error that
@@ -390,7 +410,7 @@ pub class AcmeClient
   # *terms_agreed* - or only found when *only_existing*: its URL, which
   # every request after this carries as `kid`.
   def register(contact : Array(String) = [] of String, terms_agreed : Bool = false, only_existing : Bool = false) : String | AcmeError
-    if @directory.external_account_required
+    if directory.external_account_required
       return AcmeError.new("the server requires external account binding (RFC 8555 section 7.3.4), which this does not do")
     end
     payload = JSON.build do |json|
@@ -404,7 +424,7 @@ pub class AcmeClient
         end
       end
     end
-    response = post(@directory.new_account, payload)!
+    response = post(directory.new_account, payload)!
     url = response.location
     return AcmeError.new("newAccount answered #{response.status} without the account's Location") unless url
     refused = AcmeClient.https(url, "newAccount's Location")
@@ -420,7 +440,7 @@ pub class AcmeClient
   # signed by the new key, carrying its `jwk`, inside one the old key
   # signs as the account.
   def roll_key(new_key : SigningKey) : Nil | AcmeError
-    url = @directory.key_change
+    url = directory.key_change
     return AcmeError.new("the directory names no keyChange") unless url
     account = @account_url
     return AcmeError.new("a key is rolled over for an account: register first") unless account
@@ -454,7 +474,7 @@ pub class AcmeClient
         end
       end
     end
-    response = post(@directory.new_order, payload)!
+    response = post(directory.new_order, payload)!
     url = response.location
     return AcmeError.new("newOrder answered #{response.status} without the order's Location") unless url
     refused = AcmeClient.https(url, "newOrder's Location")
@@ -540,7 +560,7 @@ pub class AcmeClient
     retries = 0
     while true
       nonce = take_nonce!
-      use_jwk = url == @directory.new_account
+      use_jwk = url == directory.new_account
       kid = use_jwk ? nil : @account_url
       return AcmeError.new("a request to #{url} before the account is known: register first") unless use_jwk || kid
       body = AcmeJws.sign(@key, AcmeJws.header(@key, nonce, url, kid), payload)
@@ -565,7 +585,7 @@ pub class AcmeClient
       @nonce = nil
       return held
     end
-    response = AcmeClient.exchange("HEAD", @directory.new_nonce, "", nil, @timeout_ms, @http)!
+    response = AcmeClient.exchange("HEAD", directory.new_nonce, "", nil, @timeout_ms, @http)!
     problem = response.problem("newNonce")
     return problem if problem
     nonce = response.nonce
@@ -916,14 +936,37 @@ pub struct AcmeTlsAlpn01
   # The identity a std/tls server shows for *domain*: `certificate`
   # under a P-256 key made for it. Its config is the caller's owner:
   # `config = TlsServerConfig.new(identity)`, its `alpn` [PROTOCOL] alone.
-  def self.identity(domain : String, key_authorization : String) : TlsIdentity | AcmeError
+  def self.identity(*args, **options)
+    {% raise "ACME identities have an owner: declare prepared =
+" +
+      "RisAcmeTlsIdentity.new(domain, key_authorization), check prepared.error,
+" +
+      "and use prepared.identity in TlsServerConfig.new." %}
+  end
+end
+
+pub class RisAcmeTlsIdentity
+  @identity : TlsIdentity? = nil
+  getter error : AcmeError? = nil
+
+  def initialize(domain : String, key_authorization : String)
     key = SigningKey.p256
-    der = certificate(domain, key_authorization, key)!
+    der = AcmeTlsAlpn01.certificate(domain, key_authorization, key)
+    if der.is_a?(AcmeError)
+      @error = der
+      return
+    end
     private_key = key.p256
     raise "acme: a P-256 SigningKey without its key" unless private_key
-    identity = TlsIdentity.from_der([der], private_key)
-    return AcmeError.new("the tls-alpn-01 identity for #{domain}: #{identity.message}") if identity.is_a?(TlsError)
-    identity
+    identity = TlsIdentity.new([der], private_key)
+    @identity = identity
+    if problem = identity.error
+      @error = AcmeError.new("the tls-alpn-01 identity for #{domain}: #{problem.message}")
+    end
+  end
+
+  def identity : TlsIdentity
+    @identity.as(TlsIdentity)
   end
 end
 

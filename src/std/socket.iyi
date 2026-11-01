@@ -600,11 +600,14 @@ pub struct IyiSocket
     port : Int32,
     timeout_ms : Int32 = -1,
   ) : IyiSocket | Cancelled | SocketError
+    # A choice of two calls, so the socket is made in the caller's scope.
+    IyiSocket.named_checked?(host, timeout_ms) ? connect_named(host, port, Resolver.system, timeout_ms) : connect_address(host, port, timeout_ms)
+  end
+
+  # Whether *host* is a name to look up; a negative timeout is refused.
+  def self.named_checked?(host : String, timeout_ms : Int32) : ::Bool
     raise "negative timeout: #{timeout_ms}" if timeout_ms < -1
-    if named?(host)
-      return connect_named(host, port, Resolver.system, timeout_ms)
-    end
-    connect_address(host, port, timeout_ms)
+    named?(host)
   end
 
   # The same to an address, IPv4 or IPv6 (bare or in brackets), or
@@ -647,10 +650,7 @@ pub struct IyiSocket
     resolver : Resolver,
     timeout_ms : Int32 = -1,
   ) : IyiSocket | Cancelled | SocketError
-    if named?(host)
-      return connect_named(host, port, resolver, timeout_ms)
-    end
-    connect(host, port, timeout_ms)
+    IyiSocket.named_checked?(host, timeout_ms) ? connect_named(host, port, resolver, timeout_ms) : connect_address(host, port, timeout_ms)
   end
 
   # A host that is a name to look up rather than an address to read: a

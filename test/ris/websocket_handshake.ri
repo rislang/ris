@@ -28,6 +28,7 @@ struct Echo
     WebSocket.serve(socket, leftover, response) do |ws|
       got = ws.receive
       ws.send("echo #{got.data}") if got.is_a?(Message)
+      nil
     end
   end
 end
@@ -58,7 +59,8 @@ group do |g|
   end
   RisBoard.take(Listening).or_panic
   tape do
-    ws = WebSocket.connect("ws://127.0.0.1:#{port}/", protocols: ["chat"])
+    connection = WebSocket.new
+    ws = connection.connect("ws://127.0.0.1:#{port}/", protocols: ["chat"])
     if ws.is_a?(WebSocket)
       terms = ws.deflate
       puts "protocol #{ws.protocol}"

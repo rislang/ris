@@ -164,8 +164,16 @@ pub class SmtpClient
   @held : String = ""
   @closed : Bool = false
 
+  # The TLS connection this session refills when it goes under TLS.
+  @tls_slot : TlsClient
+  @tls_config : TlsConfig
+
   def initialize(@socket : IyiSocket, @host : String, @helo : String, @timeout_ms : Int32)
     @greeting = SmtpReply.new(0, [] of String)
+    config = TlsConfig.new
+    @tls_config = config
+    slot = TlsClient.new(@host, config)
+    @tls_slot = slot
   end
 
   # A session with *host* on *port*: connected, greeted, EHLO said, and
@@ -231,8 +239,10 @@ pub class SmtpClient
   end
 
   private def secure(config : TlsConfig) : SmtpError?
-    conn = TlsClient.over(@socket, @host, config, @timeout_ms)
-    return fail("the TLS handshake with #{@host} failed: #{conn.message}", conn.timed_out?) if conn.is_a?(TlsError)
+    conn = @tls_slot
+    conn.configure(@socket, @host, config)
+    problem = conn.over(@timeout_ms)
+    return fail("the TLS handshake with #{@host} failed: #{problem.message}", problem.timed_out?) if problem
     @tls = conn
     nil
   end

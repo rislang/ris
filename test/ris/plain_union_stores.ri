@@ -1,0 +1,17 @@
+class State
+  property value : String | Cancelled | Nil = "hello"
+end
+def empty(state : State) : Nil
+  state.value = nil
+end
+def cancel(state : State) : Nil
+  state.value = Cancelled.new
+  nil
+end
+state = State.new
+3.times do
+  empty(state)
+  cancel(state)
+  nil
+end
+puts state.value.is_a?(Cancelled)

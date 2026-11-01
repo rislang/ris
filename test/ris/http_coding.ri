@@ -21,19 +21,26 @@ struct Coded
   end
 
   def call(req : Request) : Response
+    Response.new(200, coded(req.path),
+      {"Content-Encoding" => coding(req.path)})
+  end
+
+  def coding(path : String) : String
+    path == "/gzip" || path == "/bad" ? "gzip" :
+      (path == "/zstd" ? "zstd" : "deflate")
+  end
+
+  def coded(path : String) : String
     text = "coded body, line after line. " * 3000
-    path = req.path
-    body = if path == "/gzip"
-             Gzip.compress(text)
-           elsif path == "/zlib" || path == "/bare"
-             path == "/zlib" ? Zlib.compress(text) : Deflate.compress(text)
-           elsif path == "/zstd"
-             Zstd.compress(text)
-           else
-             "not gzip at all"
-           end
-    name = path == "/gzip" || path == "/bad" ? "gzip" : (path == "/zstd" ? "zstd" : "deflate")
-    Response.new(200, body, {"Content-Encoding" => name})
+    if path == "/gzip"
+      Gzip.compress(text)
+    elsif path == "/zlib" || path == "/bare"
+      path == "/zlib" ? Zlib.compress(text) : Deflate.compress(text)
+    elsif path == "/zstd"
+      Zstd.compress(text)
+    else
+      "not gzip at all"
+    end
   end
 end
 

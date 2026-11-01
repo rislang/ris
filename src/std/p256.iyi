@@ -99,16 +99,46 @@ pub struct P256PrivateKey
   # The key whose d is *bytes*, 32 big-endian, or why it is not one: not
   # 32 bytes, or not in [1, n - 1].
   def self.from_bytes(bytes : String | Array(UInt8)) : P256PrivateKey | EcdsaError
+    if why = check_bytes(bytes)
+      EcdsaError.new(why)
+    else
+      P256PrivateKey.new(bytes)
+    end
+  end
+
+  private def self.check_bytes(bytes : String | Array(UInt8)) : String?
     raw = bytes.is_a?(String) ? Array(UInt8).new(bytes.bytesize) { |i| bytes.byte_at(i) } : bytes
-    return EcdsaError.new("a P-256 private key is 32 bytes, not #{raw.size}") unless raw.size == 32
+    return ("a P-256 private key is 32 bytes, not #{raw.size}") unless raw.size == 32
     d = P256Num.from_bytes(raw, 0)
     unless P256Num.below?(d, P256Num.n) && !d.zero?
-      return EcdsaError.new("a P-256 private key is a number from 1 to n - 1")
+      return ("a P-256 private key is a number from 1 to n - 1")
     end
     point = P256Point.base_mult(d).encoded
     public = EcdsaPublicKey.from_point(EcdsaCurve::P256, point)
-    return public if public.is_a?(EcdsaError)
-    P256PrivateKey.new(d, public, point)
+    return public.message[7, public.message.bytesize - 7].dup if public.is_a?(EcdsaError)
+    nil
+  end
+
+  def initialize(bytes : String | Array(UInt8))
+    raw = bytes.is_a?(String) ? Array(UInt8).new(bytes.bytesize) { |i| bytes.byte_at(i) } : bytes
+    @d = P256Num.from_bytes(raw, 0)
+    @public_point = P256Point.base_mult(@d).encoded
+    @public_key = EcdsaPublicKey.new(EcdsaCurve::P256, @public_point)
+  end
+
+  def initialize(der : Array::View(UInt8), pkcs8 : Bool)
+    contents = der
+    if pkcs8
+      top = Der.parse(der).or_panic
+      fields = top.sequence.or_panic
+      contents = fields[2].octet_string.or_panic
+    end
+    top = Der.parse(contents).or_panic
+    fields = top.sequence.or_panic
+    raw = fields[1].octet_string.or_panic
+    @d = P256Num.from_bytes(raw, 0)
+    @public_point = P256Point.base_mult(@d).encoded
+    @public_key = EcdsaPublicKey.new(EcdsaCurve::P256, @public_point)
   end
 
   # ECDH: x of [d]Q for the peer's point Q, 32 bytes big-endian - or why
@@ -122,66 +152,82 @@ pub struct P256PrivateKey
   # A PKCS #8 OneAsymmetricKey (RFC 5958) holding a P-256 key: version 0 or
   # 1, the algorithm id-ecPublicKey with prime256v1, and an ECPrivateKey
   # inside the privateKey OCTET STRING.
-  def self.from_pkcs8(der : Array(UInt8)) : P256PrivateKey | EcdsaError
+  def self.from_pkcs8(der : Array::View(UInt8)) : P256PrivateKey | EcdsaError
+    if why = check_pkcs8(der)
+      EcdsaError.new(why)
+    else
+      P256PrivateKey.new(der, true)
+    end
+  end
+
+  private def self.check_pkcs8(der : Array::View(UInt8)) : String?
     top = Der.parse(der)
-    return EcdsaError.new("the private key: #{top.message}") if top.is_a?(Asn1Error)
+    return ("the private key: #{top.message}") if top.is_a?(Asn1Error)
     fields = top.sequence
-    return EcdsaError.new("the private key: #{fields.message}") if fields.is_a?(Asn1Error)
-    return EcdsaError.new("the private key: a OneAsymmetricKey of #{fields.size} values") if fields.size < 3
+    return ("the private key: #{fields.message}") if fields.is_a?(Asn1Error)
+    return ("the private key: a OneAsymmetricKey of #{fields.size} values") if fields.size < 3
     version = fields[0].integer
-    return EcdsaError.new("the private key: version #{version}, not 0 or 1") unless version == 0_i64 || version == 1_i64
+    return ("the private key: version #{version}, not 0 or 1") unless version == 0_i64 || version == 1_i64
     algorithm = fields[1].sequence
-    return EcdsaError.new("the private key: an AlgorithmIdentifier that is not a SEQUENCE") if algorithm.is_a?(Asn1Error) || algorithm.empty?
+    return ("the private key: an AlgorithmIdentifier that is not a SEQUENCE") if algorithm.is_a?(Asn1Error) || algorithm.empty?
     kind = algorithm[0].oid
-    return EcdsaError.new("the private key is for #{kind.is_a?(String) ? kind : "no OID"}, not id-ecPublicKey (1.2.840.10045.2.1)") unless kind == "1.2.840.10045.2.1"
-    return EcdsaError.new("the private key: an id-ecPublicKey with no named curve") unless algorithm.size == 2
+    return ("the private key is for #{kind.is_a?(String) ? kind : "no OID"}, not id-ecPublicKey (1.2.840.10045.2.1)") unless kind == "1.2.840.10045.2.1"
+    return ("the private key: an id-ecPublicKey with no named curve") unless algorithm.size == 2
     curve = algorithm[1].oid
-    return EcdsaError.new("the private key is on #{curve.is_a?(String) ? curve : "no named curve"}, not prime256v1 (1.2.840.10045.3.1.7)") unless curve == P256Point::CURVE_OID
+    return ("the private key is on #{curve.is_a?(String) ? curve : "no named curve"}, not prime256v1 (1.2.840.10045.3.1.7)") unless curve == P256Point::CURVE_OID
     inner = fields[2].octet_string
-    return EcdsaError.new("the private key: #{inner.message}") if inner.is_a?(Asn1Error)
-    from_sec1(inner)
+    return ("the private key: #{inner.message}") if inner.is_a?(Asn1Error)
+    check_sec1(inner)
   end
 
   # SEC 1's ECPrivateKey (RFC 5915): version 1, the 32-byte private key,
   # then optionally the curve ([0], which must be prime256v1) and the
   # public key ([1], which must be the private key's).
-  def self.from_sec1(der : Array(UInt8)) : P256PrivateKey | EcdsaError
+  def self.from_sec1(der : Array::View(UInt8)) : P256PrivateKey | EcdsaError
+    if why = check_sec1(der)
+      EcdsaError.new(why)
+    else
+      P256PrivateKey.new(der, false)
+    end
+  end
+
+  private def self.check_sec1(der : Array::View(UInt8)) : String?
     top = Der.parse(der)
-    return EcdsaError.new("the private key: #{top.message}") if top.is_a?(Asn1Error)
+    return ("the private key: #{top.message}") if top.is_a?(Asn1Error)
     fields = top.sequence
-    return EcdsaError.new("the private key: #{fields.message}") if fields.is_a?(Asn1Error)
-    return EcdsaError.new("the private key: an ECPrivateKey of #{fields.size} values") if fields.size < 2
-    return EcdsaError.new("the private key: an ECPrivateKey whose version is not 1") unless fields[0].integer == 1_i64
+    return ("the private key: #{fields.message}") if fields.is_a?(Asn1Error)
+    return ("the private key: an ECPrivateKey of #{fields.size} values") if fields.size < 2
+    return ("the private key: an ECPrivateKey whose version is not 1") unless fields[0].integer == 1_i64
     secret = fields[1].octet_string
-    return EcdsaError.new("the private key: #{secret.message}") if secret.is_a?(Asn1Error)
+    return ("the private key: #{secret.message}") if secret.is_a?(Asn1Error)
     key = from_bytes(secret)
-    return key if key.is_a?(EcdsaError)
+    return key.message[7, key.message.bytesize - 7].dup if key.is_a?(EcdsaError)
     i = 2
     while i < fields.size
       field = fields[i]
       if field.context?(0)
         named = field.explicit(0)
         oid = named.is_a?(Asn1Error) ? named : named.oid
-        return EcdsaError.new("the private key names a curve that is not prime256v1") unless oid == P256Point::CURVE_OID
+        return ("the private key names a curve that is not prime256v1") unless oid == P256Point::CURVE_OID
       elsif field.context?(1)
         bits = field.explicit(1)
-        return EcdsaError.new("the private key: its public key is not a BIT STRING") if bits.is_a?(Asn1Error)
+        return ("the private key: its public key is not a BIT STRING") if bits.is_a?(Asn1Error)
         point = bits.bit_string
-        return EcdsaError.new("the private key: its public key is not a BIT STRING") if point.is_a?(Asn1Error)
+        return ("the private key: its public key is not a BIT STRING") if point.is_a?(Asn1Error)
         carried = EcdsaPublicKey.from_point(EcdsaCurve::P256, point)
-        return EcdsaError.new("the private key: its public key is not the private key's") unless carried.is_a?(EcdsaPublicKey) && carried.x == key.public_key.x && carried.y == key.public_key.y
+        return ("the private key: its public key is not the private key's") unless carried.is_a?(EcdsaPublicKey) && carried.x == key.public_key.x && carried.y == key.public_key.y
       else
-        return EcdsaError.new("the private key: #{field.describe} where a curve or a public key belongs")
+        return ("the private key: #{field.describe} where a curve or a public key belongs")
       end
       i = i + 1
     end
-    key
+    nil
   end
 
   # The signature of *message* under *hash*: the DER of Ecdsa-Sig-Value,
   # SEQUENCE { r INTEGER, s INTEGER }, as X.509 and TLS 1.3 carry it. The
   # nonce is RFC 6979's, so the same key and message sign alike.
-  def sign(hash : EcdsaHash, message : String | Array(UInt8)) : Array(UInt8)
+  def sign(hash : EcdsaHash, message : String | Array::View(UInt8)) : Array(UInt8)
     bytes = message.is_a?(String) ? Array(UInt8).new(message.bytesize) { |i| message.byte_at(i) } : message
     r, s = sign_digest(hash, hash.digest(bytes))
     P256Der.signature(r.to_bytes, s.to_bytes)
