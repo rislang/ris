@@ -23,7 +23,7 @@ back.
   the supplied transport; the protocol and default API stay unchanged.
 
 * std/signal: syscall scratch buffers use fixed stack storage. Signal
-  lists use Ary in ris; keep the Array variant in iyi.
+  lists use ris's tape Array; keep iyi's heap Array variant in iyi.
 
 * std/socket: optional SO_REUSEPORT on Linux and Darwin, with explicit
   refusal elsewhere; value-returning listen_result closes failed setup
@@ -93,8 +93,8 @@ back.
 * `1d4f7ed68` Say which manifest a build read when an import is not found.
 * std/socket: `IyiSocket#write(first, second)`, two buffers in one
   `sendmsg`/`writev`. Written apart, a response's head and body wait on
-  the client's delayed ACK (Nagle), 40 ms each (web, 2026-10-17). Take the
-  `String` overload; the `Str` one stays in ris.
+  the client's delayed ACK (Nagle), 40 ms each (web, 2026-10-17). Take iyi's
+  heap `String` overload; the tape one stays in ris.
 * `IyiScheduler.current`: the running fiber inline, the first touch out of
   line. Two calls a `tape` made it 0.7% of respond (2026-10-18).
 * `IyiScheduler.register`: a fiber list per thread, no runtime lock per
@@ -108,7 +108,7 @@ back.
 * `IyiFloatText.write(bits, buffer)` / `format_into`: a float's text into
   a buffer, `to_s` on top. Keep bounded copies as fixed stores so LLVM 23
   does not introduce libc `memcpy` on Darwin after the extraction.
-  `Str::Builder#append_float` stays in ris.
+  `String::Builder#append_float` stays in ris.
 * Both are iyi's branch `json-float-from-ris` (`c02af8fac`), not merged.
 * `Pointer#unaligned_value`(`=`): an `align 1` access; `memcpy` copies
   words at any address on x86_64 and aarch64, its tail as one last word.

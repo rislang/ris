@@ -39,34 +39,35 @@ ris is iyi plus Goose's tape memory. These rules are for every agent.
 
 It returns tape data on the caller's tape; the owning scope frees it all:
 
-* Take input already on the tape (`String`), not a `String` copy of it.
+* Take input as a `String` and borrow it; never copy text to accept it.
 * Write into the caller's `String::Builder`, or return a `String` or an
   `@[OnTape]` struct viewing the input bytes rather than copying them.
 * Temporaries go on the caller's tape: a nested `tape` block shares it at
   no cost. Every def, loop round and block frees its own temporaries when
   it ends (SPEC 1.1); there is no `local_tape`.
 * The caller decides what outlives its tape: `copy_to(owner)` on a `String`,
-  `Array` or `@[OnTape]` struct. `to_heap`, `to_s` to a `String` and
-  `@[TapeToHeap]` are migration paths, each a marked heap site to remove.
+  `Array`, `@[OnTape]` struct or class. There is no heap: `to_heap` is a
+  historical spelling of a copy on the current tape, to remove.
   Writing into the caller's `String::Builder` beats building, then copying.
+* A def's result follows SPEC 1.5 and 1.9: end the def with the call, grow a
+  local in place, or append to a parameter. A copy is always written.
 * No raw pointers in an API: pass `String`, `String::Builder`, `Array` or an
   `@[OnTape]` struct. Outside `std/` the compiler refuses a `String`'s
   `to_unsafe` and `String.new(pointer, size)`; a caller reads with `[]`,
   `[start, count]`, `each_byte`. Only the FFI or socket call takes a pointer.
   In an `@[Ffi]` module `text.to_unsafe` may only be a `lib` fun's argument.
-* A `String` API beside it is migration only, built on the tape one; new
-  code takes `String`. In `std/` a def handing a pointer to the OS is a small
-  `@[TapeUnsafe]` with a reason. `src/iyi/` is exempt.
+* In `std/` a def handing a pointer to the OS is a small `@[TapeUnsafe]`
+  with a reason. `src/iyi/` is exempt.
 
-Example: `HTTP.parse_head(bytes : String) : ParsedHead | ParseError`, its
-fields views into *bytes*; `parse_request(text : String)` stays only until
-migrated. A web server keeps a request's bytes, temporaries and response
-on one tape.
+Example: `HeadParser.parse_head(bytes : String, from : Int32, complete :
+Bool, fields : Array(Field)) : ParsedHead | HeadError | Nil`: its answer and
+the caller's *fields* view *bytes*. A web server keeps a request's bytes,
+temporaries and response on one tape.
 
 ## Fast on the tape
 
-* Nothing frees before its block ends: refill an `Array` field with `clear`,
-  never a new one per call (the compiler refuses it).
+* Nothing frees before its def, round or block ends: refill an `Array`
+  field with `clear`, never a new one per call (the compiler refuses it).
 * Size growing values from the input up front: each reserves its own
   address space, so growth never moves it. `RIS_TAPE_STATS=1` reports
   side transfers and growth moves: both should read 0.

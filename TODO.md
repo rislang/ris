@@ -14,8 +14,7 @@ How to work (fewer tokens, faster to the goal):
 
 ## Now: code to the new SPEC (1.1, 1.5, 1.9, 2.1, 3.2, 3.3, 3.5, 3.6)
 
-Breakage between steps is fine; no transition stages. Step 2 and
-step 4's clusters can run in parallel (different files).
+Breakage between steps is fine; no transition stages.
 
 Fewest tokens: the compiler's refusals are the list. One task per
 clone (ris1/2/3) and per cluster below; build with
@@ -24,14 +23,6 @@ refusal of a file at once, fix by message, rerun only that cluster's
 files; one full check.sh on minitest per finished step, not per fix.
 Fix a checker hole below only when a cluster hits it.
 
-2. Docs to the SPEC (doc-only: no build, no check.sh). Run
-   `/egm:egm-drift-report` on AGENTS.md, LEARN.md, README.md and
-   UPSTREAM.md (CONTRIBUTING.md, Design checks) and fix the drift; the
-   report is a worksheet, not committed. Also rewrite doc/TAPE_API.md's
-   owner section for 2.1 and rename Str/Ary/Tre to String/Array/RisTree
-   in README.md, CONTRIBUTING.md, LEARN.md, UPSTREAM.md, LLVM.md,
-   doc/TAPE_API.md, doc/STD_PORT.md and doc/MESSAGES.md (check each hit
-   is the old type name). Lines at most 80 characters.
 4. Samples and tests, group by group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
    refusal. check.sh: 19 FAILED. Patterns that work: read into one flat
@@ -67,6 +58,10 @@ Fix a checker hole below only when a cluster hits it.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
 
+* SPEC 3.3: `v = w.rows`, `w.rows.clear`, `puts v.size` passes: a view
+  taken through a getter stays live over the clear. Refuse it.
+* SPEC 2.2: `initialize` may pass `self` to a helper that grows a field
+  mid-construction, unrefused. Refuse it or allow it in the SPEC.
 * `IyiSocket.listen_result` answered a socket made after other work
   inside a union (`IyiSocket | SocketError`), unrefused; the socket was
   freed with the def and every worker accepted on fd 0. Refuse a class

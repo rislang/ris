@@ -10,7 +10,7 @@
 5. [iyi references](doc/reference/iyi/README.md): unchanged language and
    library rules. Check snapshot version notes; look up only what you need.
 ## 2. The language, in short
-Read-only text parameters take `Str`; retaining ones may take `String`.
+Text parameters take `String` and borrow it; nothing copies it to accept it.
 
 * A file is a module: `.ri`, first line `module shop/order`. Its path is
   the import path; there is no `require`.
@@ -23,6 +23,7 @@ Read-only text parameters take `Str`; retaining ones may take `String`.
 * Errors are union members, no exceptions to catch:
 
 ```crystal
+@[OnTape]
 pub struct ParseError
   getter message : String
   def initialize(@message : String)
@@ -31,14 +32,14 @@ end
 impl Error for ParseError
 end
 
-pub def parse_age(text : Str) : Int32 | ParseError
+pub def parse_age(text : String) : Int32 | ParseError
   age = text.to_i?
-  return ParseError.new("not a number: #{text}".to_heap) unless age
+  return ParseError.new("not a number: #{text}") unless age
   age
 end
 
 def greet(text : String) : String | ParseError
-  "age #{parse_age(text)!}".to_heap # `!` returns an error
+  "age #{parse_age(text)!}" # `!` returns an error
 end
 
 puts greet("41").or_panic             # => age 41
@@ -49,25 +50,28 @@ end
 ```
 
 * Memory: main and every spawned fiber have an implicit owning tape.
-  Literals are static `Str` views; interpolation builds a `Str` there.
-  Plain literals use static String in heap places, without copying. Other
-  tape text needs `.to_heap`; locals stay Str. `text.as_tape` borrows String;
-  a `Str` reads as a String does (`[a..]`, `split`, `index`,
-  `to_i`), a `Str::Builder` takes `<<`, `Ary(T)` and
-  `@[OnTape]` structs hold the rest, and `to_heap` copies what must
-  outlive the tape. A nested `tape` shares it. Every def, loop round and
-  block frees its temporaries when it ends; keeping one past its end is
+  Literals are static `String` views; interpolation builds a `String` there.
+  A `String` reads as in Ruby (`[a..]`, `split`, `index`, `to_i`) and is
+  read-only; `s << x` on a local or field grows it in place. `Array(T)`,
+  `Hash`, `RisTree(T)`, `@[OnTape]` structs and classes hold the rest, all on
+  the tape: no heap, no GC. `copy_to(owner)` copies what must outlive its
+  scope (`Program.tape`). A nested `tape` shares it. Every def, loop round
+  and block frees its temporaries when it ends; keeping one past its end is
   a compile error naming the safe form (SPEC 1.1, 3.6).
-  Ordinary objects (`String`, `Array`, classes) still use the GC.
+* A def's result is built in its caller's scope: end the def with the call,
+  grow a local and return it, or append to a parameter (SPEC 1.5, 1.9).
+* A class with a growing field (`Array`, `RisTree`, a builder) is an owner:
+  build it only as `x = T.new` at a named declaration, then pass and alias
+  it freely; a def never returns its own local one (SPEC 2.1).
 
 Byte pools: `read_bytes_at(UInt32, at)`, `write_bytes_at(at, v)`, append
 `write_bytes(v)`; no byte loops. Lines: `read_line_tape` on the tape. Integer
 `/` in text is refused (a Float): `a // b`, or `a.to_f / b` for a Float.
-Lexers: `Str::Scanner` (`current_byte`, `advance`, `scan`, `skip`) holds text
+Lexers: `String::Scanner` (`current_byte`, `advance`, `scan`, `skip`) holds text
 and offset; `ris check` warns of an `@pos += 1` that indexes tape text.
 ## 3. Then install, and work in the loop
 
-Needs Crystal and LLVM. In the clone: `make ris`, then
+Needs Crystal and LLVM 23. In the clone: `make ris`, then
 `./bin/ris run samples/ris/hello.ri`. To install, follow README.md.
 
 * `ris init example.com/me/app` writes `ris.mod` and `app.ri`;

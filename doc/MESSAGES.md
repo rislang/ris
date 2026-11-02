@@ -52,14 +52,15 @@ user callbacks. Group end neither closes nor drains the board.
 
 A message is Copyable: it has a finite, self-contained packed form
 (Goose calls this flat). Copyable types are numeric scalars, Bool, Char,
-Symbol, Nil, enums, String, Array(T) and Tre(T) of Copyable T, and value
+Symbol, Nil, enums, String, Array(T) and RisTree(T) of Copyable T, and value
 structs or unions of these. The compiler infers this at post, take, poll
 and limit; no marker is needed. Copyable differs from @[Tape::Flat],
-which marks raw-byte images: String, Array and Tre are handles, and the board
-packs their live data, never their pointers. A type that contains itself
-through fields, unions, Array or Tre is refused; keep recursive data in a
-Tre or a node array with checked indices. User link fields stay refused;
-only Tre's own stop boundaries cross, relative to the copied entries. A
+which marks raw-byte images: String, Array and RisTree are handles, and
+the board packs their live data, never their pointers. A type that
+contains itself through fields, unions, Array or RisTree is refused; keep
+recursive data in a
+RisTree or a node array with checked indices. User link fields stay refused;
+only RisTree's own stop boundaries cross, relative to the copied entries. A
 post packs counts, fixed fields, union tags and live elements into one
 owned image, sized before publication, while the source stays unchanged;
 each handle occurrence gets its own copy, and an empty value still
@@ -80,7 +81,7 @@ The core has these physical bounds, independent of limit(T, n):
   tags and fixed fields. No pointer or spare container capacity is packed.
 * At most 1,048,576 value occurrences per message. The root, every struct
   field, every container element and each live union arm count. Container
-  lengths and Tre stop metadata occupy bytes but add no occurrences.
+  lengths and RisTree stop metadata occupy bytes but add no occurrences.
 
 An empty message still occupies one queue place and one image slot.
 Exceeding a physical bound follows SPEC 4.2, rather than returning
@@ -98,7 +99,7 @@ validate it before decoding. Static String uses the same copy rule; sharing
 static program data between tasks does not admit other views or pointers
 as messages.
 
-Unlike Goose, where arrays are values, String, Array and Tre are views on a
+Unlike Goose, where arrays are values, String, Array and RisTree are views on a
 tape, so the board packs their data. A miss is nil rather than Goose's
 zero T. Tasks are grouped fibers, with cancellable waits, Share checks
 and panic/defer cleanup. Every task, local or parallel, captures only

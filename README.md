@@ -3,14 +3,15 @@
 Programs always run without a collector on Linux x86_64 or aarch64.
 Heap allocation traps; use tape values and copy_to for retained data.
 
-ris is a Ruby-like language whose hot paths run on tape memory, with no GC,
+ris is a Ruby-like language whose data lives on tape memory, with no GC,
 built on [iyi](https://github.com/iyilang/iyi), a fork of Crystal. Source:
 [github.com/rislang/ris](https://github.com/rislang/ris).
 * **Ruby**: code that reads like prose; blocks, `each`, `map`, `do … end`.
 * **Crystal**: static types, nil-safety, native code through LLVM.
 * **iyi**: fast modular rebuilds; `check`, `fix`, `lsp`, `mcp` for agents.
 * **Rust**: `pub`, `impl`, closed classes, errors as return values.
-* **Go**: imports by URL (`github.com/…`), one `fmt`, fibers and channels.
+* **Go**: imports by URL (`github.com/…`), one `fmt`, fibers; messages
+  through RisBoard.
 * **Goose**: tape memory, bump-allocated and freed at once, with no GC.
 
 ## Install: paste to an agent on your machine (Claude Code, Codex, ...)
@@ -26,18 +27,19 @@ ask me to build your personal blog in ris ;-)" Don't start the blog.
 ```
 
 ## Why ris: tape memory, without the GC
-Parse a request and build its response on one tape: bump-allocated, freed
-when main or a spawned body ends. Each has an implicit tape; HTTP, JSON
-and Slim all work on it:
+Parse a request and build its response on one tape: bump-allocated, and
+every def, loop round and block frees what it made when it ends. Main and
+each fiber have an implicit tape; HTTP, JSON and Slim all work on it:
 
 ```crystal
-import std/http::{Server, ParsedHead}  # supports tape memory
+import std/http::{Server, ParsedHead, Field}  # supports tape memory
 import std/json::{JSON}                # supports tape memory
 import github.com/domify/slim::{Slim}  # supports tape memory
 bytes = "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n"
-req = Server.parse_head(bytes, 0, true) # fields view the bytes
+fields = Array(Field).new(16)
+req = Server.parse_head(bytes, 0, true, fields) # fields view the bytes
 if req.is_a?(ParsedHead)
-  body = Str.build do |writer| # JSON written on the tape
+  body = String.build do |writer| # JSON written on the tape
     writer.json { |json| json.object { json.field "path", req.target } }
   end
   puts body                             # => {"path":"/hello"}
@@ -45,12 +47,11 @@ if req.is_a?(ParsedHead)
 end
 ```
 
-Literals default to Str; heap places use static String without copying.
-Interpolation and other tape text need `.to_heap` for heap storage.
-Other objects use iyi's GC. Tape values go to a file or socket uncopied;
-`tape` blocks share it, and every def, loop round and block frees its own
-temporaries. The compiler refuses values outliving their scope;
-`text.to_heap` copies what must. [SPEC.md](SPEC.md).
+A literal is a String view of static bytes; interpolation builds a String
+on the tape. Classes live on the tape too; there is no heap. Tape values go
+to a file or socket uncopied; `tape` blocks share one tape. The compiler
+refuses values outliving their scope; `text.copy_to(owner)` copies what
+must. [SPEC.md](SPEC.md).
 
 ## How fast: [ris-bench](https://github.com/rislang/ris-bench)
 | `respond.ri`, 1.6M DTOs | ris | Goose | C++ | Rust | Go | Ruby² |

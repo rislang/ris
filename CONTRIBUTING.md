@@ -49,7 +49,7 @@ broader suites. Check formatting of changed Crystal files with
 
 ## Design and review
 
-* Library APIs work on the caller's tape: take `Str`, return tape views,
+* Library APIs work on the caller's tape: take `String`, return tape views,
   or write into the caller's builder. Copy retained data at the boundary.
 * Enforce safety in the compiler. Exceptions need a local mark and reason,
   never a global switch. Follow AGENTS.md for pointer and FFI boundaries.

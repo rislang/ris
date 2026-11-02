@@ -1,7 +1,7 @@
 # Porting std to tape-only ris
 
 [TAPE_TYPES.md](TAPE_TYPES.md) and SPEC section 7 define the model.
-String, Array, Hash and Tre are tape values. A string literal is a String
+String, Array, Hash and RisTree are tape values. A string literal is a String
 view of static bytes. There is no heap String, general heap, GC, fallback
 or transition type. Unchanged language rules are in doc/reference/iyi/.
 
