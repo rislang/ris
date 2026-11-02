@@ -12,6 +12,34 @@ How to work (fewer tokens, faster to the goal):
   git log. Remove an item when its guarantee passes its gate.
 * Linux x86_64 and aarch64 only (SPEC 7.1): no work for other targets.
 
+## Order of work
+
+Testing ris programs can start now: what a program hits comes first.
+The items are below; this is only their order.
+
+1. The user's own ris programs: each obstacle becomes an item here.
+2. Trial program obstacles, in this order: `OptionParser` String option,
+   Tuple `<`, `out` as a name, `ris doc std/http`, LEARN.md,
+   bench/std_json_exercise.iyi.
+3. `text.split` not refused in a round or yield: find the cause first,
+   it can leave a program using freed memory. Then `until` rounds,
+   TlsClient's ticket and SocketError in a socket union.
+4. Holes: `T.from_json` in a def, `Hash#update`'s block value,
+   RisBoard.take's result.
+5. Holes: SPEC 3.3 `clear`, a store into `self`'s field, a tape block
+   in a constant, the one-call def's default, `flat_result?` callers.
+6. Wrong refusals and the literal String's run-time error: when a program
+   hits one.
+7. test/ris/sse.ri, then HTTPClient's pooling.
+8. Tighten heap_trap.
+9. The checker's `evaluate` uses a lot of stack: small changes must not
+   decide whether it fits.
+10. Step 5: benches. Then remove `to_heap` and `@[TapeToHeap]`.
+11. std additions, language and runtime, other known failures.
+
+Speed work stays out of minitest. The jq check at jqg.ri:424 is the
+maintainer's.
+
 ## Now: code to the new SPEC (1.1, 1.5, 1.9, 2.1, 3.2, 3.3, 3.5, 3.6)
 
 Breakage between steps is fine; no transition stages.
