@@ -23,6 +23,54 @@ refusal of a file at once, fix by message, rerun only that cluster's
 files; one full check.sh on minitest per finished step, not per fix.
 Fix a checker hole below only when a cluster hits it.
 
+1. First: a default argument in a cycle is refused (jq blocker).
+   After 026bad193 a call in a cycle that leaves a parameter to its
+   default is refused at the call with "cannot store data made in this
+   def" when the callee stores it; the same value written as an
+   argument passes. `text : String = ""` with `node("As", b)` fails,
+   `node("As", b, "")` passes; likewise `v : C = C.new` and
+   `args : SlicePool::Run(Int32) = @arguments.alloc_slice(0)` (a run
+   of self's pool). A literal is outside the cycle (SPEC 3.7): give a
+   default the roots its expression has, as if written at the call.
+   goose-evaluations jq/ris/jqg.ri:424 `return node("As", t, body,
+   id: id)` hits it for all three defaults. Add the repro as a
+   compiler spec (also with the C.new and alloc_slice defaults);
+   check jq passes. No SPEC change.
+
+   ```
+   @[OnTape]
+   struct N
+     def initialize(@kind : String, @a : Int32 = -1,
+                    @text : String = "")
+     end
+   end
+
+   @[OnTape]
+   struct P
+     def initialize
+       @nodes = Array(N).new(8)
+     end
+
+     def node(kind : String, a : Int32 = -1,
+              text : String = "") : Int32
+       @nodes << N.new(kind, a, text)
+       @nodes.size - 1
+     end
+
+     def pipe(d : Int32) : Int32
+       return 0 if d > 3
+       b = other(d + 1)
+       node("As", b) # refused; node("As", b, "") passes
+     end
+
+     def other(d : Int32) : Int32
+       pipe(d)
+     end
+   end
+   p = P.new
+   puts p.pipe(0)
+   ```
+
 4. Samples and tests, group by group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
    refusal. check.sh: 19 FAILED. Patterns that work: read into one flat
