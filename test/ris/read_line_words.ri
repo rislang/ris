@@ -1,0 +1,44 @@
+# read_line and read_line_tape find a newline at every offset of the 8-byte step, with bytes
+# over 0x80 about, across the read buffer's end, and with chomp and \r.
+module test/ris/read_line_words
+
+path = Program.arguments[0]
+base = "éxéxéxéxéxéxéxéxéxéxéxéxéxéx"
+File.open(path, "w") do |sink|
+  size = 0
+  while size <= 40
+    sink.print(base[0, size])
+    sink.print("\n")
+    size += 1
+  end
+  sink.print("y" * 10000)
+  sink.print("\r\n")
+  sink.print("last")
+end
+File.open(path, "r") do |io|
+  size = 0
+  while size <= 40
+    line = io.read_line_tape(false) || ""
+    raise "line #{size}: #{line.bytesize}" unless line.bytesize == size + 1
+    raise "end #{size}" unless line[size] == 10_u8
+    size += 1
+  end
+  long = io.read_line_tape(true) || ""
+  raise "long #{long.bytesize}" unless long.bytesize == 10000
+  raise "last" unless io.read_line_tape(true) == "last"
+  raise "eof" unless io.read_line_tape(true).nil?
+end
+File.open(path, "r") do |io|
+  size = 0
+  while size <= 40
+    line = io.read_line(false) || ""
+    raise "line #{size}: #{line.bytesize}" unless line.bytesize == size + 1
+    raise "end #{size}" unless line[size] == 10_u8
+    size += 1
+  end
+  long = io.read_line(true) || ""
+  raise "long #{long.bytesize}" unless long.bytesize == 10000
+  raise "last" unless io.read_line(true) == "last"
+  raise "eof" unless io.read_line(true).nil?
+end
+puts "PASS: read_line_words"

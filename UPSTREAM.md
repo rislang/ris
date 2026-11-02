@@ -8,6 +8,9 @@ back.
 
 ## To take to iyi
 
+* IO#read_line finds its newline 8 bytes a step (`newline_from`); ris's gate
+  is test/ris/read_line_words.ri. iyi's loop goes byte by byte.
+
 * String#hash: iyi's byte-wise FNV-32 now takes 8 bytes a step, reads only
   the String's own bytes and spreads into the low bits Hash masks (ris's
   gates: test/ris/string_hash.ri, test/ris/src/iyi/string_hash_page.ri).

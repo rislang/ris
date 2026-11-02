@@ -1918,6 +1918,15 @@ fi
 expect file_copy_to_threads \
   'program tape writes require a single kernel thread'
 
+# read_line_tape's word-wise newline search, each offset and past the buffer.
+out=$(dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT
+  "$RIS" run test/ris/read_line_words.ri -- "$dir/l" 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: read_line_words' <<<"$out"; then
+  echo "runs     read_line_words"
+else
+  echo "FAILED   read_line_words: $out"; status=1
+fi
+
 # A session reuses fixed ticket slots; take rebuilds caller-owned bytes
 # and certificates after the receiving connection's scope has ended.
 out=$(timeout 300 "$RIS" run test/ris/tls_session_tickets.ri 2>&1)

@@ -255,10 +255,7 @@ class IyiIO
     end
 
     # Fast path: the line is in the buffer, one copy.
-    found = @read_pos
-    while found < @read_limit && @read_buffer[found] != 10_u8
-      found = found + 1
-    end
+    found = newline_from(@read_pos)
     if found < @read_limit
       start_ptr = @read_buffer + @read_pos
       len = found - @read_pos + 1

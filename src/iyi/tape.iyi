@@ -2210,16 +2210,29 @@ end
 class IyiIO
   # As `read_line`, onto the caller's active tape and with no heap String:
   # a line in the buffer is one copy; one across refills grows a writer.
+  # The first newline at or after *at*, or the limit: 8 bytes a step while
+  # none is in the word. A byte over 0x80 can flag a word falsely, never miss
+  # one: the byte loop then finds what is there.
+  private def newline_from(at : Int32) : Int32
+    while at + 8 <= @read_limit
+      word = (@read_buffer + at).as(Pointer(UInt64)).unaligned_value ^ 0x0A0A0A0A0A0A0A0A_u64
+      break if ((word &- 0x0101010101010101_u64) & (word ^ 0xFFFFFFFFFFFFFFFF_u64) &
+                0x8080808080808080_u64) != 0_u64
+      at += 8
+    end
+    while at < @read_limit && @read_buffer[at] != 10_u8
+      at += 1
+    end
+    at
+  end
+
   def read_line_tape(chomp : Bool = false) : String?
     raise "cannot read from closed IO" if @closed
     if @read_pos >= @read_limit
       return nil if @eof
       return nil if fill_buffer <= 0
     end
-    found = @read_pos
-    while found < @read_limit && @read_buffer[found] != 10_u8
-      found = found + 1
-    end
+    found = newline_from(@read_pos)
     if found < @read_limit
       start_ptr = @read_buffer + @read_pos
       len = found - @read_pos + 1
@@ -2233,10 +2246,7 @@ class IyiIO
     writer = String::Builder.new(256)
     while true
       start = @read_pos
-      j = start
-      while j < @read_limit && @read_buffer[j] != 10_u8
-        j = j + 1
-      end
+      j = newline_from(start)
       newline = j < @read_limit
       take = j - start + (newline ? 1 : 0)
       if writer.length.to_i64 + take > 2147483647_i64
