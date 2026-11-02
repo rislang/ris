@@ -265,10 +265,17 @@ pub macro serializable(declaration)
     ::Std::Json::JSON.build { |json| to_json(json) }
   end
 
-  # A macro: a constructor's value stays in the scope that makes it.
+  # A macro: a constructor's value stays in the scope that makes it. It
+  # expands where it is called, so it names the type as the caller can: a
+  # type its module does not export by its own name, as only that module
+  # reaches it and a qualified name is refused there too (iyi SPEC R-2).
   macro from_json(text)
     %doc = ::Std::Json::JSON.document(\{{ text }})
-    ::{{ @type }}.new(%doc, %doc.root)
+    {% if @type.private? %}
+      {{ @type.name.split("::").last.id }}.new(%doc, %doc.root)
+    {% else %}
+      ::{{ @type }}.new(%doc, %doc.root)
+    {% end %}
   end
 
   # Tells `JSON.read_value` and an outer derive that it reads itself.
@@ -360,8 +367,11 @@ pub macro serializable(declaration)
             {% end %}
           \{% else %}
             \{% if json_hash_{{ field[:name][1..].id }} %}
-              {{ field[:name].id }} = typeof({{ field[:name].id }}).new
-              ::Std::Json::JSON.read_into(json_doc, json_at_{{ field[:name][1..].id }}, {{ field[:name].id }})
+              # Filled before it is stored: a field is not grown while
+              # its object is made (SPEC 2.2).
+              json_hash_{{ field[:name][1..].id }} = typeof({{ field[:name].id }}).new
+              ::Std::Json::JSON.read_into(json_doc, json_at_{{ field[:name][1..].id }}, json_hash_{{ field[:name][1..].id }})
+              {{ field[:name].id }} = json_hash_{{ field[:name][1..].id }}
             \{% else %}
               {{ field[:name].id }} = ::Std::Json::JSON.read_value(json_doc, json_at_{{ field[:name][1..].id }}, typeof({{ field[:name].id }}))
             \{% end %}
