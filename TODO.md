@@ -23,60 +23,15 @@ refusal of a file at once, fix by message, rerun only that cluster's
 files; one full check.sh on minitest per finished step, not per fix.
 Fix a checker hole below only when a cluster hits it.
 
-1. First: a default argument in a cycle is refused (jq blocker).
-   After 026bad193 a call in a cycle that leaves a parameter to its
-   default is refused at the call with "cannot store data made in this
-   def" when the callee stores it; the same value written as an
-   argument passes. `text : String = ""` with `node("As", b)` fails,
-   `node("As", b, "")` passes; likewise `value : Cell = Cell.new`
-   (Cell is a plain value struct, no tape fields) and
-   `args : SlicePool::Run(Int32) = @arguments.alloc_slice(0)` (a run
-   of self's pool). A literal is outside the cycle (SPEC 3.7): give a
-   default the roots its expression has, as if written at the call
-   (Goose §7.1: a default is checked as the argument written in its
-   place). `@ivar` in a default is the receiver's field: its root is
-   the receiver (`self`, or `other` in `other.node(...)`).
-   goose-evaluations jq/ris/jqg.ri:424 `return node("As", t, body,
-   id: id)` hits it for all three defaults. Add the repro as a
-   compiler spec (also with the value-struct and alloc_slice
-   defaults); check jq passes. No SPEC change.
-   Keep refused: a class default `v : C = C.new` builds C in the cycle
-   def's scratch, refused as when written at the call (SPEC 3.7); add
-   it as a refusal spec.
-
-   ```
-   @[OnTape]
-   struct N
-     def initialize(@kind : String, @a : Int32 = -1,
-                    @text : String = "")
-     end
-   end
-
-   @[OnTape]
-   struct P
-     def initialize
-       @nodes = Array(N).new(8)
-     end
-
-     def node(kind : String, a : Int32 = -1,
-              text : String = "") : Int32
-       @nodes << N.new(kind, a, text)
-       @nodes.size - 1
-     end
-
-     def pipe(d : Int32) : Int32
-       return 0 if d > 3
-       b = other(d + 1)
-       node("As", b) # refused; node("As", b, "") passes
-     end
-
-     def other(d : Int32) : Int32
-       pipe(d)
-     end
-   end
-   p = P.new
-   puts p.pipe(0)
-   ```
+1. A def called through its defaults does not free-check its scratch.
+   The expansion runs the defaults, then the marked body, so
+   TapeShrinkChecker#check does not read it as marked: `node(1)` on
+   `def node(a : Int32 = -1, t : String = "")` that does `@n << "a#{a}"`
+   compiles; `node(1, "")` is refused. Reading it as marked
+   (`summary_marked?` in `check`) exposes std sites to move first:
+   regex match, x509 verify and public_key, mime, xml []=, mail attach.
+   All-untyped defaults forward instead: `def node(a = -1, v = C.new)`
+   stored in a cycle compiles, while `v : C = C.new` is refused.
 
 4. Samples and tests, group by group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope

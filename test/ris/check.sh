@@ -93,6 +93,13 @@ if [ "$?" -eq 0 ] && [ "$out" = '4' ]; then
 else
   echo "FAILED   mutual_store_node: $out"; status=1
 fi
+out=$("$RIS" run test/ris/cycle_defaults.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'2\n3\n1' ]; then
+  echo 'runs     cycle_defaults'
+else
+  echo "FAILED   cycle_defaults: $out"; status=1
+fi
+expect cycle_default_class 'cannot store data made in this def'
 expect cycle_store_scratch 'cannot store data made in this def'
 expect cycle_other_storage 'cannot pass other growing storage'
 expect cycle_swap_storage 'cannot pass other growing storage'

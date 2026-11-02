@@ -1,0 +1,50 @@
+# SPEC 3.7, Goose §7.1: a default has the roots written at the call.
+struct Cell
+  def initialize(@n : Int32 = 0)
+  end
+end
+
+@[OnTape]
+struct N
+  def initialize(@kind : String, @a : Int32, @text : String, @value : Cell,
+                 @args : SlicePool::Run(Int32), @id : Int32)
+  end
+end
+
+@[OnTape]
+class P
+  def initialize
+    @nodes = Array(N).new(8)
+    @arguments = SlicePool(Int32).new(8)
+  end
+
+  def node(kind : String, a : Int32 = -1, text : String = "",
+           value : Cell = Cell.new,
+           args : SlicePool::Run(Int32) = @arguments.alloc_slice(0),
+           id : Int32 = -1) : Int32
+    @nodes << N.new(kind, a, text, value, args, id)
+    @nodes.size - 1
+  end
+
+  def pipe(d : Int32, other : P) : Int32
+    return 0 if d > 3
+    b = around(d + 1, other)
+    return other.node("Far", b) if d > 2
+    return node("Id", b, id: d) if d > 1
+    node("As", b)
+  end
+
+  def around(d : Int32, other : P) : Int32
+    pipe(d, other)
+  end
+
+  def size : Int32
+    @nodes.size
+  end
+end
+
+p = P.new
+q = P.new
+puts p.pipe(0, q)
+puts p.size
+puts q.size

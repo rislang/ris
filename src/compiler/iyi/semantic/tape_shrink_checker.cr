@@ -70,6 +70,8 @@ class Iyi::TapeShrinkChecker
   @global_ids = Set(UInt64).new
   @pooled_roots = Set(UInt64).new
   @parameter_roots = Set(UInt64).new
+  # What a default's expression made, with its type (`default_values`).
+  @default_roots = Hash(UInt64, Type?).new
   @condition_storage : Array(UInt64)? = nil
   @loop_storage = [] of View
   @uses = [] of Use
@@ -624,11 +626,22 @@ class Iyi::TapeShrinkChecker
 
   private def translated(v : Value, summary : Summary,
                          inputs : Array(Value), allocation : UInt64? = nil) : Value
-    roots = v.roots.flat_map { |r| translate(r, summary, inputs, allocation) }.uniq
+    roots = v.roots.flat_map { |r| placed(r, summary, inputs, allocation) }.uniq
     views = v.views.flat_map do |v|
-      translate(v.root, summary, inputs, allocation).map { |r| view(r).copy_with(index: v.index) }
+      placed(v.root, summary, inputs, allocation).map { |r| view(r).copy_with(index: v.index) }
     end
     Value.new(roots, views)
+  end
+
+  # A callee's root at this call; what a default made is made here.
+  private def placed(root : UInt64, summary : Summary, inputs : Array(Value),
+                     allocation : UInt64?) : Array(UInt64)
+    found = translate(root, summary, inputs, allocation)
+    return found unless found.empty? && allocation && @default_roots.has_key?(root)
+    @default_roots[root].try { |type| @root_types[root] = type }
+    @root_scopes[root] = @scopes.dup
+    note_fresh(root)
+    [root]
   end
 
   private def view(root : UInt64) : View
@@ -1762,7 +1775,41 @@ class Iyi::TapeShrinkChecker
   end
 
   private def summary_marked?(target : Def) : Bool
-    !TapeScopeChecker.parts(target.body).nil?
+    !TapeScopeChecker.parts(target.body).nil? ||
+      !default_prefix(target.body).nil?
+  end
+
+  # A default's expansion: the defaults' assignments, then the marked body
+  # as written. They run before the mark, in the caller's scope.
+  private def default_prefix(node : ASTNode) : Array(ASTNode)?
+    return nil unless node.is_a?(Expressions)
+    at = node.expressions.index do |exp|
+      exp.is_a?(Assign) && (call = exp.value).is_a?(Call) &&
+        call.name == TapeScopeChecker::MARK
+    end
+    return nil unless at && at > 0
+    prefix = node.expressions[0...at]
+    prefix.all?(Assign) ? prefix : nil
+  end
+
+  # Goose §7.1: a default is checked as the argument written in its place.
+  # What it makes belongs to no scope of the callee; each call places it
+  # in its own scope (`translated`).
+  private def default_values(prefix : Array(ASTNode), env : Env) : Nil
+    blocks, scopes = @tape_blocks, @scopes
+    @tape_blocks, @scopes = [] of UInt64, [] of UInt64
+    begin
+      prefix.each do |assign|
+        contents = stored(value(assign, env), env)
+        source_roots(contents).each do |root|
+          next if @parents.has_key?(root) || @parameter_roots.includes?(root) ||
+                  @global_ids.includes?(root)
+          @default_roots[root] = @root_types[root]? || assign.type?
+        end
+      end
+    ensure
+      @tape_blocks, @scopes = blocks, scopes
+    end
   end
 
   private def use(v : Value, node : ASTNode, holder = "")
@@ -1955,7 +2002,9 @@ class Iyi::TapeShrinkChecker
     when Expressions
       result = EMPTY
       mark = @guards.size
-      node.expressions.each do |exp|
+      prefix = default_prefix(node)
+      default_values(prefix, env) if prefix
+      (prefix ? node.expressions[prefix.size..] : node.expressions).each do |exp|
         @fallthrough = Guards.new
         result = value(exp, env)
         @guards.concat(@fallthrough) if exp.is_a?(If) || exp.is_a?(Expressions)

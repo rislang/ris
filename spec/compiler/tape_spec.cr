@@ -361,4 +361,84 @@ describe "ris recursive store summaries" do
       puts p.pipe(0)
       CODE
   end
+
+  it "gives a default in a cycle the roots of its expression" do
+    tape_compile(<<-'CODE')
+      struct Cell
+        def initialize(@n : Int32 = 0)
+        end
+      end
+
+      @[OnTape]
+      struct N
+        def initialize(@kind : String, @a : Int32, @text : String,
+                       @value : Cell, @args : SlicePool::Run(Int32))
+        end
+      end
+
+      @[OnTape]
+      class P
+        def initialize
+          @nodes = Array(N).new(8)
+          @arguments = SlicePool(Int32).new(8)
+        end
+
+        def node(kind : String, a : Int32 = -1, text : String = "",
+                 value : Cell = Cell.new,
+                 args : SlicePool::Run(Int32) = @arguments.alloc_slice(0),
+                 id : Int32 = -1) : Int32
+          @nodes << N.new(kind, a, text, value, args)
+          @nodes.size - 1
+        end
+
+        def pipe(d : Int32, far : P) : Int32
+          return 0 if d > 3
+          b = other(d + 1, far)
+          return far.node("Far", b) if d > 2
+          return node("Id", b, id: d) if d > 1
+          node("As", b)
+        end
+
+        def other(d : Int32, far : P) : Int32
+          pipe(d, far)
+        end
+      end
+      p = P.new
+      q = P.new
+      puts p.pipe(0, q)
+      CODE
+  end
+
+  it "refuses a class default stored in a cycle" do
+    expect_raises(Iyi::TypeException, /cannot store data made in this def/) do
+      tape_compile(<<-'CODE')
+        class C
+        end
+
+        @[OnTape]
+        struct P
+          def initialize
+            @nodes = Array(C).new(8)
+          end
+
+          def node(a : Int32 = -1, v : C = C.new) : Int32
+            @nodes << v
+            @nodes.size - 1
+          end
+
+          def pipe(d : Int32) : Int32
+            return 0 if d > 3
+            b = other(d + 1)
+            node(b)
+          end
+
+          def other(d : Int32) : Int32
+            pipe(d)
+          end
+        end
+        p = P.new
+        puts p.pipe(0)
+        CODE
+    end
+  end
 end
