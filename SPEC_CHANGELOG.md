@@ -4,6 +4,23 @@ Every change to SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one. Entries before 2026-10-31 name the file by its old name, TAPE_SPEC.md.
 
+## 2026-11-02: the header drops the heap sentence
+
+* Was: the opening paragraph said "A heap path (to_heap) needs a
+  migration mark; suggest copy_to." Supersedes the to_heap half of the
+  older "to_heap is a migration path" entry.
+* Now: the sentence is gone and nothing replaces it. No rule changes and
+  no number moves; copy_to stays in the rules that name it (7.6 among them).
+* Why: to_heap is no heap path: it copies on the current tape (tape.iyi),
+  so the sentence is false and contradicts 7.1. EGM review (zoom out,
+  comprehension, critic) found no rule relying on the mark and no check
+  enforcing @[TapeToHeap]: only `ris heap` labels it. The review added
+  alternatives, non-goals and risks to the draft and moved the surviving
+  work to TODO.md: removing to_heap and the mark, and errors still naming
+  `.to_heap`. It suspected to_heap's checker exemption of dangling; probes
+  found no corruption across a def or loop round and a store out of a tape
+  block is refused, which is not proof, so TODO.md keeps it open.
+
 ## 2026-11-02: 3.5 allows passed-on growing storage; 3.7 cycle stores
 
 * Was: 3.5 banned any "growing local or parameter" live at a call into

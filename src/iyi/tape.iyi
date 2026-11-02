@@ -64,7 +64,7 @@ end
 
 # Runs the block on the fiber's implicit tape, sharing its storage.
 # Main or the spawned body releases it; scopes keeping nothing reset their
-# part. Use local_tape for a separate owning scope of temporaries.
+# part.
 #
 # Returns nothing: a block's value is the one thing that leaves it
 # without an assignment the compiler can see, so it is not passed on.

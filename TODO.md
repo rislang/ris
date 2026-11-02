@@ -169,6 +169,18 @@ After the Now steps; their refusals replace most of the old bench list.
   TERM handler) is not caught.
 * Add 128-bit formatting, IDNA and URI resolution.
 
+## Remove to_heap and its mark
+
+No rule needs them (SPEC_CHANGELOG 2026-11-02). Remove the method
+(`src/iyi/tape.iyi`), `@[TapeToHeap]`, the census's `to_heap` and
+`@[TapeToHeap]` reasons, the checker exemptions (`tape_shrink_checker.cr`;
+that they cannot dangle is unproved), test, bench and doc uses and the
+`to_heap.ri` gate. Make `call_error.cr:740,839` and `tape_spec.cr` name
+`copy_to`. Gate: no `to_heap` or `TapeToHeap` left outside doc/archive.
+
+`heap_trap` (`test/ris/check.sh:29`) passes on any compile error naming
+String, Array, Hash or tape, so it can hide a refusal: tighten it.
+
 ## Known failures
 
 * check.sh (2026-11-01, 3a4b4810b): 63 FAILED. Every scope frees now;

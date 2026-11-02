@@ -9,8 +9,7 @@ section (v0.19.1), apply as written; only what ris adds or changes is
 stated here. iyi's own draft is archived in doc/archive/iyi/SPEC.md and
 cited in code as "iyi SPEC" and a section.
 [Goose](doc/reference/goose/README.md) citations inform; the tape is
-Goose's data stack. Reuse iyi before designing anew. A heap path
-(to_heap) needs a migration mark; suggest copy_to. This is the target
+Goose's data stack. Reuse iyi before designing anew. This is the target
 contract; what the code does not meet yet is in TODO.md. Cite a rule by
 its number (SPEC 2.3). Numbers never change: a new rule goes last in its
 section; a removed one leaves its number unused.
