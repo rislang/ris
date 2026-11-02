@@ -167,6 +167,69 @@ class Iyi::TapeCallGraph
     scan.suspension
   end
 
+  # Whether a round running *node* can get tape data back that `allocates?`
+  # does not see: a `yield` or rescue here, or a proc call here or in a
+  # callee (a callee's `yield` is this call's block, which is visited).
+  def hands_back?(node : ASTNode) : Bool
+    scan = HandsBack.new(self)
+    node.accept scan
+    scan.found
+  end
+
+  def calls_proc?(target : Def) : Bool
+    @calls_proc.fetch(target.object_id) do
+      return true if proc_call?(target)
+      return false if target.iyi_from_artifact? && !target.iyi_body_travelled?
+      # A cycle's way back adds nothing to what the walk already finds.
+      @calls_proc[target.object_id] = false
+      scan = HandsBack.new(self, callee: true)
+      target.body.accept scan
+      @calls_proc[target.object_id] = scan.found
+    end
+  end
+
+  @calls_proc = Hash(UInt64, Bool).new
+
+  class HandsBack < Visitor
+    getter found = false
+
+    def initialize(@graph : TapeCallGraph, @callee = false)
+    end
+
+    def visit(node : Yield | ExceptionHandler)
+      @found ||= !@callee
+      !@found
+    end
+
+    def visit(node : Call)
+      return false if @found
+      if expanded = node.expanded
+        expanded.accept self
+        return false
+      end
+      # As in Effects: the runtime's own proc dispatch is no user callback.
+      unless TapeRules.runtime?(@graph.program, node.location)
+        @graph.targets(node).try &.each do |target|
+          @found ||= @graph.calls_proc?(target)
+        end
+      end
+      !@found
+    end
+
+    def visit(node : Def)
+      false
+    end
+
+    def visit(node : MacroIf | MacroFor | MacroExpression | MacroVerbatim)
+      node.expanded.try &.accept(self)
+      false
+    end
+
+    def visit(node : ASTNode)
+      !@found
+    end
+  end
+
   def threaded?(target : Def) : Bool
     (target.name == "start" &&
       (target.owner.to_s.includes?("Thread") ||

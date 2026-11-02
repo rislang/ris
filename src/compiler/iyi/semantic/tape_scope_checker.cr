@@ -141,7 +141,10 @@ class Iyi::TapeScopeChecker
   # A scope that puts nothing on the tape has nothing to free: its mark
   # is turned off, which folds to nothing in a release build.
   def run(node : ASTNode) : Nil
-    @graph.defs.each_value { |target| off(target.body) }
+    @graph.defs.each_value do |target|
+      off(target.body)
+      target.body.accept(Finder.new(self))
+    end
     node.accept(Finder.new(self))
   end
 
@@ -149,6 +152,17 @@ class Iyi::TapeScopeChecker
     return unless parts = TapeScopeChecker.parts(body)
     flag, inner = parts
     flag.value = false unless @graph.allocates?(inner)
+  end
+
+  # A loop's or block's round. Its mark also frees what comes back into
+  # the round without counting as its own allocation, so it stays on for
+  # a `yield`, a proc call (a callback's result moves down into the round)
+  # and a rescue (the raise's sentence stays on the tape).
+  def off_round(body : ASTNode) : Nil
+    return unless parts = TapeScopeChecker.parts(body)
+    flag, inner = parts
+    return if @graph.allocates?(inner) || @graph.hands_back?(inner)
+    flag.value = false
   end
 
   # An explicit return must receive its result before the def's rollback,
@@ -223,7 +237,7 @@ class Iyi::TapeScopeChecker
     end
 
     def visit(node : While | Block)
-      @checker.off(node.body)
+      @checker.off_round(node.body)
       true
     end
 

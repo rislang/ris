@@ -1867,6 +1867,22 @@ else
   echo "FAILED   scope_frees: $out"; status=1
 fi
 
+# A round that puts nothing on the tape has no mark, in a def as well; one
+# that makes text, yields or calls a proc keeps it.
+marks=$(mktemp -d)
+if "$RIS" build --release --emit llvm-ir -o "$marks/marks" \
+    test/ris/scope_round_marks.ri >"$marks/log" 2>&1; then
+  bad=$(python3 test/ris/scope_round_marks.py "$marks/marks.ll")
+  if [ -z "$bad" ] && [ "$("$marks/marks" | tr '\n' ' ')" = '2 6 10 10 10 ' ]; then
+    echo "lowers   scope_round_marks (no mark on a round that makes nothing)"
+  else
+    echo "FAILED   scope_round_marks: $bad"; status=1
+  fi
+else
+  echo "FAILED   scope_round_marks: $(cat "$marks/log")"; status=1
+fi
+rm -rf "$marks"
+
 # A session reuses fixed ticket slots; take rebuilds caller-owned bytes
 # and certificates after the receiving connection's scope has ended.
 out=$(timeout 300 "$RIS" run test/ris/tls_session_tickets.ri 2>&1)

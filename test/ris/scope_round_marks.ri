@@ -1,0 +1,65 @@
+# Which rounds keep a scope mark: gated by check.sh on the release IR. A
+# loop or block nested in a def that puts nothing on the tape has none.
+
+@[NoInline]
+def byte_scan(text : String) : Int32
+  at = 0
+  count = 0
+  while at < text.bytesize
+    count += 1 if text[at] == 32_u8
+    at += 1
+  end
+  count
+end
+
+@[NoInline]
+def block_scan(values : Array(Int32)) : Int32
+  total = 0
+  values.each do |value|
+    total += value
+    nil
+  end
+  total
+end
+
+@[NoInline]
+def builder_loop(text : String) : Int32
+  count = 0
+  at = 0
+  while at < text.bytesize
+    made = ""
+    made << text[at, 1] << at
+    count += made.bytesize
+    at += 1
+  end
+  count
+end
+
+@[NoInline]
+def yield_loop(text : String) : Int32
+  at = 0
+  count = 0
+  while at < text.bytesize
+    count += yield at
+    at += 1
+  end
+  count
+end
+
+@[NoInline]
+def proc_loop(text : String, handler : Proc(Int32, Int32)) : Int32
+  at = 0
+  count = 0
+  while at < text.bytesize
+    count += handler.call(at)
+    at += 1
+  end
+  count
+end
+
+text = "a b c"
+puts byte_scan(text)
+puts block_scan([1, 2, 3])
+puts builder_loop(text)
+puts yield_loop(text) { |at| "x#{at}".bytesize }
+puts proc_loop(text, ->(at : Int32) { "y#{at}".bytesize })

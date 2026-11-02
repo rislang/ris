@@ -126,20 +126,6 @@ x = ris time / Goose time, median of 5 runs; lower is faster. A
 timing is a baseline and never fails a gate; nothing is timed per
 change. Gates stay structural. No item below changes SPEC.
 
-* A loop or block nested in a def keeps its scope mark even when it
-  puts nothing on the tape. TapeScopeChecker
-  (src/compiler/iyi/semantic/tape_scope_checker.cr) turns a mark off
-  when `allocates?` finds no tape growth, but it reaches only each
-  def's top body and the program's top level: Finder does not enter
-  a def, so its nested While and Block never reach `off`. Each round
-  then loads the tape's region, cursor and side and may call
-  `__iyi_scope_release`. perf (ris 0ad4691bb): jq
-  `Engine#scan_string` is 25-33% of jq's time, mostly that compare;
-  yaml `Document#skip_spaces` spends 15-20% on it. Send nested loops
-  and blocks through the same check. If scan_string still keeps its
-  mark, find what `allocates?` counts there. Gate: IR specs that a
-  byte loop in a def has no mark and a loop in a def that pushes to
-  a Builder keeps it; check.sh and RIS_TAPE_STATS unchanged.
 * String#hash (src/iyi/tape.iyi:218) is byte-at-a-time FNV-32. perf
   on ninja gen-small: `Hash#find` is 34% of the run, 70% of it
   hashing; ninja is at 1.40x. Hash 8 bytes a step like Goose
