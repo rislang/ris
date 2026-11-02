@@ -10,11 +10,26 @@ import std/tls::{TlsIdentity, TlsError}
 import std/time::{Time}
 
 @[OnTape]
-class FakeIssuer < AutocertView
+class FakeIssuer
+  @view : AutocertView
+
+  def initialize(config : AutocertConfig)
+    view = AutocertView.new(config)
+    @view = view
+  end
+
+  def config : AutocertConfig
+    @view.config
+  end
+
+  def cache : AutocertDirCache
+    @view.cache
+  end
+
   def issue(name : String) : AutocertError?
     prior = cache.get("attempt")
     count = prior.is_a?(String) ? prior.to_i + 1 : 1
-    cache.put("attempt", count.to_s.to_heap)
+    cache.put("attempt", count.to_s)
     if config.directory_url == "panic"
       cache.put("challenge-http-flight", "proof")
       defer cache.delete("challenge-http-flight")
@@ -33,14 +48,23 @@ class FakeIssuer < AutocertView
   end
 end
 
+@[OnTape]
+struct TestSettings
+  getter config : AutocertConfig
+
+  def initialize(root : String, mode : String)
+    hosts = Array(String).new(1)
+    hosts << "localhost"
+    config = AutocertConfig.new(mode, root, hosts)
+    config.roots_pem = File.read("#{root}/roots.pem").as_tape
+    config.wait_ms = 3000
+    config.retry_ms = 1000
+    @config = config
+  end
+end
+
 def settings(root : String, mode : String) : AutocertConfig
-  hosts = Array(String).new(1)
-  hosts << "localhost"
-  config = AutocertConfig.new(mode, root, hosts)
-  config.roots_pem = File.read("#{root}/roots.pem").as_tape
-  config.wait_ms = 3000
-  config.retry_ms = 1000
-  config
+  TestSettings.new(root, mode).config
 end
 
 @[OnTape]
@@ -72,7 +96,7 @@ def reader_settings : ReaderConfig
 end
 
 def count(config : AutocertConfig) : Int32
-  text = AutocertDirCache.new(config.cache_dir.to_heap).get("attempt")
+  text = AutocertDirCache.new(config.cache_dir).get("attempt")
   text.is_a?(String) ? text.to_i : 0
 end
 
@@ -189,14 +213,15 @@ group do |service|
     12.times do
       RisBoard.post(ReaderConfig.new(failure_config))
       readers << waiters.spawn do
-        result = AutocertView.new(reader_settings.config).identity_for("localhost", nil)
+        view = AutocertView.new(reader_settings.config)
+        result = view.identity_for("localhost", nil)
         result.is_a?(TlsError) && result.message.includes?("autocert: the local CA refused this order")
       end
     end
     readers.each { |reader| raise "failure broadcast" unless reader.value == true }
   end
   raise "failure dedupe" unless count(failure_config) == 1
-  stored = AutocertDirCache.new(failure_config.cache_dir.to_heap).get("localhost.error")
+  stored = AutocertDirCache.new(failure_config.cache_dir).get("localhost.error")
   raise "failure persisted" unless stored.is_a?(String)
   until_ms = stored.split("\n")[0].to_i64
   view = AutocertView.new(failure_config)
@@ -218,9 +243,10 @@ puts "PASS: autocert failure broadcast and until_ms boundary"
 panic_config = settings("#{root}/panic", "panic")
 group do |service|
   manager = start_manager(service, panic_config)
-  error = AutocertView.new(panic_config).identity_for("localhost", nil)
+  panic_view = AutocertView.new(panic_config)
+  error = panic_view.identity_for("localhost", nil)
   raise "panic visible" unless error.is_a?(TlsError) && error.message.includes?("flight panic")
-  cache = AutocertDirCache.new(panic_config.cache_dir.to_heap)
+  cache = AutocertDirCache.new(panic_config.cache_dir)
   raise "panic certificate" unless cache.get("localhost").nil?
   raise "panic challenge" unless cache.get("challenge-http-flight").nil?
   Autocert.stop
@@ -240,7 +266,7 @@ group do |service|
   Autocert.stop
   raise "cancel stop deadline" unless manager.wait(2000).nil?
   raise "cancel manager stop" unless manager.value == true
-  cache = AutocertDirCache.new(cancel_config.cache_dir.to_heap)
+  cache = AutocertDirCache.new(cancel_config.cache_dir)
   raise "cancel certificate" unless cache.get("localhost").nil?
   raise "cancel failure" unless cache.get("localhost.error").nil?
   raise "cancel challenge" unless cache.get("challenge-http-flight").nil?

@@ -952,8 +952,10 @@ struct Array(T)
   end
 end
 
-# Compiler companion for an appended binding. Creating a slot allocates
-# nothing. Its home is captured with the field's other initializers.
+# Compiler companion for an appended binding. Creating a slot allocates no
+# text; a tape's first slot takes one empty side region as its boundary
+# (RisRegion.text_anchor). Its home is captured with the field's other
+# initializers.
 @[OnTape]
 struct RisTextGrowth
   @writer : String::Builder? = nil
@@ -965,7 +967,7 @@ struct RisTextGrowth
 
   def initialize
     @home = RisRegion.tape
-    @side = @home == 0 ? 0_u64 : IyiHeap.read64(@home &+ RisRegion::OFF_SIDE)
+    @side = RisRegion.text_anchor(@home)
   end
 
   # A copied object starts lazily in its destination owner. The String

@@ -1,0 +1,34 @@
+class Holder
+  getter bytes : String::Builder
+  property view : String
+
+  def initialize(@view : String)
+    @bytes = String::Builder.new(16)
+    @bytes << "abc"
+  end
+
+  def head : String
+    @bytes.finish
+  end
+
+  def wipe : Nil
+    @bytes.clear
+  end
+
+  def wipe_using(borrowed : String) : Int32
+    @bytes.clear
+    borrowed.bytesize
+  end
+end
+
+def put(holder : Holder, text : String, pick : Bool) : Nil
+  made = ""
+  made << "made"
+  holder.view = pick ? text : made
+end
+holder = Holder.new("h")
+tape do
+  put(holder, "abc", true)
+  nil
+end
+puts holder.view

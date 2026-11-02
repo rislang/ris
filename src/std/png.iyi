@@ -108,6 +108,62 @@ end
 # color that is to be read as transparent (a gray value, or red, green and
 # blue), in the image's own depth.
 pub class Image
+  getter error : PngError? = nil
+
+  def initialize(d : PngDecode, data : String, idats : Array({Int32, Int32}))
+    @width = d.width
+    @height = d.height
+    @layout = d.layout
+    @depth = d.out_depth
+    @samples = ""
+    @transparent = nil
+    faults = String::Builder.new(512)
+    expected = d.raw_size
+    size = d.out_size
+    if expected > 0x7fffffff_i64 || size > 0x7fffffff_i64
+      @error = PngError.new(Png.keep("png: the image's data is #{expected > size ? expected : size} bytes, past what one string holds", faults))
+      return
+    end
+    want = expected.to_i32
+    raw = Array(UInt8).new(want)
+    total = 0
+    idats.each { |piece| total = total + piece[1] }
+    stream = ""
+    idats.each { |piece| stream << data[piece[0], piece[1]] }
+    inf = Inflater.new(Envelope::Zlib, nil, stream)
+    while true
+      piece = inf.read(65536)
+      if piece.is_a?(CompressError)
+        @error = PngError.new(Png.keep("png: the image data's zlib stream: #{piece.message}", faults))
+        return
+      end
+      break if piece.empty?
+      if raw.size + piece.bytesize > want
+        @error = PngError.new(Png.keep("png: the image data inflates past the #{want} bytes a #{d.layout_desc} needs", faults))
+        return
+      end
+      raw.append(piece)
+    end
+    got = raw.size
+    if got < want
+      @error = PngError.new(Png.keep("png: the image data ends after #{got} of the #{want} bytes a #{d.layout_desc} needs", faults))
+      return
+    end
+    fault = d.unfilter(raw)
+    if fault
+      @error = fault
+      return
+    end
+    pixels = Array(UInt8).new(size.to_i32, 0_u8)
+    bad = d.unpack(raw, pixels)
+    if bad >= 0
+      @error = PngError.new(Png.keep("png: a pixel's palette index is #{bad}, past the palette's #{d.palette_entries} entries", faults))
+      return
+    end
+    @samples = PngBytes.text(pixels, 0, pixels.size)
+    @transparent = d.key
+  end
+
   getter width : Int32
   getter height : Int32
   getter layout : Layout
@@ -234,7 +290,8 @@ end
 
 # A tEXt, zTXt or iTXt chunk: `chunk` says which. `language` and
 # `translated_keyword` are iTXt's, "" for the other two.
-pub class PngText
+@[OnTape]
+pub struct PngText
   getter chunk : String
   getter keyword : String
   getter text : String
@@ -807,26 +864,21 @@ class PngEncode
   end
 end
 
-pub struct Png
-  # Pillow's `Image.MAX_IMAGE_PIXELS`, past which it warns of a
-  # decompression bomb: the default bound on the pixels a file may claim.
-  MAX_PIXELS = 89_478_485_i64
-  # The most an iCCP profile or a compressed text inflates to.
-  MAX_METADATA = 8 * 1024 * 1024
-  # How much image data one IDAT chunk carries, written.
-  IDAT_SIZE = 65536
+# A decode constructs its retained chunks in the caller's scope.
+@[OnTape]
+struct RisPngRead
+  getter result : PngFile | PngError = PngError.new("png: incomplete file")
 
-  SIGNATURE = StaticArray[137_u8, 80_u8, 78_u8, 71_u8, 13_u8, 10_u8, 26_u8, 10_u8]
-
-  # The file in *data*, decoded; or what is wrong with it. A file whose
-  # IHDR claims more than *max_pixels* pixels is refused before anything
-  # is allocated for them.
-  def self.decode(data : String, max_pixels : Int64 = MAX_PIXELS) : PngFile | PngError
+  def initialize(data : String, max_pixels : Int64)
+    kept = String::Builder.new(data.bytesize)
     p = data
     n = data.bytesize
     i = 0
     while i < 8
-      return PngError.new("png: not a PNG file: the 8-byte signature is not there") if i >= n || p[i] != SIGNATURE[i]
+      if i >= n || p[i] != Png::SIGNATURE[i]
+        @result = PngError.new(Png.keep("png: not a PNG file: the 8-byte signature is not there", kept))
+        return
+      end
       i = i + 1
     end
     width = 0
@@ -852,49 +904,63 @@ pub struct Png
     at = 8
     while !ended
       if at == n
-        return PngError.new("png: the file ends after #{n} bytes, without an IEND chunk")
+        @result = PngError.new(Png.keep("png: the file ends after #{n} bytes, without an IEND chunk", kept))
+        return
       end
       if n - at < 12
-        return PngError.new("png: the chunk at offset #{at} is cut short: #{n - at} bytes are left of the 12 a chunk's frame takes")
+        @result = PngError.new(Png.keep("png: the chunk at offset #{at} is cut short: #{n - at} bytes are left of the 12 a chunk's frame takes", kept))
+        return
       end
       len32 = PngBytes.be32(p, at)
       if len32 > 0x7fffffff_u32
-        return PngError.new("png: the chunk at offset #{at} claims #{len32} bytes; a chunk holds at most 2^31 - 1")
+        @result = PngError.new(Png.keep("png: the chunk at offset #{at} claims #{len32} bytes; a chunk holds at most 2^31 - 1", kept))
+        return
       end
       len = len32.to_i32
       k = 0
       while k < 4
         c = p[at + 4 + k]
         unless (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8)
-          return PngError.new("png: the chunk at offset #{at} is named #{PngBytes.slice(p, at + 4, 4).inspect}, which is not four ASCII letters")
+          @result = PngError.new(Png.keep("png: the chunk at offset #{at} is named #{PngBytes.slice(p, at + 4, 4).inspect}, which is not four ASCII letters", kept))
+          return
         end
         k = k + 1
       end
       name = PngBytes.slice(p, at + 4, 4)
       if n - at - 12 < len
-        return PngError.new("png: the #{name} chunk at offset #{at} is cut short: it holds #{len} bytes and the file has #{n - at - 12} after its header")
+        @result = PngError.new(Png.keep("png: the #{name} chunk at offset #{at} is cut short: it holds #{len} bytes and the file has #{n - at - 12} after its header", kept))
+        return
       end
       body = at + 8
       stored = PngBytes.be32(p, body + len)
       sum = CRC32.update(0_u32, data[at + 4, len + 4], len + 4)
       if stored != sum
-        return PngError.new("png: the #{name} chunk at offset #{at} fails its CRC-32: it says #{PngBytes.hex(stored)}, its bytes make #{PngBytes.hex(sum)}")
+        @result = PngError.new(Png.keep("png: the #{name} chunk at offset #{at} fails its CRC-32: it says #{PngBytes.hex(stored)}, its bytes make #{PngBytes.hex(sum)}", kept))
+        return
       end
       if !seen_ihdr && name != "IHDR"
-        return PngError.new("png: the first chunk is #{name}; IHDR comes first")
+        @result = PngError.new(Png.keep("png: the first chunk is #{name}; IHDR comes first", kept))
+        return
       end
       if idat_state == 1 && name != "IDAT"
         idat_state = 2
       end
       case name
       when "IHDR"
-        return PngError.new("png: a second IHDR chunk at offset #{at}") if seen_ihdr
-        return PngError.new("png: IHDR holds #{len} bytes, not 13") if len != 13
+        if seen_ihdr
+          @result = PngError.new(Png.keep("png: a second IHDR chunk at offset #{at}", kept))
+          return
+        end
+        if len != 13
+          @result = PngError.new(Png.keep("png: IHDR holds #{len} bytes, not 13", kept))
+          return
+        end
         seen_ihdr = true
         w32 = PngBytes.be32(p, body)
         h32 = PngBytes.be32(p, body + 4)
         if w32 == 0_u32 || h32 == 0_u32 || w32 > 0x7fffffff_u32 || h32 > 0x7fffffff_u32
-          return PngError.new("png: IHDR says #{w32}x#{h32}; a width and height are 1 to 2^31 - 1")
+          @result = PngError.new(Png.keep("png: IHDR says #{w32}x#{h32}; a width and height are 1 to 2^31 - 1", kept))
+          return
         end
         width = w32.to_i32
         height = h32.to_i32
@@ -907,106 +973,216 @@ pub struct Png
                 else              false
                 end
         unless legal
-          return PngError.new("png: IHDR's color type #{ctype} at bit depth #{depth} is not a pair the format has")
+          @result = PngError.new(Png.keep("png: IHDR's color type #{ctype} at bit depth #{depth} is not a pair the format has", kept))
+          return
         end
-        return PngError.new("png: IHDR's compression method is #{p[body + 10]}; only 0, zlib, is defined") if p[body + 10] != 0_u8
-        return PngError.new("png: IHDR's filter method is #{p[body + 11]}; only 0 is defined") if p[body + 11] != 0_u8
-        return PngError.new("png: IHDR's interlace method is #{p[body + 12]}; 0 and 1 are defined") if p[body + 12] > 1_u8
+        if p[body + 10] != 0_u8
+          @result = PngError.new(Png.keep("png: IHDR's compression method is #{p[body + 10]}; only 0, zlib, is defined", kept))
+          return
+        end
+        if p[body + 11] != 0_u8
+          @result = PngError.new(Png.keep("png: IHDR's filter method is #{p[body + 11]}; only 0 is defined", kept))
+          return
+        end
+        if p[body + 12] > 1_u8
+          @result = PngError.new(Png.keep("png: IHDR's interlace method is #{p[body + 12]}; 0 and 1 are defined", kept))
+          return
+        end
         interlace = p[body + 12] == 1_u8
         if width.to_i64 * height.to_i64 > max_pixels
-          return PngError.new("png: the image is #{width}x#{height}, #{width.to_i64 * height.to_i64} pixels, past the limit of #{max_pixels}")
+          @result = PngError.new(Png.keep("png: the image is #{width}x#{height}, #{width.to_i64 * height.to_i64} pixels, past the limit of #{max_pixels}", kept))
+          return
         end
       when "PLTE"
-        return PngError.new("png: a second PLTE chunk at offset #{at}") if seen_plte
-        return PngError.new("png: PLTE comes after IDAT") if idat_state != 0
-        return PngError.new("png: a PLTE chunk in a grayscale image (color type #{ctype})") if ctype == 0 || ctype == 4
+        if seen_plte
+          @result = PngError.new(Png.keep("png: a second PLTE chunk at offset #{at}", kept))
+          return
+        end
+        if idat_state != 0
+          @result = PngError.new(Png.keep("png: PLTE comes after IDAT", kept))
+          return
+        end
+        if ctype == 0 || ctype == 4
+          @result = PngError.new(Png.keep("png: a PLTE chunk in a grayscale image (color type #{ctype})", kept))
+          return
+        end
         if len == 0 || len % 3 != 0 || len > 768
-          return PngError.new("png: PLTE holds #{len} bytes; it is 1 to 256 entries of three")
+          @result = PngError.new(Png.keep("png: PLTE holds #{len} bytes; it is 1 to 256 entries of three", kept))
+          return
         end
         if ctype == 3 && len // 3 > (1 << depth)
-          return PngError.new("png: PLTE has #{len // 3} entries, past the #{1 << depth} a #{depth}-bit index reaches")
+          @result = PngError.new(Png.keep("png: PLTE has #{len // 3} entries, past the #{1 << depth} a #{depth}-bit index reaches", kept))
+          return
         end
         seen_plte = true
         plte = PngBytes.slice(p, body, len)
       when "tRNS"
-        return PngError.new("png: a second tRNS chunk at offset #{at}") if seen_trns
-        return PngError.new("png: tRNS comes after IDAT") if idat_state != 0
+        if seen_trns
+          @result = PngError.new(Png.keep("png: a second tRNS chunk at offset #{at}", kept))
+          return
+        end
+        if idat_state != 0
+          @result = PngError.new(Png.keep("png: tRNS comes after IDAT", kept))
+          return
+        end
         case ctype
         when 0
-          return PngError.new("png: tRNS for a grayscale image holds 2 bytes, not #{len}") if len != 2
+          if len != 2
+            @result = PngError.new(Png.keep("png: tRNS for a grayscale image holds 2 bytes, not #{len}", kept))
+            return
+          end
         when 2
-          return PngError.new("png: tRNS for an RGB image holds 6 bytes, not #{len}") if len != 6
+          if len != 6
+            @result = PngError.new(Png.keep("png: tRNS for an RGB image holds 6 bytes, not #{len}", kept))
+            return
+          end
         when 3
-          return PngError.new("png: tRNS comes before PLTE") unless seen_plte
+          unless seen_plte
+            @result = PngError.new(Png.keep("png: tRNS comes before PLTE", kept))
+            return
+          end
           if len > plte.bytesize // 3
-            return PngError.new("png: tRNS has #{len} alpha values for a palette of #{plte.bytesize // 3}")
+            @result = PngError.new(Png.keep("png: tRNS has #{len} alpha values for a palette of #{plte.bytesize // 3}", kept))
+            return
           end
         else
-          return PngError.new("png: a tRNS chunk in an image with an alpha channel (color type #{ctype})")
+          @result = PngError.new(Png.keep("png: a tRNS chunk in an image with an alpha channel (color type #{ctype})", kept))
+          return
         end
         seen_trns = true
         trns = PngBytes.slice(p, body, len)
       when "IDAT"
-        return PngError.new("png: the IDAT chunk at offset #{at} comes after another chunk ended the IDAT run; IDAT chunks are consecutive") if idat_state == 2
+        if idat_state == 2
+          @result = PngError.new(Png.keep("png: the IDAT chunk at offset #{at} comes after another chunk ended the IDAT run; IDAT chunks are consecutive", kept))
+          return
+        end
         if ctype == 3 && !seen_plte
-          return PngError.new("png: IDAT comes before PLTE in a palette image")
+          @result = PngError.new(Png.keep("png: IDAT comes before PLTE in a palette image", kept))
+          return
         end
         idat_state = 1
         idats << {body, len}
       when "IEND"
         ended = true
       when "gAMA"
-        return PngError.new("png: gAMA holds #{len} bytes, not 4") if len != 4
+        if len != 4
+          @result = PngError.new(Png.keep("png: gAMA holds #{len} bytes, not 4", kept))
+          return
+        end
         gamma = PngBytes.be32(p, body).to_i32
       when "sRGB"
-        return PngError.new("png: sRGB holds #{len} bytes, not 1") if len != 1
-        return PngError.new("png: sRGB's rendering intent is #{p[body]}; it is 0 to 3") if p[body] > 3_u8
+        if len != 1
+          @result = PngError.new(Png.keep("png: sRGB holds #{len} bytes, not 1", kept))
+          return
+        end
+        if p[body] > 3_u8
+          @result = PngError.new(Png.keep("png: sRGB's rendering intent is #{p[body]}; it is 0 to 3", kept))
+          return
+        end
         srgb = p[body].to_i32
       when "iCCP"
         z = PngBytes.nul(p, body, body + len)
-        return PngError.new("png: iCCP's profile name is not ended by a NUL") if z < 0
-        return PngError.new("png: iCCP's profile name is #{z - body} bytes; it is 1 to 79") if z == body || z - body > 79
-        return PngError.new("png: iCCP holds no compression method") if z + 1 >= body + len
-        return PngError.new("png: iCCP's compression method is #{p[z + 1]}; only 0, zlib, is defined") if p[z + 1] != 0_u8
+        if z < 0
+          @result = PngError.new(Png.keep("png: iCCP's profile name is not ended by a NUL", kept))
+          return
+        end
+        if z == body || z - body > 79
+          @result = PngError.new(Png.keep("png: iCCP's profile name is #{z - body} bytes; it is 1 to 79", kept))
+          return
+        end
+        if z + 1 >= body + len
+          @result = PngError.new(Png.keep("png: iCCP holds no compression method", kept))
+          return
+        end
+        if p[z + 1] != 0_u8
+          @result = PngError.new(Png.keep("png: iCCP's compression method is #{p[z + 1]}; only 0, zlib, is defined", kept))
+          return
+        end
         prof = Png.inflate_metadata(PngBytes.slice(p, z + 2, body + len - z - 2), "iCCP")
-        return prof if prof.is_a?(PngError)
-        icc_name = PngBytes.latin1(PngBytes.slice(p, body, z - body))
-        icc = prof
+        if prof.is_a?(PngError)
+          @result = PngError.new(Png.keep(prof.message, kept))
+          return
+        end
+        icc_name = Png.keep(PngBytes.latin1(PngBytes.slice(p, body, z - body)), kept)
+        icc = Png.keep(prof, kept)
       when "tEXt", "zTXt", "iTXt"
-        t = Png.read_text(name, p, body, len)
-        return t if t.is_a?(PngError)
+        t = Png.read_text(name, p, body, len, kept)
+        if t.is_a?(PngError)
+          @result = PngError.new(Png.keep(t.message, kept))
+          return
+        end
         texts << t
       else
         if p[at + 4] & 0x20_u8 == 0_u8
-          return PngError.new("png: the chunk #{name} at offset #{at} is critical and not one this decoder knows")
+          @result = PngError.new(Png.keep("png: the chunk #{name} at offset #{at} is critical and not one this decoder knows", kept))
+          return
         end
         skipped << name
       end
       at = body + len + 4
     end
-    return PngError.new("png: the file has no IDAT chunk") if idats.empty?
-    return PngError.new("png: a palette image (color type 3) without a PLTE chunk") if ctype == 3 && !seen_plte
+    if idats.empty?
+      @result = PngError.new(Png.keep("png: the file has no IDAT chunk", kept))
+      return
+    end
+    if ctype == 3 && !seen_plte
+      @result = PngError.new(Png.keep("png: a palette image (color type 3) without a PLTE chunk", kept))
+      return
+    end
     img = Png.pixels(PngDecode.new(width, height, depth, ctype, interlace, plte, trns), data, idats)
-    return img if img.is_a?(PngError)
-    PngFile.new(img, ctype, depth, interlace, plte, trns, gamma, srgb, icc_name, icc, texts, skipped)
+    if img.is_a?(PngError)
+      @result = PngError.new(Png.keep(img.message, kept))
+      return
+    end
+    file = PngFile.new(img, ctype, depth, interlace, plte, trns, gamma, srgb, icc_name, icc, texts, skipped)
+    @result = file
+  end
+end
+
+pub struct Png
+  # Pillow's `Image.MAX_IMAGE_PIXELS`, past which it warns of a
+  # decompression bomb: the default bound on the pixels a file may claim.
+  MAX_PIXELS = 89_478_485_i64
+  # The most an iCCP profile or a compressed text inflates to.
+  MAX_METADATA = 8 * 1024 * 1024
+  # How much image data one IDAT chunk carries, written.
+  IDAT_SIZE = 65536
+
+  SIGNATURE = StaticArray[137_u8, 80_u8, 78_u8, 71_u8, 13_u8, 10_u8, 26_u8, 10_u8]
+
+  # The file in *data*, decoded; or what is wrong with it. A file whose
+  # IHDR claims more than *max_pixels* pixels is refused before anything
+  # is allocated for them.
+  def self.decode(data : String, max_pixels : Int64 = MAX_PIXELS) : PngFile | PngError
+    Png.result(RisPngRead.new(data, max_pixels))
+  end
+
+  def self.result(read : RisPngRead) : PngFile | PngError
+    read.result
+  end
+
+  def self.keep(value : String, into : String::Builder) : String
+    at = into.bytesize
+    into << value
+    into.finish[at, value.bytesize]
   end
 
   # tEXt, zTXt or iTXt (sections 11.3.3.2-4).
-  def self.read_text(name : String, p : String, body : Int32, len : Int32) : PngText | PngError
+  def self.read_text(name : String, p : String, body : Int32, len : Int32, kept : String::Builder) : PngText | PngError
     limit = body + len
     z = PngBytes.nul(p, body, limit)
     return PngError.new("png: a #{name} keyword is not ended by a NUL") if z < 0
     return PngError.new("png: a #{name} keyword is #{z - body} bytes; it is 1 to 79") if z == body || z - body > 79
-    keyword = PngBytes.latin1(PngBytes.slice(p, body, z - body))
+    keyword = Png.keep(PngBytes.latin1(PngBytes.slice(p, body, z - body)), kept)
     case name
     when "tEXt"
-      PngText.new(name, keyword, PngBytes.latin1(PngBytes.slice(p, z + 1, limit - z - 1)))
+      PngText.new(name, keyword, Png.keep(PngBytes.latin1(PngBytes.slice(p, z + 1, limit - z - 1)), kept))
     when "zTXt"
       return PngError.new("png: zTXt #{keyword.inspect} holds no compression method") if z + 1 >= limit
       return PngError.new("png: zTXt #{keyword.inspect}'s compression method is #{p[z + 1]}; only 0 is defined") if p[z + 1] != 0_u8
       text = Png.inflate_metadata(PngBytes.slice(p, z + 2, limit - z - 2), "zTXt")
       return text if text.is_a?(PngError)
-      PngText.new(name, keyword, PngBytes.latin1(text))
+      PngText.new(name, keyword, Png.keep(PngBytes.latin1(text), kept))
     else
       return PngError.new("png: iTXt #{keyword.inspect} is cut short before its text") if z + 3 > limit
       flag = p[z + 1]
@@ -1023,7 +1199,7 @@ pub struct Png
         return inflated if inflated.is_a?(PngError)
         raw = inflated
       end
-      PngText.new(name, keyword, raw, PngBytes.slice(p, z + 3, lz - z - 3), PngBytes.slice(p, lz + 1, tz - lz - 1))
+      PngText.new(name, keyword, Png.keep(raw, kept), PngBytes.slice(p, z + 3, lz - z - 3), PngBytes.slice(p, lz + 1, tz - lz - 1))
     end
   end
 
@@ -1044,40 +1220,11 @@ pub struct Png
   # The image data inflated into exactly the bytes IHDR promised, the
   # filters undone, and the pixels laid out.
   def self.pixels(d : PngDecode, data : String, idats : Array({Int32, Int32})) : Image | PngError
-    expected = d.raw_size
-    size = d.out_size
-    if expected > 0x7fffffff_i64 || size > 0x7fffffff_i64
-      return PngError.new("png: the image's data is #{expected > size ? expected : size} bytes, past what one string holds")
-    end
-    want = expected.to_i32
-    raw = Array(UInt8).new(want)
-    total = 0
-    idats.each { |piece| total = total + piece[1] }
-    stream = ""
-    idats.each { |piece| stream << data[piece[0], piece[1]] }
-    inf = Inflater.new(Envelope::Zlib, nil, stream)
-    while true
-      piece = inf.read(65536)
-      return PngError.new("png: the image data's zlib stream: #{piece.message}") if piece.is_a?(CompressError)
-      break if piece.empty?
-      if raw.size + piece.bytesize > want
-        return PngError.new("png: the image data inflates past the #{want} bytes a #{d.layout_desc} needs")
-      end
-      raw.append(piece)
-    end
-    got = raw.size
-    if got < want
-      return PngError.new("png: the image data ends after #{got} of the #{want} bytes a #{d.layout_desc} needs")
-    end
-    fault = d.unfilter(raw)
-    return fault if fault
-    pixels = Array(UInt8).new(size.to_i32, 0_u8)
-    bad = d.unpack(raw, pixels)
-    if bad >= 0
-      return PngError.new("png: a pixel's palette index is #{bad}, past the palette's #{d.palette_entries} entries")
-    end
-    samples = PngBytes.text(pixels, 0, pixels.size)
-    Image.new(d.width, d.height, d.layout, d.out_depth, samples, d.key)
+    Png.image(Image.new(d, data, idats))
+  end
+
+  def self.image(image : Image) : Image | PngError
+    image.error || image
   end
 
   # *image* as a PNG file. *texts* are written as tEXt chunks, keyword

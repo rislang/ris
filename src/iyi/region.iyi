@@ -385,6 +385,20 @@ class RisRegion
     @@text_copied_bytes &+= bytes
   end
 
+  # A lazy reservation needs a side-list boundary that already exists
+  # at its declaration, even before this tape has made its first side.
+  # So a tape's first text slot takes one empty side region; it returns to
+  # the spares with the tape and is reused, and counts as no transfer.
+  def self.text_anchor(home : UInt64) : UInt64
+    return 0_u64 if home == 0
+    side = IyiHeap.read64(home &+ OFF_SIDE)
+    return side unless side == 0
+    side = acquire_side(0_u64)
+    IyiHeap.write64(side &+ OFF_PARENT, 0_u64)
+    IyiHeap.write64(home &+ OFF_SIDE, side)
+    side
+  end
+
   # Lazy text may first grow while a shorter-lived caller tape is active.
   # Link its state and payload directly to its construction-time owner.
   # Metadata occupies the first 40 bytes of the private reservation.

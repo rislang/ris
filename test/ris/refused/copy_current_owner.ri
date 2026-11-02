@@ -1,0 +1,14 @@
+class RisLocalCopy
+  getter items : Array(Int32)
+
+  def initialize
+    @items = [1]
+  end
+end
+
+def escape : RisLocalCopy
+  local = RisLocalCopy.new
+  local.copy_to(RisCurrentTape.new)
+end
+
+puts escape.items[0]

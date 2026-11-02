@@ -122,6 +122,9 @@ class Iyi::TapeShrinkChecker
              when Call
                node.name.ends_with?("=") ? node.args.last? : nil
              end
+    while source.is_a?(Cast)
+      source = source.obj
+    end
     source ? !reference?(source) : false
   end
 
@@ -174,9 +177,16 @@ class Iyi::TapeShrinkChecker
   # A field read without a recorded store bounds a lifetime, not an
   # identity. Include every compatible owner already in scope at or above
   # that holder; parameter roots also bound caller storage.
+  private def copied_root?(root : UInt64) : Bool
+    return true if @copied_roots.includes?(root)
+    @parents[root]?.try { |parent| copied_root?(parent[0]) } || false
+  end
+
   private def read_back(v : Value, type : Type?, env : Env) : Value
     return v unless type && @checking
-    unresolved = v.roots.select { |r| @parents.has_key?(r) && !env.slots.has_key?(r) }
+    unresolved = v.roots.select do |r|
+      @parents.has_key?(r) && !env.slots.has_key?(r) && !copied_root?(r)
+    end
     return v if unresolved.empty?
     candidates = [] of UInt64
     @root_types.to_a.each do |root, candidate|
@@ -263,7 +273,22 @@ class Iyi::TapeShrinkChecker
     if solving = @solving
       sites = @store_sites[solving] ||= Hash(UInt64, ASTNode).new
       kinds = @store_kinds[solving] ||= Hash(UInt64, UInt8).new
-      kind = store_kind || (plain_store?(@store_site || node) ? 1_u8 : 2_u8)
+      # A forwarded borrow may specialize to nil at a caller. Keep it
+      # distinct from a fresh or unproved reference when its roots vanish.
+      sources = v.roots + v.views.map(&.root)
+      borrowed = !sources.empty? && sources.all? do |source|
+        parameter_root?(source) || @global_ids.includes?(source) ||
+          (copied_root?(source) && root_scope(source).empty?)
+      end
+      kind = if plain_store?(@store_site || node)
+               1_u8
+             elsif borrowed
+               4_u8
+             elsif store_kind == 4_u8 && sources.empty?
+               4_u8
+             else
+               store_kind == 1_u8 ? 1_u8 : 2_u8
+             end
       roots.each do |root|
         sites[root] ||= @store_site || node
         kinds[root] = (kinds[root]? || 0_u8) | kind
@@ -320,7 +345,15 @@ class Iyi::TapeShrinkChecker
       env.slots[root] = strong ? v : merge(env.slots[root]? || EMPTY, v)
       copies.each do |path, contents|
         destination = root
-        path.each { |name| destination = field_root(destination, name) }
+        fits = true
+        path.each do |name|
+          unless field_fits?(destination, name)
+            fits = false
+            break
+          end
+          destination = field_root(destination, name)
+        end
+        next unless fits
         env.slots[destination] = strong && !@folded_roots.includes?(destination) ? contents : merge(env.slots[destination]? || EMPTY, contents)
       end
     end
@@ -359,10 +392,21 @@ class Iyi::TapeShrinkChecker
   private def check_store(root : UInt64, v : Value, node : ASTNode)
     if @checking && !@text_only
       destinations = root_scope(root)
-      source_roots(v).each do |source|
+      sources = source_roots(v)
+      kept = [] of UInt64
+      # A slot's own appends and a builder's copy the bytes; a store into
+      # any other named place keeps the text.
+      target_type = root_type(root)
+      unless within_growth?(root) || (target_type.nil? && !@parents.has_key?(root)) ||
+             target_type.try { |t| type_name(t.remove_typedef) == "String::Builder" }
+        kept = v.roots.select { |r| scope_storage?(r) }
+        sources += kept
+      end
+      sources.uniq.each do |source|
         # A struct is stored by value: its bytes are copied, and what its
         # fields hold is checked through the value's views.
-        next if struct_value?(source) && !@handed.includes?(source)
+        next if struct_value?(source) && !@handed.includes?(source) &&
+                !kept.includes?(source)
         scope = source_scope(source)
         unless scope.all? { |part| destinations.includes?(part) }
           STDERR.puts "DBG scope source=#{root_name(source)} type=#{@root_types[source]?} scope=#{scope} dest=#{root_name(root)} type=#{@root_types[root]?} scope=#{destinations} at #{node.location}" if ENV["RIS_DBG"]?
@@ -386,6 +430,30 @@ class Iyi::TapeShrinkChecker
         end
       end
     end
+  end
+
+  # Plain structs that stand for storage ending with their own scope: a
+  # String local's growth slot and the running tape a copy was put on.
+  private def scope_storage?(root : UInt64) : Bool
+    text_growth?(root) || current_tape?(root)
+  end
+
+  private def current_copy?(root : UInt64) : Bool
+    return true if @current_copies.includes?(root)
+    @parents[root]?.try { |parent| current_copy?(parent[0]) } || false
+  end
+
+  private def within_growth?(root : UInt64) : Bool
+    return true if text_growth?(root)
+    @parents[root]?.try { |parent| within_growth?(parent[0]) } || false
+  end
+
+  private def text_growth?(root : UInt64) : Bool
+    @root_types[root]?.try { |type| type_name(type.remove_typedef) == "RisTextGrowth" } || false
+  end
+
+  private def current_tape?(root : UInt64) : Bool
+    @root_types[root]?.try { |type| type_name(type.remove_typedef) == "RisCurrentTape" } || false
   end
 
   # The innermost explicit `tape` block *root* was made in, if any.
@@ -541,6 +609,15 @@ class Iyi::TapeShrinkChecker
        !target.type?.try(&.remove_typedef.is_a?(PointerInstanceType))
       complete = stored(v, env)
       declaration.roots.each { |root| check_store(root, complete, node) }
+    end
+    type = one_class(target.type?)
+    if type.is_a?(InstanceVarContainer) && !type.struct? && !storage_type?(type)
+      # A class alias reads its fields when used; it does not snapshot the
+      # old borrows of those fields across a later clear or replacement.
+      held = env.slots.flat_map do |root, contents|
+        contains_root?(v.roots, root) ? contents.views : [] of View
+      end
+      v = Value.new(v.roots, v.views - held, v.procs, v.unknown_proc)
     end
     env[target.name] = v
   end
@@ -712,7 +789,12 @@ class Iyi::TapeShrinkChecker
       when PointerInstanceType
         owners << owner.element_type.remove_typedef
       when InstanceVarContainer
-        owner.instance_vars[parent[1]]?.try(&.type?).try { |t| found << t }
+        if parent[1] == "[]" && owner.is_a?(GenericClassInstanceType)
+          key = type_name(owner).starts_with?("Hash(") ? "V" : "T"
+          owner.type_vars[key]?.as?(Var).try(&.type?).try { |t| found << t }
+        else
+          owner.instance_vars[parent[1]]?.try(&.type?).try { |t| found << t }
+        end
       end
     end
     found.size == 1 ? found[0] : nil
@@ -780,6 +862,7 @@ class Iyi::TapeShrinkChecker
     elsif @global_ids.includes?(root)
       [root]
     elsif allocation && summary.result.roots.includes?(root)
+      @copied_roots << allocation if copied_root?(root)
       [allocation]
     elsif @text_only && allocation && @text_copies.includes?(root)
       # A fresh copy stored inside a returned holder is independent too.
@@ -1070,6 +1153,11 @@ class Iyi::TapeShrinkChecker
         retained = summary.retains.any? { |r| relative_path(r, seed) }
         summary.stores.each do |destination, contents|
           next unless source_roots(contents).any? { |r| relative_path(r, seed) }
+          local_result = contains_root?(summary.result.roots, destination) &&
+            translate(destination, summary, summary.seeds.map do |r|
+              Value.new([r], [] of View)
+            end).empty?
+          next if local_result
           if relative_path(destination, summary.seeds[0])
             bits |= TapeCallGraph::Contract::STORE_SELF
           else
@@ -1435,6 +1523,10 @@ class Iyi::TapeShrinkChecker
   # (SPEC 1.9). What it views from outside is checked as a store.
   # Roots a copy_to or to_heap made: they are on their owner.
   @copied_roots = Set(UInt64).new
+  @growth_fallbacks = Set(UInt64).new
+  # copy_to(RisCurrentTape.new): on whichever tape runs the call, so a store
+  # of it is as fresh as anything else the callee made there.
+  @current_copies = Set(UInt64).new
 
   private def check_leaving(scope : UInt64, v : Value, env : Env,
                             type : Type?, node : ASTNode) : Nil
@@ -1445,7 +1537,8 @@ class Iyi::TapeShrinkChecker
     # slots' views. A class instance or storage handle is on the tape.
     sources = flat ? complete.views.map(&.root).reject { |r| complete.roots.includes?(r) } : source_roots(complete).reject { |r| struct_value?(r) }
     # A String's views are its own bytes, which move with it.
-    sources = [] of UInt64 if text_result?(type)
+    # Only a copy on this scope's own tape stays behind.
+    sources = sources.select { |source| current_copy?(source) } if text_result?(type)
     sources.each do |source|
       blocks = root_tapes_of(source)
       if flat
@@ -1458,7 +1551,7 @@ class Iyi::TapeShrinkChecker
         # its block appends to) is older than the block's scratch.
         next if !node.is_a?(Def) && blocks && !blocks.includes?(scope)
       end
-      next if @copied_roots.includes?(source)
+      next if copied_root?(source) && root_scope(source).empty?
       what = node.is_a?(Def) ? "def `#{node.name}`" : "block"
       refuse node, "cannot return a value made in this #{what}'s scratch: " \
                  "it would have to be copied out (SPEC 1.9).\nEnd the def " \
@@ -1697,9 +1790,27 @@ class Iyi::TapeShrinkChecker
       input.procs, input.unknown_proc)
   end
 
+  # A local's growing text lives in its slot's reservation: it carries the
+  # slot, which ends with the scope that declared the local.
+  private def growing_text(node : ASTNode, result : Value, env : Env) : Value
+    return result unless node.is_a?(Call) && node.name == "append"
+    return result unless node.obj.try(&.type?).try { |t| t.to_s.includes?("RisTextGrowth") }
+    guard = node.obj
+    guard = guard.expressions.last? if guard.is_a?(Expressions)
+    return result unless guard.is_a?(If) && (name = guard.cond.as?(Var).try(&.name))
+    # The lowered `slot || (slot = new)`: the slot exists from the local's
+    # declaration, so the fallback's `new` is not storage made here.
+    fallback = guard.else
+    fallback = fallback.value if fallback.is_a?(Assign)
+    @growth_fallbacks << fallback.object_id
+    made = (env[name]? || EMPTY).roots.reject { |r| @growth_fallbacks.includes?(r) }
+    Value.new((result.roots + made).uniq, result.views, result.procs, result.unknown_proc)
+  end
+
   def value(node : ASTNode, env : Env) : Value
     result = evaluate(node, env)
     result = tape_text(node, result)
+    result = growing_text(node, result, env)
     result = handed_on(node, result)
     if (fields = @condition_storage) && storage?(node)
       result.roots.each do |root|
@@ -1862,6 +1973,16 @@ class Iyi::TapeShrinkChecker
       end
     when ClassVar, Global
       global_value(node.var.object_id, node.type?)
+    when ReadInstanceVar
+      receiver = value(node.obj, env)
+      return EMPTY unless reference?(node)
+      roots = receiver.roots.map { |root| field_root(root, node.name) }
+      roots.each { |root| @root_types[root] ||= node.type }
+      # `other.@field` borrows that field, not every sibling in other.
+      field = roots.empty? ? receiver : Value.new(roots, [] of View)
+      result = read_slots(field, env, node.type?, roots)
+      use(result, node)
+      result
     when Var, InstanceVar
       if node.is_a?(Var) && (loop_body = @dead[node.name]?) && @checking && !@text_only
         refuse node, "cannot read `#{node.name}` after the loop: its value was " \
@@ -2214,7 +2335,9 @@ class Iyi::TapeShrinkChecker
               builder = summary_root_type(root, summary, target).try { |t| type_name(t.remove_typedef) == "String::Builder" }
               STDERR.puts "DBG fresh-store #{node.name} root=#{root} type=#{summary_root_type(root, summary, target)} at #{node.location}" if ENV["RIS_DBG"]? && contents.roots.empty? && contents.views.empty?
               store_kind = @store_kinds[target.object_id]?.try &.[root]?
-              refuse_fresh_store(destinations, node) if store_kind != 1_u8 && contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root) && !builder
+              current_copy = source_roots(contents).any? { |r| current_copy?(r) }
+              refuse_fresh_store(destinations, node) if current_copy
+              refuse_fresh_store(destinations, node) if (store_kind.nil? || store_kind.not_nil! & 2_u8 != 0) && contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root) && !builder
               incoming = translated(contents, summary, actuals, node.object_id)
               # A marked callee's own scratch cannot reach its stores: it
               # refused that itself. What it made and stored is not this
@@ -2291,8 +2414,14 @@ class Iyi::TapeShrinkChecker
       # consumes the receiver, not the views its slots carry.
       if summarized && !@text_only && !receiver.roots.empty?
         held = env.slots.compact_map { |key, contents| contents.views if contains_root?(receiver.roots, key) }.flatten + held_before
-        unless held.empty?
-          consumed = Value.new(consumed.roots, consumed.views - held,
+        receiver_type = one_class(node.obj.try(&.type?))
+        class_receiver = receiver_type && class_instance?(receiver_type)
+        unless held.empty? && !class_receiver
+          remaining = consumed.views.reject do |borrow|
+            held.includes?(borrow) ||
+              (class_receiver && contains_root?(receiver.roots, borrow.root))
+          end
+          consumed = Value.new(consumed.roots, remaining,
             consumed.procs, consumed.unknown_proc)
         end
       end
@@ -2377,10 +2506,19 @@ class Iyi::TapeShrinkChecker
           (derived.views + derived.roots.map { |root| view(root) }).uniq)
       elsif {"copy_to", "dup", "to_heap", "new"}.includes?(node.name) || concatenated
         if reference?(node)
-          @root_scopes[node.object_id] = {"copy_to", "to_heap"}.includes?(node.name) ? [] of UInt64 : @scopes.dup
+          copying = {"copy_to", "to_heap"}.includes?(node.name)
+          current = node.name == "to_heap" ||
+            (node.name == "copy_to" && node.args.first?.try(&.type?).try do |t|
+              t.to_s.includes?("RisCurrentTape")
+            end)
+          @root_scopes[node.object_id] = copying && !current ? [] of UInt64 : @scopes.dup
           # copy_to and to_heap put the copy on its owner, not here.
-          note_fresh(node.object_id) unless {"copy_to", "to_heap"}.includes?(node.name)
+          note_fresh(node.object_id) unless copying && !current
           @copied_roots << node.object_id if {"copy_to", "to_heap"}.includes?(node.name)
+          @current_copies << node.object_id if copying && current && node.name == "copy_to"
+          if {"copy_to", "to_heap"}.includes?(node.name)
+            env.slots.reject! { |root, _| contains_root?([node.object_id], root) }
+          end
           # A struct `new` holds what its arguments give it: a value it
           # returns carries their storage (SPEC 1.9).
           # (The constructor's own work, not its arguments': a struct

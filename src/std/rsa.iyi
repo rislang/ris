@@ -335,11 +335,16 @@ pub struct RsaPublicKey
     m.to_bytes(@size)
   end
 
+  # A choice of nil and one call: the power is built in the caller's
+  # destination (SPEC 1.5).
   private def open_value(signature : Array::View(UInt8)) : BigInt?
-    return nil unless signature.size == @size
-    s = BigInt.from_bytes(signature)
-    return nil unless s < @modulus
-    s.pow_mod(@exponent, @modulus)
+    if signature.size != @size
+      nil
+    elsif !((s = BigInt.from_bytes(signature)) < @modulus)
+      nil
+    else
+      s.pow_mod(@exponent, @modulus)
+    end
   end
 end
 
@@ -393,6 +398,13 @@ pub struct RsaPrivateKey
   def initialize(@public_key : RsaPublicKey, @p : BigInt, @q : BigInt, @dp : BigInt, @dq : BigInt, @qi : BigInt, @prf : Array(UInt8))
     @n = @public_key.modulus
     @e = @public_key.exponent
+  end
+
+  def copy_into_identity(store) : RsaPrivateKey
+    RsaPrivateKey.new(store.certificate_key(@public_key),
+      store.certificate_number(@p), store.certificate_number(@q),
+      store.certificate_number(@dp), store.certificate_number(@dq),
+      store.certificate_number(@qi), store.identity_prf(@prf))
   end
 
   # The one key in a PEM text: an `RSA PRIVATE KEY` block (PKCS #1) or a
@@ -562,7 +574,11 @@ pub struct RsaPrivateKey
   # which is odd.
   private def rsasp1(em : Array::View(UInt8)) : Array(UInt8)
     m = BigInt.from_bytes(em)
-    r, r_inverse = blinding(em)
+    r_limbs = Array(UInt64).new(@n.limbs.size + 2)
+    inverse_limbs = Array(UInt64).new(@n.limbs.size + 2)
+    blinding(em, r_limbs, inverse_limbs)
+    r = BigInt.new(1, r_limbs)
+    r_inverse = BigInt.new(1, inverse_limbs)
     c = (m * r.pow_mod(@e, @n)) % @n
     s1 = (c % @p).pow_mod_secret(@dp, @p)
     s2 = (c % @q).pow_mod_secret(@dq, @q)
@@ -576,7 +592,8 @@ pub struct RsaPrivateKey
   # r, an HMAC of the encoded message under the key's own secret reduced
   # mod n, and r^-1 mod n; the next counter's r in the 2^-1000 case of one
   # with no inverse.
-  private def blinding(em : Array::View(UInt8)) : {BigInt, BigInt}
+  # Both refill the caller's limbs.
+  private def blinding(em : Array::View(UInt8), r_limbs : Array(UInt64), inverse_limbs : Array(UInt64)) : Nil
     counter = 0_u8
     while true
       wide = [] of UInt8
@@ -588,11 +605,15 @@ pub struct RsaPrivateKey
       r = BigInt.from_bytes(wide) % @n
       if r > BigInt.new(1)
         inverse = r.inverse_mod_secret(@n)
-        return {r, inverse} if inverse
+        if inverse
+          r.limbs.each { |limb| r_limbs << limb }
+          inverse.limbs.each { |limb| inverse_limbs << limb }
+          return
+        end
       end
       counter = counter + 1_u8
     end
-    {BigInt.new(1), BigInt.new(1)}
+    nil
   end
 end
 

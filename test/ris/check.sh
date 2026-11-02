@@ -105,6 +105,31 @@ else
   echo "FAILED   plain_union_stores: $out"; status=1
 fi
 expect union_store_fresh 'cannot store data made in this def'
+
+# Explicit field reads preserve sibling identity and still guard shrinks.
+out=$("$RIS" run test/ris/explicit_field_read.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '1' ]; then
+  echo 'runs     explicit_field_read'
+else
+  echo "FAILED   explicit_field_read: $out"; status=1
+fi
+expect explicit_field_read 'cannot shrink tape storage with a live view'
+expect copy_current_owner 'cannot return a value made in this def'
+# Each loosened check keeps its unsafe neighbour refused (SPEC 3.6).
+expect class_alias_held_view 'cannot shrink tape storage'
+expect class_alias_field_view 'cannot shrink tape storage'
+expect class_receiver_borrow 'cannot shrink tape storage'
+expect class_receiver_view 'cannot shrink tape storage'
+expect tape_block_program_store 'cannot store request tape data'
+expect copied_root_shrink 'cannot shrink tape storage'
+expect copied_field_return 'cannot return a value made in this def'
+expect contract_result_holder 'cannot shrink tape storage'
+expect contract_result_stash 'cannot store'
+expect store_borrowed_or_fresh 'cannot store data made in this def'
+expect copy_current_store 'cannot store data made in this'
+expect growing_text_element 'cannot store data made in this tape block'
+expect growing_text_field 'cannot store data made in this def'
+
 # HPKE owners refill their contexts for all three supported KEMs.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/hpke_owners.ri 2>&1)
 want='32

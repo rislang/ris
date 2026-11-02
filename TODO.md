@@ -80,7 +80,7 @@ Fix a checker hole below only when a cluster hits it.
 
 4. Samples and tests, group by group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
-   refusal. check.sh: 19 FAILED. Patterns that work: read into one flat
+   refusal. check.sh: 8 FAILED. Patterns that work: read into one flat
    String (tagged where an error may come back) and wrap it in a one-call
    def, a choice of two calls, or a `new` (a constructor builds in the
    caller's scope: dns, SvcbRecord, json's document); keep a round's
@@ -88,27 +88,18 @@ Fix a checker hole below only when a cluster hits it.
    refill a field instead of a new value (TLS records, key updates); a
    struct or Tuple of texts and plain values moves down whole.
    Left, by cluster:
-   * HTTP client and websocket (http_coding, websocket_handshake,
-     http_prefork's TLS half). Done: HPKE/P-256/P-384 holders, TLS
-     configs refilled, HTTPClient's HTTPS-record configs in slots, the
-     default TlsConfig per client, ClientHello and ECH parts written
-     into the caller's arrays, the ServerHello a refilled slot. Left:
-     the certificate check reaches SystemRoots.load and Certificate
-     lists made in defs (x509); then the exchange loop's
-     fresh stores (an H2Stream per request, BodyReader and socket per
-     round) and WebSocket.connect. TLS server ClientHello offers and
-     ECH outer parts still need caller-owned storage.
-   * smtp, mail: `SmtpClient.connect` makes and returns its owner
-     (declare `client = SmtpClient.new(...)`, then a method that
-     connects); MailAddresses' parsers return lists and texts made in a
-     round (`phrase`, `list`, `addr_spec`, `params` with `quoted`): give
-     the scanner a texts builder and the caller's lists. In smtp.ri,
-     `msg.to << Address.new` reads as a program-tape store even inside a
-     def: find why.
-   * regex (RxCompiler fields), big (BigInt results), png (chunk texts
-     kept per round, PngInfo built in its def), zip, log (with_context
-     fields), hpack, text_grow, iyimod_text_growth,
-     autocert, program_local_init, secure_dns.
+   * TLS server (http_prefork's TLS half): `client_hello` and
+     `read_outer` return reader views and lists made in the def; the
+     offers and ECH outer parts need caller-owned storage.
+   * autocert lifecycle: `held_of` makes and returns its TlsIdentity and
+     store (declare them at the caller, pass them in);
+     SigningKey.public_key (x509) returns key bytes made in a def.
+   * Real dangling text the growing-local check now refuses: mime:200
+     and yaml/xml `TapeMap#[]=` (xml:150, a key from a round), URI's
+     `path=` (uri:219, from http_coding) and eiy:333 `value=`. Build
+     them in a builder made before the loop, or copy them to the owner.
+   * secure_dns:360: `@client = HTTPClient.new` is refused as an owner
+     built in a field: take the client from a named declaration.
 5. Benches: build each, group the refusals by message, fix per group.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
@@ -121,9 +112,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   inside a union (`IyiSocket | SocketError`), unrefused; the socket was
   freed with the def and every worker accepted on fd 0. Refuse a class
   instance made in a def and answered in a union after other work.
-* `x.copy_to(RisCurrentTape.new)` in a callee reads as a store into an
-  untyped root outside every scope, so a loop round calling it is
-  refused. Model it as a value on the running scope.
 * A store into `self`'s field inside a method is not checked against
   the method's scope; the same store is refused at a caller that holds
   the receiver in a local. Check it where it is made.

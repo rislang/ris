@@ -94,6 +94,11 @@ pub struct P384PrivateKey
   def initialize(@d : P384Num, @public_key : EcdsaPublicKey, @public_point : Array(UInt8))
   end
 
+  def copy_into_identity(store) : P384PrivateKey
+    P384PrivateKey.new(@d, store.certificate_key(@public_key),
+      store.identity_point(@public_point))
+  end
+
   # The key whose d is *bytes*, 48 big-endian, or why it is not one: not
   # 48 bytes, or not in [1, n - 1].
   def self.from_bytes(bytes : String | Array(UInt8)) : P384PrivateKey | EcdsaError
@@ -142,7 +147,7 @@ pub struct P384PrivateKey
   # ECDH: x of [d]Q for the peer's point Q, 48 bytes big-endian - or why
   # *peer* is not a point of P-384 (checked before d is used), or why the
   # answer is no secret.
-  def shared_secret(peer : Array(UInt8)) : Array(UInt8) | EcdsaError
+  def shared_secret(peer : Array::View(UInt8)) : Array(UInt8) | EcdsaError
     q = P384Point.decode(peer)
     return q if q.is_a?(EcdsaError)
     product = P384Point.mult(q, @d)
@@ -260,10 +265,10 @@ pub struct P384PrivateKey
     v = P384Hmac.mac(hash, k, v)
     while true
       # Step h: HMAC blocks until there are 384 bits of them.
-      t = [] of UInt8
+      t = Array(UInt8).new(48 + 64)
       while t.size < 48
-        v = P384Hmac.mac(hash, k, v)
-        t = t + v
+        P384Hmac.refill(v, P384Hmac.mac(hash, k, v))
+        v.each { |byte| t << byte }
       end
       candidate = P384Num.from_bytes(t, 0)
       if P384Num.below?(candidate, P384Num.n) && !candidate.zero?
@@ -277,8 +282,8 @@ pub struct P384PrivateKey
           return {r, s} unless s.zero?
         end
       end
-      k = P384Hmac.mac(hash, k, v + [0_u8])
-      v = P384Hmac.mac(hash, k, v)
+      P384Hmac.refill(k, P384Hmac.mac(hash, k, v + [0_u8]))
+      P384Hmac.refill(v, P384Hmac.mac(hash, k, v))
     end
     {P384Num.zero, P384Num.zero}
   end
@@ -286,6 +291,13 @@ end
 
 # HMAC under the hash a signature names.
 struct P384Hmac
+  # *into* refilled with *value*: a round's MAC ends with the round.
+  def self.refill(into : Array(UInt8), value : Array(UInt8)) : Nil
+    into.clear
+    value.each { |byte| into << byte }
+    nil
+  end
+
   def self.mac(hash : EcdsaHash, key : Array(UInt8), data : Array(UInt8)) : Array(UInt8)
     case hash
     when EcdsaHash::SHA256 then HMAC.digest(SHA256, key, data)
@@ -297,25 +309,48 @@ end
 
 # DER's Ecdsa-Sig-Value from two 48-byte big-endian numbers.
 struct P384Der
+  # Grown in one local and returned: a fresh flat value (SPEC 1.5).
   def self.signature(r : Array(UInt8), s : Array(UInt8)) : Array(UInt8)
-    body = integer(r) + integer(s)
-    [0x30_u8] + length(body.size) + body
+    rs = P384Der.skip(r)
+    ss = P384Der.skip(s)
+    rn = r.size - rs + (r[rs] >= 0x80_u8 ? 1 : 0)
+    sn = s.size - ss + (s[ss] >= 0x80_u8 ? 1 : 0)
+    body = 2 + (rn < 128 ? 1 : 2) + rn + (sn < 128 ? 1 : 2) + sn
+    der = Array(UInt8).new(body + 6)
+    der << 0x30_u8
+    P384Der.length(der, body)
+    P384Der.integer(der, r, rs)
+    P384Der.integer(der, s, ss)
+    der
   end
 
-  # A positive INTEGER: leading zeros dropped, one put back when the top
-  # bit is set.
-  private def self.integer(bytes : Array(UInt8)) : Array(UInt8)
+  # Leading zero bytes to drop, keeping the last byte.
+  def self.skip(bytes : Array(UInt8)) : Int32
     at = 0
     while at < bytes.size - 1 && bytes[at] == 0_u8
       at = at + 1
     end
-    value = bytes[at, bytes.size - at]
-    value = [0_u8] + value if value[0] >= 0x80_u8
-    [0x02_u8] + length(value.size) + value
+    at
   end
 
-  private def self.length(size : Int32) : Array(UInt8)
-    size < 128 ? [size.to_u8] : [0x81_u8, size.to_u8]
+  # A positive INTEGER from *at*: one zero put back when the top bit is
+  # set.
+  def self.integer(der : Array(UInt8), bytes : Array(UInt8), at : Int32) : Nil
+    pad = bytes[at] >= 0x80_u8 ? 1 : 0
+    der << 0x02_u8
+    P384Der.length(der, bytes.size - at + pad)
+    der << 0_u8 if pad == 1
+    while at < bytes.size
+      der << bytes[at]
+      at = at + 1
+    end
+    nil
+  end
+
+  def self.length(der : Array(UInt8), size : Int32) : Nil
+    der << 0x81_u8 if size >= 128
+    der << size.to_u8
+    nil
   end
 end
 
@@ -348,7 +383,7 @@ struct P384Num
   end
 
   # 48 big-endian bytes of *bytes* from *at*.
-  def self.from_bytes(bytes : Array(UInt8), at : Int32) : P384Num
+  def self.from_bytes(bytes : Array::View(UInt8), at : Int32) : P384Num
     new(word(bytes, at + 40), word(bytes, at + 32), word(bytes, at + 24),
       word(bytes, at + 16), word(bytes, at + 8), word(bytes, at))
   end
@@ -360,7 +395,7 @@ struct P384Num
     from_bytes(Array(UInt8).new(48 - digest.size, 0_u8) + digest, 0)
   end
 
-  private def self.word(bytes : Array(UInt8), at : Int32) : UInt64
+  private def self.word(bytes : Array::View(UInt8), at : Int32) : UInt64
     w = 0_u64
     i = 0
     while i < 8
@@ -774,7 +809,7 @@ struct P384Point
   # The point *bytes* encodes uncompressed (0x04, x, y), checked: each
   # coordinate below p, and y^2 = x^3 - 3x + b. Public input, so the checks
   # may branch.
-  def self.decode(bytes : Array(UInt8)) : P384Point | EcdsaError
+  def self.decode(bytes : Array::View(UInt8)) : P384Point | EcdsaError
     unless bytes.size == 97 && bytes[0] == 4_u8
       return EcdsaError.new("a P-384 point is 97 bytes, 0x04 and then x and y, not #{bytes.size} bytes starting #{bytes.empty? ? "-" : bytes[0].to_s}")
     end

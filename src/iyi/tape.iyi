@@ -1900,6 +1900,11 @@ struct Array::View(T)
     false
   end
 
+  def find(& : T -> Bool) : T?
+    each { |value| return value if yield value }
+    nil
+  end
+
   def initialize(@target : Array(T), indexes : Array(Int32))
     count = target.size
     @at = Array(Int32).new(indexes.size) do |k|

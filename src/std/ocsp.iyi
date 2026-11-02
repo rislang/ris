@@ -4,7 +4,8 @@
 #
 #     import std/ocsp::{OcspResponse, OcspCertStatus, OcspError, Ocsp}
 #
-#     response = OcspResponse.parse(der).or_panic   # an OCSPResponse
+#     store = RisOcspStore.new
+#     response = OcspResponse.parse(der, store).or_panic
 #     verdict = response.verify(leaf, issuer).or_panic
 #     verdict.status                                # Good, Revoked or Unknown
 #     request = Ocsp.request(leaf, issuer)          # an OCSPRequest's DER
@@ -75,7 +76,7 @@
 module std/ocsp
 
 import std/asn1::{Der, DerValue, DerTag, Asn1Error}
-import std/x509::{Certificate, X509, X509Error}
+import std/x509::{RisCertificateStore, Certificate, X509, X509Error}
 import std/digest::{SHA1, SHA256, SHA384, SHA512}
 import std/time::{Time}
 
@@ -269,40 +270,49 @@ pub struct Ocsp
   end
 end
 
+# Storage supplied by the caller for a parsed response and its chain.
+pub class RisOcspStore
+  include RisCertificateStore::Storage
+  getter responses = Array(OcspSingleResponse).new
+
+  def initialize
+  end
+end
+
 @[OnTape]
 pub struct OcspResponse
   # The whole OCSPResponse as it was read, and the ResponseData the
   # signature is over.
-  getter raw : Array(UInt8)
-  getter tbs : Array(UInt8)
+  getter raw : Array::View(UInt8)
+  getter tbs : Array::View(UInt8)
   getter version : Int32
   # The responderID: a Name's DER (byName), or the SHA-1 of the
   # responder's key (byKey); one of the two is nil.
-  getter responder_name : Array(UInt8)?
-  getter responder_key_hash : Array(UInt8)?
+  getter responder_name : Array::View(UInt8)?
+  getter responder_key_hash : Array::View(UInt8)?
   getter produced_at : Time
-  getter responses : Array(OcspSingleResponse)
+  getter responses : Array::View(OcspSingleResponse)
   # The nonce extension's OCTET STRING, nil when absent.
-  getter nonce : Array(UInt8)?
+  getter nonce : Array::View(UInt8)?
   # The signature algorithm's OID, and the signature.
   getter signature_algorithm : String
-  getter signature : Array(UInt8)
+  getter signature : Array::View(UInt8)
   # The certificates the response carries, for a delegated responder.
-  getter certificates : Array(Certificate)
+  getter certificates : Array::View(Certificate)
   @signature_parameters : DerValue?
 
-  def initialize(@raw : Array(UInt8), @tbs : Array(UInt8), @version : Int32, @responder_name : Array(UInt8)?, @responder_key_hash : Array(UInt8)?,
-                 @produced_at : Time, @responses : Array(OcspSingleResponse), @nonce : Array(UInt8)?, @signature_algorithm : String,
-                 @signature_parameters : DerValue?, @signature : Array(UInt8), @certificates : Array(Certificate))
+  def initialize(@raw : Array::View(UInt8), @tbs : Array::View(UInt8), @version : Int32, @responder_name : Array::View(UInt8)?, @responder_key_hash : Array::View(UInt8)?,
+                 @produced_at : Time, @responses : Array::View(OcspSingleResponse), @nonce : Array::View(UInt8)?, @signature_algorithm : String,
+                 @signature_parameters : DerValue?, @signature : Array::View(UInt8), @certificates : Array::View(Certificate))
   end
 
   # The OCSPResponse *der* holds (RFC 6960 section 4.2.1). The parse
   # and the lists of values it walks are on the caller's tape.
-  def self.parse(der : Array(UInt8)) : OcspResponse | OcspError
-    parse_on_tape(der)
+  def self.parse(der : Array(UInt8), store : RisOcspStore) : OcspResponse | OcspError
+    parse_on_tape(der, store)
   end
 
-  private def self.parse_on_tape(der : Array(UInt8)) : OcspResponse | OcspError
+  private def self.parse_on_tape(der : Array(UInt8), store : RisOcspStore) : OcspResponse | OcspError
     top = OcspAsn1.tape_values(OcspAsn1.value(Der.parse(der))!.tape_sequence)!
     return OcspError.new("an OCSPResponse of #{top.size} values, not 1 or 2") unless top.size == 1 || top.size == 2
     status = OcspAsn1.int(top[0].enumerated)!
@@ -323,14 +333,15 @@ pub struct OcspResponse
     signature_algorithm = OcspAsn1.text(algorithm[0].oid)!
     parameters = algorithm.size == 2 ? algorithm[1] : nil
     signature = OcspAsn1.bytes(basic[2].bit_string)!
-    certificates = [] of Certificate
+    cert_start = store.kept_certificates.size
+    certificates = store.kept_certificates
     if basic.size == 4
       carried = OcspAsn1.tape_values(OcspAsn1.value(basic[3].explicit(0))!.tape_sequence)!
       return OcspError.new("a response carrying #{carried.size} certificates, past #{Ocsp::MAX_CERTIFICATES}") if carried.size > Ocsp::MAX_CERTIFICATES
       carried.each_with_index do |value, i|
-        certificate = Certificate.parse(value.raw)
-        return OcspError.new("the response's certificate #{i}: #{certificate.message}") if certificate.is_a?(X509Error)
-        certificates << certificate
+        problem = store.append_certificate(value.raw)
+        return OcspError.new("the response's certificate #{i}: #{problem.message}") if problem
+        nil
       end
     end
 
@@ -343,36 +354,42 @@ pub struct OcspResponse
     end
     return OcspError.new("a ResponseData of #{data.size} values, not 3 or 4") unless data.size == 3 || data.size == 4
     responder = data[0]
-    name = nil.as(Array(UInt8)?)
-    key_hash = nil.as(Array(UInt8)?)
+    name = nil.as(Array::View(UInt8)?)
+    key_hash = nil.as(Array::View(UInt8)?)
     if responder.context?(1) && responder.constructed?
       written = OcspAsn1.value(responder.explicit(1))!
       OcspAsn1.tape_values(written.tape_sequence)!
-      name = written.raw
+      name = store.certificate_bytes(written.raw)
     elsif responder.context?(2) && responder.constructed?
       hash = OcspAsn1.bytes(OcspAsn1.value(responder.explicit(2))!.octet_string)!
       return OcspError.new("a responder key hash of #{hash.size} bytes, where SHA-1's is 20") unless hash.size == 20
-      key_hash = hash
+      key_hash = store.certificate_bytes(hash)
     else
       return OcspError.new("a ResponderID that is #{responder.describe}, neither byName [1] nor byKey [2]")
     end
     produced_at = OcspAsn1.generalized(data[1], "producedAt")!
     singles = OcspAsn1.tape_values(data[2].tape_sequence)!
     return OcspError.new("a ResponseData with no SingleResponse") if singles.empty?
-    responses = [] of OcspSingleResponse
-    singles.each { |single| responses << read_single(single)! }
-    nonce = nil.as(Array(UInt8)?)
+    response_start = store.responses.size
+    responses = store.responses
+    singles.each { |single| responses << read_single(single, store)!; nil }
+    nonce = nil.as(Array::View(UInt8)?)
     if data.size == 4
       return OcspError.new("#{data[3].describe} where a ResponseData's extensions [1] belong") unless data[3].context?(1)
-      nonce = OcspAsn1.extensions(OcspAsn1.value(data[3].explicit(1))!, "responseExtensions")!
+      nonce = OcspAsn1.extensions(OcspAsn1.value(data[3].explicit(1))!, "responseExtensions", store)!
     end
-    OcspResponse.new(der, basic[0].raw, 1, name, key_hash, produced_at, responses, nonce, signature_algorithm, parameters, signature, certificates)
+    OcspResponse.new(der.view, store.certificate_bytes(basic[0].raw), 1, name, key_hash, produced_at,
+      responses[response_start, responses.size - response_start], nonce,
+      store.certificate_text(signature_algorithm),
+      parameters ? store.certificate_der(parameters) : nil,
+      store.certificate_bytes(signature),
+      certificates[cert_start, certificates.size - cert_start])
   end
 
-  private def self.read_single(single : DerValue) : OcspSingleResponse | OcspError
+  private def self.read_single(single : DerValue, store : RisOcspStore) : OcspSingleResponse | OcspError
     fields = OcspAsn1.tape_values(single.tape_sequence)!
     return OcspError.new("a SingleResponse of #{fields.size} values, not 3 to 5") unless fields.size >= 3 && fields.size <= 5
-    cert_id = read_cert_id(fields[0])!
+    cert_id = read_cert_id(fields[0], store)!
     written = fields[1]
     revoked_at = nil.as(Time?)
     reason = nil.as(Int32?)
@@ -401,14 +418,14 @@ pub struct OcspResponse
       rest = rest + 1
     end
     if rest < fields.size && fields[rest].context?(1)
-      OcspAsn1.extensions(OcspAsn1.value(fields[rest].explicit(1))!, "singleExtensions")!
+      OcspAsn1.extensions(OcspAsn1.value(fields[rest].explicit(1))!, "singleExtensions", store)!
       rest = rest + 1
     end
     return OcspError.new("#{fields[rest].describe} where a SingleResponse ends") unless rest == fields.size
     OcspSingleResponse.new(cert_id, status, revoked_at, reason, this_update, next_update)
   end
 
-  private def self.read_cert_id(value : DerValue) : OcspCertId | OcspError
+  private def self.read_cert_id(value : DerValue, store : RisOcspStore) : OcspCertId | OcspError
     fields = OcspAsn1.tape_values(value.tape_sequence)!
     return OcspError.new("a CertID of #{fields.size} values, not 4") unless fields.size == 4
     algorithm = OcspAsn1.tape_values(fields[0].tape_sequence)!
@@ -426,7 +443,8 @@ pub struct OcspResponse
       return OcspError.new("a CertID whose hashes are #{name_hash.size} and #{key_hash.size} bytes, where the hash it names makes #{hash.size}")
     end
     serial = OcspAsn1.bytes(fields[3].integer_bytes)!
-    OcspCertId.new(hash, name_hash, key_hash, serial)
+    OcspCertId.new(hash, store.certificate_bytes(name_hash),
+      store.certificate_bytes(key_hash), store.certificate_bytes(serial))
   end
 
   # The responderID, for a sentence.
@@ -471,16 +489,19 @@ pub struct OcspResponse
   # delegated responder: each candidate the responderID names - the issuer,
   # then the certificates carried - tried in turn; or why none did.
   private def signer(issuer : Certificate, now : Time) : {Certificate, Bool} | OcspError
-    failures = [] of String
-    ([issuer] + @certificates).each do |candidate|
+    failure = ""
+    i = -1
+    while i < @certificates.size
+      candidate = i < 0 ? issuer : @certificates[i]
+      i += 1
       next unless names?(candidate)
       delegated = !(candidate.subject == issuer.subject && candidate.public_key_bits == issuer.public_key_bits)
       problem = delegated ? delegate_error(candidate, issuer, now) : nil
       problem = X509.signature_error(candidate.public_key, @signature_algorithm, @signature_parameters, @tbs, @signature, "the OCSP response", candidate.subject_name) unless problem
       return {candidate, delegated} unless problem
-      failures << problem
+      failure << problem if failure.empty?
     end
-    return OcspError.new(failures[0]) unless failures.empty?
+    return OcspError.new(failure) unless failure.empty?
     OcspError.new("no certificate here is the responder, #{responder_text}")
   end
 
@@ -512,50 +533,64 @@ end
 
 # std/asn1's errors as this one's, and the readers this module shares.
 struct OcspAsn1
+  def self.same(value : T) : T forall T
+    value
+  end
+
   def self.value(answer : DerValue | Asn1Error) : DerValue | OcspError
-    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : OcspAsn1.same(answer)
   end
 
   def self.tape_values(answer : Array(DerValue) | Asn1Error) : Array(DerValue) | OcspError
-    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : OcspAsn1.same(answer)
   end
 
   def self.values(answer : Array(DerValue) | Asn1Error) : Array(DerValue) | OcspError
-    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : OcspAsn1.same(answer)
   end
 
   def self.bytes(answer : Array(UInt8) | Asn1Error) : Array(UInt8) | OcspError
-    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : OcspAsn1.same(answer)
   end
 
   def self.text(answer : String | Asn1Error) : String | OcspError
-    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : OcspAsn1.same(answer)
   end
 
   def self.int(answer : Int64 | Asn1Error) : Int64 | OcspError
-    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : OcspAsn1.same(answer)
   end
 
   def self.bool(answer : Bool | Asn1Error) : Bool | OcspError
-    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : answer
+    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : OcspAsn1.same(answer)
   end
 
   # A GeneralizedTime, the one form RFC 6960 writes its times in.
   def self.generalized(value : DerValue, what : String) : Time | OcspError
-    return OcspError.new("a #{what} that is #{value.describe}, where RFC 6960 writes a GeneralizedTime") unless value.universal?(DerTag::GENERALIZED_TIME)
-    time = value.time
-    time.is_a?(Asn1Error) ? OcspError.new(time.message) : time
+    if value.universal?(DerTag::GENERALIZED_TIME)
+      OcspAsn1.time(value.time)
+    else
+      OcspError.new("a #{what} that is #{value.describe}, where RFC 6960 writes a GeneralizedTime")
+    end
+  end
+
+  def self.time(answer : Time | Asn1Error) : Time | OcspError
+    answer.is_a?(Asn1Error) ? OcspError.new(answer.message) : OcspAsn1.same(answer)
   end
 
   # Extensions (RFC 5280 section 4.1): each once, none critical that this
   # does not understand; the nonce's OCTET STRING when there is one.
-  def self.extensions(value : DerValue, where : String) : Array(UInt8)? | OcspError
+  def self.extensions(value : DerValue, where : String, store : RisOcspStore) : Array::View(UInt8)? | OcspError
     seen = [] of String
-    nonce = nil.as(Array(UInt8)?)
-    values(value.sequence)!.each do |extension|
+    nonce = nil.as(Array::View(UInt8)?)
+    extensions = values(value.sequence)!
+    i = 0
+    while i < extensions.size
+      extension = extensions[i]
+      i += 1
       fields = values(extension.sequence)!
       return OcspError.new("an Extension of #{fields.size} values in #{where}") unless fields.size == 2 || fields.size == 3
-      oid = text(fields[0].oid)!
+      oid = store.certificate_text(text(fields[0].oid)!)
       return OcspError.new("extension #{oid} twice in #{where}") if seen.includes?(oid)
       seen << oid
       critical = fields.size == 3 ? bool(fields[1].boolean)! : false
@@ -563,7 +598,7 @@ struct OcspAsn1
       if oid == Ocsp::NONCE
         # RFC 8954 section 2.1: Nonce ::= OCTET STRING.
         inner = value(Der.parse(body))!
-        nonce = bytes(inner.octet_string)!
+        nonce = store.certificate_bytes(bytes(inner.octet_string)!)
       elsif critical
         return OcspError.new("a critical extension #{oid} in #{where}, which this does not understand")
       end
@@ -581,8 +616,8 @@ struct OcspAsn1
   end
 
   # A Name's DER as a sentence names it, or its bytes when it is not one.
-  def self.describe_name(der : Array(UInt8)) : String
-    parts = [] of String
+  def self.describe_name(der : Array::View(UInt8)) : String
+    parts = String::Builder.new(256)
     top = Der.parse(der)
     return hex(der) if top.is_a?(Asn1Error)
     rdns = top.sequence
@@ -594,10 +629,11 @@ struct OcspAsn1
         pair = attribute.children
         return hex(der) if pair.is_a?(Asn1Error) || pair.size != 2
         text = pair[1].string
+        parts << ", " unless parts.bytesize == 0
         parts << (text.is_a?(Asn1Error) ? "#" + pair[1].describe : text)
       end
     end
-    parts.join(", ")
+    parts.to_s
   end
 end
 

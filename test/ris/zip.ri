@@ -1,6 +1,6 @@
 module test/zip_tape
 
-import std/zip::{ZipReader, ZipWriter, ZipEntry, ZipError, ZipMethod}
+import std/zip::{ZipReader, ZipWriter, ZipEntry, ZipEntryReader, ZipError, ZipMethod}
 import std/io::{Memory}
 import std/time::{Time}
 import std/digest::{CRC32}
@@ -16,7 +16,8 @@ def hex(v : UInt32) : String
 end
 
 def list(data : String) : Nil
-  zip = ZipReader.open(data)
+  archive = ZipReader.new(data)
+  zip = archive.load
   if zip.is_a?(ZipError)
     puts zip.message
     return
@@ -28,7 +29,8 @@ def list(data : String) : Nil
       puts "  #{e.name} #{got.message}"
       next
     end
-    stream = zip.open(e)
+    slot = ZipEntryReader.new(zip, e)
+    stream = slot.open
     if stream.is_a?(ZipError)
       puts "  #{e.name} #{stream.message}"
       next

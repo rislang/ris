@@ -1,0 +1,22 @@
+class Box
+  property view : String
+
+  def initialize(@view : String)
+  end
+end
+
+def wrap(view : String) : Box
+  box = Box.new("h")
+  box.view = view
+  box
+end
+
+def run
+  bytes = String::Builder.new(16)
+  bytes << "abc"
+  held = wrap(bytes.finish)
+  bytes.clear
+  puts held.view
+end
+
+tape { run }

@@ -1083,9 +1083,9 @@ pub class BodyReader
 
   def configure(conn : Conn?, kind : Int32, length : Int64,
                 limit : Int64, coding : Int32 = CODED_NONE,
-                frames : H2Connection? = nil, frames_id : Int32 = 0) : Nil
+                frames_id : Int32 = 0) : Nil
     @conn = conn
-    @frames = frames
+    @frames = nil
     @frames_id = frames_id
     @kind = kind
     @left = kind == CHUNKED ? -1_i64 : length
@@ -1344,6 +1344,9 @@ pub class BodyReader
       piece
     when FRAMES
       h2 = @frames
+      if !h2 && (conn = @conn)
+        h2 = conn.h2
+      end
       raise "BodyReader: an HTTP/2 body on no connection" unless h2
       got = h2.body_piece(@frames_id, max)
       return remember(got) unless got.is_a?(String)
@@ -1743,7 +1746,7 @@ class RisHttpResponseBody
       if previous = @client_lines[kept_name]?
         previous.each { |line| @line_values << line }
       else
-        @line_values << existing
+        @line_values << note(existing)
       end
       @line_values << kept_value
       @client_lines[kept_name] = @line_values[start, @line_values.size - start]
@@ -1857,8 +1860,16 @@ pub class Response
     @held.client_header(name, value)
   end
 
-  def client_reader(reader : BodyReader, url : String, decoded : Bool) : Nil
+  def attached_reader : BodyReader?
+    @reader
+  end
+
+  def attach_reader(reader : BodyReader) : Nil
     @reader = reader
+    nil
+  end
+
+  def client_response(url : String, decoded : Bool) : Nil
     @client_url_at = @held.notes.bytesize
     @client_url_size = url.bytesize
     @held.notes << url
@@ -2000,11 +2011,8 @@ pub class Response
     if @reader
       got = @reader.as(BodyReader).read_all_into(@held.text)
       raise got.message if got
-      if @held.client_fields
-        @client_loaded = true
-      else
-        @body = @held.text.finish
-      end
+      # The bytes stay in `text`; a view in @body would outlive its clear.
+      @client_loaded = true
       @reader = nil
     end
     @client_loaded ? @held.text.finish : @body
@@ -2025,11 +2033,8 @@ pub class Response
     if @reader
       got = @reader.as(BodyReader).read_all_into(@held.text)
       return got if got
-      if @held.client_fields
-        @client_loaded = true
-      else
-        @body = @held.text.finish
-      end
+      # The bytes stay in `text`; a view in @body would outlive its clear.
+      @client_loaded = true
       @reader = nil
     end
     self
@@ -3349,7 +3354,11 @@ class Exchange
     @client = client
     @key = key
     @keep = keep
-    @reader = response.body_io
+    # Not body_io: its text reader would view the bytes the next answer
+    # clears. The exchange's reader was configured for this answer.
+    if reader = response.attached_reader
+      @reader = reader
+    end
     @response.tls_resumed = conn.resumed?
     @h2_id = 0
   end
@@ -3386,6 +3395,7 @@ end
 
 # A client's response, decoders and unpooled transport share its scope.
 class RisHttpClientExchange
+  getter socket : IyiSocket
   getter response : Response
   getter conn : Conn
   getter tls : TlsClient
@@ -3404,6 +3414,7 @@ class RisHttpClientExchange
 
   def initialize(@response : Response)
     socket = IyiSocket.new(-1)
+    @socket = socket
     config = TlsConfig.new
     conn = Conn.new(socket)
     tls = TlsClient.new(socket, "", config)
@@ -3421,16 +3432,29 @@ class RisHttpClientExchange
     default_tls.alpn << "http/1.1"
     @default_tls = default_tls
     system_resolver = Resolver.new
+    system_resolver.read_system
     @system_resolver = system_resolver
     @h2 = h2
     fault = String::Builder.new(256)
     reader = BodyReader.new(fault, nil, BodyReader::EMPTY, 0_i64,
       9223372036854775807_i64, client_decode: true)
     @reader = reader
-    @response.client_reader(reader, "", false)
+    @response.attach_reader(reader)
+    @response.client_response("", false)
     exchange = Exchange.new(conn, @response)
     @exchange = exchange
     @key = String::Builder.new(256)
+  end
+
+  def connect(dialer : D, client : HTTPClient?, host : String,
+              port : Int32, wait : Int32) : IyiSocket | Cancelled | SocketError forall D
+    take_connection(dialer.connect(client, host, port, wait, @system_resolver))
+  end
+
+  private def take_connection(result : IyiSocket | Cancelled | SocketError) : IyiSocket | Cancelled | SocketError
+    return result unless result.is_a?(IyiSocket)
+    @socket.take_descriptor(result)
+    @socket
   end
 
   def exchange(dialer : D, method : String, url : String,
@@ -3607,6 +3631,7 @@ pub class HTTPClient
   @resumed : Int32
   # The tickets kept, an origin's together, the one used last at the end.
   @sessions : Array(HeldSession)
+  @session_tick : Int64 = 0_i64
   @origin_tickets : Int32
   @tickets : Int32
   # The configurations HTTPS records made, the one an origin's last
@@ -3651,17 +3676,16 @@ pub class HTTPClient
     @made = 0
     @reused = 0
     @resumed = 0
-    @sessions = [] of HeldSession
     default_tls = TlsConfig.new
     default_tls.alpn << "http/1.1"
     @default_tls = default_tls
+    room = @origin_tickets > 0 ? @tickets // @origin_tickets : 0
+    @sessions = Array(HeldSession).new(room) do
+      HeldSession.new(default_tls, @origin_tickets)
+    end
     system = Resolver.new
     @system = system
-    @bound = Array(HttpsBound).new(BOUND)
-    BOUND.times do
-      @bound << HttpsBound.new
-      nil
-    end
+    @bound = Array(HttpsBound).new(BOUND) { HttpsBound.new }
   end
 
   # The machine's resolver, read afresh: what a connection by name uses
@@ -3693,7 +3717,7 @@ pub class HTTPClient
   def tickets_held(origin : String? = nil) : Int32
     count = 0
     @sessions.each do |held|
-      count = count + held.session.size if origin.nil? || held.origin == origin
+      count = count + held.session.size if held.used && (origin.nil? || held.origin == origin)
     end
     count
   end
@@ -3776,23 +3800,23 @@ pub class HTTPClient
   # them from. The session handed out is the newest used; past the room
   # *tickets* leaves, the oldest goes.
   protected def session_for(origin : String, tls : TlsConfig) : TlsSession?
-    room = @origin_tickets > 0 ? @tickets // @origin_tickets : 0
-    return nil if room == 0
-    kept = [] of HeldSession
+    return nil if @sessions.empty?
+    chosen = @sessions[0]
     found = nil.as(HeldSession?)
     @sessions.each do |held|
-      if held.origin != origin
-        kept << held
-      elsif held.under.same?(tls)
+      if held.used && held.origin == origin
         found = held
+        break
       end
+      chosen = held if !held.used || (chosen.used && held.tick < chosen.tick)
+      nil
     end
-    held = found || HeldSession.new(origin, TlsMadeUnder.new(tls), TlsSession.new(@origin_tickets))
-    while kept.size >= room
-      kept.shift
+    held = found || chosen
+    unless held.used && held.origin == origin && held.under.same?(tls)
+      held.configure(origin, tls)
     end
-    kept << held
-    @sessions = kept
+    @session_tick += 1
+    held.tick = @session_tick
     held.session
   end
 
@@ -3971,11 +3995,31 @@ end
 # The tickets an `HTTPClient` keeps for one origin, and the configuration
 # they were taken under.
 class HeldSession
-  getter origin : String
   getter under : TlsMadeUnder
   getter session : TlsSession
+  property used : Bool = false
+  property tick : Int64 = 0_i64
+  @origin : String::Builder
 
-  def initialize(@origin : String, @under : TlsMadeUnder, @session : TlsSession)
+  def initialize(config : TlsConfig, limit : Int32)
+    @origin = String::Builder.new(256)
+    under = TlsMadeUnder.new(config)
+    session = TlsSession.new(limit)
+    @under = under
+    @session = session
+  end
+
+  def origin : String
+    @origin.finish
+  end
+
+  def configure(origin : String, config : TlsConfig) : Nil
+    @used = false
+    @session.clear
+    @under.configure(config)
+    @origin.clear
+    @origin << origin
+    @used = true
   end
 end
 
@@ -4086,7 +4130,6 @@ struct ByName
     if client && (own = client.resolver)
       return own
     end
-    system.read_system
     system
   end
 
@@ -4613,7 +4656,7 @@ pub struct HTTP
           conn.made_under = snapshot
           speaks_h2 = tls.alpn_protocol == "h2"
         else
-          socket = dialer.connect(client, dial_host, dial_port, wait, state.system_resolver)!
+          socket = state.connect(dialer, client, dial_host, dial_port, wait)!
           client.made if client
           if tunneled && (via = route)
             unopened = tunnel(socket, via, named + ":" + port.to_s, tunnel_credential, timeout_ms, secure)
@@ -5066,8 +5109,18 @@ pub struct HTTP
     end
     response = state.response
     response.begin_client(status, reason_for(status))
+    header_text = String::Builder.new(4096)
+    spans = Array({Int32, Int32, Int32}).new(fields.size)
     fields.each do |field|
-      response.client_header(field.name, field.value) unless field.name == ":status"
+      at = header_text.bytesize
+      header_text << field.name << field.value
+      spans << {at, field.name.bytesize, field.value.bytesize}
+      nil
+    end
+    spans.each do |span|
+      name = header_text.finish[span[0], span[1]]
+      value = header_text.finish[span[0] + span[1], span[2]]
+      response.client_header(name, value) unless name == ":status"
       nil
     end
     stream = h2.stream(id)
@@ -5075,11 +5128,11 @@ pub struct HTTP
     empty = head || bodiless?(status) || (!stream.nil? && stream.ended && stream.drained?)
     coding = asked && !empty ? coding_of(response.headers) : BodyReader::CODED_NONE
     reader = state.reader
-    reader.configure(nil, empty ? BodyReader::EMPTY : BodyReader::FRAMES,
-      0_i64, unlimited, coding, h2, id)
+    reader.configure(conn, empty ? BodyReader::EMPTY : BodyReader::FRAMES,
+      0_i64, unlimited, coding, id)
     decoded = reader.decoding?
     drop_coding_fields(response.headers) if decoded
-    response.client_reader(reader, url, decoded)
+    response.client_response(url, decoded)
     if keeper = jar
       keeper.update(url, response)
     end
@@ -5153,6 +5206,8 @@ pub struct HTTP
   end
 
   def self.read_answer(state : RisHttpClientExchange, conn : Conn, url : String, method : String, head : Bool, asked : Bool, jar : CookieStore?, client : HTTPClient?, key : String) : Exchange | Cancelled | SocketError | HTTPError | Nil
+    response = state.response
+    reader = state.reader
     while true
       # As far as the server's limit on a request's head, and no further: a
       # head that did not end was read for as long as it came, 256 MB of one
@@ -5170,19 +5225,17 @@ pub struct HTTP
       in String
         problem = state.read_head(got)
         return problem if problem
-        response = state.response
         status = response.status
         fields = response.headers
         next if status >= 100 && status < 200 && status != 101
         coding = asked ? coding_of(fields) : BodyReader::CODED_NONE
         framing = framing_kind(status, fields, head)
         return framing if framing.is_a?(HTTPError)
-        reader = state.reader
         reader.configure(conn, framing[0], framing[1],
           9223372036854775807_i64, coding)
         decoded = reader.decoding?
         drop_coding_fields(fields) if decoded
-        response.client_reader(reader, url, decoded)
+        response.client_response(url, decoded)
         if keeper = jar
           keeper.update(url, response)
         end
@@ -6392,13 +6445,11 @@ end
 
 @[OnTape]
 struct H2Stream
-  @[OnTape]
   struct State
     property id : Int32
     # DATA arrived and not yet read.
-    property pieces : SlicePool::List(H2Piece)
+    property has_fields : Bool = false
     # The head, decoded: a request's, or an answer's final one.
-    property fields : SlicePool::List(Std::Hpack::HeaderField)? = nil
     # The next piece to read, and its bytes already read.
     property head : Int32 = 0
     property taken : Int32 = 0
@@ -6416,113 +6467,144 @@ struct H2Stream
     # A server's request past its limit on a body: answered 413.
     property too_large : Bool = false
 
-    def initialize(@id : Int32, @send_window : Int64, @recv_window : Int64, @pieces : SlicePool::List(H2Piece))
+    def initialize(@id : Int32, @send_window : Int64, @recv_window : Int64)
     end
   end
 
-  @state : Pointer(State)
+  @state : Array::View(State)
+  getter slot : Int32
+  getter pieces : SlicePool::List(H2Piece)
+  getter header_slots : SlicePool::List(Std::Hpack::HeaderField)
 
-  # A stream whose state is in *pool*'s words: it lives as long as the
-  # pool, not the scope that made it.
-  def initialize(id : Int32, send_window : Int64, recv_window : Int64, pool : SlicePool(H2Piece?))
-    @state = Pointer(State).new(pool.state_words(((sizeof(State) + 7) // 8).to_i32))
-    @state.value = State.new(id, send_window, recv_window, SlicePool::List(H2Piece).new(pool))
+  def initialize(states : Array(State), @slot : Int32,
+                 @pieces : SlicePool::List(H2Piece),
+                 @header_slots : SlicePool::List(Std::Hpack::HeaderField))
+    @state = states[@slot, 1]
   end
 
   def id : Int32
-    @state.value.id
-  end
-
-  def pieces : SlicePool::List(H2Piece)
-    @state.value.pieces
+    @state[0].id
   end
 
   def fields : SlicePool::List(Std::Hpack::HeaderField)?
-    @state.value.fields
+    @state[0].has_fields ? @header_slots : nil
   end
 
-  def fields=(value : SlicePool::List(Std::Hpack::HeaderField)?) : SlicePool::List(Std::Hpack::HeaderField)?
-    @state.value.fields = value
+  def mark_fields : Nil
+    state = @state[0]
+    state.has_fields = true
+    @state[0] = state
+    nil
   end
 
   def head : Int32
-    @state.value.head
+    @state[0].head
   end
 
   def head=(value : Int32) : Int32
-    @state.value.head = value
+    state = @state[0]
+    state.head = value
+    @state[0] = state
+    value
   end
 
   def taken : Int32
-    @state.value.taken
+    @state[0].taken
   end
 
   def taken=(value : Int32) : Int32
-    @state.value.taken = value
+    state = @state[0]
+    state.taken = value
+    @state[0] = state
+    value
   end
 
   def received : Int64
-    @state.value.received
+    @state[0].received
   end
 
   def received=(value : Int64) : Int64
-    @state.value.received = value
+    state = @state[0]
+    state.received = value
+    @state[0] = state
+    value
   end
 
   def declared : Int64
-    @state.value.declared
+    @state[0].declared
   end
 
   def declared=(value : Int64) : Int64
-    @state.value.declared = value
+    state = @state[0]
+    state.declared = value
+    @state[0] = state
+    value
   end
 
   def ended : Bool
-    @state.value.ended
+    @state[0].ended
   end
 
   def ended=(value : Bool) : Bool
-    @state.value.ended = value
+    state = @state[0]
+    state.ended = value
+    @state[0] = state
+    value
   end
 
   def reset : Int32
-    @state.value.reset
+    @state[0].reset
   end
 
   def reset=(value : Int32) : Int32
-    @state.value.reset = value
+    state = @state[0]
+    state.reset = value
+    @state[0] = state
+    value
   end
 
   def send_window : Int64
-    @state.value.send_window
+    @state[0].send_window
   end
 
   def send_window=(value : Int64) : Int64
-    @state.value.send_window = value
+    state = @state[0]
+    state.send_window = value
+    @state[0] = state
+    value
   end
 
   def recv_window : Int64
-    @state.value.recv_window
+    @state[0].recv_window
   end
 
   def recv_window=(value : Int64) : Int64
-    @state.value.recv_window = value
+    state = @state[0]
+    state.recv_window = value
+    @state[0] = state
+    value
   end
 
   def sent_end : Bool
-    @state.value.sent_end
+    @state[0].sent_end
   end
 
   def sent_end=(value : Bool) : Bool
-    @state.value.sent_end = value
+    state = @state[0]
+    state.sent_end = value
+    @state[0] = state
+    value
   end
 
   def too_large : Bool
-    @state.value.too_large
+    @state[0].too_large
   end
 
   def too_large=(value : Bool) : Bool
-    @state.value.too_large = value
+    state = @state[0]
+    state.too_large = value
+    @state[0] = state
+    value
   end
 
   # Every piece that arrived was read.
@@ -6590,6 +6672,10 @@ class H2Connection
   @fault_why : Array(UInt8)
   @server : Bool
   @streams : Hash(Int32, H2Stream)
+  @stream_states : Array(H2Stream::State)
+  @free_streams : Array(Int32)
+  @stream_pieces : Array(SlicePool::List(H2Piece))
+  @stream_fields : Array(SlicePool::List(Std::Hpack::HeaderField))
   @send_window : Int64
   @recv_window : Int64
   @peer_window : Int64
@@ -6656,6 +6742,19 @@ class H2Connection
     @piece_pool = SlicePool(H2Piece?).new(64)
     @data_pool = SlicePool(UInt8).new(65536)
     @field_pool = SlicePool(Std::Hpack::HeaderField?).new(64)
+    @stream_states = Array(H2Stream::State).new(STREAMS)
+    @free_streams = Array(Int32).new(STREAMS)
+    @stream_pieces = Array(SlicePool::List(H2Piece)).new(STREAMS)
+    @stream_fields = Array(SlicePool::List(Std::Hpack::HeaderField)).new(STREAMS)
+    STREAMS.times do |i|
+      pieces = SlicePool::List(H2Piece).new(@piece_pool)
+      fields = SlicePool::List(Std::Hpack::HeaderField).new(@field_pool)
+      @stream_states << H2Stream::State.new(0, WINDOW, WINDOW)
+      @stream_pieces << pieces
+      @stream_fields << fields
+      @free_streams << i
+      nil
+    end
     @head_text = String::Builder.new(16384)
     @pending_size = 0
     @ready = [] of Int32
@@ -6902,11 +7001,13 @@ class H2Connection
         return fail(PROTOCOL_ERROR, "a stream opened with the even number #{id}") if id % 2 == 0
         if id > @highest
           @highest = id
-          s = H2Stream.new(id, @peer_window, WINDOW, @piece_pool)
-          @streams[id] = s
-          # Past the streams a server takes at once, the head is still read -
-          # the HPACK table is the connection's - and the stream refused.
-          mode = REFUSED_BLOCK if open_count > STREAMS
+          s = take_stream(id)
+          if s
+            @streams[id] = s
+          else
+            # Decode even refused blocks to keep HPACK synchronized.
+            mode = REFUSED_BLOCK
+          end
         else
           mode = @reset_lately.includes?(id) ? IGNORED_BLOCK : STALE_BLOCK
         end
@@ -7000,12 +7101,13 @@ class H2Connection
     end
     # Ready streams live on the connection until selected by the server.
     # This is the ownership boundary; rejected heads never copy out.
-    kept = SlicePool::List(Std::Hpack::HeaderField).new(@field_pool)
+    kept = s.header_slots
+    kept.clear
     decoded.each do |field|
       kept << Std::Hpack::HeaderField.new(keep_text(field.name), keep_text(field.value), field.indexing)
       nil
     end
-    s.fields = kept
+    s.mark_fields
     if declared = H2Connection.field(decoded, "content-length")
       n = HTTP.content_length(declared)
       return refuse(id, PROTOCOL_ERROR) unless n
@@ -7027,6 +7129,17 @@ class H2Connection
     @head_text.finish[from, text.bytesize]
   end
 
+  private def take_stream(id : Int32) : H2Stream?
+    slot = @free_streams.pop?
+    return nil unless slot
+    pieces = @stream_pieces[slot]
+    fields = @stream_fields[slot]
+    pieces.clear
+    fields.clear
+    @stream_states[slot] = H2Stream::State.new(id, @peer_window, WINDOW)
+    H2Stream.new(@stream_states, slot, pieces, fields)
+  end
+
   # Stream *id* gone from the connection, its pieces' bytes freed: no
   # view of them is read after its request or answer is done.
   private def drop_stream(id : Int32) : Nil
@@ -7035,8 +7148,12 @@ class H2Connection
         @data_pool.free_slice(@data_pool.run_at(piece.at, piece.size))
         nil
       end
+      s.pieces.clear
+      s.header_slots.clear
+      slot = s.slot
+      @streams.delete(id)
+      @free_streams << slot
     end
-    @streams.delete(id)
     nil
   end
 
@@ -7495,7 +7612,8 @@ class H2Connection
     @refused = false
     id = @next_id
     @next_id = @next_id + 2
-    s = H2Stream.new(id, @peer_window, WINDOW, @piece_pool)
+    s = take_stream(id)
+    return HTTPError.new("HTTP/2: too many open streams") unless s
     @streams[id] = s
     fields = [Std::Hpack::HeaderField.new(":method", method), Std::Hpack::HeaderField.new(":scheme", scheme),
               Std::Hpack::HeaderField.new(":authority", authority), Std::Hpack::HeaderField.new(":path", path)]

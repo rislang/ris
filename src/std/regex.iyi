@@ -83,11 +83,91 @@ class RxRuns
   @tails : UInt64
   @width : Int32
 
-  def initialize(@tables : Array(UInt8), @starts : Array(Int32), @lengths : Array(Int32), @first : Array(UInt8))
+  getter valid : Bool = false
+
+  def initialize(pattern : String)
+    @starts = [] of Int32
+    @lengths = [] of Int32
     @masks = [] of UInt64
     @heads = 0_u64
     @tails = 0_u64
     @width = 0
+    n = pattern.bytesize
+    p = pattern
+    # An atom takes at least one byte of the pattern.
+    @tables = Array(UInt8).new(n * 256, 0_u8)
+    tables = @tables
+    @first = Array(UInt8).new(256, 0_u8)
+    first = @first
+    starts = @starts
+    lengths = @lengths
+    return if n == 0
+    i = 0
+    atoms = 0
+    while true
+      start = atoms
+      while i < n && p[i] != 124_u8
+        b = p[i]
+        at = atoms * 256
+        if b == 91_u8
+          i = i + 1
+          return if i < n && p[i] == 94_u8
+          return if i >= n || p[i] == 93_u8
+          while i < n && p[i] != 93_u8
+            c = p[i]
+            return if c == 92_u8 || c == 91_u8 || c >= 128_u8
+            if i + 2 < n && p[i + 1] == 45_u8 && p[i + 2] != 93_u8
+              high = p[i + 2]
+              # An escaped end, `[0-\x34]`, is the machine's to read: taken
+              # here as the byte `\` it made `[0-\x34]` match `x` and `A`.
+              return if high == 92_u8 || high < c
+              return if high >= 128_u8
+              x = c.to_i32
+              while x <= high.to_i32
+                tables[at + x] = 1_u8
+                x = x + 1
+              end
+              i = i + 3
+            else
+              tables[at + c.to_i32] = 1_u8
+              i = i + 1
+            end
+          end
+          return if i >= n
+          i = i + 1
+        elsif b == 92_u8
+          return if i + 1 >= n
+          c = p[i + 1]
+          return if (c >= 48_u8 && c <= 57_u8) || (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8) || c >= 128_u8
+          tables[at + c.to_i32] = 1_u8
+          i = i + 2
+        elsif b == 94_u8 || b == 36_u8 || b == 63_u8 || b == 42_u8 || b == 43_u8 || b == 46_u8 ||
+              b == 40_u8 || b == 41_u8 || b == 123_u8 || b == 125_u8 || b == 93_u8
+          return
+        else
+          tables[at + b.to_i32] = 1_u8
+          i = i + 1
+        end
+        atoms = atoms + 1
+      end
+      return if atoms == start
+      starts << start * 256
+      lengths << atoms - start
+      head = start * 256
+      k = 0
+      while k < 256
+        first[k] = 1_u8 if tables[head + k] != 0_u8
+        k = k + 1
+      end
+      break if i >= n
+      i = i + 1
+      return if i >= n
+    end
+    @valid = true
+    build_masks
+  end
+
+  private def build_masks : Nil
     width = @lengths[0]
     return if @lengths.any? { |length| length != width }
     atoms = width * @lengths.size
@@ -112,81 +192,6 @@ class RxRuns
     end
     @width = width
   end
-
-  # Nil for anything past the shape above; the machine takes those.
-  def self.parse(pattern : String) : RxRuns?
-    n = pattern.bytesize
-    return nil if n == 0
-    p = pattern
-    # An atom takes at least one byte of the pattern.
-    tables = Array(UInt8).new(n * 256, 0_u8)
-    first = Array(UInt8).new(256, 0_u8)
-    starts = [] of Int32
-    lengths = [] of Int32
-    i = 0
-    atoms = 0
-    while true
-      start = atoms
-      while i < n && p[i] != 124_u8
-        b = p[i]
-        at = atoms * 256
-        if b == 91_u8
-          i = i + 1
-          return nil if i < n && p[i] == 94_u8
-          return nil if i >= n || p[i] == 93_u8
-          while i < n && p[i] != 93_u8
-            c = p[i]
-            return nil if c == 92_u8 || c == 91_u8 || c >= 128_u8
-            if i + 2 < n && p[i + 1] == 45_u8 && p[i + 2] != 93_u8
-              high = p[i + 2]
-              # An escaped end, `[0-\x34]`, is the machine's to read: taken
-              # here as the byte `\` it made `[0-\x34]` match `x` and `A`.
-              return nil if high == 92_u8 || high < c
-              return nil if high >= 128_u8
-              x = c.to_i32
-              while x <= high.to_i32
-                tables[at + x] = 1_u8
-                x = x + 1
-              end
-              i = i + 3
-            else
-              tables[at + c.to_i32] = 1_u8
-              i = i + 1
-            end
-          end
-          return nil if i >= n
-          i = i + 1
-        elsif b == 92_u8
-          return nil if i + 1 >= n
-          c = p[i + 1]
-          return nil if (c >= 48_u8 && c <= 57_u8) || (c >= 65_u8 && c <= 90_u8) || (c >= 97_u8 && c <= 122_u8) || c >= 128_u8
-          tables[at + c.to_i32] = 1_u8
-          i = i + 2
-        elsif b == 94_u8 || b == 36_u8 || b == 63_u8 || b == 42_u8 || b == 43_u8 || b == 46_u8 ||
-              b == 40_u8 || b == 41_u8 || b == 123_u8 || b == 125_u8 || b == 93_u8
-          return nil
-        else
-          tables[at + b.to_i32] = 1_u8
-          i = i + 1
-        end
-        atoms = atoms + 1
-      end
-      return nil if atoms == start
-      starts << start * 256
-      lengths << atoms - start
-      head = start * 256
-      k = 0
-      while k < 256
-        first[k] = 1_u8 if tables[head + k] != 0_u8
-        k = k + 1
-      end
-      break if i >= n
-      i = i + 1
-      return nil if i >= n
-    end
-    new(tables, starts, lengths, first)
-  end
-
   # Whether run *a* matches *src* at *i*.
   private def run_at?(src : String, i : Int32, a : Int32) : Bool
     length = @lengths[a]
@@ -503,9 +508,9 @@ pub struct Regex
   @options : Options
   # Each group's name, nil for an unnamed one; group 0, the whole match,
   # is first and has none.
-  @names : Array(String?)
+  @names : Array::View(String?)
 
-  def initialize(@nfa : RxNfa, @literal : String?, @runs : RxRuns?, @source : String, @options : Options, @names : Array(String?))
+  def initialize(@nfa : RxNfa, @literal : String?, @runs : RxRuns?, @source : String, @options : Options, @names : Array::View(String?))
   end
 
   # The machine is compiled first either way: it is what refuses a pattern
@@ -515,17 +520,19 @@ pub struct Regex
   # U+FFFD: the machine reads a byte that begins no character as that
   # character, and comparing bytes would find only its three-byte spelling.
   def self.compile(pattern : String, options : Options = Options::None) : Regex
-    compiler = RxCompiler.new(pattern, options)
-    nfa = compiler.compile
-    plain = options.value == 0 && !pattern.includes?("\u{FFFD}")
-    literal = plain ? literal_of(pattern) : nil
-    runs = plain && literal.nil? ? RxRuns.parse(pattern) : nil
-    new(nfa, literal, runs, pattern, options, compiler.names)
+    new(pattern, options)
   end
 
-  # The other library's name for `compile`.
-  def self.new(pattern : String, options : Options = Options::None) : Regex
-    compile(pattern, options)
+  def initialize(pattern : String, options : Options = Options::None)
+    compiler = RxCompiler.new(pattern, options)
+    @nfa = compiler.compile
+    plain = options.value == 0 && !pattern.includes?("\u{FFFD}")
+    @literal = plain ? Regex.literal_of(pattern) : nil
+    runs = RxRuns.new(pattern)
+    @runs = plain && @literal.nil? && runs.valid ? runs : nil
+    @source = pattern
+    @options = options
+    @names = compiler.names.view
   end
 
   # *text* with every character a pattern would read as an operator
@@ -672,7 +679,7 @@ pub struct Regex
 
   # Nil for an empty pattern, which matches between every two bytes, and
   # for any pattern with a byte the compiler reads as an operator.
-  private def self.literal_of(pattern : String) : String?
+  def self.literal_of(pattern : String) : String?
     return nil if pattern.empty?
     operators = "\\^$.|?*+()[]{}"
     i = 0
@@ -737,10 +744,19 @@ pub struct Regex
   # `\A` mean its start, not *pos*, and `\b` sees the byte before *pos*.
   # A negative *pos* counts from the end, as `match`'s does.
   def match_at(text : String, pos : Int32) : MatchData?
-    pos = text.bytesize + pos if pos < 0
-    return nil if pos < 0 || pos > text.bytesize
-    slots = @nfa.capture_at(text, pos, @names.size * 2)
-    slots ? MatchData.new(self, text, slots) : nil
+    matched_at(text, pos < 0 ? text.bytesize + pos : pos)
+  end
+
+  private def matched_at(text : String, pos : Int32) : MatchData?
+    if pos < 0 || pos > text.bytesize
+      nil
+    else
+      Regex.captured(self, text, @nfa.capture_at(text, pos, @names.size * 2))
+    end
+  end
+
+  def self.captured(regex : Regex, text : String, slots : Array(Int32)?) : MatchData?
+    slots ? MatchData.new(regex, text, slots) : nil
   end
 
   # Where the first match begins, in bytes, or nil. It sets nothing: the
@@ -910,7 +926,8 @@ class RxNfa
   getter count : Int32
   @low : Array(UInt64)
   @high : Array(UInt64)
-  @ranges : Array(Array(Int32))
+  @ranges : Array(Int32)
+  @range_spans : Array({Int32, Int32})
 
   def initialize
     @kind = [] of Int32
@@ -921,7 +938,8 @@ class RxNfa
     @count = 0
     @low = [] of UInt64
     @high = [] of UInt64
-    @ranges = [] of Array(Int32)
+    @ranges = [] of Int32
+    @range_spans = [] of {Int32, Int32}
   end
 
   def add(kind : Int32, arg : Int32 = 0) : Int32
@@ -961,7 +979,8 @@ class RxNfa
     end
     @low << low
     @high << high
-    @ranges << past
+    @range_spans << {@ranges.size, past.size}
+    @ranges.concat(past)
     add(CLASS, @low.size - 1)
   end
 
@@ -972,7 +991,8 @@ class RxNfa
     if cp < 128
       return @high[id].unsafe_shr((cp - 64).to_u64) & 1_u64 != 0_u64
     end
-    ranges = @ranges[id]
+    span = @range_spans[id]
+    ranges = @ranges[span[0], span[1]]
     data = ranges
     low = 0
     high = ranges.size // 2
@@ -1349,7 +1369,8 @@ class RxSet
       flipped << next_lo
       flipped << MAX
     end
-    @pairs = flipped
+    @pairs.clear
+    @pairs.concat(flipped)
     @sorted = true
   end
 
@@ -1386,7 +1407,8 @@ class RxSet
         merged << hi
       end
     end
-    @pairs = merged
+    @pairs.clear
+    @pairs.concat(merged)
     @sorted = true
   end
 end
@@ -1402,6 +1424,8 @@ class RxCompiler
   @depth : Int32
   # How many times the counts enclosing the cursor copy what it parses.
   @copies : Int32
+  @patch_states : Array(Int32)
+  @patch_next : Array(Int32)
   # Scratch for `nullable?`: the question a state was last walked for,
   # and last marked an open end for.
   @stamp : Array(Int32)
@@ -1427,7 +1451,10 @@ class RxCompiler
     @pat = RxCompiler.unquote(pattern)
     @n = @pat.bytesize
     @i = 0
-    @nfa = RxNfa.new
+    nfa = RxNfa.new
+    @nfa = nfa
+    @patch_states = Array(Int32).new(pattern.bytesize * 4)
+    @patch_next = Array(Int32).new(pattern.bytesize * 4)
     @depth = 0
     @copies = 1
     @stamp = [] of Int32
@@ -1489,21 +1516,20 @@ class RxCompiler
 
   # A fragment: its first state, and the states whose next out is still
   # to be patched.
-  private def parse_alt : {Int32, Array(Int32)}
+  private def parse_alt : {Int32, Int32, Int32}
     left = parse_concat
     while @i < @n && peek == 124_u8 # |
       @i = @i + 1
       right = parse_concat
       split = @nfa.add(RxNfa::SPLIT)
       @nfa.patch(split, left[0], right[0])
-      outs = left[1]
-      right[1].each { |o| outs << o }
-      left = {split, outs}
+      @patch_next[left[2]] = right[1]
+      left = {split, left[1], right[2]}
     end
     left
   end
 
-  private def parse_concat : {Int32, Array(Int32)}
+  private def parse_concat : {Int32, Int32, Int32}
     skip_space
     return empty_fragment if @i >= @n || peek == 124_u8 || peek == 41_u8
     left = parse_repeat
@@ -1511,7 +1537,7 @@ class RxCompiler
     while @i < @n && peek != 124_u8 && peek != 41_u8
       right = parse_repeat
       patch_outs(left, right[0])
-      left = {left[0], right[1]}
+      left = {left[0], right[1], right[2]}
       skip_space
     end
     left
@@ -1537,12 +1563,12 @@ class RxCompiler
   end
 
   # An empty alternative or group matches nothing at all, which is legal.
-  private def empty_fragment : {Int32, Array(Int32)}
+  private def empty_fragment : {Int32, Int32, Int32}
     s = @nfa.add(RxNfa::SPLIT)
-    {s, [s]}
+    fragment(s, s)
   end
 
-  private def parse_repeat : {Int32, Array(Int32)}
+  private def parse_repeat : {Int32, Int32, Int32}
     skip_space
     atom_at = @i
     groups_at = @groups
@@ -1592,7 +1618,7 @@ class RxCompiler
   # so the empty branch lost its priority: `(|a)*` on `aa` answered `aa`,
   # where pcre2, Python and Go answer the empty match. Only then, since
   # `(x+)?` of any `x` reorders the threads of a loop around it.
-  private def star(atom : {Int32, Array(Int32)}, lazy : Bool) : {Int32, Array(Int32)}
+  private def star(atom : {Int32, Int32, Int32}, lazy : Bool) : {Int32, Int32, Int32}
     return optional(plus(atom, lazy), lazy) if nullable?(atom)
     split = @nfa.add(RxNfa::SPLIT)
     if lazy
@@ -1601,19 +1627,23 @@ class RxCompiler
       @nfa.patch(split, atom[0], -1)
     end
     patch_outs(atom, split)
-    {split, [split]}
+    fragment(split, split)
   end
 
   # Whether *frag* can match empty: a path of splits, saves and assertions
   # from its start reaches one of its open ends. Stamped per question, so
   # each costs the states it walks, not the whole machine.
-  private def nullable?(frag : {Int32, Array(Int32)}) : Bool
+  private def nullable?(frag : {Int32, Int32, Int32}) : Bool
     @asked = @asked + 1
     while @stamp.size < @nfa.count
       @stamp << 0
       @open << 0
     end
-    frag[1].each { |s| @open[s] = @asked }
+    at = frag[1]
+    while at >= 0
+      @open[@patch_states[at]] = @asked
+      at = @patch_next[at]
+    end
     todo = [frag[0]]
     while !todo.empty?
       s = todo.pop
@@ -1628,7 +1658,7 @@ class RxCompiler
     false
   end
 
-  private def plus(atom : {Int32, Array(Int32)}, lazy : Bool) : {Int32, Array(Int32)}
+  private def plus(atom : {Int32, Int32, Int32}, lazy : Bool) : {Int32, Int32, Int32}
     split = @nfa.add(RxNfa::SPLIT)
     if lazy
       @nfa.patch(split, -1, atom[0])
@@ -1636,19 +1666,19 @@ class RxCompiler
       @nfa.patch(split, atom[0], -1)
     end
     patch_outs(atom, split)
-    {atom[0], [split]}
+    fragment(atom[0], split)
   end
 
-  private def optional(atom : {Int32, Array(Int32)}, lazy : Bool) : {Int32, Array(Int32)}
+  private def optional(atom : {Int32, Int32, Int32}, lazy : Bool) : {Int32, Int32, Int32}
     split = @nfa.add(RxNfa::SPLIT)
     if lazy
       @nfa.patch(split, -1, atom[0])
     else
       @nfa.patch(split, atom[0], -1)
     end
-    outs = atom[1]
-    outs << split
-    {split, outs}
+    tail = fragment(split, split)
+    @patch_next[atom[2]] = tail[1]
+    {split, atom[1], tail[2]}
   end
 
   # `{n}`, `{n,}`, `{n,m}`: the atom is parsed again for every copy, so
@@ -1656,7 +1686,7 @@ class RxCompiler
   # copy's were - `(a){2}` has one group, which the last copy sets. A `{`
   # that is not one of those three shapes is the literal character, as
   # RE2 and Python read it.
-  private def counted(atom : {Int32, Array(Int32)}, atom_at : Int32, atom_end : Int32, groups_at : Int32) : {Int32, Array(Int32)}
+  private def counted(atom : {Int32, Int32, Int32}, atom_at : Int32, atom_end : Int32, groups_at : Int32) : {Int32, Int32, Int32}
     return atom unless count_ahead?
     @i = @i + 1
     lo = digits
@@ -1697,7 +1727,7 @@ class RxCompiler
         piece = optional(piece, lazy)
       end
       patch_outs(frag, piece[0])
-      frag = {frag[0], piece[1]}
+      frag = {frag[0], piece[1], piece[2]}
       c = c + 1
     end
     @i = after
@@ -1733,7 +1763,7 @@ class RxCompiler
     value
   end
 
-  private def parse_atom : {Int32, Array(Int32)}
+  private def parse_atom : {Int32, Int32, Int32}
     raise "regex: unexpected end of /#{@shown}/" if @i >= @n
     b = peek
     if b == 46_u8 # .
@@ -1766,7 +1796,7 @@ class RxCompiler
 
   # One character, or under `i` a class of every character in its case
   # orbit.
-  private def literal(cp : Int32) : {Int32, Array(Int32)}
+  private def literal(cp : Int32) : {Int32, Int32, Int32}
     if @fold
       orbit = Unicode.case_orbit(cp.unsafe_chr)
       if orbit.size > 1
@@ -1778,7 +1808,7 @@ class RxCompiler
     single(@nfa.add(RxNfa::CHAR, cp))
   end
 
-  private def parse_group : {Int32, Array(Int32)}
+  private def parse_group : {Int32, Int32, Int32}
     @i = @i + 1
     raise "regex: unmatched '(' in /#{@shown}/" if @i >= @n
     capture = true
@@ -1873,7 +1903,7 @@ class RxCompiler
     close = @nfa.add(RxNfa::SAVE, 2 * index + 1)
     @nfa.patch(open, inner[0])
     patch_outs(inner, close)
-    {open, [close]}
+    fragment(open, close)
   end
 
   # The flags of `(?i-s)` or `(?i-s:`, the cursor on the first: set as the
@@ -1915,10 +1945,11 @@ class RxCompiler
     false
   end
 
-  private def parse_escape : {Int32, Array(Int32)}
+  private def parse_escape : {Int32, Int32, Int32}
     @i = @i + 1
     raise "regex: trailing '\\' in /#{@shown}/" if @i >= @n
     b = peek
+    set = RxSet.new
     if b >= 49_u8 && b <= 57_u8
       raise "regex: backreferences are refused in /#{@shown}/"
     elsif (b == 107_u8 || b == 103_u8) && @i + 1 < @n &&
@@ -1939,7 +1970,7 @@ class RxCompiler
       single(@nfa.add(RxNfa::TEXT_END))
     elsif b == 67_u8 # \C
       raise "regex: \\C is refused in /#{@shown}/ (it matches one byte, and this engine matches characters)"
-    elsif set = class_escape
+    elsif class_escape(set)
       single(@nfa.add_class(set))
     else
       @i = @i + 1
@@ -1951,10 +1982,9 @@ class RxCompiler
   # letter, as the set they stand for, folded under `i` before a negation
   # is applied, as RE2 does (`(?i)\W` does not take `K`); nil, the cursor
   # unmoved, for any other escape.
-  private def class_escape : RxSet?
+  private def class_escape(set : RxSet) : Bool
     b = peek
     negated = b == 68_u8 || b == 87_u8 || b == 83_u8 || b == 80_u8
-    set = RxSet.new
     if b == 100_u8 || b == 68_u8 # \d \D
       set.add(48, 57)
     elsif b == 119_u8 || b == 87_u8 # \w \W
@@ -1970,14 +2000,14 @@ class RxCompiler
       negated = property(set) != negated
       set.fold if @fold
       set.negate if negated
-      return set
+      return true
     else
-      return nil
+      return false
     end
     @i = @i + 1
     set.fold if @fold
     set.negate if negated
-    set
+    true
   end
 
   # The name after `\p` - one letter, or braces - read into *set*, the
@@ -2078,7 +2108,7 @@ class RxCompiler
   # Members, ranges and the named classes, then under `i` every case orbit
   # the set meets, then the negation: folded first, as RE2 does, so
   # `(?i)[^k]` refuses `K` as well as `k`.
-  private def parse_class : {Int32, Array(Int32)}
+  private def parse_class : {Int32, Int32, Int32}
     @i = @i + 1
     raise "regex: unterminated class in /#{@shown}/" if @i >= @n
     neg = false
@@ -2118,7 +2148,8 @@ class RxCompiler
     if peek == 92_u8
       @i = @i + 1
       raise "regex: trailing '\\' in /#{@shown}/" if @i >= @n
-      if named = class_escape
+      named = RxSet.new
+      if class_escape(named)
         set.merge(named)
         return -1
       end
@@ -2177,8 +2208,16 @@ class RxCompiler
     point
   end
 
-  private def single(s : Int32) : {Int32, Array(Int32)}
-    {s, [s]}
+  # Patch lists use indices in the compiler's scratch, also in recursion.
+  private def fragment(start : Int32, state : Int32) : {Int32, Int32, Int32}
+    at = @patch_states.size
+    @patch_states << state
+    @patch_next << -1
+    {start, at, at}
+  end
+
+  private def single(s : Int32) : {Int32, Int32, Int32}
+    fragment(s, s)
   end
 
   def self.digit?(c : UInt8) : Bool
@@ -2229,8 +2268,11 @@ class RxCompiler
     k < @n ? @pat.byte_at(k) : 0_u8
   end
 
-  private def patch_outs(frag : {Int32, Array(Int32)}, target : Int32) : Nil
-    frag[1].each do |s|
+  private def patch_outs(frag : {Int32, Int32, Int32}, target : Int32) : Nil
+    at = frag[1]
+    while at >= 0
+      s = @patch_states[at]
+      at = @patch_next[at]
       if @nfa.out1[s] < 0
         @nfa.out1[s] = target
       elsif @nfa.out2[s] < 0

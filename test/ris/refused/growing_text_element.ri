@@ -1,0 +1,11 @@
+def run
+  kept = [] of String
+  tape do
+    made = ""
+    made << "made"
+    kept << made
+    nil
+  end
+  puts kept[0]
+end
+run

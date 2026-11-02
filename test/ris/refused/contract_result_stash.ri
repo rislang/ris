@@ -1,0 +1,29 @@
+class Box
+  property view : String
+
+  def initialize(@view : String)
+  end
+end
+
+class Stash
+  @@kept = Box.new("k")
+
+  def self.kept : Box
+    @@kept
+  end
+
+  def self.wrap(view : String) : Box
+    box = Box.new("h")
+    box.view = view
+    @@kept = box
+    box
+  end
+end
+
+tape do
+  made = ""
+  made << "made"
+  Stash.wrap(made)
+  nil
+end
+puts Stash.kept.view

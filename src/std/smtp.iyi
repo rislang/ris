@@ -4,7 +4,8 @@
 #     import std/smtp::{SmtpClient, SmtpError, SmtpSecurity}
 #     import std/mail::{Mail}
 #
-#     smtp = SmtpClient.connect("mail.example.com", 587).or_panic   # STARTTLS
+#     smtp = SmtpClient.new("mail.example.com", 587)
+#     smtp.connect.or_panic                                      # STARTTLS
 #     smtp.auth("ann@example.com", password).or_panic
 #     smtp.send(msg).or_panic                                       # a Mail::Message
 #     smtp.quit
@@ -131,9 +132,9 @@ end
 @[OnTape]
 pub struct SmtpReply
   getter code : Int32
-  getter lines : Array(String)
+  getter lines : Array::View(String)
 
-  def initialize(@code : Int32, @lines : Array(String))
+  def initialize(@code : Int32, @lines : Array::View(String))
   end
 
   def text : String
@@ -161,41 +162,74 @@ pub class SmtpClient
   @host : String
   @helo : String
   @timeout_ms : Int32
-  @held : String = ""
+  @input : String::Builder
+  @texts : String::Builder
+  @reply_lines : Array(String)
+  @read_at : Int32 = 0
+  @port : Int32
+  @security : SmtpSecurity
   @closed : Bool = false
 
   # The TLS connection this session refills when it goes under TLS.
   @tls_slot : TlsClient
   @tls_config : TlsConfig
 
-  def initialize(@socket : IyiSocket, @host : String, @helo : String, @timeout_ms : Int32)
-    @greeting = SmtpReply.new(0, [] of String)
-    config = TlsConfig.new
-    @tls_config = config
-    slot = TlsClient.new(@host, config)
-    @tls_slot = slot
-  end
-
-  # A session with *host* on *port*: connected, greeted, EHLO said, and
-  # under TLS as *security* asks.
-  def self.connect(host : String, port : Int32, security : SmtpSecurity = SmtpSecurity::StartTls, config : TlsConfig = TlsConfig.new,
-                   helo : String? = nil, timeout_ms : Int32 = TIMEOUT_MS) : SmtpClient | SmtpError
-    raise "SMTP: a timeout is a count of milliseconds, at least 1, not #{timeout_ms}" if timeout_ms < 1
+  def initialize(@host : String, @port : Int32,
+                 @security : SmtpSecurity = SmtpSecurity::StartTls,
+                 config : TlsConfig? = nil, helo : String? = nil,
+                 @timeout_ms : Int32 = TIMEOUT_MS)
+    raise "SMTP: a timeout must be at least 1 ms" if @timeout_ms < 1
     if name = helo
       raise "SMTP: the EHLO name #{name.inspect} is not a name" if name.empty? || SmtpClient.unsafe?(name) || name.includes?(" ")
     end
-    socket = IyiSocket.connect(host, port, timeout_ms)
-    return SmtpError.new("the connection to #{host}:#{port} was cancelled", cancelled: true) if socket.is_a?(Cancelled)
-    return SmtpError.new("could not connect to #{host}:#{port}: #{socket.message}", timed_out: socket.timed_out?) if socket.is_a?(SocketError)
-    socket.read_timeout_ms = timeout_ms
-    socket.write_timeout_ms = timeout_ms
-    client = SmtpClient.new(socket, host, helo || SmtpClient.literal(socket.local_address), timeout_ms)
-    problem = client.open(security, config)
+    socket = IyiSocket.new(-1)
+    @socket = socket
+    @input = String::Builder.new(MAX_LINE)
+    @texts = String::Builder.new(MAX_LINE)
+    @reply_lines = Array(String).new(MAX_LINES)
+    @greeting = SmtpReply.new(0, @reply_lines[0, 0])
+    @helo = helo || ""
+    default = TlsConfig.new
+    @tls_config = config || default
+    slot = TlsClient.new(@host, @tls_config)
+    @tls_slot = slot
+  end
+
+  # Fill this caller-declared session, then greet and negotiate TLS.
+  def connect : SmtpClient | SmtpError
+    problem = dial
+    return problem if problem
+    @socket.read_timeout_ms = @timeout_ms
+    @socket.write_timeout_ms = @timeout_ms
+    @helo = keep(SmtpClient.literal(@socket.local_address)) if @helo.empty?
+    problem = open(@security, @tls_config)
     if problem
-      client.close
+      close
       return problem
     end
-    client
+    self
+  end
+
+  private def dial : SmtpError?
+    take_connection(IyiSocket.connect(@host, @port, @timeout_ms))
+  end
+
+  private def take_connection(socket : IyiSocket | Cancelled | SocketError) : SmtpError?
+    return SmtpError.new("the connection to #{@host}:#{@port} was cancelled", cancelled: true) if socket.is_a?(Cancelled)
+    return SmtpError.new("could not connect to #{@host}:#{@port}: #{socket.message}", timed_out: socket.timed_out?) if socket.is_a?(SocketError)
+    @socket.take_descriptor(socket)
+    nil
+  end
+
+  private def keep(text : String) : String
+    at = @texts.bytesize
+    @texts << text
+    @texts.finish[at, text.bytesize]
+  end
+
+  private def retain(error : SmtpError) : SmtpError
+    SmtpError.new(keep(error.reason), error.code, keep(error.reply),
+      error.timed_out?, error.cancelled?)
   end
 
   # `[192.0.2.1]`, or `[IPv6:2001:db8::1]` (section 4.1.3).
@@ -229,7 +263,7 @@ pub class SmtpClient
       answer = command("STARTTLS")
       return answer if answer.is_a?(SmtpError)
       return SmtpError.new("STARTTLS was refused", answer.code, answer.text) unless answer.code == 220
-      return fail("the server sent more after its 220 to STARTTLS, which would be read as though it came under TLS") unless @held.empty?
+      return fail("the server sent more after its 220 to STARTTLS, which would be read as though it came under TLS") unless @read_at == @input.bytesize
       problem = secure(config)
       return problem if problem
       problem = hello
@@ -250,7 +284,7 @@ pub class SmtpClient
   # EHLO, and HELO where the server does not know EHLO; the extensions
   # read afresh either way.
   private def hello : SmtpError?
-    @extensions = {} of String => String
+    @extensions.clear
     answer = command("EHLO " + @helo)
     return answer if answer.is_a?(SmtpError)
     if answer.code == 500 || answer.code == 502 || answer.code == 504
@@ -263,7 +297,7 @@ pub class SmtpClient
     answer.lines.each_with_index do |line, i|
       if i > 0
         space = line.index(' ')
-        keyword = (space ? line[0, space] : line).upcase
+        keyword = keep((space ? line[0, space] : line).upcase)
         @extensions[keyword] = space ? line[space + 1, line.bytesize - space - 1] : ""
       end
     end
@@ -345,7 +379,10 @@ pub class SmtpClient
   def send(message : Mail::Message) : SmtpError?
     sender = message.from
     raise "SMTP: a message has no From" unless sender
-    send(sender.address, message.recipients, message.to_s, message.utf8?)
+    recipients = Array(String).new
+    texts = String::Builder.new(256)
+    message.recipients(recipients, texts)
+    send(sender.address, recipients, message.to_s, message.utf8?)
   end
 
   # *data*, a whole message, from *sender* to *recipients*; *utf8* when
@@ -386,14 +423,17 @@ pub class SmtpClient
     answer = command("MAIL FROM:<#{sender}>" + params)
     return answer if answer.is_a?(SmtpError)
     return SmtpError.new("MAIL FROM:<#{sender}> was refused", answer.code, answer.text) unless answer.code == 250
-    recipients.each do |r|
-      answer = command("RCPT TO:<#{r}>")
-      return answer if answer.is_a?(SmtpError)
-      unless answer.code == 250 || answer.code == 251
-        refused = SmtpError.new("RCPT TO:<#{r}> was refused", answer.code, answer.text)
+    i = 0
+    while i < recipients.size
+      r = recipients[i]
+      i += 1
+      recipient_reply = command("RCPT TO:<#{r}>")
+      return retain(recipient_reply) if recipient_reply.is_a?(SmtpError)
+      unless recipient_reply.code == 250 || recipient_reply.code == 251
+        refused = SmtpError.new("RCPT TO:<#{r}> was refused", recipient_reply.code, recipient_reply.text)
         reset = command("RSET")
-        return reset if reset.is_a?(SmtpError)
-        return refused
+        return retain(reset) if reset.is_a?(SmtpError)
+        return retain(refused)
       end
     end
     answer = command("DATA")
@@ -498,7 +538,8 @@ pub class SmtpClient
 
   # The next reply, every line of it.
   def reply : SmtpReply | SmtpError
-    lines = [] of String
+    start = @reply_lines.size
+    lines = @reply_lines
     code = 0
     while true
       line = read_line
@@ -511,10 +552,10 @@ pub class SmtpClient
       return fail("a reply's lines have the codes #{code} and #{this}") if code != 0 && this != code
       code = this
       lines << (line.bytesize > 4 ? line[4, line.bytesize - 4] : "")
-      return SmtpReply.new(code, lines) unless line.bytesize > 3 && p[3] == 45_u8
-      return fail("a reply of more than #{MAX_LINES} lines") if lines.size >= MAX_LINES
+      return SmtpReply.new(code, lines[start, lines.size - start]) unless line.bytesize > 3 && p[3] == 45_u8
+      return fail("a reply of more than #{MAX_LINES} lines") if lines.size - start >= MAX_LINES
     end
-    SmtpReply.new(code, lines)
+    SmtpReply.new(code, lines[start, lines.size - start])
   end
 
   def self.digit?(b : UInt8) : Bool
@@ -524,17 +565,18 @@ pub class SmtpClient
   # One line without its CRLF (a bare LF ends one too).
   private def read_line : String | SmtpError
     while true
-      nl = @held.index('\n')
-      return fail("a reply line longer than #{MAX_LINE} bytes") if (nl || @held.bytesize) > MAX_LINE + 1
+      held = @input.finish[@read_at, @input.bytesize - @read_at]
+      nl = held.index('\n')
+      return fail("a reply line longer than #{MAX_LINE} bytes") if (nl || held.bytesize) > MAX_LINE + 1
       if nl
-        line = @held[0, nl]
-        @held = @held[nl + 1, @held.bytesize - nl - 1]
+        line = held[0, nl]
+        @read_at = @read_at + nl + 1
         return line.ends_with?("\r") ? line[0, line.bytesize - 1] : line
       end
       more = pull
       return more if more.is_a?(SmtpError)
       return fail("the server closed the connection") if more.empty?
-      @held = @held + more
+      @input << more
     end
     ""
   end

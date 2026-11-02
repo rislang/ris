@@ -1,6 +1,6 @@
 module test/mail_tape
 
-import std/mail::{Mail, MailError}
+import std/mail::{Mail, MailError, MailAddresses}
 
 # std/mail on the caller's tape: a message built with text, HTML and an
 # attachment, read back into its node tree, addresses, dates, encodings
@@ -19,18 +19,28 @@ tape do
   msg.attach("bericht.txt", "line one\nline two\n")
   wire = msg.to_s
   puts wire.bytesize
-  puts msg.recipients.join(",")
+  recipients = Array(String).new
+  recipient_text = String::Builder.new(256)
+  msg.recipients(recipients, recipient_text)
+  puts recipients.join(",")
 
-  part = Mail.parse(wire)
+  part_parser = Mail::RisMailParser.new(wire)
+
+  part = part_parser.parse
   if part.is_a?(MailError)
     puts part.message
   else
     puts part.media_type
     puts part.subject || "-"
-    puts part.header_values("To").join(";")
-    from = part.addresses("From")
+    values = Array(String).new
+    texts = String::Builder.new(256)
+    part.header_values("To", values, texts)
+    puts values.join(";")
+    from_parser = MailAddresses.new("")
+    from = part.addresses("From", from_parser)
     puts from.is_a?(MailError) ? from.message : "#{from[0].name}|#{from[0].address}"
-    cc = part.addresses("cc")
+    cc_parser = MailAddresses.new("")
+    cc = part.addresses("cc", cc_parser)
     puts cc.is_a?(MailError) ? cc.message : "#{cc[0].local}|#{cc[0]}"
     puts part.parts.size
     part.walk { |p| puts "  #{p.media_type} #{p.parts.size} #{p.transfer_encoding}" }
@@ -48,12 +58,14 @@ tape do
   end
 
   digest = "Content-Type: multipart/digest; boundary=\"d\"\r\n\r\npre\r\n--d\r\n\r\nSubject: =?utf-8?q?inner_=C3=A9?=\r\n\r\nbody\r\n--d--\r\nepi\r\n"
-  got = Mail.parse(digest)
+  got_parser = Mail::RisMailParser.new(digest)
+  got = got_parser.parse
   unless got.is_a?(MailError)
     inner = got.parts[0]
     puts "#{inner.media_type} #{inner.parts[0].subject}"
   end
-  got = Mail.parse("Content-Type: text/plain; charset=iso-8859-1; name*=iso-8859-1''caf%E9; title*0=\"a\"; title*1=\"b\"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\ncaf=E9 =\r\nau lait")
+  parameter_parser = Mail::RisMailParser.new("Content-Type: text/plain; charset=iso-8859-1; name*=iso-8859-1''caf%E9; title*0=\"a\"; title*1=\"b\"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\ncaf=E9 =\r\nau lait")
+  got = parameter_parser.parse
   unless got.is_a?(MailError)
     puts "#{got.charset} #{got.param("title")} #{got.filename} #{got.text}"
   end
@@ -63,7 +75,8 @@ tape do
    "Content-Type: multipart/mixed; boundary=q\r\n\r\nno parts\r\n",
    "Content-Type: multipart/mixed; boundary=q\r\n\r\n--q\r\n\r\nopen\r\n",
    "Content-Transfer-Encoding: x-uu\r\n\r\nzz"].each do |text|
-    bad = Mail.parse(text)
+    bad_parser = Mail::RisMailParser.new(text)
+    bad = bad_parser.parse
     if bad.is_a?(MailError)
       puts bad.message
     else
@@ -79,9 +92,11 @@ tape do
   puts when_.is_a?(MailError) ? when_.message : "#{when_[0]} #{when_[1]}"
   puts Mail.fold("Subject", "a very long subject line that has to be folded somewhere near the seventy-eighth column").inspect
   puts Mail.decode_words("=?ISO-8859-1?Q?Andr=E9?= Pirard")
-  list = Mail::Address.parse_list("A Group:Ed Jones <c@a.test>,joe@where.test;, \"x y\" <z@q.test>")
+  addresses = MailAddresses.new("A Group:Ed Jones <c@a.test>,joe@where.test;, \"x y\" <z@q.test>")
+  list = addresses.list
   puts list.is_a?(MailError) ? list.message : list.map(&.to_s).join(" | ")
-  bad = Mail::Address.parse("two@a.test, three@b.test")
+  invalid = MailAddresses.new("two@a.test, three@b.test")
+  bad = invalid.single
   puts bad.message if bad.is_a?(MailError)
   qp = Mail.encode_quoted_printable("café = ok\n")
   puts qp.inspect

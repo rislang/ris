@@ -17,16 +17,19 @@ def serve(server : IyiSocket) : Nil
   server.close
   return unless conn.is_a?(IyiSocket)
   conn.write("220 test ESMTP\r\n")
-  held = ""
+  input = String::Builder.new(4096)
+  at = 0
   data = false
   while true
     got = conn.read(4096)
     break unless got.is_a?(String)
     break if got.empty?
-    held = held + got
+    input << got
+    held = input.finish[at, input.bytesize - at]
     while nl = held.index('\n')
       line = held[0, nl - 1]
-      held = held[nl + 1, held.bytesize - nl - 1]
+      at += nl + 1
+      held = input.finish[at, input.bytesize - at]
       if data
         if line == "."
           data = false
@@ -68,7 +71,8 @@ end
 
 # The client's session, in a def of its own: what it makes is the def's.
 def session(port : Int32) : Nil
-  client = SmtpClient.connect("127.0.0.1", port, SmtpSecurity::Cleartext, helo: "client.test")
+  session = SmtpClient.new("127.0.0.1", port, SmtpSecurity::Cleartext, helo: "client.test")
+  client = session.connect
   if client.is_a?(SmtpError)
     puts client.message
   else

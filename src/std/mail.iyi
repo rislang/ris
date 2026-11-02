@@ -17,9 +17,11 @@
 #     msg.attach("bericht.pdf", pdf_bytes)
 #     wire = msg.to_s
 #
-#     part = Mail.parse(wire).or_panic
+#     parser = Mail::RisMailParser.new(wire)
+#     part = parser.parse.or_panic
 #     part.header("Subject")                  # "Grüße aus Köln"
-#     part.addresses("From").or_panic[0].name # "Jörg Müller"
+#     addresses = MailAddresses.new("")
+#     part.addresses("From", addresses).or_panic[0].name # "Jörg Müller"
 #     part.find("text/plain").not_nil         # the text, decoded
 #
 # **Building.** `Mail::Message` takes From, To, Cc, Bcc, Reply-To, Subject,
@@ -65,7 +67,7 @@
 # when it is long. A header value or a display name that holds a line
 # break is a panic, as it would be a header of the caller's making.
 #
-# **Reading.** `Mail.parse` reads a message whose lines end in CRLF or LF
+# **Reading.** `Mail::RisMailParser#parse` reads CRLF or LF lines
 # into a `Mail::TapePart`: its fields unfolded, in order, and its body; a
 # multipart's parts, and a `message/rfc822`'s message, are parts of their
 # own. `header` answers a field with its encoded-words decoded; `body` the
@@ -373,45 +375,36 @@ struct MailText
     MailText.base64_decode(MailText.cut(text, start, e))
   end
 
-  def self.content_type(value : String) : {String, TapeMap(String, String)}?
-    scan = TapeMailScan.new(value)
-    return nil if scan.skip_cfws
-    major = scan.token
-    return nil if major.empty? || scan.skip_cfws || scan.peek != 47_u8
-    scan.advance
-    return nil if scan.skip_cfws
-    minor = scan.token
-    return nil if minor.empty?
-    essence = ""
-    essence << MailText.lower(major) << "/" << MailText.lower(minor)
-    {essence, MailText.params(scan)}
+  def self.content_type(value : String) : {String, RisMailMap(String, String)}?
+    RisMailParameters.read(RisMailParameters.new(value, true))
   end
 
-  # A Content-Disposition's kind in lower case, and its parameters.
-  def self.disposition(value : String) : {String, TapeMap(String, String)}?
-    scan = TapeMailScan.new(value)
-    return nil if scan.skip_cfws
-    kind = scan.token
-    return nil if kind.empty?
-    {MailText.lower(kind), MailText.params(scan)}
+  def self.disposition(value : String) : {String, RisMailMap(String, String)}?
+    RisMailParameters.read(RisMailParameters.new(value, false))
+  end
+
+  def self.keep(text : String, texts : String::Builder) : String
+    at = texts.bytesize
+    texts << text
+    texts.finish[at, text.bytesize]
   end
 
   # `; name=value` after `scan`, names in lower case, RFC 2231's extended
   # values and continuations put together. A parameter that cannot be read
   # ends the list; what came before it is kept.
-  def self.params(scan : TapeMailScan) : TapeMap(String, String)
+  def self.params(scan : TapeMailScan, texts : String::Builder, result : RisMailMap(String, String)) : Nil
     raw = Array({String, String}).new
     while true
       break if scan.skip_cfws
       break if scan.done? || scan.peek != 59_u8
       scan.advance
       break if scan.skip_cfws
-      name = MailText.lower(scan.token)
+      name = MailText.keep(MailText.lower(scan.token), texts)
       break if name.empty? || scan.skip_cfws || scan.peek != 61_u8
       scan.advance
       break if scan.skip_cfws
       if scan.peek == 34_u8
-        value = scan.quoted
+        value = scan.quoted(texts)
         break if value.is_a?(MailError)
         raw << {name, value}
       else
@@ -420,12 +413,11 @@ struct MailText
         raw << {name, scan.bare_value}
       end
     end
-    MailText.assemble(raw)
+    MailText.assemble(raw, texts, result)
   end
 
-  def self.assemble(raw : Array({String, String})) : TapeMap(String, String)
-    result = TapeMap(String, String).new
-    plain = TapeMap(String, String).new
+  def self.assemble(raw : Array({String, String}), texts : String::Builder, result : RisMailMap(String, String)) : Nil
+    plain = RisMailMap(String, String).new
     # RFC 2231 pieces in one flat list, their names in order seen.
     bases = Array(String).new
     pieces = Array({String, Int32, String, Bool}).new
@@ -457,12 +449,12 @@ struct MailText
         list << {piece[1], piece[2], piece[3]} if piece[0] == base
       end
       joined = MailText.continued(list)
-      result[base] = joined if joined
+      result[MailText.keep(base, texts)] = MailText.keep(joined, texts) if joined
     end
     plain.each do |name, value|
-      result[name] = MailText.whole_words(value) if result[name]?.nil?
+      result[MailText.keep(name, texts)] = MailText.keep(MailText.whole_words(value), texts) if result[name]?.nil?
     end
-    result
+    nil
   end
 
   # A value that is encoded-words and nothing else - how some mailers
@@ -774,7 +766,7 @@ struct MailText
     line = String::Builder.new
     i = 0
     while i < n
-      line = String::Builder.new
+      line.clear
       while i < n
         b = p[i]
         break if !binary && (b == 13_u8 || b == 10_u8)
@@ -1090,10 +1082,42 @@ struct MailText
   end
 end
 
+# Header parameter lists and decoded text are constructed together.
+@[OnTape]
+struct RisMailParameters
+  getter kind : String? = nil
+  getter params : RisMailMap(String, String)
+
+  def initialize(value : String, media : Bool)
+    @params = RisMailMap(String, String).new
+    texts = String::Builder.new(value.bytesize)
+    scan = TapeMailScan.new(value)
+    return if scan.skip_cfws
+    first = scan.token
+    return if first.empty?
+    if media
+      return if scan.skip_cfws || scan.peek != 47_u8
+      scan.advance
+      return if scan.skip_cfws
+      second = scan.token
+      return if second.empty?
+      @kind = MailText.keep("#{MailText.lower(first)}/#{MailText.lower(second)}", texts)
+    else
+      @kind = MailText.keep(MailText.lower(first), texts)
+    end
+    MailText.params(scan, texts, @params)
+  end
+
+  def self.read(parsed : RisMailParameters) : {String, RisMailMap(String, String)}?
+    kind = parsed.kind
+    kind ? {kind, parsed.params} : nil
+  end
+end
+
 # A cursor over a structured header value: whitespace and comments
 # passed over, tokens and quoted strings read.
 @[OnTape]
-struct TapeMap(K, V)
+pub struct RisMailMap(K, V)
   @keys : Array(K)
   @values : Array(V)
 
@@ -1237,14 +1261,14 @@ struct TapeMailScan
   end
 
   # The quoted string at `"`, its quoted-pairs resolved.
-  def quoted : String | MailError
+  def quoted(io : String::Builder) : String | MailError
     @at = @at + 1
-    io = String::Builder.new
+    start = io.bytesize
     while @at < @n
       b = @text[@at]
       if b == 34_u8
         @at = @at + 1
-        return io.finish
+        return io.finish[start, io.bytesize - start]
       elsif b == 92_u8
         @at = @at + 1
         break if @at >= @n
@@ -1295,12 +1319,30 @@ struct MailWord
 end
 
 # RFC 5322 section 3.4's address lists, read.
-class MailAddresses
+pub class MailAddresses
   @scan : TapeMailScan
   @text : String
+  @texts : String::Builder
+  @words : Array(MailWord)
+  getter addresses : Array(Std::Mail::Mail::Address)
 
   def initialize(@text : String)
+    @texts = String::Builder.new(@text.bytesize)
+    @words = Array(MailWord).new
+    @addresses = Array(Std::Mail::Mail::Address).new
     @scan = TapeMailScan.new(@text)
+  end
+
+  def read(text : String) : Array(Std::Mail::Mail::Address) | MailError
+    @text = text
+    @scan = TapeMailScan.new(text)
+    list
+  end
+
+  private def keep(text : String) : String
+    at = @texts.bytesize
+    @texts << text
+    @texts.finish[at, text.bytesize]
   end
 
   def fail(why : String) : MailError
@@ -1309,7 +1351,7 @@ class MailAddresses
 
   # The mailboxes of an address list, a group's members among them.
   def list : Array(Std::Mail::Mail::Address) | MailError
-    found = [] of Std::Mail::Mail::Address
+    found = @addresses
     while true
       problem = @scan.skip_cfws
       return problem if problem
@@ -1327,6 +1369,13 @@ class MailAddresses
       end
     end
     found
+  end
+
+  def single : Std::Mail::Mail::Address | MailError
+    result = list
+    return result if result.is_a?(MailError)
+    return MailError.new("#{@text.inspect} holds #{result.size} addresses, not one") unless result.size == 1
+    result[0]
   end
 
   # One mailbox, or a group of them, added to *found*.
@@ -1354,7 +1403,7 @@ class MailAddresses
       return problem if problem
       return fail("an angle address is not closed with >") unless @scan.peek == 62_u8
       @scan.advance
-      found << Std::Mail::Mail::Address.new(spec[0], spec[1], MailAddresses.display(words), true)
+      found << Std::Mail::Mail::Address.new(spec[0], spec[1], keep(MailAddresses.display(words)), true)
     when 58_u8
       return fail("a group is inside a group") if grouped
       return fail("a group has no name") if words.empty?
@@ -1390,16 +1439,17 @@ class MailAddresses
   end
 
   # Atoms, quoted strings and dots up to the next special.
-  def phrase : Array(MailWord) | MailError
-    words = [] of MailWord
+  def phrase : Array::View(MailWord) | MailError
+    start = @words.size
+    words = @words
     while true
       before = @scan.at
       problem = @scan.skip_cfws
       return problem if problem
-      spaced = @scan.at > before && !words.empty?
+      spaced = @scan.at > before && words.size > start
       c = @scan.peek
       if c == 34_u8
-        text = @scan.quoted
+        text = @scan.quoted(@texts)
         return text if text.is_a?(MailError)
         words << MailWord.new(text, MailWord::QUOTED, spaced)
       elsif c == 46_u8
@@ -1411,12 +1461,12 @@ class MailAddresses
         break
       end
     end
-    words
+    words[start, words.size - start]
   end
 
   # The display name *words* spell: one space where whitespace was, none
   # between two encoded-words, each decoded.
-  def self.display(words : Array(MailWord)) : String
+  def self.display(words : Array::View(MailWord)) : String
     io = ""
     last_word = false
     words.each do |w|
@@ -1430,7 +1480,7 @@ class MailAddresses
 
   # `local@domain` at the cursor, or after the local part *phrase_words*
   # already read: the local part unquoted, and the domain.
-  def addr_spec(phrase_words : Array(MailWord)?) : {String, String} | MailError
+  def addr_spec(phrase_words : Array::View(MailWord)?) : {String, String} | MailError
     words = phrase_words
     unless words
       read = phrase
@@ -1460,7 +1510,7 @@ class MailAddresses
     if @scan.peek == 91_u8
       lit = @scan.literal
       return lit if lit.is_a?(MailError)
-      return {local, lit}
+      return {keep(local), lit}
     end
     domain = ""
     while true
@@ -1478,7 +1528,7 @@ class MailAddresses
         break
       end
     end
-    {local, domain}
+    {keep(local), keep(domain)}
   end
 end
 
@@ -1490,11 +1540,15 @@ class MailFolder
   @col : Int32
   @content : Bool
 
-  def initialize(name : String)
-    @io = String::Builder.new
+  def initialize(name : String, @io : String::Builder)
     @io << name << ":"
     @col = name.bytesize + 1
     @content = false
+  end
+
+  def initialize(name : String)
+    io = String::Builder.new
+    initialize(name, io)
   end
 
   # *text*, never broken, after a space when *spaced*: on a line of its
@@ -1612,7 +1666,7 @@ class MailFolder
         name.split(' ').each do |w|
           if MailFolder.atom?(w)
             encoded(run.join(' ')) unless run.empty?
-            run = [] of String
+            run.clear
             token(w)
           else
             run << w
@@ -1681,13 +1735,14 @@ struct MailEntity
 end
 
 pub struct Mail
+  macro parse(*args)
+    {% raise "declare parser = Mail::RisMailParser.new(text), then call parser.parse" %}
+  end
+
   # How deep parts may nest before a message is refused.
   MAX_DEPTH = 32
 
   # A message read from *text*: its header section, then its body.
-  def self.parse(text : String) : TapePart | MailError
-    TapePart.parse(text)
-  end
 
   # RFC 5322's date-time for *unix* seconds, at *offset* minutes east of
   # UTC: `Sat, 17 Oct 2026 14:00:00 +0200`, as `email.utils.format_datetime`
@@ -1778,10 +1833,15 @@ pub struct Mail
   # An unstructured header line, `name: value` folded and encoded as the
   # builder writes it, CRLF and all.
   def self.fold(name : String, value : String) : String
+    String.build { |writer| Mail.fold(name, value, writer) }
+  end
+
+  def self.fold(name : String, value : String, writer : String::Builder) : Nil
     MailText.check_field(name, value)
-    f = MailFolder.new(name)
+    f = MailFolder.new(name, writer)
     f.unstructured(value)
     f.finish
+    nil
   end
 
   # *text* with its RFC 2047 encoded-words decoded.
@@ -1853,7 +1913,8 @@ pub struct Mail
   end
 
   # A mailbox: an address and the name shown with it.
-  class Address
+  @[OnTape]
+  struct Address
     # The display name, decoded; "" when there is none.
     getter name : String
     # The local part, unquoted, and the domain as written.
@@ -1906,18 +1967,7 @@ pub struct Mail
       @name == other.name && @local == other.local && @domain == other.domain
     end
 
-    # The one mailbox *text* holds.
-    def self.parse(text : String) : Address | MailError
-      list = Address.parse_list(text)
-      return list if list.is_a?(MailError)
-      return MailError.new("#{text.inspect} holds #{list.size} addresses, not one") unless list.size == 1
-      list[0]
-    end
 
-    # The mailboxes of an address list, a group's members in its place.
-    def self.parse_list(text : String) : Array(Address) | MailError
-      MailAddresses.new(text).list
-    end
   end
 
   # A message to be written: its addresses, subject, date and identifier,
@@ -1928,6 +1978,7 @@ pub struct Mail
     getter cc : Array(Address) = Array(Address).new(4)
     getter bcc : Array(Address) = Array(Address).new(4)
     getter reply_to : Array(Address) = Array(Address).new(4)
+    @id_text = String::Builder.new(128)
     @subject : String? = nil
     @date : String? = nil
     @message_id : String? = nil
@@ -1981,7 +2032,9 @@ pub struct Mail
         i = i + 1
       end
       raise "mail: the Message-ID #{value.inspect} is not <left@right>" unless ok
-      @message_id = "<" + id + ">"
+      at = @id_text.bytesize
+      @id_text << "<" << id << ">"
+      @message_id = @id_text.finish[at, id.bytesize + 2]
     end
 
     def text : String?
@@ -2025,12 +2078,13 @@ pub struct Mail
     end
 
     # Every address the message goes to - To, Cc and Bcc - once each.
-    def recipients : Array(String)
-      seen = [] of String
+    def recipients(seen : Array(String), texts : String::Builder) : Nil
       (@to + @cc + @bcc).each do |a|
-        seen << a.address unless seen.includes?(a.address)
+        text = a.address
+        seen << MailText.keep(text, texts) unless seen.includes?(text)
+        nil
       end
-      seen
+      nil
     end
 
     # Whether an address in the message is RFC 6532's UTF-8.
@@ -2103,7 +2157,13 @@ pub struct Mail
       return body if body && @attachments.empty?
       children = [] of MailEntity
       children << body if body
-      @attachments.each { |item| children << Message.attachment(item[0], item[1], item[2]) }
+      texts = String::Builder.new(4096)
+      @attachments.each do |item|
+        part = Message.attachment(item[0], item[1], item[2])
+        children << MailEntity.new(MailText.keep(part.head, texts),
+          MailText.keep(part.body, texts))
+        nil
+      end
       Message.multipart("mixed", children)
     end
 
@@ -2145,7 +2205,7 @@ pub struct Mail
       kind.split(' ').each { |w| type.token(w) }
       disposition = MailFolder.new("Content-Disposition")
       disposition.token("attachment;")
-      Message.filename_params(filename).each { |param| disposition.token(param) }
+      Message.filename_params(filename, disposition)
       head = type.finish + disposition.finish + "Content-Transfer-Encoding: base64\r\n"
       MailEntity.new(head, MailText.base64_encode(data))
     end
@@ -2155,7 +2215,7 @@ pub struct Mail
     # characters when it is longer - 50 encoded bytes in the first, after
     # its charset, and 60 in the rest, so each fits a line. All but the
     # last end in `;`.
-    protected def self.filename_params(filename : String) : Array(String)
+    protected def self.filename_params(filename : String, folder : MailFolder) : Nil
       p = filename
       n = filename.bytesize
       simple = n <= 60 && !filename.includes?("=?")
@@ -2165,9 +2225,13 @@ pub struct Mail
         simple = false if b < 32_u8 || b > 126_u8 || b == 34_u8 || b == 92_u8
         i = i + 1
       end
-      return ["filename=" + MailText.quoted(filename)] if simple
-      chunks = [] of String
+      if simple
+        folder.token("filename=" + MailText.quoted(filename))
+        return
+      end
+      chunks = [] of {Int32, Int32}
       chunk = String::Builder.new
+      start = 0
       size = 0
       i = 0
       while i < n
@@ -2184,34 +2248,42 @@ pub struct Mail
         end
         text = piece.to_s
         if size + text.bytesize > (chunks.empty? ? 50 : 60) && size > 0
-          chunks << chunk.to_s
-          chunk = String::Builder.new
+          chunks << {start, chunk.bytesize - start}
+          start = chunk.bytesize
           size = 0
         end
         chunk << text
         size = size + text.bytesize
         i = i + c
       end
-      chunks << chunk.to_s
-      if chunks.size == 1 && chunks[0].bytesize <= 52
-        return ["filename*=utf-8''" + chunks[0]]
+      chunks << {start, chunk.bytesize - start}
+      if chunks.size == 1 && chunks[0][1] <= 52
+        first = chunks[0]
+        folder.token("filename*=utf-8''" + chunk.finish[first[0], first[1]])
+        return
       end
-      params = [] of String
-      chunks.each_with_index do |text, k|
+      chunks.each_with_index do |span, k|
+        text = chunk.finish[span[0], span[1]]
         prefix = k == 0 ? "utf-8''" : ""
-        params << "filename*#{k}*=" + prefix + text + (k == chunks.size - 1 ? "" : ";")
+        folder.token("filename*#{k}*=" + prefix + text + (k == chunks.size - 1 ? "" : ";"))
       end
-      params
+      nil
     end
 
     # The parts under one boundary, made from their own hash.
     protected def self.multipart(subtype : String, children : Array(MailEntity)) : MailEntity
-      rendered = children.map { |c| c.to_s }
+      rendered = Array(String).new(children.size)
+      texts = String::Builder.new(4096)
+      children.each do |child|
+        rendered << MailText.keep(child.to_s, texts)
+        nil
+      end
       digest = SHA1.new
       rendered.each { |r| digest.update(r) }
-      mark = "iyi-" + digest.hexfinal[0, 32]
+      marks = String::Builder.new(128)
+      mark = MailText.keep("iyi-" + digest.hexfinal[0, 32], marks)
       while rendered.any? { |r| ("\r\n" + r).includes?("\r\n--" + mark) }
-        mark = "iyi-" + SHA1.hexdigest(mark)[0, 32]
+        mark = MailText.keep("iyi-" + SHA1.hexdigest(mark)[0, 32], marks)
       end
       body = ""
       rendered.each_with_index do |r, i|
@@ -2223,7 +2295,7 @@ pub struct Mail
     end
   end
 
-  # One part of a read message in a MailTree: where its text, header
+  # One part of a read message in a RisMailParser: where its text, header
   # fields, Content-Type parameters and child parts lie, as index ranges
   # into the tree's arrays.
   @[OnTape]
@@ -2248,11 +2320,12 @@ pub struct Mail
   # A read message as one node array: every part a MailNode, its header
   # fields and parameters runs of two flat arrays, its children a run of
   # nodes. Built breadth first, so a part's children sit side by side.
-  class MailTree
+  pub class RisMailParser
     getter source : String
     getter nodes : Array(MailNode)
     getter headers : Array({String, String})
     getter params : Array({String, String})
+    @texts = String::Builder.new(4096)
 
     def initialize(@source : String)
       @nodes = Array(MailNode).new
@@ -2260,16 +2333,19 @@ pub struct Mail
       @params = Array({String, String}).new
     end
 
-    def self.parse(text : String) : TapePart | MailError
-      tree = MailTree.new(text)
-      tree.nodes << MailNode.new(0, text.bytesize, 0, "text/plain".as_tape)
+    def parse : TapePart | MailError
+      @nodes << MailNode.new(0, @source.bytesize, 0, "text/plain".as_tape)
       i = 0
-      while i < tree.nodes.size
-        failed = tree.read(i)
+      while i < @nodes.size
+        failed = read(i)
         return failed if failed
         i = i + 1
       end
-      TapePart.new(tree, 0)
+      TapePart.new(self, 0)
+    end
+
+    def keep(text : String) : String
+      MailText.keep(text, @texts)
     end
 
     # Reads node *at*: its header fields, its media type and parameters,
@@ -2310,7 +2386,7 @@ pub struct Mail
           value << source[i, e - i]
         else
           if field = name
-            @headers << {field, TapePart.trim(value.finish)}
+            @headers << {field, keep(TapePart.trim(value.finish))}
           end
           colon = i
           while colon < e && p[colon] != 58_u8
@@ -2331,14 +2407,14 @@ pub struct Mail
             return MailError.new("line #{line} of a header section is not a field: #{shown.inspect}")
           end
           name = field
-          value = String::Builder.new
+          value.clear
           value << source[colon + 1, e - colon - 1]
         end
         body_at = after
         i = after
       end
       if field = name
-        @headers << {field, TapePart.trim(value.finish)}
+        @headers << {field, keep(TapePart.trim(value.finish))}
       end
       head_end = @headers.size
       media = default_type
@@ -2346,8 +2422,8 @@ pub struct Mail
       if type = TapePart.first(@headers, head_at, head_end, "content-type")
         parsed = MailText.content_type(type)
         if parsed
-          media = parsed[0]
-          parsed[1].each { |key, item| @params << {key, item} }
+          media = keep(parsed[0])
+          parsed[1].each { |key, item| @params << {keep(key), keep(item)} }
         else
           media = "text/plain".as_tape
         end
@@ -2381,18 +2457,15 @@ pub struct Mail
   # A message or one of its parts, as read: its header fields unfolded and
   # in order, and its body - a multipart's parts, a `message/rfc822`'s
   # message, or bytes in a transfer encoding. A view of one node of the
-  # MailTree `Mail.parse` builds on the caller's tape.
+  # RisMailParser builds on the caller's tape.
   @[OnTape]
   struct TapePart
-    @tree : MailTree
+    @tree : RisMailParser
     @at : Int32
 
-    def initialize(@tree : MailTree, @at : Int32)
+    def initialize(@tree : RisMailParser, @at : Int32)
     end
 
-    def self.parse(text : String) : TapePart | MailError
-      MailTree.parse(text)
-    end
 
     private def node : MailNode
       @tree.nodes[@at]
@@ -2517,17 +2590,16 @@ pub struct Mail
     end
 
     # Every field named *name*, in order, decoded.
-    def header_values(name : String) : Array(String)
+    def header_values(name : String, found : Array(String), texts : String::Builder) : Nil
       lower = MailText.lower(name)
       n = node
-      found = Array(String).new
       i = n.head_at
       while i < n.head_end
         pair = @tree.headers[i]
-        found << MailText.decode_words(pair[1]) if MailText.lower(pair[0]) == lower
+        found << MailText.keep(MailText.decode_words(pair[1]), texts) if MailText.lower(pair[0]) == lower
         i = i + 1
       end
-      found
+      nil
     end
 
     # The first field named *name*, as written.
@@ -2542,21 +2614,19 @@ pub struct Mail
 
     # The mailboxes of every field named *name* - `From`, `To`, `Cc` -
     # none when there is no such field.
-    def addresses(name : String) : Array(Address) | MailError
+    def addresses(name : String, parser : MailAddresses) : Array(Address) | MailError
       lower = MailText.lower(name)
       n = node
-      found = Array(Address).new
       i = n.head_at
       while i < n.head_end
         pair = @tree.headers[i]
         if MailText.lower(pair[0]) == lower
-          list = Address.parse_list(pair[1])
+          list = parser.read(pair[1])
           return list if list.is_a?(MailError)
-          list.each { |address| found << address }
         end
         i = i + 1
       end
-      found
+      parser.addresses
     end
 
     # A Content-Type parameter, RFC 2231's decoded.

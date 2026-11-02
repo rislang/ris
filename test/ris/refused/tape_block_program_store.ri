@@ -1,0 +1,39 @@
+class Holder
+  getter bytes : String::Builder
+  property view : String
+
+  def initialize(@view : String)
+    @bytes = String::Builder.new(16)
+    @bytes << "abc"
+  end
+
+  def head : String
+    @bytes.finish
+  end
+
+  def wipe : Nil
+    @bytes.clear
+  end
+
+  def wipe_using(borrowed : String) : Int32
+    @bytes.clear
+    borrowed.bytesize
+  end
+end
+
+class Keep
+  @@text = ""
+  def self.put(v : String) : Nil
+    @@text = v
+  end
+  def self.text : String
+    @@text
+  end
+end
+tape do
+  made = ""
+  made << "made"
+  Keep.put(made)
+  nil
+end
+puts Keep.text

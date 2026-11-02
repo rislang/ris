@@ -1,0 +1,20 @@
+class H
+  getter bytes : String::Builder
+  def initialize
+    @bytes = String::Builder.new(16)
+    @bytes << "abcdef"
+  end
+end
+
+def escape : String
+  local = H.new
+  local.copy_to(RisCurrentTape.new).bytes.finish
+end
+
+def run
+  e = escape
+  o = H.new
+  o.bytes << "ZZZZZZZZ"
+  puts e, o.bytes.finish
+end
+run

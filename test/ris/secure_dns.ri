@@ -21,11 +21,11 @@ raise "ca.pem" unless roots.is_a?(Array(Certificate))
 dot_port = File.read("#{dir}/dot.port").as_tape.strip.to_i
 doh_port = File.read("#{dir}/doh.port").as_tape.strip.to_i
 
-def config(roots : Array(Certificate)) : TlsConfig
-  made = TlsConfig.new
+def config(made : TlsConfig, roots : Array(Certificate)) : Nil
   made.roots = roots
-  made.alpn = ["http/1.1"]
-  made
+  made.alpn.clear
+  made.alpn << "http/1.1"
+  nil
 end
 
 def ask(resolver : Resolver, name : String) : Nil
@@ -40,7 +40,9 @@ def ask(resolver : Resolver, name : String) : Nil
 end
 
 tape do
-  dot = DnsOverTls.new("dns.test", "127.0.0.1", dot_port, config(roots))
+  tls = TlsConfig.new
+  config(tls, roots)
+  dot = DnsOverTls.new("dns.test", "127.0.0.1", dot_port, tls)
   resolver = Resolver.new
   resolver.read_system
   resolver.encrypt([dot] of DnsUpstream)
@@ -51,8 +53,10 @@ tape do
 end
 
 tape do
+  tls = TlsConfig.new
+  config(tls, roots)
   url = "https://dns.test:#{doh_port}/dns-query"
-  post = DnsOverHttps.new(url, "127.0.0.1", config(roots))
+  post = DnsOverHttps.new(url, "127.0.0.1", tls)
   resolver = Resolver.new
   resolver.read_system
   resolver.encrypt([post] of DnsUpstream)
@@ -60,7 +64,7 @@ tape do
   ask(resolver, "six.zone.test")
   puts "post connections #{post.connections_made} reused #{post.connections_reused}"
   resolver.close
-  get = DnsOverHttps.new(url, "127.0.0.1", config(roots), "GET")
+  get = DnsOverHttps.new(url, "127.0.0.1", tls, "GET")
   resolver.read_system
   resolver.encrypt([get] of DnsUpstream)
   ask(resolver, "dual.zone.test")
@@ -68,7 +72,7 @@ tape do
   resolver.close
   # The URL's host an address: nothing to bootstrap; the certificate
   # names 127.0.0.1 too.
-  bare = DnsOverHttps.new("https://127.0.0.1:#{doh_port}/dns-query", nil, config(roots))
+  bare = DnsOverHttps.new("https://127.0.0.1:#{doh_port}/dns-query", nil, tls)
   resolver.read_system
   resolver.encrypt([bare] of DnsUpstream)
   ask(resolver, "alias.zone.test")

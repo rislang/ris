@@ -1,0 +1,38 @@
+class Holder
+  getter bytes : String::Builder
+  property view : String
+
+  def initialize(@view : String)
+    @bytes = String::Builder.new(16)
+    @bytes << "abc"
+  end
+
+  def head : String
+    @bytes.finish
+  end
+
+  def wipe : Nil
+    @bytes.clear
+  end
+
+  def wipe_using(borrowed : String) : Int32
+    @bytes.clear
+    borrowed.bytesize
+  end
+end
+
+def put(holder : Holder, from : Holder) : Nil
+  holder.view = from.view.copy_to(RisCurrentTape.new)
+end
+
+def run
+  holder = Holder.new("h")
+  from = Holder.new("abcdefgh")
+  3.times do
+    put(holder, from)
+    nil
+  end
+  puts holder.view
+end
+
+run

@@ -267,6 +267,18 @@ pub struct BigInt
 
   # Parses a string with full error checking.
   def self.parse(str : String, base : Int32 = 10) : BigInt
+    BigInt.signed(BigInt.parse_limbs(str, base))
+  end
+
+  # *limbs* with a sign marker last (1 for negative), as parse_limbs
+  # answers them.
+  protected def self.signed(limbs : Array(UInt64)) : BigInt
+    BigInt.new(limbs.last == 1_u64 ? -1 : 1, limbs[0, limbs.size - 1])
+  end
+
+  # parse's magnitude, then 1 when it is negative: a flat Array that moves
+  # to the caller.
+  protected def self.parse_limbs(str : String, base : Int32) : Array(UInt64)
     raise "invalid base: #{base} (must be 2..36)" if base < 2 || base > 36
 
     bytes = str
@@ -331,8 +343,10 @@ pub struct BigInt
     # Underscores are skipped, so `_`, `-_` and `0x_` get here with none.
     raise "invalid BigInt: no digits in \"#{str}\"" if digits.empty?
 
-    result = BigInt.from_digits(digits, actual_base)
-    sign < 0 ? result.negate : result
+    limbs = Array(UInt64).new(digits.size // 2 + 2)
+    BigInt.from_digits(digits, actual_base, limbs)
+    limbs << (sign < 0 ? 1_u64 : 0_u64)
+    limbs
   end
 
   # A digit byte's value in any base up to 36, or 36 for a byte that is a
@@ -349,20 +363,14 @@ pub struct BigInt
     end
   end
 
-  # The value of `digits`, most significant first, in `base`: the inverse
-  # of `to_s(base)`, and built the same way. A power-of-two base packs the
-  # digits' bits into limbs directly. Any other splits the digits at a
-  # power of the chunk (`append_digits`), so that the halves meet in one
-  # Karatsuba product each, and runs the short pieces at the bottom through
-  # one multiply-add per chunk in place. This had shifted or multiplied a
-  # whole new BigInt per digit - per nine digits in decimal - and 80,000
-  # hex digits took more than a second.
-  protected def self.from_digits(digits : Array(UInt8), base : Int32) : BigInt
+  # The value of `digits`, most significant first, in `base`, appended
+  # to *limbs*. A power-of-two base packs the digits' bits into limbs;
+  # any other runs one multiply-add per chunk of digits, in place.
+  protected def self.from_digits(digits : Array(UInt8), base : Int32, limbs : Array(UInt64)) : Nil
     count = digits.size
-    return BigInt.zero if count == 0
+    return if count == 0
     if base & (base - 1) == 0
       width = BigInt.bits_per_digit(base).to_u64
-      limbs = Array(UInt64).new(count * width.to_i32 // 32 + 1)
       acc = 0_u64
       held = 0_u64
       i = count - 1
@@ -377,61 +385,39 @@ pub struct BigInt
         i = i - 1
       end
       limbs << acc if acc > 0_u64
-      return BigInt.new(1, limbs)
+      return
     end
-
-    chunk = base.to_u64
+    radix = base.to_u64
     per = 1
-    while chunk * base.to_u64 <= 0xFFFFFFFF_u64
-      chunk = chunk * base.to_u64
+    chunk = radix
+    while chunk * radix <= 0xFFFFFFFF_u64
+      chunk = chunk * radix
       per = per + 1
     end
-    powers = [BigInt.new(chunk.to_i64)]
-    while per.unsafe_shl(powers.size) < count
-      powers << powers.last * powers.last
-    end
-    value_of_digits(digits, 0, count, base.to_u64, per, powers)
-  end
-
-  # The value of `count` digits from `from`: the high part times the power
-  # of the chunk that the low part's digits stand for, plus the low part.
-  protected def self.value_of_digits(digits : Array(UInt8), from : Int32, count : Int32, base : UInt64, per : Int32, powers : Array(BigInt)) : BigInt
-    if count > per * DIGITS_SPLIT_LIMBS
-      level = powers.size - 1
-      while level > 0 && per.unsafe_shl(level) >= count
-        level = level - 1
-      end
-      low = per.unsafe_shl(level)
-      high = value_of_digits(digits, from, count - low, base, per, powers)
-      return high * powers[level] + value_of_digits(digits, from + count - low, low, base, per, powers)
-    end
-
-    limbs = Array(UInt64).new(count // per + 2)
-    i = from
-    stop = from + count
-    while i < stop
+    first = limbs.size
+    i = 0
+    while i < count
       value = 0_u64
       scale = 1_u64
       taken = 0
-      while taken < per && i < stop
-        value = value * base + digits[i].to_u64
-        scale = scale * base
+      while taken < per && i < count
+        value = value * radix + digits[i].to_u64
+        scale = scale * radix
         taken = taken + 1
         i = i + 1
       end
       carry = value
-      w = limbs.view
-      j = 0
+      j = first
       size = limbs.size
       while j < size
-        product = w[j] &* scale &+ carry
-        w[j] = product & 0xFFFFFFFF_u64
+        product = limbs[j] &* scale &+ carry
+        limbs[j] = product & 0xFFFFFFFF_u64
         carry = product.unsafe_shr(32_u64)
         j = j + 1
       end
       limbs << carry if carry > 0_u64
     end
-    BigInt.new(1, limbs)
+    nil
   end
 
   # Number of limbs currently allocated.
@@ -1145,9 +1131,14 @@ pub struct BigInt
     self // BigInt.new(other.to_i64)
   end
 
+  # A choice of a raise and one call: the remainder is built in the
+  # caller's destination (SPEC 1.5).
   def %(other : BigInt) : BigInt
-    raise "modulo by zero" if other.zero?
-    divmod(other)[1]
+    if other.zero?
+      raise "modulo by zero"
+    else
+      divmod(other)[1]
+    end
   end
 
   def %(other : Int64) : BigInt
@@ -1207,45 +1198,58 @@ pub struct BigInt
   end
 
   def **(exp : Int64) : BigInt
-    raise "negative exponent: #{exp}" if exp < 0_i64
-    return BigInt.one if exp == 0_i64
-    return BigInt.zero if zero?
-
-    res = BigInt.one
-    base = self
-    e = exp
-    while e > 0_i64
-      res = res * base if (e & 1_i64) == 1_i64
-      e = e // 2_i64
-      base = base * base if e > 0_i64
-    end
-    res
+    BigInt.new(@sign < 0 && (exp & 1_i64) == 1_i64 ? -1 : 1, BigInt.power_limbs(self, exp))
   end
 
   def **(exp : BigInt) : BigInt
-    raise "negative exponent: #{exp}" if exp.negative?
-    return BigInt.one if exp.zero?
-    return BigInt.zero if zero?
+    BigInt.new(@sign < 0 && exp.odd? ? -1 : 1, BigInt.power_limbs(self, exp))
+  end
 
-    res = BigInt.one
-    base = self
-    e = exp
-    while !e.zero?
-      res = res * base if e.odd?
-      e = e >> 1
-      base = base * base if !e.zero?
+  # |base| ** exp's limbs by squaring, each round's product copied into
+  # two buffers refilled in place: a flat Array that moves to the caller.
+  protected def self.power_limbs(base : BigInt, exp : Int64 | BigInt) : Array(UInt64)
+    raise "negative exponent: #{exp}" if exp < 0_i64
+    result = Array(UInt64).new(base.limbs.size + 1)
+    square = Array(UInt64).new(base.limbs.size + 1)
+    return result if base.zero? && exp != 0_i64
+    result << 1_u64
+    base.limbs.each { |limb| square << limb }
+    if exp.is_a?(Int64)
+      e = exp
+      while e > 0_i64
+        BigInt.refill(result, BigInt.new(1, result) * BigInt.new(1, square)) if (e & 1_i64) == 1_i64
+        e = e // 2_i64
+        BigInt.refill(square, BigInt.new(1, square) * BigInt.new(1, square)) if e > 0_i64
+      end
+    else
+      bits = BigInt.bit_length(exp)
+      i = 0
+      while i < bits
+        if (exp.limbs[i >> 5].unsafe_shr((i & 31).to_u64) & 1_u64) == 1_u64
+          BigInt.refill(result, BigInt.new(1, result) * BigInt.new(1, square))
+        end
+        i = i + 1
+        BigInt.refill(square, BigInt.new(1, square) * BigInt.new(1, square)) if i < bits
+      end
     end
-    res
+    result
   end
 
   # Greatest Common Divisor (Euclidean algorithm)
   def gcd(other : BigInt) : BigInt
-    a = self.abs
-    b = other.abs
-    while !b.zero?
-      rem = a % b
-      a = b
-      b = rem
+    BigInt.new(1, BigInt.gcd_limbs(self, other))
+  end
+
+  # The Euclidean algorithm on two buffers refilled in place.
+  protected def self.gcd_limbs(left : BigInt, right : BigInt) : Array(UInt64)
+    a = Array(UInt64).new(left.limbs.size + 1)
+    b = Array(UInt64).new(right.limbs.size + 1)
+    left.limbs.each { |limb| a << limb }
+    right.limbs.each { |limb| b << limb }
+    while !BigInt.new(1, b).zero?
+      rest = BigInt.new(1, a) % BigInt.new(1, b)
+      BigInt.refill(a, BigInt.new(1, b))
+      BigInt.refill(b, rest)
     end
     a
   end
@@ -1303,29 +1307,46 @@ pub struct BigInt
   # 8.5 and 20.6 in the run of bench/std_big_exercise.sh that measured
   # Python at 13.7, 45.4 and 102.1, which prints these each run.
   def pow_mod(exp : BigInt, mod : BigInt) : BigInt
+    BigInt.new(1, BigInt.pow_mod_limbs(self, exp, mod))
+  end
+
+  # pow_mod's magnitude, a flat Array that moves to the caller.
+  def self.pow_mod_limbs(left : BigInt, exp : BigInt, mod : BigInt) : Array(UInt64)
     raise "modulo by zero" if mod.zero?
     raise "modulus must be positive" if mod.negative?
     raise "negative exponent in pow_mod: #{exp}" if exp.negative?
-    return BigInt.zero if mod == 1_i64
+    return Array(UInt64).new if mod == 1_i64
 
     # Ensure base is non-negative modulo mod
-    base = self % mod
+    base = left % mod
     base = base + mod if base.negative?
     return Montgomery.new(mod, false).pow(base, exp) if mod.odd?
 
     # The exponent's bits read where they lie: shifting it right a bit at
     # a time made a copy of it per bit.
-    result = BigInt.one
+    # Each round's product is copied into these two, refilled: a value
+    # made in a round ends with it.
+    result = Array(UInt64).new(mod.limbs.size + 1)
+    result << 1_u64
+    square = Array(UInt64).new(mod.limbs.size + 1)
+    base.limbs.each { |limb| square << limb }
     bits = BigInt.bit_length(exp)
     i = 0
     while i < bits
       if (exp.limbs[i >> 5].unsafe_shr((i & 31).to_u64) & 1_u64) == 1_u64
-        result = (result * base) % mod
+        BigInt.refill(result, (BigInt.new(1, result) * BigInt.new(1, square)) % mod)
       end
       i = i + 1
-      base = (base * base) % mod if i < bits
+      BigInt.refill(square, (BigInt.new(1, square) * BigInt.new(1, square)) % mod) if i < bits
     end
     result
+  end
+
+  # *into* refilled with *value*'s limbs, a value below the modulus.
+  protected def self.refill(into : Array(UInt64), value : BigInt) : Nil
+    into.clear
+    value.limbs.each { |limb| into << limb }
+    nil
   end
 
   # `pow_mod` for an exponent that is a secret, a private key's: a fixed
@@ -1340,12 +1361,17 @@ pub struct BigInt
   # on the base and the modulus, so a caller with a secret base (RSA's
   # CRT halves of a message) blinds it first, as std/rsa's signing does.
   def pow_mod_secret(exp : BigInt, mod : BigInt) : BigInt
+    BigInt.new(1, BigInt.pow_mod_secret_limbs(self, exp, mod))
+  end
+
+  # pow_mod_secret's magnitude, a flat Array that moves to the caller.
+  def self.pow_mod_secret_limbs(left : BigInt, exp : BigInt, mod : BigInt) : Array(UInt64)
     raise "modulo by zero" if mod.zero?
     raise "modulus must be positive" if mod.negative?
     raise "negative exponent in pow_mod_secret: #{exp}" if exp.negative?
     raise "pow_mod_secret needs an odd modulus, not #{mod}" if mod.even?
-    return BigInt.zero if mod == 1_i64
-    base = self % mod
+    return Array(UInt64).new if mod == 1_i64
+    base = left % mod
     base = base + mod if base.negative?
     exp_bits = BigInt.bit_length(exp)
     mod_bits = BigInt.bit_length(mod)
@@ -1361,11 +1387,21 @@ pub struct BigInt
   # first, whose time depends on it: a caller hands in a value below the
   # modulus.
   def inverse_mod_secret(mod : BigInt) : BigInt?
+    # No limbs when there is none: an inverse modulo m > 1 is not zero.
+    if (found = BigInt.inverse_secret_limbs(self, mod)).empty? && mod != 1_i64
+      nil
+    else
+      BigInt.new(1, found)
+    end
+  end
+
+  # inverse_mod_secret's magnitude, a flat Array that moves to the caller.
+  def self.inverse_secret_limbs(left : BigInt, mod : BigInt) : Array(UInt64)
     raise "modulo by zero" if mod.zero?
     raise "modulus must be positive" if mod.negative?
     raise "inverse_mod_secret needs an odd modulus, not #{mod}" if mod.even?
-    return BigInt.zero if mod == 1_i64
-    x = self % mod
+    return Array(UInt64).new if mod == 1_i64
+    x = left % mod
     x = x + mod if x.negative?
     Montgomery.new(mod, false).inverse(x)
   end
@@ -2356,7 +2392,7 @@ struct Montgomery
   end
 
   # The value at *a* out of Montgomery form, as a BigInt: a times 1 / R.
-  private def leave(a : Array::View(UInt64)) : BigInt
+  private def leave(a : Array::View(UInt64)) : Array(UInt64)
     n = @n
     one = Array(UInt64).new(n, 0_u64)
     one[0] = 1_u64
@@ -2370,14 +2406,15 @@ struct Montgomery
       limbs[2 * i + 1] = o[i].unsafe_shr(32_u64)
       i = i + 1
     end
-    BigInt.new(1, limbs)
+    limbs
   end
 
   # base^exp mod m, base below m, by a sliding window, left to right: the
   # table holds the odd powers g, g^3, ... g^(2^k - 1), a run of zero bits
   # costs a square each, and a window of up to k bits that starts and ends
   # on a one costs its squares and one product.
-  def pow(base : BigInt, exp : BigInt) : BigInt
+  # The answer's limbs: a flat Array, which moves to the caller.
+  def pow(base : BigInt, exp : BigInt) : Array(UInt64)
     n = @n
     bits = Montgomery.bit_length(exp.limbs)
     return leave(@one.view) if bits == 0
@@ -2443,7 +2480,7 @@ struct Montgomery
   # so a 64-entry table costs more scanning than the products it saves.
   # With the one-pass product, a 2048-bit PSS signature went from 1,077 to
   # 1,013 us (best of eight, --release, a machine other jobs shared).
-  def pow_fixed(base : BigInt, exp : BigInt, width : Int32) : BigInt
+  def pow_fixed(base : BigInt, exp : BigInt, width : Int32) : Array(UInt64)
     n = @n
     k = Montgomery.window(width)
     k = 5 if k > 5
@@ -2529,7 +2566,8 @@ struct Montgomery
   # quotients, and this takes 64 in the same run (best of five runs of
   # 100, --release, a machine other jobs shared); s mod P-256's n takes
   # 2.5, where Fermat's x^(n - 2) on std/ecdsa's words took 10.
-  def inverse(x : BigInt) : BigInt?
+  # The inverse's limbs, or none when there is no inverse.
+  def inverse(x : BigInt) : Array(UInt64)
     n = @n
     m = @m.view
     zero = @zero.get
@@ -2684,15 +2722,14 @@ struct Montgomery
       rest = rest | bp[j]
       j = j &+ 1
     end
-    return nil unless rest == 0_u64
-    limbs = Array(UInt64).new(2 * n, 0_u64)
+    limbs = Array(UInt64).new(rest == 0_u64 ? 2 * n : 0, 0_u64)
     j = 0
-    while j < n
+    while j < n && rest == 0_u64
       limbs[2 * j] = vp[j] & 0xFFFFFFFF_u64
       limbs[2 * j + 1] = vp[j].unsafe_shr(32_u64)
       j = j &+ 1
     end
-    BigInt.new(1, limbs)
+    limbs
   end
 
   # The n words at *r* and the signed word *top* above them, a value in
@@ -3488,12 +3525,28 @@ pub struct BigFloat
   # *precision* bits, ties to even: every value here is made by this, from
   # an exact one.
   protected def self.rounded(negative : Bool, num : BigInt, den : BigInt, shift : Int64, precision : Int32) : BigFloat
+    BigFloat.from_rounded(negative, BigFloat.rounded_limbs(num, den, shift, precision), precision)
+  end
+
+  # A mantissa's limbs with the exponent's bits last, as rounded_limbs
+  # answers them.
+  protected def self.from_rounded(negative : Bool, limbs : Array(UInt64), precision : Int32) : BigFloat
+    new(negative && limbs.size > 1, BigInt.new(1, limbs[0, limbs.size - 1]), limbs.last.unsafe_to_i64, precision)
+  end
+
+  # num/den rounded to *precision* bits: the mantissa's limbs, then the
+  # exponent's bits. A flat Array, which moves to the caller.
+  protected def self.rounded_limbs(num : BigInt, den : BigInt, shift : Int64, precision : Int32) : Array(UInt64)
     check(precision)
-    return new(false, BigInt.zero, 0_i64, precision) if num.zero?
+    limbs = Array(UInt64).new(precision // 32 + 3)
+    if num.zero?
+      limbs << 0_u64
+      return limbs
+    end
     # num/den lies in [2^(gap - 1), 2^(gap + 1)), so its quotient by 2^k
     # has precision or precision + 1 bits; one too many moves k up.
     k = (BigInt.bit_length(num) - BigInt.bit_length(den) - precision).to_i64
-    while true
+    while limbs.empty?
       # The remainder is of the divisor actually used, which is den
       # scaled up when k is not negative.
       divisor = k >= 0_i64 ? den << k.to_i32 : den
@@ -3508,8 +3561,10 @@ pub struct BigFloat
         q = q >> 1
         k = k + 1_i64
       end
-      return new(negative, q, k + shift, precision)
+      q.limbs.each { |limb| limbs << limb }
+      limbs << (k + shift).unsafe_to_u64
     end
+    limbs
   end
 
   protected def self.check(precision : Int32) : Nil
@@ -3747,23 +3802,24 @@ pub struct BigFloat
     # Enough digits always read back: ceil(precision · log10 2) + 1.
     low = 1
     high = (@precision.to_i64 * 30103_i64 // 100000_i64 + 2_i64).to_i32
+    kept = Array(UInt64).new(high // 9 + 2)
     while low < high
       middle = (low + high) // 2
-      candidate = decimal_digits(middle, lead)
-      if reads_back?(candidate[0], candidate[1])
+      last = decimal_digits(middle, lead, kept)
+      if reads_back?(BigInt.new(1, kept), last)
         high = middle
       else
         low = middle + 1
       end
     end
-    best = decimal_digits(low, lead)
-    text = best[0].to_s
+    last = decimal_digits(low, lead, kept)
+    text = BigInt.new(1, kept).to_s
     # Trailing zeros are the place's, not digits: 100 is one digit.
     stop = text.bytesize
     while stop > 1 && text[stop - 1] == 48_u8
       stop = stop - 1
     end
-    point = best[1] + text.bytesize.to_i64 - 1_i64
+    point = last + text.bytesize.to_i64 - 1_i64
     writer << '-' if @negative
     BigFloat.place(writer, text[0, stop], point)
   end
@@ -3833,7 +3889,8 @@ pub struct BigFloat
   # |self| to *count* significant digits, ties to even: the digits as an
   # integer and the power of ten of the last one. A carry to one more digit
   # is the next power's first.
-  private def decimal_digits(count : Int32, lead : Int64) : {BigInt, Int64}
+  # The integer refills *digits*' limbs.
+  private def decimal_digits(count : Int32, lead : Int64, digits : Array(UInt64)) : Int64
     last = lead - count.to_i64 + 1_i64
     num = @mantissa
     den = BigInt.one
@@ -3850,7 +3907,8 @@ pub struct BigFloat
     q, r = num.divmod(den)
     twice = (r << 1) <=> den
     q = q + BigInt.one if twice > 0 || (twice == 0 && q.odd?)
-    {q, last}
+    BigInt.refill(digits, q)
+    last
   end
 
   # Whether *digits* · 10^*last* rounds back to this value.

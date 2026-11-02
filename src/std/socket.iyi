@@ -1667,6 +1667,24 @@ pub struct IyiSocket
     nil
   end
 
+  # Move a fresh descriptor from *source* into this closed slot, so a
+  # connection that dials again keeps one socket. Only scalars move;
+  # *source* reads as closed after.
+  def take_descriptor(source : IyiSocket) : Nil
+    unless @state.value.fd < 0 && @state.value.io.nil? && @state.value.path.nil?
+      raise "an open or buffered socket cannot refill; close it first"
+    end
+    unless source.@state.value.fd >= 0 && source.@state.value.io.nil? && source.@state.value.path.nil?
+      raise "the source needs a fresh, unread IP descriptor"
+    end
+    @state.value.family = source.@state.value.family
+    @state.value.read_timeout_ms = source.@state.value.read_timeout_ms
+    @state.value.write_timeout_ms = source.@state.value.write_timeout_ms
+    @state.value.fd = source.@state.value.fd
+    source.@state.value.fd = -1
+    nil
+  end
+
   # The OS borrows the terminated path during unlink.
   @[TapeUnsafe]
   def close : Nil
@@ -3728,7 +3746,9 @@ pub class Resolver
       Resolver.fallback.each do |text|
         server = Resolver.server(text, @own_text)
         @own_servers << server if server.is_a?(NameServer)
-        @own_names << text
+        at = @own_text.bytesize
+        @own_text << text
+        @own_names << @own_text.finish[at, text.bytesize]
         nil
       end
     end

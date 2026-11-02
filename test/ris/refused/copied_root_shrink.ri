@@ -1,0 +1,32 @@
+class Holder
+  getter bytes : String::Builder
+  property view : String
+
+  def initialize(@view : String)
+    @bytes = String::Builder.new(16)
+    @bytes << "abc"
+  end
+
+  def head : String
+    @bytes.finish
+  end
+
+  def wipe : Nil
+    @bytes.clear
+  end
+
+  def wipe_using(borrowed : String) : Int32
+    @bytes.clear
+    borrowed.bytesize
+  end
+end
+
+def run
+  owner = Holder.new("o")
+  source = Holder.new("s")
+  copy = source.copy_to(Program.tape)
+  kept = copy.bytes.finish
+  copy.bytes.clear
+  puts kept
+end
+tape { run }

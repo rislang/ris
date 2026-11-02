@@ -51,7 +51,8 @@ tape do
   c.add("two")
   puts c.text
   puts App::Text.joined("x", "y")
-  puts App::Text::Stack(Int32).new.push(5)
+  stack = App::Text::Stack(Int32).new
+  puts stack.push(5)
   s = ""
   s << "main" << "!"
   puts s
@@ -88,7 +89,7 @@ end
 ''')
     main = work / "main.iyi"
     main.write_text("module main\n\nimport app/stack::*\n\n"
-                    "puts Stack(Int32).new.push(5)\n")
+                    "stack = Stack(Int32).new\nputs stack.push(5)\n")
     build("--emit-iyimod", "source")
     source = subprocess.check_output([str(work / "source")], text=True)
     (work / "app/stack.iyi").unlink()

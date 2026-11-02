@@ -246,7 +246,10 @@ end
 struct AutocertFiles
   @[TaskClosureUnsafe("joins the reader before closing its packed input")]
   def self.read(path : String) : String | AutocertError | Nil
-    answer = nil.as(String | AutocertError | Nil)
+    # What the group's block learns stays in locals made before it: its
+    # own scratch ends with it. 0: read, 1: panicked, 2: cancelled, 3: gone.
+    kept = ""
+    outcome = 0
     image = RisTaskConfig.new(path.as_tape)
     defer image.close
     group do |g|
@@ -255,21 +258,27 @@ struct AutocertFiles
       if got.is_a?(Panicked)
         # A concurrent success may retire an error/challenge entry after
         # the caller's exists check. Disappearance is a cache miss.
-        answer = File.exists?(path) ? AutocertError.new("reading #{path}: #{got.message}") : nil
+        outcome = File.exists?(path) ? 1 : 3
+        kept << got.message
       elsif got.is_a?(Cancelled)
-        answer = AutocertError.new("reading #{path}: cancelled")
+        outcome = 2
       else
-        answer = got
+        kept << got
       end
+      nil
     end
-    answer
+    return nil if outcome == 3
+    return AutocertError.new("reading #{path}: #{kept}") if outcome == 1
+    return AutocertError.new("reading #{path}: cancelled") if outcome == 2
+    kept
   end
 
   @[TaskClosureUnsafe("joins the writer before closing its packed input")]
   def self.put(dir : String, path : String, data : String) : AutocertError?
     image = RisTaskConfig.new({dir.as_tape, path.as_tape, data.as_tape})
     defer image.close
-    error = nil.as(AutocertError?)
+    why = ""
+    outcome = 0
     group do |g|
       task = g.spawn do
         folder, target, bytes = image.read(Tuple(String, String, String))
@@ -281,10 +290,17 @@ struct AutocertFiles
         0
       end
       got = task.value
-      error = AutocertError.new("writing #{path}: #{got.message}") if got.is_a?(Panicked)
-      error = AutocertError.new("writing #{path}: cancelled") if got.is_a?(Cancelled)
+      if got.is_a?(Panicked)
+        outcome = 1
+        why << got.message
+      elsif got.is_a?(Cancelled)
+        outcome = 2
+      end
+      nil
     end
-    error
+    return AutocertError.new("writing #{path}: #{why}") if outcome == 1
+    return AutocertError.new("writing #{path}: cancelled") if outcome == 2
+    nil
   end
 
   @[TaskClosureUnsafe("joins cleanup before closing its packed input")]
@@ -381,6 +397,14 @@ module RisAutocertViewState
 
   def initialize(@config : AutocertConfig)
     @cache = AutocertDirCache.new(@config.cache_dir)
+    made = AutocertPem.new_key
+    now = Time.utc
+    # Neither can fail on a key made here and a name that is a host's.
+    der = X509.self_signed(SigningKey.new(made.key), ["autocert.invalid"], now - Span.days(1), now + Span.days(3650)).or_panic
+    identity = TlsIdentity.new([der], made.key)
+    raise identity.error.as(TlsError).message if identity.error
+    @placeholder = identity
+
   end
 
   def self.normalize(host : String) : String
@@ -403,17 +427,7 @@ module RisAutocertViewState
   end
 
   private def placeholder : TlsIdentity
-    if held = @placeholder
-      return held
-    end
-    made = AutocertPem.new_key
-    now = Time.utc
-    # Neither can fail on a key made here and a name that is a host's.
-    der = X509.self_signed(SigningKey.new(made.key), ["autocert.invalid"], now - Span.days(1), now + Span.days(3650)).or_panic
-    identity = TlsIdentity.new([der], made.key)
-    raise identity.error.as(TlsError).message if identity.error
-    @placeholder = identity
-    identity
+    @placeholder.as(TlsIdentity)
   end
 
   def identity_for(server_name : String?, alpn : Array(String) | Array(String) | Nil, left_ms : Int32? = nil) : TlsIdentity | TlsError
@@ -747,6 +761,12 @@ pub struct Autocert
   end
 
   # An issuer factory also permits local CA doubles without network IO.
+  def self.keep(text : String, into : String::Builder) : String
+    at = into.bytesize
+    into << text
+    into.finish[at, text.bytesize]
+  end
+
   # F.new(config).issue(name) publishes PEM or returns AutocertError.
   def self.run(config : AutocertConfig, factory : F.class) : AutocertError? forall F
     return AutocertError.new("a manager is already running; one board protocol per process") unless @@running.compare_and_set(0, 1)[1]
@@ -755,6 +775,7 @@ pub struct Autocert
     if error = view.cache.put("autocert+stats", "0\n0")
       return error
     end
+    texts = String::Builder.new(4096)
     held = {} of String => AutocertHeld
     flights = {} of String => IyiTask(Int32)
     failures = {} of String => Int32
@@ -762,7 +783,7 @@ pub struct Autocert
     renewals = 0
     images = {} of String => RisTaskConfig
     config.hosts.each do |host|
-      name = AutocertView.normalize(host)
+      name = Autocert.keep(AutocertView.normalize(host), texts)
       if certificate = view.read(name, AutocertPem.now_ms)
         held[name] = certificate
       end
@@ -777,7 +798,7 @@ pub struct Autocert
           finished = nil.as(String?)
           flights.each do |key, task|
             if task.done?
-              finished = key.copy_to(RisCurrentTape.new)
+              finished = Autocert.keep(key, texts)
               break
             end
           end
@@ -825,7 +846,7 @@ pub struct Autocert
           next if flights.has_key?(name)
           if certificate.renew_at_ms <= now
             # A copy: held may grow before the order is read.
-            due = name.copy_to(RisCurrentTape.new)
+            due = Autocert.keep(name, texts)
             break
           end
           wake_at = certificate.renew_at_ms if certificate.renew_at_ms < wake_at
@@ -838,7 +859,7 @@ pub struct Autocert
         end
         next unless message
         return nil if message.control == AutocertControl::Stop
-        name = message.name.copy_to(RisCurrentTape.new)
+        name = Autocert.keep(message.name, texts)
         next unless config.allows?(name)
         next if flights.has_key?(name)
         next if view.cached_failure(name, now)
@@ -913,6 +934,13 @@ struct AutocertKey
   getter key : P256PrivateKey
   getter bytes : Array(UInt8)
 
+  def initialize
+    @bytes = AutocertPem.secret
+    key = P256PrivateKey.from_bytes(@bytes)
+    raise "autocert: a checked private scalar was refused" if key.is_a?(EcdsaError)
+    @key = key
+  end
+
   def initialize(@key : P256PrivateKey, @bytes : Array(UInt8))
   end
 end
@@ -934,12 +962,16 @@ struct AutocertPem
   # A new P-256 key from the system's entropy; drawn again in the 2^-32
   # chance its bytes are not below the group's order.
   def self.new_key : AutocertKey
-    while true
-      d = Random::Secure.random_bytes(32)
-      key = P256PrivateKey.from_bytes(d)
-      return AutocertKey.new(key, d) unless key.is_a?(EcdsaError)
+    AutocertKey.new
+  end
+
+  def self.secret : Array(UInt8)
+    bytes = Array(UInt8).new(32, 0_u8)
+    loop do
+      Random::Secure.random_bytes(bytes)
+      break unless P256PrivateKey.from_bytes(bytes).is_a?(EcdsaError)
     end
-    raise "unreachable"
+    bytes
   end
 
   # *made* as an EC PRIVATE KEY block.

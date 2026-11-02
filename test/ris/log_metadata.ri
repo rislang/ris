@@ -11,6 +11,7 @@ end
   tape do
     log = Logger.new("metadata", Severity::None)
     fields = Array(LogField).new(8)
+    texts = String::Builder.new(256)
     first = Metadata.new("id", "old", nil)
     latest = Metadata.new("id", "new", first)
     raise "key" unless latest.key == "id" && latest.value == "new"
@@ -25,11 +26,11 @@ end
       raise "outer" unless Log.context_size == 2
       Log.with_context(id: 2) do
         fields.clear
-        Log.context_into(fields)
+        Log.context_into(fields, texts)
         raise "nested" unless first_value(fields, "2")
       end
       fields.clear
-      Log.context_into(fields)
+      Log.context_into(fields, texts)
       raise "restore" unless first_value(fields, "1")
     end
     raise "cleanup" if Log.has_context?
@@ -76,7 +77,8 @@ end
 
 def held_context : Bool
   fields = Array(LogField).new(2)
-  Log.context_into(fields)
+  texts = String::Builder.new(256)
+  Log.context_into(fields, texts)
   set_phase(1_u64)
   while phase != 2_u64
     sleep(0)
@@ -98,6 +100,7 @@ group do |g|
     tape do
       writer = String::Builder.new(64)
       writer << "overwrite released parent context bytes"
+      nil
     end
   end
   set_phase(2_u64)

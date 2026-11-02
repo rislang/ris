@@ -1,0 +1,19 @@
+# Reading one explicit field must not borrow its sibling.
+class RisReadFields
+  getter first : Array(UInt8)
+  getter second : Array(UInt8)
+
+  def initialize
+    @first = [1_u8]
+    @second = [2_u8]
+  end
+
+  def first_of(other : RisReadFields) : Array(UInt8)
+    other.@first
+  end
+end
+
+owner = RisReadFields.new
+kept = owner.first_of(owner)[0, 1]
+owner.second.clear
+puts kept[0]

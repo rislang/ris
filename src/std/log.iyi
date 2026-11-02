@@ -152,18 +152,34 @@ pub struct Metadata
     @bytes = writer.finish
   end
 
+  def self.append(writer : String::Builder, key : String, value : String) : Nil
+    size = 12 + key.bytesize + value.bytesize
+    writer.write_bytes(key.bytesize)
+    writer.write_bytes(value.bytesize)
+    writer.append(key)
+    writer.append(value)
+    writer.write_bytes(size)
+    nil
+  end
+
   # A child keeps its own bytes before its parent's context can close.
   def copy : Metadata
-    writer = String::Builder.new(@bytes.bytesize)
-    writer.append(@bytes)
-    Metadata.new(writer.finish)
+    Metadata.new(@bytes.dup)
   end
 
   def self.combine(older : Metadata, newer : Metadata) : Metadata
+    Metadata.new(Metadata.joined(older, newer))
+  end
+
+  def self.joined(older : Metadata, newer : Metadata) : String
     writer = String::Builder.new(older.bytes.bytesize + newer.bytes.bytesize)
     writer.append(older.bytes)
     writer.append(newer.bytes)
-    Metadata.new(writer.finish)
+    writer.finish
+  end
+
+  def self.optional(bytes : String?) : Metadata?
+    bytes ? Metadata.new(bytes) : nil
   end
 
   def self.from_bytes(bytes : String) : Metadata
@@ -387,10 +403,12 @@ pub class RisMemoryBackend < Backend
 
   def output : Array(String)
     lines = Array(String).new(@entries.size)
+    text = String::Builder.new(@entries.size * 128)
     @entries.each do |entry|
-      lines << String.build do |writer|
-        DefaultFormatter.write(entry.tape_entry, writer)
-      end
+      at = text.bytesize
+      DefaultFormatter.write(entry.tape_entry, text)
+      lines << text.finish[at, text.bytesize - at]
+      nil
     end
     lines
   end
@@ -500,12 +518,16 @@ struct EntryWriter
     tape do
       count = data.size + Log.context_size + Metadata.count_fields(bound)
       fields = Array(LogField).new(count)
-      Log.context_into(fields)
+      texts = String::Builder.new(count * 32)
+      Log.context_into(fields, texts)
       Metadata.each_field(bound) { |key, value| LogField.set(fields, key, value) }
       data.each do |key, value|
         name = key.to_s.as_tape
         text = LogField.text(value)
-        LogField.set(fields, name, text)
+        at = texts.bytesize
+        texts << name << text
+        LogField.set(fields, texts.finish[at, name.bytesize],
+          texts.finish[at + name.bytesize, text.bytesize])
       end
       b.write(TapeEntry.new(source.as_tape, severity, message,
         Time.utc, fields))
@@ -551,11 +573,24 @@ pub class Logger
   # A logger for the same source, its level and backend this one's, whose
   # entries all carry *data*: a request's id, a connection's peer.
   def bind(**data) : Logger
+    Logger.new(self, data)
+  end
+
+  def initialize(parent : Logger, data : NamedTuple)
+    initialize(parent.source, nil, nil, parent)
     node = nil.as(Metadata?)
+    texts = String::Builder.new(256)
+    texts << node.bytes if node
     data.each do |key, value|
-      node = Metadata.new(key.to_s.as_tape, LogField.text(value), node)
+      Metadata.append(texts, key.to_s, LogField.text(value))
+      nil
     end
-    Logger.new(@source, nil, nil, self, node)
+    node = Metadata.from_bytes(texts.finish)
+    @bound = if older = parent.bound_node
+      Metadata.combine(older, node)
+    else
+      node
+    end
   end
 
   # This logger's own level, or the nearest ancestor's; Info at a root
@@ -807,9 +842,13 @@ pub class Log
     # Copies: the table's bytes for *id* are replaced under them below.
     own = context_copy(id)
     node = own || starter_context
+    texts = String::Builder.new(256)
+    texts << node.bytes if node
     data.each do |key, value|
-      node = Metadata.new(key.to_s.as_tape, LogField.text(value), node)
+      Metadata.append(texts, key.to_s, LogField.text(value))
+      nil
     end
+    node = Metadata.from_bytes(texts.finish)
     @@open.add(1_u64)
     store(id, node)
     defer restore(id, own)
@@ -831,10 +870,14 @@ pub class Log
     size
   end
 
-  def self.context_into(fields : Array(LogField)) : Nil
+  def self.context_into(fields : Array(LogField), texts : String::Builder) : Nil
     return unless has_context?
     if node = context_node
-      node.append_into(fields)
+      at = texts.bytesize
+      texts << node.bytes
+      Metadata.each_field(texts.finish[at, node.bytes.bytesize]) do |key, value|
+        LogField.set(fields, key, value)
+      end
     end
   end
 
@@ -861,14 +904,18 @@ pub class Log
   # The innermost context open for this task: its own, or the nearest
   # starter's, up the groups that started it.
   private def self.context_node : Metadata?
+    Metadata.optional(context_node_bytes)
+  end
+
+  private def self.context_node_bytes : String?
     {% if flag?(:wasm32) %}
-      context_of(0_u64)
+      context_bytes(0_u64)
     {% else %}
       current = IyiScheduler.current
       fiber = current
       while true
-        if node = context_of(fiber.object_id, fiber != current)
-          return node
+        if bytes = context_bytes(fiber.object_id)
+          return bytes
         end
         group = fiber.group
         return nil unless group
@@ -877,13 +924,12 @@ pub class Log
     {% end %}
   end
 
-  # The table's holders never park, so a wait for it is another thread's
-  # moment.
-  private def self.context_of(id : UInt64, copy : Bool = false) : Metadata?
+  private def self.context_bytes(id : UInt64) : String?
     context_enter
     defer context_leave
-    node = context_locked(id)
-    copy && node ? node.copy : node
+    if bytes = @@contexts[id]?
+      bytes.dup
+    end
   end
 
   private def self.context_enter : Nil
@@ -897,27 +943,26 @@ pub class Log
 
   # A copy of the nearest starter's context, for a task without its own.
   private def self.starter_context : Metadata?
+    Metadata.optional(starter_bytes)
+  end
+
+  private def self.starter_bytes : String?
     {% if flag?(:wasm32) %}
       nil
     {% else %}
       fiber = IyiScheduler.current
       while group = fiber.group
         fiber = group.owner
-        if node = context_copy(fiber.object_id)
-          return node
+        if bytes = context_bytes(fiber.object_id)
+          return bytes
         end
       end
       nil
     {% end %}
   end
 
-  # A copy of *id*'s context on the current tape, never a table view.
   private def self.context_copy(id : UInt64) : Metadata?
-    context_enter
-    defer context_leave
-    if bytes = @@contexts[id]?
-      Metadata.new(bytes.copy_to(RisCurrentTape.new))
-    end
+    Metadata.optional(context_bytes(id))
   end
 
   protected def self.context_locked(id : UInt64) : Metadata?

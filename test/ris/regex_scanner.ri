@@ -3,6 +3,11 @@ module test/regex_scanner
 import std/regex::{Regex}
 import std/string_scanner::{StringScanner}
 
+def add(io : String::Builder, prefix : String, text : String) : Nil
+  io << prefix << text
+  nil
+end
+
 # std/string_scanner reads tokens with std/regex's match_at; no heap.
 tape do
   s = StringScanner.new("let x = 42;")
@@ -10,17 +15,18 @@ tape do
   space = Regex.compile("\\s*")
   # Each round's text is freed with the round: tokens are written into
   # one String grown in place.
-  toks = ""
+  toks = String::Builder.new(32)
   while !s.eos?
     s.skip(space)
-    toks << " " unless toks.empty?
+    toks << " " unless toks.bytesize == 0
     if t = s.scan(word)
-      toks << "w:" << t
+      add(toks, "w:", t)
     elsif t = s.scan(Regex.compile("(?<n>\\d+)"))
-      toks << "n:" << t << ":" << s["n"]
+      add(toks, "n:", t)
+      add(toks, ":", s["n"])
     elsif t = s.scan(1)
-      toks << "p:" << t
+      add(toks, "p:", t)
     end
   end
-  puts toks
+  puts toks.finish
 end

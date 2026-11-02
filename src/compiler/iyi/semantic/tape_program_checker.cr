@@ -372,6 +372,7 @@ class Iyi::TapeProgramChecker
             outer[arg.name] = YIELDS_VIEWS.includes?(node.name) ? (receiver.element || viewed(receiver)) : active_origin
           end
           saved = @program_context
+          @program_context = false if node.name == "tape"
           loop do
             before = env.dup
             yielded = value(block.body, outer)

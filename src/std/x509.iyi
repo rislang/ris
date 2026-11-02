@@ -731,8 +731,12 @@ pub struct X509
     end
     written_serial = X509Der.tlv(0x02_u8, octets)
     name = X509Der.name(names[0])
-    written = [X509Der.extension(X509Oids::SUBJECT_ALT_NAME, false, alt)]
-    extensions.each { |e| written << X509Der.extension(e.oid, e.critical, e.value) }
+    # Flat: each extension's DER is copied before its round frees it.
+    written = X509Der.extension(X509Oids::SUBJECT_ALT_NAME, false, alt)
+    extensions.each do |e|
+      written.concat(X509Der.extension(e.oid, e.critical, e.value))
+      nil
+    end
     tbs = X509Der.sequence([
       X509Der.explicit(0, X509Der.integer([2_u8])),
       written_serial,
@@ -741,7 +745,7 @@ pub struct X509
       X509Der.sequence([X509Der.time(not_before), X509Der.time(not_after)]),
       name,
       key.public_key_info,
-      X509Der.explicit(3, X509Der.sequence(written)),
+      X509Der.explicit(3, X509Der.tlv(0x30_u8, written)),
     ])
     X509Der.sequence([tbs, key.algorithm_identifier, X509Der.bit_string(key.sign(tbs))])
   end
@@ -1702,6 +1706,10 @@ pub struct SigningKey
     if key = @rsa
       return key.public_key
     end
+    ed25519_public_key
+  end
+
+  private def ed25519_public_key : Ed25519PublicKey
     Ed25519PublicKey.new(X509Der.bytes(Ed25519.public_key(ed25519_seed)))
   end
 
@@ -1918,12 +1926,13 @@ struct X509Der
   # rest for a wildcard (std/idna's `to_ascii` writes a Unicode name so).
   def self.alt_names(names : Array(String)) : Array(UInt8) | X509Error
     return X509Error.new("a certificate for no names") if names.empty?
-    entries = [] of Array(UInt8)
+    entries = [] of UInt8
     names.each do |name|
       return X509Error.new("#{name.inspect} is not a host name") unless host?(name)
-      entries << tlv(0x82_u8, bytes(name))
+      entries.concat(tlv(0x82_u8, bytes(name)))
+      nil
     end
-    sequence(entries)
+    tlv(0x30_u8, entries)
   end
 
   def self.host?(name : String) : Bool
