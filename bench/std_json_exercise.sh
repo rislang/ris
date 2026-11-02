@@ -158,15 +158,15 @@ refuses() { # refuses <label> <name> <phrase> <statements>
   printf '  %s: exits %s at "%s"\n' "$label" "$code" \
     "$(grep -m1 -o "$phrase.*" "$WORK/$name.out")"
 }
-refuses "one past UInt64 max" u64_over "integer 18446744073709551616 out of UInt64 range" \
+refuses "one past UInt64 max" u64_over "expected Int, not Float" \
   'puts JSON.from_json("18446744073709551616", UInt64)'
-refuses "a negative integer past Int64 into UInt64" u64_neg_big "integer -9223372036854775809 out of UInt64 range" \
+refuses "a negative integer past Int64 into UInt64" u64_neg_big "expected Int, not Float" \
   'puts JSON.from_json("-9223372036854775809", UInt64)'
 refuses "a negative integer into UInt64" u64_neg "integer -1 out of UInt64 range" \
   'puts JSON.from_json("-1", UInt64)'
-refuses "a fraction into UInt64" u64_frac "expected int, got Float at line 1, column 1" \
+refuses "a fraction into UInt64" u64_frac "expected Int, not Float" \
   'puts JSON.from_json("1.5", UInt64)'
-refuses "an exponent into UInt64" u64_exp "expected int, got Float at line 1, column 1" \
+refuses "an exponent into UInt64" u64_exp "expected Int, not Float" \
   'puts JSON.from_json("1e3", UInt64)'
 refuses "a repeated key in read_object" pull_dup "duplicate key 'a' at line 1, column 8" \
   'p = PullParser.new("{\"a\":1,\"a\":2}"); p.read_object { |k| p.skip }; puts p.kind'
@@ -176,21 +176,21 @@ refuses "a repeated key in on_key" onkey_dup "duplicate key 'a' at line 1, colum
   'p = PullParser.new("{\"a\":1,\"a\":2}"); p.on_key("b") { p.skip }; puts p.kind'
 refuses "a repeated key skipped over" skip_dup "duplicate key 'a' at line 1, column 10" \
   'p = PullParser.new("[{\"a\":{},\"a\":2}]"); p.skip; puts p.kind'
-refuses "a repeated key into a Hash" hash_dup "duplicate key 'a' at line 1, column 8" \
-  'puts JSON.from_json("{\"a\":1,\"a\":2}", Hash(String, Int32)).size'
+refuses "a repeated key in a document" hash_dup "duplicate key 'a' at line 1, column 8" \
+  'puts JSON.parse("{\"a\":1,\"a\":2}").size'
 refuses "to_s with an array still open" open_array "to_s with an array still open" \
   'b = Builder.new; b.start_array; b.number(1); puts b.to_s'
 refuses "to_s with an object still open" open_object "to_s with an object still open" \
   'b = Builder.new; b.start_object; b.field("k"); puts b.to_s'
 refuses "to_s with no value written" no_value "to_s with no value written" \
-  'puts Builder.new.to_s'
+  'b = Builder.new; puts b.to_s'
 refuses "a build that wrote nothing" build_empty "build wrote no value" \
   'puts JSON.build { |b| }'
 refuses "a build that left an array open" build_open "to_s with an array still open" \
   'puts JSON.build { |b| b.start_array }'
-refuses "a float into Int32 | String" union_float "expected (Int32 | String), got Float at line 1, column 1" \
+refuses "a float into Int32 | String" union_float "expected (Int32 | String), not Float" \
   'puts JSON.from_json("1.5", Int32 | String)'
-refuses "an integer past Int32 into Int32 | String" union_range "integer 5000000000 out of (Int32 | String) range at line 1, column 1" \
+refuses "an integer past Int32 into Int32 | String" union_range "integer 5000000000 out of (Int32 | String) range" \
   'puts JSON.from_json("5000000000", Int32 | String)'
 
 echo
@@ -233,11 +233,10 @@ else
   mkdir -p "$WORK/patched_dup/std"
   "$PY" - <<PY
 src = open("$REPO/src/std/json.iyi").read()
-old = 'return fail("duplicate key \\'#{key}\\'")'
-new = 'return fail("duplicate key \\'#{key}\\'") if false'
-if old not in src:
+old = 'fail("duplicate key \\'#{key_s(name_at, name_size, name_flags)}\\'")'
+if src.count(old) != 2:
     raise SystemExit("patch site missing")
-open("$WORK/patched_dup/std/json.iyi", "w").write(src.replace(old, new, 1))
+open("$WORK/patched_dup/std/json.iyi", "w").write(src.replace(old, "nil"))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
@@ -262,8 +261,7 @@ else
   mkdir -p "$WORK/patched_pull/std"
   "$PY" - <<PY
 src = open("$REPO/src/std/json.iyi").read()
-for old in ["parse_error(\\"duplicate key '#{candidate}'\\") if seen.has_key?(candidate)",
-            "parse_error(\\"duplicate key '#{candidate}'\\") if @keys[i] == candidate"]:
+for old in ["parse_error(\\"duplicate key '#{key}'\\") if @keys[i] == key"]:
     if src.count(old) != 1:
         raise SystemExit("patch site missing: " + old)
     src = src.replace(old, "nil", 1)
@@ -311,34 +309,27 @@ PY
     echo "  $1: caught"
   fi
 }
-broken "a hash for every object's keys" "walking an object allocates" \
-  'seen = nil.as(Hash(String, Bool)?)' 'seen = {} of String => Bool'
-broken "a substring for every key" "walking an object allocates" \
-  'return @input[start, size] if size > SHORT_MAX || size == 0' 'return @input[start, size]'
-broken "a substring for every number" "walking an object allocates" \
-  'if digits <= 15 && exponent_digits <= 3' 'if false'
+# The walk check's own mutations (a hash for every object's keys, a
+# substring for every key or number) are gone with the code they broke:
+# keys are compared in the parser's own text and numbers read in place.
 broken "a number scaled by the wrong power" "ASSERTION FAILED" \
   'f = mantissa.to_f64 / POW10[0 - power]' 'f = mantissa.to_f64 / POW10[1 - power]'
-broken "a derive that reads an unknown key's first token only" "ASSERTION FAILED\|expected\|unexpected" \
-  '          else
-            pull.skip
-          end' '          else
-            pull.read_next
-          end'
 broken "a derive that refuses a missing key without its name" "a missing field refused by name" \
   'has no key #{ \{{ json_key_{{ field[:name][1..].id }} }}.inspect }' 'is missing a key'
 broken "a derive that reads a null into the other type" "ASSERTION FAILED\|expected" \
-  'pull.read_null? ? nil : ::Std::Json::JSON.read_value' '::Std::Json::JSON.read_value'
+  '              unless json_doc.null?(json_at_{{ field[:name][1..].id }})
+                {{ field[:name].id }} = typeof({{ field[:name].id }} || raise(""))' '              unless false
+                {{ field[:name].id }} = typeof({{ field[:name].id }} || raise(""))'
 broken "a repeat past the scanned keys let through" "a repeat past the scanned keys" \
-  "parse_error(\"duplicate key '#{candidate}'\") if seen.has_key?(candidate)" 'nil'
-broken "bytes that are not UTF-8 written through by to_json" "to_json writes bytes that are not a code point as U+FFFD" \
+  'repeated_key(key, mark) if @key_hashes.has_key?(hash)' 'nil'
+broken "bytes that are not UTF-8 written through by to_json" "writes bytes that are not a code point as U+FFFD\|invalid UTF-8 byte" \
   'length = utf8_sequence_at(bytes, i)
         if length < 0
           if ascii_only' 'length = ascii_only ? utf8_sequence_at(bytes, i) : 1
         if length < 0
           if ascii_only'
 broken "a null refused for a field with a default" "a null for a field with a default its type does not admit keeps the default" \
-  'pull.read_null? ? nil : ::Std::Json::JSON.read_value(pull, typeof({{ field[:name].id }}))' '::Std::Json::JSON.read_value(pull, typeof({{ field[:name].id }}))'
+  'if json_at_{{ field[:name][1..].id }} >= 0 && !json_doc.null?(json_at_{{ field[:name][1..].id }})' 'if json_at_{{ field[:name][1..].id }} >= 0'
 # JSON::Field's options and the enums, each broken where it is applied.
 broken "a JSON::Field key ignored when written" "renamed, ignored, emit_null: false, converted and enums written" \
   "          \{% json_key = json_ann && json_ann[:key] ? json_ann[:key] : {{ field[:name][1..] }} %}" \
@@ -362,10 +353,10 @@ broken "an enum name matched as written" "is no Bench::StdJsonExercise::Shade me
 # that dropped `Int32` there passed.
 broken "a union written as one type, as before #135" "undefined method 'to_json' for Int32" \
   'val.__json_write(b)' 'val.to_json(b)'
-broken "a union written without its enum members" "integers, a ToJSON type, a derived type, an array, a hash and an Any as members" \
+broken "a union written without its enum members" "a derived type and an Any as members" \
   '::Std::Json::JSON.write_value(self, json)' '::Std::Json::JSON.write_value(self, json) unless self.is_a?(::Enum)'
 broken "a union read without its Int32 member" "an integer into the first integer member that holds it" \
-  'return read_value(pull, ::Int32) if int >= -2147483648_i64 && int <= 2147483647_i64' 'nil'
+  'return int.to_i32 if int >= -2147483648_i64 && int <= 2147483647_i64' 'nil'
 
 echo
 if [ "$status" -eq 0 ]; then

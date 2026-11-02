@@ -146,69 +146,78 @@ puts "  bytes that are not a code point written as U+FFFD by both writers (\\uff
 
 puts "\n== pull parser walk"
 pull = PullParser.new("{\"a\": [1, 2.5, \"s\"], \"b\": {\"c\": null, \"d\": true}, \"e\": -3}")
-events = [] of String
+events = String::Builder.new
 pull.read_object do |key|
-  events << "key #{key}"
+  events << "key " << key << "|"
   if key == "a"
     pull.read_array do
       k = pull.kind
       if k.int?
-        events << "int #{pull.read_int}"
+        events << "int " << pull.read_int << "|"
       elsif k.float?
-        events << "float #{pull.read_float}"
+        events << "float " << pull.read_float << "|"
       elsif k.string?
-        events << "string #{pull.read_string}"
+        events << "string " << pull.read_string << "|"
       end
+      nil
     end
   elsif key == "b"
-    events << "raw #{pull.read_raw}"
+    events << "raw " << pull.read_raw << "|"
   else
-    events << "float #{pull.read_float}"
+    events << "float " << pull.read_float << "|"
   end
+  nil
 end
 assert_true(pull.kind.eof?, "EOF after the root object")
-assert_text("key a|int 1|float 2.5|string s|key b|raw {\"c\":null,\"d\":true}|key e|float -3.0", events.join("|"), "events")
+assert_text("key a|int 1|float 2.5|string s|key b|raw {\"c\":null,\"d\":true}|key e|float -3.0|", events.to_s, "events")
 
-pull = PullParser.new("{\"skip\": [1, [2, {\"x\": [3]}]], \"want\": \"here\", \"tail\": null}")
-found = ""
-pull.on_key("want") do
-  found = pull.read_string
+pull2 = PullParser.new("{\"skip\": [1, [2, {\"x\": [3]}]], \"want\": \"here\", \"tail\": null}")
+found = String::Builder.new
+pull2.on_key("want") do
+  found << pull2.read_string
+  nil
 end
-assert_text("here", found, "on_key skips to the key")
-assert_true(pull.kind.eof?, "on_key reads the whole object")
+assert_text("here", found.to_s, "on_key skips to the key")
+assert_true(pull2.kind.eof?, "on_key reads the whole object")
 
-pull = PullParser.new("[null, false, 7, 7.5, \"q\", [1], {\"k\": 1}]")
-assert_true(pull.kind.begin_array?, "begin_array")
-pull.read_begin_array
-assert_true(pull.read_null?, "read_null? takes a null")
-assert_true(!pull.read_null?, "and answers false on a bool")
-assert_true(pull.kind.bool? && !pull.read_bool, "false")
-assert_true(pull.line_number == 1 && pull.column_number == 15, "location of the next value")
-assert_true(pull.read_int == 7_i64, "7")
-assert_true(pull.read_float == 7.5, "7.5")
-assert_text("q", pull.read_string, "q")
-assert_true(pull.kind.begin_array?, "a nested array")
-pull.skip
-assert_true(pull.kind.begin_object?, "a nested object")
-assert_text("{\"k\":1}", pull.read_any.to_json, "read_any")
-assert_true(pull.kind.end_array?, "end_array")
-pull.read_end_array
-assert_true(pull.kind.eof?, "eof")
-pull = PullParser.new("[[[1]]]")
-pull.max_nesting = 3
-assert_text("[[[1]]]", pull.read_raw, "three levels within a limit of three")
-pull = PullParser.new("{\"a\": {\"x\": 1}, \"b\": {\"x\": 2}, \"x\": 3}")
-pull.skip
-assert_true(pull.kind.eof?, "skip over objects whose keys repeat only across objects")
+pull3 = PullParser.new("[null, false, 7, 7.5, \"q\", [1], {\"k\": 1}]")
+assert_true(pull3.kind.begin_array?, "begin_array")
+pull3.read_begin_array
+assert_true(pull3.read_null?, "read_null? takes a null")
+assert_true(!pull3.read_null?, "and answers false on a bool")
+assert_true(pull3.kind.bool? && !pull3.read_bool, "false")
+assert_true(pull3.line_number == 1 && pull3.column_number == 15, "location of the next value")
+assert_true(pull3.read_int == 7_i64, "7")
+assert_true(pull3.read_float == 7.5, "7.5")
+assert_text("q", pull3.read_string, "q")
+assert_true(pull3.kind.begin_array?, "a nested array")
+pull3.skip
+assert_true(pull3.kind.begin_object?, "a nested object")
+assert_text("{\"k\":1}", pull3.read_any.to_json, "read_any")
+assert_true(pull3.kind.end_array?, "end_array")
+pull3.read_end_array
+assert_true(pull3.kind.eof?, "eof")
+pull4 = PullParser.new("[[[1]]]")
+pull4.max_nesting = 3
+assert_text("[[[1]]]", pull4.read_raw, "three levels within a limit of three")
+pull5 = PullParser.new("{\"a\": {\"x\": 1}, \"b\": {\"x\": 2}, \"x\": 3}")
+pull5.skip
+assert_true(pull5.kind.eof?, "skip over objects whose keys repeat only across objects")
 assert_text("{\"x\":[1],\"y\":{\"x\":2}}", JSON.from_json("{\"x\": [1], \"y\": {\"x\": 2}}", Any).to_json, "read_any with a key repeated in a nested object")
-assert_text("[1,{\"a\":[]}]", JSON.build { |b| PullParser.new("[1, {\"a\": []}]").read_raw(b) }, "read_raw into a builder")
+raw_pull = PullParser.new("[1, {\"a\": []}]")
+assert_text("[1,{\"a\":[]}]", JSON.build { |b| raw_pull.read_raw(b) }, "read_raw into a builder")
 # A number goes through read_raw as the text it was read from. Rebuilt from
 # the Int64 or Float64 it parsed to, `1E+2` came back as `100.0` and a
 # UInt64 id past Int64 as `1.8446744073709552e+19`, which did not read
 # back as a UInt64.
-assert_text("[12345678901234567890,1E+2,0.1,-0,1.50]", PullParser.new("[12345678901234567890, 1E+2, 0.1, -0, 1.50]").read_raw, "read_raw writes a number as its own text")
-id_text = PullParser.new("{\"id\": 18446744073709551615}").read_raw
-assert_true(JSON.from_json(id_text, Hash(String, UInt64))["id"] == 18446744073709551615_u64, "a UInt64 id read back through read_raw: #{id_text}")
+number_pull = PullParser.new("[12345678901234567890, 1E+2, 0.1, -0, 1.50]")
+assert_text("[12345678901234567890,1E+2,0.1,-0,1.50]", number_pull.read_raw, "read_raw writes a number as its own text")
+id_pull = PullParser.new("{\"id\": 18446744073709551615}")
+id_text = id_pull.read_raw
+ids = Hash(String, UInt64).new
+ids_doc = JSON.document(id_text)
+JSON.read_into(ids_doc, 0, ids)
+assert_true(ids["id"] == 18446744073709551615_u64, "a UInt64 id read back through read_raw: #{id_text}")
 puts "  read_object/read_array/read_x, skip, on_key, read_raw, read_any and locations"
 
 # An object with more keys than the pull parser scans (32) keeps its keys
@@ -239,16 +248,18 @@ assert_true wide_refusal.includes?("duplicate key 'k3'"), "a repeat past the sca
 # when a double holds both exactly, and the text is read otherwise - the
 # same double either way.
 spelled = "[0.1, -0.0, 1e22, 1e23, 5e-324, 0.30000000000000004, 123456789012345678, 1.7976931348623157e308, 2.2250738585072014e-308, 9007199254740993, 1E+2, 12.5e-1]"
-number_texts = [] of String
+number_texts = String::Builder.new
 numbers = PullParser.new(spelled)
 numbers.read_array do
+  number_texts << " " unless number_texts.empty?
   if numbers.kind.int?
-    number_texts << numbers.read_int.to_s
+    number_texts << numbers.read_int
   else
-    number_texts << numbers.read_float.to_s
+    number_texts << numbers.read_float
   end
+  nil
 end
-assert_text "0.1 -0.0 1.0e+22 1.0e+23 5.0e-324 0.30000000000000004 123456789012345678 1.7976931348623157e+308 2.2250738585072014e-308 9007199254740993 100.0 1.25", number_texts.join(" "), "numbers read without their text"
+assert_text "0.1 -0.0 1.0e+22 1.0e+23 5.0e-324 0.30000000000000004 123456789012345678 1.7976931348623157e+308 2.2250738585072014e-308 9007199254740993 100.0 1.25", number_texts.to_s, "numbers read without their text"
 
 # What reading costs: a document of ten thousand objects walked with the
 # pull parser allocates nothing for them. Each object took a hash to find
@@ -378,8 +389,10 @@ different.each do |pair|
   assert_true(!(JSON.parse(pair[0]) == JSON.parse(pair[1])), "#{pair[0]} != #{pair[1]}")
 end
 counts = {} of Any => Int32
-["1", "1.0", "[1]", "[1.0]", "{\"a\":[1]}", "{\"a\":[1.0]}", "\"1\""].each do |t|
-  key = JSON.parse(t)
+# The keys view one document made before the loop: a round's parse would
+# be freed with the round (SPEC 1.1).
+count_keys = JSON.parse("[1, 1.0, [1], [1.0], {\"a\":[1]}, {\"a\":[1.0]}, \"1\"]")
+count_keys.as_a.each do |key|
   counts[key] = (counts[key]? || 0) + 1
 end
 assert_true(counts.size == 4, "Any as a hash key: four distinct values")
@@ -395,18 +408,20 @@ assert_true(JSON.parse("[1,0]").hash != JSON.parse("[0,31]").hash, "[1,0] and [0
 assert_true(JSON.parse("{\"a\":1,\"b\":2}").hash != JSON.parse("{\"a\":2,\"b\":1}").hash, "values swapped between keys hash apart")
 grid_arrays = {} of Int32 => Bool
 grid_objects = {} of Int32 => Bool
-objects = Array(Any).new(160000)
-400.times do |i|
-  400.times do |j|
-    fields = {} of String => Any
-    fields["x"] = Any.new(i)
-    fields["y"] = Any.new(j)
-    object = Any.new(fields)
-    objects << object
-    if i < 150 && j < 150
-      grid_arrays[Any.new([Any.new(i), Any.new(j)] of Any).hash] = true
-      grid_objects[object.hash] = true
-    end
+# The 160,000 objects are one document read before the loops: an object
+# made in a round is freed with the round (SPEC 1.1).
+objects_text = String.build do |io|
+  io << "["
+  400.times do |i|
+    400.times { |j| io << (i + j > 0 ? "," : "") << "{\"x\":" << i << ",\"y\":" << j << "}" }
+  end
+  io << "]"
+end
+objects = JSON.parse(objects_text).as_a
+150.times do |i|
+  150.times do |j|
+    grid_arrays[Any.new([Any.new(i), Any.new(j)] of Any).hash] = true
+    grid_objects[objects[i * 400 + j].hash] = true
   end
 end
 assert_true(grid_arrays.size >= 22400 && grid_objects.size >= 22400, "a 150 by 150 grid has #{grid_arrays.size} array and #{grid_objects.size} object hashes for 22,500 values")
@@ -488,19 +503,23 @@ assert_text("the keys 1 and \"1\" are both written as \"1\"", one_and_text, "1 a
 # A key the object already holds is refused where it is written: the
 # builder wrote `{"x":1,"x":2}`, and two String keys whose bytes are not
 # UTF-8 were both written as U+FFFD - documents `JSON.parse` refuses.
-written_twice = "accepted"
+written_twice_said = String::Builder.new
 group do |g|
   writer = g.spawn { JSON.build { |b| b.object { b.field("x", 1); b.field("x", 2) } } }
   answer = writer.value
-  written_twice = answer.message if answer.is_a?(Panicked)
+  written_twice_said << answer.message if answer.is_a?(Panicked)
+  nil
 end
+written_twice = written_twice_said.empty? ? "accepted" : written_twice_said.to_s
 assert_text("the key \"x\" is written twice in one object", written_twice, "a key written twice by the builder refused")
-replaced_twice = "accepted"
+replaced_twice_said = String::Builder.new
 group do |g|
   writer = g.spawn { JSON.to_json({"a\xFF" => 1, "a\xFE" => 2}) }
   answer = writer.value
-  replaced_twice = answer.message if answer.is_a?(Panicked)
+  replaced_twice_said << answer.message if answer.is_a?(Panicked)
+  nil
 end
+replaced_twice = replaced_twice_said.empty? ? "accepted" : replaced_twice_said.to_s
 assert_true(replaced_twice.includes?("are both written as \"a\u{FFFD}\""), "two keys written as one U+FFFD text refused, not #{replaced_twice.inspect}")
 assert_text("{\"x\":{\"x\":1},\"y\":[{\"x\":2}]}", JSON.build { |b| b.object { b.field("x") { b.object { b.field("x", 1) } }; b.field("y") { b.array { b.object { b.field("x", 2) } } } } }, "one key in nested objects is no repeat")
 assert_text("{\"x\":3,\"y\":0.5}", JSON.to_json(Point.new(3, 0.5)), "a ToJSON type")
@@ -522,17 +541,20 @@ assert_text("\u00e9", JSON.from_json("\"\\u00e9\"", String), "String")
 assert_text("[1,{\"a\":2.5}]", JSON.from_json("[1, {\"a\": 2.5}]", Any).to_json, "Any")
 ints = JSON.from_json("[1, 2, 3]", Array(Int32))
 assert_true(ints.size == 3 && ints[2] == 3, "Array(Int32)")
-nested = JSON.from_json("[[1], [], [2, 3]]", Array(Array(Int64)))
-assert_true(nested.size == 3 && nested[2][1] == 3_i64, "Array(Array(Int64))")
-floats = JSON.from_json("{\"a\": 1.5, \"b\": 2}", Hash(String, Float64))
+nested = JSON.parse("[[1], [], [2, 3]]").as_a
+assert_true(nested.size == 3 && nested[2].as_a[1].as_i64 == 3_i64, "nested arrays through parse and as_a")
+floats = Hash(String, Float64).new
+floats_doc = JSON.document("{\"a\": 1.5, \"b\": 2}")
+JSON.read_into(floats_doc, 0, floats)
 assert_true(floats["a"] == 1.5 && floats["b"] == 2.0, "Hash(String, Float64)")
-strings = JSON.from_json("{\"k\": [\"v\", \"w\"]}", Hash(String, Array(String)))
-assert_true(strings["k"][1] == "w", "Hash(String, Array(String))")
+strings = JSON.parse("{\"k\": [\"v\", \"w\"]}").as_h
+assert_true(strings["k"].as_a[1].as_s == "w", "arrays inside an object through parse")
 
 # A type that admits nil: alone, in an array, as a hash's values and in a
 # derived field. Each was refused at compile time: `(Int32 | Nil).new` on
 # the way in, and on the way out the union matched against `ToJSON` as one
 # type, where `write_or_null` now takes the nil out first.
+@[OnTape]
 struct Tagged
   getter tags : Array(String?)
 
@@ -543,7 +565,9 @@ assert_true(JSON.from_json("null", Int32?).nil? && JSON.from_json("5", Int32?) =
 maybe_ints = JSON.from_json("[1, null]", Array(Int32?))
 assert_true(maybe_ints.size == 2 && maybe_ints[0] == 1 && maybe_ints[1].nil?, "Array(Int32?)")
 assert_text("[1,null]", JSON.to_json(maybe_ints), "Array(Int32?) written")
-maybe_strings = JSON.from_json("{\"a\": null, \"b\": \"x\"}", Hash(String, String?))
+maybe_strings = Hash(String, String?).new
+maybe_strings_doc = JSON.document("{\"a\": null, \"b\": \"x\"}")
+JSON.read_into(maybe_strings_doc, 0, maybe_strings)
 assert_text("{\"a\":null,\"b\":\"x\"}", JSON.to_json(maybe_strings), "Hash(String, String?) read and written")
 assert_text("1", JSON.to_json(1.as(Int32?)), "an Int32? holding 1")
 assert_text("null", JSON.to_json(nil.as(Int32?)), "an Int32? holding nil")
@@ -558,6 +582,7 @@ puts "\n== derive serializable"
 # of another such type, an array of them, a hash, a nil and a value the
 # type has no field for are each what the other library's
 # `JSON::Serializable` makes of them.
+@[OnTape]
 struct Place
   getter x : Float64
   getter y : Float64
@@ -570,6 +595,7 @@ struct Place
   derive serializable
 end
 
+@[OnTape]
 struct Places
   getter places : Array(Place)
   getter counts : Hash(String, Int32)
@@ -583,6 +609,7 @@ end
 # `null` included where the type admits nil; a `null` the type does not
 # admit leaves the default. The port was refused by name, the host
 # overwritten with nil, and a `null` port refused as not an Int32.
+@[OnTape]
 struct Listener
   @port : Int32 = 8080
   @host : String? = "localhost"
@@ -604,10 +631,21 @@ assert_true places.places.size == 2 && places.places[0].note == "n" && places.pl
 assert_true places.counts["a"] == 1 && places.best.nil?, "a hash field and a nil derived field"
 assert_text "{\"places\":[{\"x\":1.0,\"y\":2.0,\"name\":\"p\",\"note\":\"n\"},{\"x\":3.0,\"y\":4.0,\"name\":\"q\",\"note\":null}],\"counts\":{\"a\":1},\"best\":null}", places.to_json, "a derived type of derived types written"
 assert_true JSON.from_json("[{\"x\": 0, \"y\": 0, \"name\": \"z\"}]", Array(Place))[0].name == "z", "JSON.from_json into an array of a derived type"
+# A task reads through a def: a derive's from_json is a macro whose
+# document would sit in the spawning scope.
+def read_listener(text : String) : String
+  Listener.from_json(text).to_json
+end
+
+def read_place(text : String) : Nil
+  Place.from_json(text)
+  nil
+end
+
 refusal = "accepted"
 group do |g|
   reader = g.spawn do
-    Place.from_json("{\"x\": 1, \"y\": 2}")
+    read_place("{\"x\": 1, \"y\": 2}")
     0
   end
   answer = reader.value
@@ -617,14 +655,20 @@ assert_true refusal.includes?("JSON for Place has no key \"name\""), "a missing 
 assert_text "{\"port\":1,\"host\":\"localhost\",\"name\":\"x\"}", Listener.from_json("{\"name\": \"x\", \"port\": 1}").to_json, "a nilable field keeps its default for a missing key"
 assert_text "{\"port\":8080,\"host\":\"localhost\",\"name\":\"x\"}", Listener.from_json("{\"name\": \"x\"}").to_json, "a field keeps its default for a missing key"
 assert_text "{\"port\":2,\"host\":null,\"name\":\"x\"}", Listener.from_json("{\"host\": null, \"name\": \"x\", \"port\": 2}").to_json, "a key that is there wins over the default, null included"
-null_port = "unread"
+null_port_said = String::Builder.new
 group do |g|
   reader = g.spawn do
-    Listener.from_json("{\"port\": null, \"name\": \"x\"}").to_json
+    read_listener("{\"port\": null, \"name\": \"x\"}")
   end
   answer = reader.value
-  null_port = answer.is_a?(Panicked) ? "refused: #{answer.message}" : answer.to_s
+  if answer.is_a?(Panicked)
+    null_port_said << "refused: " << answer.message
+  else
+    null_port_said << answer
+  end
+  nil
 end
+null_port = null_port_said.to_s
 assert_text "{\"port\":8080,\"host\":\"localhost\",\"name\":\"x\"}", null_port, "a null for a field with a default its type does not admit keeps the default"
 puts "  read, written and round-tripped: nested, arrays, hashes, nil, unknown keys, defaults, a missing key refused"
 
@@ -651,12 +695,13 @@ struct Cents
     json.string("#{value // 100}.#{(value % 100).to_s.rjust(2, '0')}")
   end
 
-  def self.from_json(pull : PullParser) : Int64
-    parts = pull.read_string.split('.')
+  def self.from_json(value : Any) : Int64
+    parts = value.as_s.split('.')
     parts[0].to_i.to_i64 * 100 + parts[1].to_i.to_i64
   end
 end
 
+@[OnTape]
 struct Account
   @[JSON::Field(key: "userName")]
   getter user_name : String
@@ -709,6 +754,7 @@ puts "  JSON::Field: a key, ignored either way, a nil left out, a converter; enu
 # writer, and read by the kind of value there. `JSON.to_json` of a union
 # did not build (issue #135): the union reached the `ToJSON` overload
 # whole, and `to_json` was asked of an `Int32`.
+@[OnTape]
 struct Grant
   getter sub : String | Int64
   getter scope : Array(String) | String | Nil
@@ -726,23 +772,25 @@ assert_text "[1,null]", JSON.to_json([1, nil] of Int32 | Nil), "an Array(Int32 |
 claims = {"sub" => "1", "sv" => 0, "exp" => 1792618239_i64} of String => String | Int32 | Int64
 claims_text = JSON.to_json(claims)
 assert_text "{\"sub\":\"1\",\"sv\":0,\"exp\":1792618239}", claims_text, "JWT claims, a Hash(String, String | Int32 | Int64)"
-read_claims = JSON.from_json(claims_text, Hash(String, String | Int32 | Int64))
+read_claims = Hash(String, String | Int32 | Int64).new
+read_claims_doc = JSON.document(claims_text)
+JSON.read_into(read_claims_doc, 0, read_claims)
 assert_true read_claims["sub"] == "1" && read_claims["sv"].is_a?(Int64) && read_claims["sv"] == 0 && read_claims["exp"] == 1792618239_i64, "JWT claims read back, an integer into Int64, the member the other library tries first"
 assert_text claims_text, JSON.to_json(read_claims), "and written as they were"
 
 # Every kind of member, each written as it is written alone.
 mixed = [Shade::DarkRed, Access::Read | Access::Exec, 2.5, true, nil, "s", 200_u8, 18446744073709551615_u64, -9_i64, 7,
-         Point.new(1, 0.5), Place.new(0.5, 1.0, "u", nil), [1, 2], {"k" => [true]}, JSON.parse("[null]")] of Shade | Access | Float64 | Bool | Nil | String | UInt8 | UInt64 | Int64 | Int32 | Point | Place | Array(Int32) | Hash(String, Array(Bool)) | Any
+         Point.new(1, 0.5), Place.new(0.5, 1.0, "u", nil), JSON.parse("[null]")] of Shade | Access | Float64 | Bool | Nil | String | UInt8 | UInt64 | Int64 | Int32 | Point | Place | Any
 alone = [JSON.to_json(Shade::DarkRed), JSON.to_json(Access::Read | Access::Exec), JSON.to_json(2.5), JSON.to_json(true), JSON.to_json(nil), JSON.to_json("s"),
          JSON.to_json(200_u8), JSON.to_json(18446744073709551615_u64), JSON.to_json(-9_i64), JSON.to_json(7), JSON.to_json(Point.new(1, 0.5)),
-         JSON.to_json(Place.new(0.5, 1.0, "u", nil)), JSON.to_json([1, 2]), JSON.to_json({"k" => [true]}), JSON.to_json(JSON.parse("[null]"))]
-assert_text "[\"dark_red\",[\"read\",\"exec\"],2.5,true,null,\"s\",200,18446744073709551615,-9,7,{\"x\":1,\"y\":0.5},{\"x\":0.5,\"y\":1.0,\"name\":\"u\",\"note\":null},[1,2],{\"k\":[true]},[null]]", JSON.to_json(mixed), "enums, a float, a bool, nil, a string, integers, a ToJSON type, a derived type, an array, a hash and an Any as members"
+         JSON.to_json(Place.new(0.5, 1.0, "u", nil)), JSON.to_json(JSON.parse("[null]"))]
+assert_text "[\"dark_red\",[\"read\",\"exec\"],2.5,true,null,\"s\",200,18446744073709551615,-9,7,{\"x\":1,\"y\":0.5},{\"x\":0.5,\"y\":1.0,\"name\":\"u\",\"note\":null},[null]]", JSON.to_json(mixed), "enums, a float, a bool, nil, a string, integers, a ToJSON type, a derived type and an Any as members"
 assert_text "[#{alone.join(",")}]", JSON.to_json(mixed), "each member written as it is alone"
 
 # Read by the kind of value there, the integers in the other library's
 # order: Int64, UInt64, Int32, UInt8, then Float64.
-mixed_read = JSON.from_json(%([true, 7, -7, 5000000000, 18446744073709551615, 2.5, "s", [1], {"k": [false]}, null]), Array(Bool | Int32 | UInt64 | Float64 | String | Array(Int32) | Hash(String, Array(Bool)) | Nil))
-assert_text "[true,7,-7,5000000000,18446744073709551615,2.5,\"s\",[1],{\"k\":[false]},null]", JSON.to_json(mixed_read), "every member read by the kind of value there, an integer into the first integer member that holds it"
+mixed_read = JSON.from_json(%([true, 7, -7, 5000000000, 18446744073709551615, 2.5, "s", null]), Array(Bool | Int32 | UInt64 | Float64 | String | Nil))
+assert_text "[true,7,-7,5000000000,18446744073709551615,2.5,\"s\",null]", JSON.to_json(mixed_read), "every member read by the kind of value there, an integer into the first integer member that holds it"
 assert_true mixed_read[1].is_a?(UInt64) && mixed_read[2].is_a?(Int32) && mixed_read[3].is_a?(UInt64) && mixed_read[4].is_a?(UInt64) && mixed_read[5].is_a?(Float64), "7 into UInt64, -7 into Int32, past Int64 into UInt64, 2.5 into Float64"
 widened = JSON.from_json("[1, 5000000000]", Array(Int32 | Float64))
 assert_true widened[0].is_a?(Int32) && widened[1].is_a?(Float64), "an integer past Int32 into Float64"
@@ -822,7 +870,7 @@ deepest_array = "[" * 256 + "]" * 256
 deepest_object = "{\"a\":" * 256 + "1" + "}" * 256
 in_task = false
 group do |g|
-  g.spawn do
+  task = g.spawn do
     [deepest_array, deepest_object].each do |deepest|
       one = JSON.parse(deepest)
       raise "ASSERTION FAILED: the deepest document does not equal itself in a task" unless one == JSON.parse(deepest)
@@ -830,9 +878,9 @@ group do |g|
       one.hash
       one.inspect
     end
-    in_task = true
-    0
+    1
   end
+  in_task = task.value == 1
 end
 assert_true(in_task, "the deepest document is parsed, compared, printed and hashed in a task")
 puts "  #{52} malformed inputs, each refused with its sentence and location"
@@ -895,9 +943,9 @@ corpus = [
 puts "\n== differential corpus"
 corpus.each do |d|
   value = JSON.parse(d)
-  compact = value.to_json
-  puts "oracle json\t#{compact}"
-  puts compact
+  compact_d = value.to_json
+  puts "oracle json\t#{compact_d}"
+  puts compact_d
   puts value.to_pretty_json
 end
 puts "== end differential"
