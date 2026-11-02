@@ -23,6 +23,31 @@ refusal of a file at once, fix by message, rerun only that cluster's
 files; one full check.sh on minitest per finished step, not per fix.
 Fix a checker hole below only when a cluster hits it.
 
+6. Speed: a loop round or block that makes nothing keeps no scope
+   mark. Every round now reads the tape top from TLS
+   (`%fs:...`), compares it with the round's mark and may call
+   `__iyi_scope_release`, even when the body only reads bytes and
+   moves an offset. perf on goose-evaluations (ris 0ad4691bb): jq
+   `Engine#scan_string` is 25-33% of jq's time and its two hottest
+   instructions are that compare (~25-30% of the function); yaml
+   `Document#skip_spaces` spends ~15-20% on it (11.6% of yaml, Goose's
+   skip_blank 4.6%). jq medium went from 0.76-0.81x of Goose to
+   0.98-1.14x. When the checker proves a round or block can make
+   nothing (scalars, views, indices, stores into existing storage),
+   emit no mark and no release; SPEC 1.1 is unchanged, as there is
+   nothing to free. Gate: a spec that a byte loop has no scope mark
+   in its IR; jq strings-m timing back near 0.8x. No SPEC change.
+
+7. Speed: String#hash (src/iyi/tape.iyi:218) is byte-at-a-time
+   FNV-32, so Hash(String, V) lookups spend ~70% of `find` hashing.
+   perf on goose-evaluations ninja gen-small: `Hash#find` is 34% of
+   the run (ninja at 1.40x of Goose; its own 8-byte table was 1.30x).
+   Hash eight bytes a step with one overlapping tail read, as Goose's
+   map hash does (fold each UInt64 with a multiply and rotate, then
+   mix). Keep equal strings equal-hashed; check std specs that pin
+   hash values. Gate: ninja gen-small Hash#find share drops and
+   std_spec hash/Hash specs pass. No SPEC change.
+
 4. Samples and tests, group by group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
    refusal. check.sh (2026-11-02): 4 FAILED. Patterns that work: read into
