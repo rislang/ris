@@ -174,6 +174,13 @@ expect set_add_block 'cannot store data made in this block'
 expect array_insert_block 'cannot store data made in this block'
 expect optional_result_store 'cannot store data made in this loop round'
 expect yield_fresh_store 'cannot store data made in this block'
+expect yield_class_store 'cannot store data made in this block'
+expect yield_struct_store 'cannot store data made in this block'
+expect yield_element_store 'cannot store data made in this block'
+expect while_union_class_store 'cannot store data made in this loop round'
+expect while_union_struct_store 'cannot store data made in this loop round'
+expect union_class_return 'cannot return a value made in this def'
+expect std/unsafe_round_store 'cannot store data made in this loop round'
 
 # Dir's names stay valid after the listing ends.
 out=$("$RIS" run test/ris/dir_children.ri 2>&1)

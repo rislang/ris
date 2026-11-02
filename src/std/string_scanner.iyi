@@ -52,13 +52,16 @@ pub class StringScanner
   # come from. A string, a character or a count matches group 0 alone.
   @last_start : Int32
   @last_end : Int32
-  @last_data : Regex::MatchData?
+  @last_regex : Regex?
+  # Its slots, refilled: a def's match is freed when the def ends.
+  @last_slots : Array(Int32)
 
   def initialize(@string : String)
     @offset = 0
     @last_start = -1
     @last_end = -1
-    @last_data = nil
+    @last_regex = nil
+    @last_slots = [] of Int32
   end
 
   # The string being scanned.
@@ -166,7 +169,7 @@ pub class StringScanner
   # one that took no part are mistakes, and panic with which.
   def [](n : Int32) : String
     raise "string_scanner: the last scan matched nothing, so it has no group #{n}" unless matched?
-    if data = @last_data
+    if data = last_data
       raise "string_scanner: the last match has no group #{n} (it has #{data.size - 1})" if n < -data.size || n >= data.size
       found = data[n]?
       raise "string_scanner: group #{n} took no part in the last match" unless found
@@ -179,7 +182,7 @@ pub class StringScanner
   # Group *n* of the last match, or nil for any of the reasons `[]` panics.
   def []?(n : Int32) : String?
     return nil unless matched?
-    if data = @last_data
+    if data = last_data
       return data[n]?
     end
     return nil unless n == 0 || n == -1
@@ -189,7 +192,7 @@ pub class StringScanner
   # The group called *name* of the last match.
   def [](name : String) : String
     raise "string_scanner: the last scan matched nothing, so it has no group named '#{name}'" unless matched?
-    data = @last_data
+    data = last_data
     raise "string_scanner: the last match has no group named '#{name}'" unless data && data.regex.group_index(name)
     found = data[name]?
     raise "string_scanner: group '#{name}' took no part in the last match" unless found
@@ -199,7 +202,7 @@ pub class StringScanner
   # The group called *name* of the last match, or nil.
   def []?(name : String) : String?
     return nil unless matched?
-    data = @last_data
+    data = last_data
     data ? data[name]? : nil
   end
 
@@ -256,7 +259,7 @@ pub class StringScanner
   private def here(pattern : Regex) : Bool
     data = pattern.match_at(@string, @offset)
     return forget unless data
-    remember(data.byte_begin(0), data.byte_end(0), data)
+    remember(data.byte_begin(0), data.byte_end(0), pattern, data.slots)
   end
 
   private def here(pattern : String) : Bool
@@ -267,7 +270,7 @@ pub class StringScanner
       return forget if @string.byte_at(@offset + i) != pattern.byte_at(i)
       i = i + 1
     end
-    remember(@offset, @offset + n, nil)
+    remember(@offset, @offset + n, nil, nil)
   end
 
   private def here(pattern : Char) : Bool
@@ -284,37 +287,45 @@ pub class StringScanner
       stop = stop + width_at(stop)
       n = n + 1
     end
-    remember(@offset, stop, nil)
+    remember(@offset, stop, nil, nil)
   end
 
   # Records the first match of *pattern* at or after the offset.
   private def ahead(pattern : Regex) : Bool
     data = pattern.match(@string, @offset)
     return forget unless data
-    remember(data.byte_begin(0), data.byte_end(0), data)
+    remember(data.byte_begin(0), data.byte_end(0), pattern, data.slots)
   end
 
   private def ahead(pattern : String) : Bool
     found = @string.byte_index(pattern, @offset)
     return forget unless found
-    remember(found, found + pattern.bytesize, nil)
+    remember(found, found + pattern.bytesize, nil, nil)
   end
 
   private def ahead(pattern : Char) : Bool
     ahead(pattern.to_s)
   end
 
-  private def remember(start : Int32, stop : Int32, data : Regex::MatchData?) : Bool
+  private def remember(start : Int32, stop : Int32, regex : Regex?, slots : Array(Int32)?) : Bool
     @last_start = start
     @last_end = stop
-    @last_data = data
+    @last_regex = regex
+    @last_slots.clear
+    if slots
+      slots.each { |slot| @last_slots << slot; nil }
+    end
     true
+  end
+
+  private def last_data : Regex::MatchData?
+    Regex.captured(@last_regex, @string, @last_slots)
   end
 
   private def forget : Bool
     @last_start = -1
     @last_end = -1
-    @last_data = nil
+    @last_regex = nil
     false
   end
 

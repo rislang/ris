@@ -1,0 +1,18 @@
+# A class instance a def makes and yields ends with that def's scope.
+module test/ris/refused/yield_class_store
+
+class Box
+  getter v : Int32
+
+  def initialize(@v : Int32)
+  end
+end
+
+def each_box(& : Box -> Nil) : Nil
+  3.times { |i| yield Box.new(i); nil }
+  nil
+end
+
+kept = [] of Box
+each_box { |box| kept << box }
+puts kept.size

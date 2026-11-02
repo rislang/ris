@@ -1,0 +1,24 @@
+# A class instance made in a def and answered in a union after other work
+# is freed with the def: IyiSocket.listen_result's shape.
+module test/ris/refused/union_class_return
+
+class Box
+  getter v : Int32
+
+  def initialize(@v : Int32)
+  end
+end
+
+class Failed
+  def initialize(@code : Int32)
+  end
+end
+
+def open(a : Int32) : Box | Failed
+  size = "x#{a}".size
+  return Failed.new(size) if size < 0
+  Box.new(size)
+end
+
+made = open(1)
+puts made.v if made.is_a?(Box)

@@ -1245,8 +1245,9 @@ class Iyi::TapeShrinkChecker
       # Check its effect and input at that call site, where the new
       # field value's provenance is available.
       next if @text_only && target.name.starts_with?("__ris_text_reset_") && target.args.empty?
+      # @[TapeUnsafe] lets a body hold pointers, not keep freed scratch.
       check(target.body, seed_env(target, summary(target).not_nil!.seeds,
-        owner_aliases: true), target) unless TapeRules.unsafe?(@program, target)
+        owner_aliases: true), target)
     end
     check(node)
     @program.const_initializers.each { |i| check(i.value) }
@@ -1593,7 +1594,11 @@ class Iyi::TapeShrinkChecker
     return nil unless @checking && !@text_only && node.name != "tape"
     return nil unless targets.try(&.any? { |t| yields_fresh?(t) })
     fresh = block.args.select { |arg| reference?(arg) }
-    fresh.each { |arg| outer[arg.name] = merge(yielded, Value.new([arg.object_id], [] of View)) }
+    fresh.each do |arg|
+      # A struct it yields is a source as well, not a plain value.
+      @handed << arg.object_id
+      outer[arg.name] = merge(yielded, Value.new([arg.object_id], [] of View))
+    end
     fresh
   end
 
@@ -1626,7 +1631,7 @@ class Iyi::TapeShrinkChecker
   def fresh_text?(node : ASTNode, names : Set(String)) : Bool
     case node
     when Var               then names.includes?(node.name)
-    when StringInterpolation then true
+    when StringInterpolation, ArrayLiteral, HashLiteral then reference?(node)
     when TupleLiteral      then node.elements.any? { |e| fresh_text?(e, names) }
     when Expressions       then node.expressions.last?.try { |e| fresh_text?(e, names) } || false
     when If                then fresh_text?(node.then, names) || fresh_text?(node.else, names)
@@ -1635,21 +1640,70 @@ class Iyi::TapeShrinkChecker
     when Call
       return false unless reference?(node)
       return false if {"copy_to", "to_heap"}.includes?(node.name)
+      return made_union?(node) if made_union_type?(node.type?)
       obj = node.obj
       if obj && (VIEWS.includes?(node.name) || TEXT_VIEWS.includes?(node.name))
         return fresh_text?(obj, names)
       end
-      @graph.allocates?(node)
+      return true if node.args.any? { |arg| fresh_text?(arg, names) }
+      @graph.allocates?(node) || @graph.fresh?(node) || makes_instance?(node)
     else
       false
+    end
+  end
+
+  # Whether the call runs a class's `new`, directly or in a def it calls:
+  # the instance is on the running tape, though no allocation effect says
+  # so (a `new` is a compiler primitive).
+  @instance_makers = Hash(UInt64, Bool).new
+
+  def makes_instance?(node : Call) : Bool
+    return node.type?.try { |t| class_instance?(t.remove_typedef) } || false if node.name == "new"
+    @graph.targets(node).try(&.any? { |t| def_makes_instance?(t) }) || false
+  end
+
+  private def def_makes_instance?(target : Def) : Bool
+    id = target.object_id
+    known = @instance_makers[id]?
+    return known unless known.nil?
+    @instance_makers[id] = false
+    return false if target.is_a?(External) || TapeRules.runtime?(@program, target.location)
+    scan = InstanceScan.new(self)
+    target.body.accept scan
+    @instance_makers[id] = scan.found
+  end
+
+  class InstanceScan < Visitor
+    getter found = false
+
+    def initialize(@checker : TapeShrinkChecker)
+    end
+
+    def visit(node : Call)
+      if expanded = node.expanded
+        expanded.accept self
+        return false
+      end
+      @found ||= @checker.makes_instance?(node)
+      !@found
+    end
+
+    def visit(node : ASTNode)
+      !@found
     end
   end
 
   class YieldScan < Visitor
     getter names = Set(String).new
     getter found = false
+    getter answered = false
 
     def initialize(@checker : TapeShrinkChecker)
+    end
+
+    def visit(node : Return)
+      @answered ||= node.exp.try { |e| @checker.fresh_text?(e, names) } || false
+      true
     end
 
     def visit(node : Assign)
@@ -1664,7 +1718,10 @@ class Iyi::TapeShrinkChecker
     end
 
     def visit(node : Call)
-      if (block = node.block) && @checker.yield_targets(node).any? { |t| @checker.yields_fresh?(t) }
+      block = node.block
+      # A block over what this def made sees it too: `made.each { |e| yield e }`.
+      if block && (@checker.yield_targets(node).any? { |t| @checker.yields_fresh?(t) } ||
+         node.obj.try { |obj| @checker.fresh_text?(obj, names) })
         block.args.each { |arg| names << arg.name }
       end
       true
@@ -1805,6 +1862,35 @@ class Iyi::TapeShrinkChecker
   @handed = Set(UInt64).new
 
   # An @[OnTape] struct: a value whose fields may hold tape storage.
+  # A union with a class instance or a tape struct in it (`Box?`): a call
+  # whose def answers such a thing it made made it here, as a `Box`. What
+  # the def merely reads (a cache's entry) is the owner's, allocation or not.
+  def made_union?(node : Call) : Bool
+    return false unless made_union_type?(node.type?)
+    @graph.targets(node).try(&.any? { |t| answers_made?(t) }) || false
+  end
+
+  private def made_union_type?(type : Type?) : Bool
+    type = type.try(&.remove_typedef)
+    return false unless type.is_a?(UnionType)
+    # A socket's state is on program storage: its handle outlives any scope.
+    return false if type.union_types.any? { |t| type_name(t.remove_typedef) == "Std::Socket::IyiSocket" }
+    type.union_types.any? { |t| class_instance?(t.remove_typedef) || tape_struct?(t) }
+  end
+
+  @answers_made = Hash(UInt64, Bool).new
+
+  private def answers_made?(target : Def) : Bool
+    id = target.object_id
+    known = @answers_made[id]?
+    return known unless known.nil?
+    @answers_made[id] = false
+    return false if target.is_a?(External)
+    scan = YieldScan.new(self)
+    target.body.accept scan
+    @answers_made[id] = scan.answered || fresh_text?(target.body, scan.names)
+  end
+
   private def tape_struct?(type : Type) : Bool
     type = type.remove_typedef
     type.struct? && !type.is_a?(UnionType) && type_name(type) != "String" &&
@@ -2537,7 +2623,7 @@ class Iyi::TapeShrinkChecker
             # allocated is made here the same way.
             if !@tape_blocks.empty? && !{"copy_to", "to_heap"}.includes?(node.name) && (@graph.fresh?(node) ||
                (node.type?.try { |t| TapeChecker.possible_string?(t) || tape_struct?(t) } &&
-                @graph.allocates?(node)))
+                @graph.allocates?(node)) || made_union?(node))
               @root_scopes[node.object_id] ||= @scopes.dup
               note_fresh(node.object_id) unless @root_tapes.has_key?(node.object_id)
             end

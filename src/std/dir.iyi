@@ -602,29 +602,27 @@ pub class Dir
     # `C:/rel` - a directory created at the drive's root - and in a
     # `\\?\` path, which Windows does not parse again, `/` is not a
     # separator at all, so every segment after the first was refused.
-    acc = ""
+    # A round's text is freed with the round: the prefix grows in place.
+    prefix = ""
     # Why the first directory that could not be made was refused, said if
     # the path is still not there at the end: the ones under it fail for it.
     refusal = ""
     segments.each do |seg|
-      if acc.empty?
-        acc = seg
-      elsif acc.ends_with?("/") || ({{ flag?(:win32) }} && (acc.ends_with?("\\") || acc.ends_with?(":")))
-        acc = acc + seg
-      else
-        acc = acc + {{ flag?(:win32) ? "\\" : "/" }} + seg
+      unless prefix.empty? || prefix.ends_with?("/") || ({{ flag?(:win32) }} && (prefix.ends_with?("\\") || prefix.ends_with?(":")))
+        prefix << {{ flag?(:win32) ? "\\" : "/" }}
       end
+      prefix << seg
 
-      if !exists?(acc)
+      if !exists?(prefix)
         # Try mkdir, ignore if already exists (e.g. root or race)
         {% if flag?(:darwin) || flag?(:linux) %}
-          LibC.mkdir(c_str(acc).to_unsafe, mode)
+          LibC.mkdir(c_str(prefix).to_unsafe, mode)
         {% elsif flag?(:win32) %}
           # Each segment is converted on its own, so the `\\?\` prefix goes on
           # exactly the ones long enough to need it: the whole path can be
           # past MAX_PATH while the first segments are not, and those are
           # created by their plain relative names.
-          acc_wide = __iyi_wide_path(c_str(acc).to_unsafe)
+          acc_wide = __iyi_wide_path(c_str(prefix).to_unsafe)
           if acc_wide.address != 0_u64 && LibKernel32.CreateDirectoryW(acc_wide, Pointer(Void).new(0_u64)) == 0
             refusal = ": #{File.win_error}" if refusal.empty?
           end

@@ -1,0 +1,22 @@
+# An @[OnTape] struct in a union a while condition made is the round's.
+module test/ris/refused/while_union_struct_store
+
+@[OnTape]
+struct Row
+  getter text : String
+
+  def initialize(@text : String)
+  end
+end
+
+def row_at(i : Int32) : Row?
+  i < 3 ? Row.new("x#{i}") : nil
+end
+
+kept = [] of Row
+i = 0
+while got = row_at(i)
+  kept << got
+  i += 1
+end
+puts kept.size

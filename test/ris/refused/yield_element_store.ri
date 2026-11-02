@@ -1,0 +1,13 @@
+# An element of a list the def made is the def's, yielded through `each`.
+module test/ris/refused/yield_element_store
+
+def each_item(& : String -> Nil) : Nil
+  made = [] of String
+  made << "x#{1}"
+  made.each { |item| yield item; nil }
+  nil
+end
+
+kept = [] of String
+each_item { |item| kept << item }
+puts kept.size

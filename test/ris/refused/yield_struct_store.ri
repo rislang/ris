@@ -1,0 +1,19 @@
+# An @[OnTape] struct a def makes and yields holds the def's text.
+module test/ris/refused/yield_struct_store
+
+@[OnTape]
+struct Row
+  getter text : String
+
+  def initialize(@text : String)
+  end
+end
+
+def each_row(& : Row -> Nil) : Nil
+  3.times { |i| yield Row.new("x#{i}"); nil }
+  nil
+end
+
+kept = [] of Row
+each_row { |row| kept << row }
+puts kept.size

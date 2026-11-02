@@ -404,9 +404,8 @@ import std/path::{Path}
       hops = 0
       # The resolved part and the rest to read live in builders made
       # before the loop: a round's own text is freed when it ends
-      # (SPEC 1.1). The rest is rewritten into the other of two builders.
+      # (SPEC 1.1). The rest after a link is appended to its builder.
       done = String::Builder.new(4096)
-      spare = String::Builder.new(4096)
       held = String::Builder.new(4096)
       held << text
       rest = held.finish
@@ -441,13 +440,11 @@ import std/path::{Path}
           hops = hops + 1
           return nil if hops > 40
           target = String.new(n.to_i) { |t| t.copy_from(buf, n.to_i) }
-          spare.truncate(0)
-          spare << target
-          spare << "/" << rest if rest.bytesize > 0
-          swap = held
-          held = spare
-          spare = swap
-          rest = held.finish
+          # Forty links at most, so appending to *held* stays small.
+          from = held.bytesize
+          held << target
+          held << "/" << rest if rest.bytesize > 0
+          rest = held.finish[from, held.bytesize - from]
           done.truncate(0) if target[0] == 47_u8
           next
         end

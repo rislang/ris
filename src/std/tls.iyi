@@ -2667,7 +2667,9 @@ pub class TlsClient < TlsConnection
       made_under = @made_under_slot
       made_under.configure(@config)
       @made_under = made_under
-      @offered = held.take(host, @port, @config, TlsTime.now_ms)
+      # Made in this def, read after it: the connection keeps a copy.
+      taken = held.take(host, @port, @config, TlsTime.now_ms)
+      @offered = taken ? taken.copy_to(Program.tape) : nil
     end
     # Early data goes when the ticket allows that much (section 4.6.1's
     # max_early_data_size), and not otherwise.
@@ -2856,7 +2858,8 @@ pub class TlsClient < TlsConnection
       end
       psk = offered.psk
       @resumed = true
-      @peer_certificates = offered.peer_certificates
+      @peer_certificates.clear
+      @peer_certificates.concat(offered.peer_certificates)
       @authenticated_ms = offered.authenticated_ms
     end
 

@@ -58,10 +58,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 
 * SPEC 3.3: `v = w.rows`, `w.rows.clear`, `puts v.size` passes: a view
   taken through a getter stays live over the clear. Refuse it.
-* `IyiSocket.listen_result` answered a socket made after other work
-  inside a union (`IyiSocket | SocketError`), unrefused; the socket was
-  freed with the def and every worker accepted on fd 0. Refuse a class
-  instance made in a def and answered in a union after other work.
 * A store into `self`'s field inside a method is not checked against
   the method's scope; the same store is refused at a caller that holds
   the receiver in a local. Check it where it is made.
@@ -78,10 +74,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 * A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
   is refused: the block frees its scratch before the task copy takes
   the value. Copy the value at the boundary before the reset.
-* File::LibC.realpath (a @[TapeUnsafe] def in a `{% if %}` branch)
-  set outer locals to text made in a loop round, unrefused: the round
-  freed it and real_path answered garbage. Find why that body is not
-  checked (the same code in a program is refused).
 * A tape block in a constant's initializer (program_local_init:
   `INIT = tape { State.keep(String.new("x")) }`) stores block text into
   a class variable unrefused.
@@ -103,13 +95,17 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 * A one-call def's value moves down only when it is one fresh flat
   value: a tuple or two locals do not. Bzip2.decompress tags its String
   (a 0 or 1 byte first) to answer bytes or an error in one value.
-* A value a marked def yields to its caller's block may be its scratch,
-  but the block sees it as a view of the call's inputs, so it may store
-  it outward (CSV.parse's row before this change): mark yielded values
-  as the yielding scope's.
-* A value made in a `while` condition (`while got = f(...)`) is freed
-  with the round but not attributed to it: DnsName.candidates stored
-  each round's String in an outer Array unrefused and read garbage.
+* `until` rounds get no scope mark: Normalizer's new While skips
+  `transform`, so they free nothing and are not checked (a leak, not
+  garbage). Transforming it refuses std/big's mul_karatsuba (frames kept
+  over rounds): fix that loop together with the normalizer's line.
+* `a = text.split(" "); kept << a` in a marked round or yielded is not
+  refused: split shows no allocation. It read right under load; find out
+  why, or refuse it.
+* A SocketError in a union with IyiSocket, made in a round and kept, is
+  not refused: a connect's union is exempt for the socket's sake.
+* TlsClient keeps a resumed ticket with `copy_to(Program.tape)`: the
+  program tape grows per resumption. Give the client a slot to refill.
 * A class instance made in a def and returned after other work was
   taken as flat (no tape fields): UdpSocket.bind? answered a freed
   socket. Now refused; check other `flat_result?` callers.

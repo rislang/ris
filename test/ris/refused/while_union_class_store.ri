@@ -1,0 +1,21 @@
+# A class instance in a union a while condition made is the round's.
+module test/ris/refused/while_union_class_store
+
+class Box
+  getter v : Int32
+
+  def initialize(@v : Int32)
+  end
+end
+
+def box_at(i : Int32) : Box?
+  i < 3 ? Box.new(i) : nil
+end
+
+kept = [] of Box
+i = 0
+while got = box_at(i)
+  kept << got
+  i += 1
+end
+puts kept.size

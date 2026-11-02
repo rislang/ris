@@ -1,0 +1,19 @@
+# @[TapeUnsafe] lets a body hold pointers, not keep a round's text:
+# File::LibC.realpath's shape. In a `std/` directory, as the mark needs.
+module test/ris/refused/std/unsafe_round_store
+
+lib LibProbe
+  fun strlen(text : UInt8*) : UInt64
+end
+
+@[TapeUnsafe("hands a path to the OS")]
+def joined(part : String) : String
+  done = ""
+  while done.bytesize < 3
+    done = done + "/" + part
+    LibProbe.strlen(done.to_unsafe)
+  end
+  done
+end
+
+puts joined("a")

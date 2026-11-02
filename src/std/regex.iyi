@@ -298,6 +298,11 @@ pub struct Regex
       @regex
     end
 
+    # Two offsets per group, group 0 first; -1 for one that took no part.
+    def slots : Array(Int32)
+      @slots
+    end
+
     # The text the match was found in.
     def string : String
       @string
@@ -761,8 +766,8 @@ pub struct Regex
     end
   end
 
-  def self.captured(regex : Regex, text : String, slots : Array(Int32)?) : MatchData?
-    slots ? MatchData.new(regex, text, slots) : nil
+  def self.captured(regex : Regex?, text : String, slots : Array(Int32)?) : MatchData?
+    regex && slots ? MatchData.new(regex, text, slots) : nil
   end
 
   # Where the first match begins, in bytes, or nil. It sets nothing: the

@@ -145,10 +145,15 @@ pub class RisCertificateStore
   end
 
   def append_certificate(der : Array::View(UInt8)) : X509Error?
-    parsed = Certificate.parse(der)
-    return parsed if parsed.is_a?(X509Error)
-    @kept_certificates << Certificate.new(parsed, self)
+    why = Certificate.check(der)
+    return X509Error.new(why) if why
+    # Certificate.new(source, store) copies every field into this store.
+    keep_certificate(Certificate.new(der))
     nil
+  end
+
+  private def keep_certificate(source : Certificate) : Nil
+    @kept_certificates << Certificate.new(source, self)
   end
 
   def read_pem(text : String) : X509Error?
@@ -348,8 +353,9 @@ pub struct Certificate
 
   def initialize(source : Certificate, store)
     @version = source.@version
-    @not_before = source.@not_before
-    @not_after = source.@not_after
+    # Rebuilt: a Time's location is not the store's to keep.
+    @not_before = Time.unix(source.@not_before.to_unix)
+    @not_after = Time.unix(source.@not_after.to_unix)
     @basic_constraints = source.@basic_constraints
     @ca = source.@ca
     @path_length = source.@path_length
@@ -419,7 +425,7 @@ pub struct Certificate
     end
   end
 
-  private def self.check(der : Array::View(UInt8)) : String?
+  protected def self.check(der : Array::View(UInt8)) : String?
     outer = check_value(X509Asn1.tape_values(check_value(X509Asn1.value(Der.parse(der))).tape_sequence))
     return "a Certificate of #{outer.size} values, not 3" unless outer.size == 3
     tbs = check_value(X509Asn1.tape_values(outer[0].tape_sequence))
