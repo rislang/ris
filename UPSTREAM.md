@@ -8,6 +8,10 @@ back.
 
 ## To take to iyi
 
+* Explain a bare `out` in an argument as FFI syntax and suggest `output`
+  for a local name; point at `out`, not the following token. Gate:
+  compiler parser specs for iyi and ris source.
+
 * Tuple#< compares members lexicographically, then equal-prefix lengths,
   so Array#sort_by accepts tuple keys. Gate: trial/tuple_order.ri.
 

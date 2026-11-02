@@ -2075,6 +2075,23 @@ module Iyi
     assert_syntax_error "foo **bar, out x", "out argument not allowed after double splat"
     assert_syntax_error "foo(**bar, out x)", "out argument not allowed after double splat"
 
+    it "explains out used as a local name in an iyi argument" do
+      ["x.iyi", "x.ri"].each do |filename|
+        error = expect_raises(SyntaxException,
+          "`out` starts an FFI output argument, as in " \
+          "`Lib.fun(out value)`: use `output` as a local name") do
+          parse("out = 1\nputs out\n", filename: filename)
+        end
+        error.line_number.should eq(2)
+        error.column_number.should eq(6)
+      end
+    end
+
+    it "keeps valid out arguments and the suggested local name" do
+      parse("Lib.fun(out value)", filename: "x.ri").as(Call).args[0].should be_a(Out)
+      parse("output = 1\nputs output", filename: "x.ri").should be_a(Expressions)
+    end
+
     it_parses "private def foo; end", VisibilityModifier.new(Visibility::Private, Def.new("foo"))
     it_parses "protected def foo; end", VisibilityModifier.new(Visibility::Protected, Def.new("foo"))
 

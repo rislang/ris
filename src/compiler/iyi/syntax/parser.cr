@@ -6980,6 +6980,10 @@ module Iyi
       when .underscore?
         var = Underscore.new
       else
+        if iyi?
+          raise "`out` starts an FFI output argument, as in " \
+                "`Lib.fun(out value)`: use `output` as a local name", location
+        end
         raise "expecting variable or instance variable after out"
       end
       var.at(@token.location).at_end(token_end_location)
