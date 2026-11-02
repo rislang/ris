@@ -1,0 +1,15 @@
+# A block a def yields to is a round too: `split`'s Array is its scratch.
+module test/ris/refused/split_yield_kept
+
+def each_line(text : String, & : String -> Nil) : Nil
+  3.times { yield text; nil }
+  nil
+end
+
+def keep_words(text : String) : Int32
+  kept = [] of Array(String)
+  each_line(text) { |line| kept << line.split(" "); nil }
+  kept.size
+end
+
+tape { puts keep_words("a b c") }

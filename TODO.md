@@ -18,9 +18,7 @@ Testing ris programs can start now: what a program hits comes first.
 The items are below; this is only their order.
 
 1. The user's own ris programs: each obstacle becomes an item here.
-2. `text.split` not refused in a round or yield: find the cause first,
-   it can leave a program using freed memory. Then `until` rounds,
-   TlsClient's ticket and SocketError in a socket union.
+2. `until` rounds, TlsClient's ticket and SocketError in a socket union.
 3. Holes: `T.from_json` in a def, `Hash#update`'s block value,
    RisBoard.take's result.
 4. Holes: SPEC 3.3 `clear`, a store into `self`'s field, a tape block
@@ -122,9 +120,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   `transform`, so they free nothing and are not checked (a leak, not
   garbage). Transforming it refuses std/big's mul_karatsuba (frames kept
   over rounds): fix that loop together with the normalizer's line.
-* `a = text.split(" "); kept << a` in a marked round or yielded is not
-  refused: split shows no allocation. It read right under load; find out
-  why, or refuse it.
 * A SocketError in a union with IyiSocket, made in a round and kept, is
   not refused: a connect's union is exempt for the socket's sake.
 * TlsClient keeps a resumed ticket with `copy_to(Program.tape)`: the

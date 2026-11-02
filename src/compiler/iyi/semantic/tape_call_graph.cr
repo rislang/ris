@@ -96,9 +96,16 @@ class Iyi::TapeCallGraph
       @reachable[id] = reached
       @effects[id]?.try { |effect| effect.cyclic = reached.includes?(id) }
     end
+    # A runtime def is opaque to the checks, but whether it answers a
+    # growing value it made (`split`'s Array) is read from its body as a
+    # user def's is: else a round could keep that value past its end.
+    answering = @defs.values
+    @effect_defs.each_value do |target|
+      answering << target if opaque?(target) && growing_type?(target.type?)
+    end
     loop do
       changed = false
-      @defs.each_value do |target|
+      answering.each do |target|
         summary = Result.new(self)
         fresh = summary.value(target.body)
         effect = @effects[target.object_id]
@@ -469,6 +476,15 @@ class Iyi::TapeCallGraph
     name = type.to_s
     name == "String::Builder" || name.starts_with?("Array(") ||
       name.starts_with?("RisTree(") || TapeOwnerChecker.owner?(@program, type)
+  end
+
+  # Whether every def a *call* reaches makes and answers a growing value
+  # of its own: not one it forwards from its receiver, arguments or block.
+  def makes?(call : Call) : Bool
+    found = targets(call)
+    !!found && !found.empty? && found.all? do |target|
+      @effects[target.object_id]?.try(&.allocating) == true
+    end
   end
 
   def fresh?(node : ASTNode) : Bool

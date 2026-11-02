@@ -177,6 +177,9 @@ expect yield_fresh_store 'cannot store data made in this block'
 expect yield_class_store 'cannot store data made in this block'
 expect yield_struct_store 'cannot store data made in this block'
 expect yield_element_store 'cannot store data made in this block'
+# split's Array is made in the round that calls it (SPEC 1.1, 3.6).
+expect split_round_kept 'Copy it with .copy_to(owner)'
+expect split_yield_kept 'Copy it with .copy_to(owner)'
 expect while_union_class_store 'cannot store data made in this loop round'
 expect while_union_struct_store 'cannot store data made in this loop round'
 expect union_class_return 'cannot return a value made in this def'
@@ -1082,6 +1085,14 @@ else
 fi
 out=$("$RIS" run test/ris/ffi_marked.ri 2>&1)
 if [ "$out" = $'4\n111' ]; then echo "runs     ffi_marked"; else echo "FAILED   ffi_marked: $out"; status=1; fi
+
+# The safe form: a round copies what split made onto the kept owner.
+out=$("$RIS" run test/ris/split_kept.ri 2>&1)
+if [ "$out" = 6 ]; then
+  echo "runs     split_kept"
+else
+  echo "FAILED   split_kept: $out"; status=1
+fi
 
 out=$("$RIS" run test/ris/allowed.ri 2>&1)
 if [ "$out" = $'2\na' ]; then echo "runs     allowed"; else echo "FAILED   allowed: $out"; status=1; fi

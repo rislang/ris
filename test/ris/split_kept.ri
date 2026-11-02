@@ -1,0 +1,22 @@
+# The safe form of test/ris/refused/split_*_kept.ri: a round keeps what
+# `split` made by copying it onto the owner that outlives the round.
+module test/ris/split_kept
+
+def each_line(text : String, & : String -> Nil) : Nil
+  3.times { yield text; nil }
+  nil
+end
+
+def keep_words(text : String) : Int32
+  kept = [] of Array(String)
+  i = 0
+  while i < 3
+    kept << text.split(" ").copy_to(Program.tape)
+    i += 1
+  end
+  each_line(text) { |line| kept << line.split(" ").copy_to(Program.tape); nil }
+  kept.each { |words| raise "split kept" unless words.join(",") == "a,b,c" }
+  kept.size
+end
+
+tape { puts keep_words("a b c") }

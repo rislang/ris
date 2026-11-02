@@ -482,6 +482,26 @@ class Iyi::TapeShrinkChecker
       targets.all? { |d| TapeRules.runtime?(@program, d.location) }
   end
 
+  # A runtime def with no summary that makes and answers a growing value
+  # (`split`'s Array) made it here, in this scope: a round keeping it must
+  # copy it (SPEC 1.1, 3.6). Its items view the text it read; an input
+  # Array's own storage is copied from, not viewed (`a + b`). Kept out of
+  # `evaluate`, whose frame a long `case` chain multiplies.
+  @[NoInline]
+  private def runtime_made(node : Call, derived : Value) : Value
+    @root_types[node.object_id] = node.type
+    @root_scopes[node.object_id] = @scopes.dup
+    @runtime_made << node.object_id
+    note_fresh(node.object_id)
+    read = derived.roots.reject { |root| storage_type?(root_type(root)) }
+    Value.new([node.object_id],
+      (derived.views + read.map { |root| view(root) }).uniq)
+  end
+
+  # Arrays a runtime def made and answered (`split`): their items view
+  # its inputs, not the Array's own storage.
+  @runtime_made = Set(UInt64).new
+
   # Text built inside a `tape` block - an interpolation, or a call that
   # allocates and answers a String viewing none of its inputs - is that
   # block's storage, as an allocated Array is.
@@ -505,7 +525,8 @@ class Iyi::TapeShrinkChecker
     return result if viewing && !node.is_a?(Call)
     # A view of a builder's or an Array's storage is what it says.
     if viewing && (result.roots + result.views.map(&.root)).all? { |r|
-         storage_type?(root_type(r)) && type_name(root_type(r).not_nil!.remove_typedef) != "String"
+         !@runtime_made.includes?(r) && storage_type?(root_type(r)) &&
+           type_name(root_type(r).not_nil!.remove_typedef) != "String"
        }
       return result
     end
@@ -2899,6 +2920,9 @@ class Iyi::TapeShrinkChecker
         result = Value.new(call_result.roots, views)
         use(result, node)
         result
+      elsif reference?(node) && storage?(node) && incomplete_result &&
+            @graph.makes?(node)
+        runtime_made(node, derived)
       elsif reference?(node)
         views = derived.views
         if VIEWS.includes?(node.name) || !storage?(node)

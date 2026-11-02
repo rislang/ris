@@ -1,0 +1,16 @@
+# `split` makes its Array in the round: kept past the round, it is freed
+# with it (SPEC 1.1, 3.6). Copy it out: test/ris/split_kept.ri.
+module test/ris/refused/split_round_kept
+
+def keep_words(text : String) : Int32
+  kept = [] of Array(String)
+  i = 0
+  while i < 3
+    words = text.split(" ")
+    kept << words
+    i += 1
+  end
+  kept.size
+end
+
+tape { puts keep_words("a b c") }
