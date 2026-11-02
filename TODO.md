@@ -49,11 +49,10 @@ Fix a checker hole below only when a cluster hits it.
      default TlsConfig per client, ClientHello and ECH parts written
      into the caller's arrays, the ServerHello a refilled slot. Left:
      the certificate check reaches SystemRoots.load and Certificate
-     lists made in defs (roots_holders, x509); then the exchange loop's
+     lists made in defs (x509); then the exchange loop's
      fresh stores (an H2Stream per request, BodyReader and socket per
-     round), tls.iyi 2871/2897 (exporter secret, client certificate
-     entries) and WebSocket.connect. TLS server identities need the big
-     cluster.
+     round) and WebSocket.connect. TLS server ClientHello offers and
+     ECH outer parts still need caller-owned storage.
    * smtp, mail: `SmtpClient.connect` makes and returns its owner
      (declare `client = SmtpClient.new(...)`, then a method that
      connects); MailAddresses' parsers return lists and texts made in a
@@ -63,7 +62,7 @@ Fix a checker hole below only when a cluster hits it.
      def: find why.
    * regex (RxCompiler fields), big (BigInt results), png (chunk texts
      kept per round, PngInfo built in its def), zip, log (with_context
-     fields), hpack, text_grow, roots_holders, iyimod_text_growth,
+     fields), hpack, text_grow, iyimod_text_growth,
      autocert, program_local_init, secure_dns.
 5. Benches: build each, group the refusals by message, fix per group.
 

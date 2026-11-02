@@ -1687,7 +1687,7 @@ module RisTlsConnectionState
 
   # The exporter's secret (section 7.1), over the handshake to the server's
   # Finished.
-  @exporter_secret : Array(UInt8) = [] of UInt8
+  @exporter_secret : Array(UInt8) = Array(UInt8).new(48)
 
   # *length* bytes bound to this connection, for *label* and *context*
   # (RFC 8446 section 7.5, RFC 5705's interface): the same at both ends and
@@ -2868,7 +2868,8 @@ pub class TlsClient < TlsConnection
     master = @schedule.master_secret(handshake_secret)
     client_application = @schedule.derive_secret(master, "c ap traffic", transcript)
     server_application = @schedule.derive_secret(master, "s ap traffic", transcript)
-    @exporter_secret = @schedule.derive_secret(master, "exp master", transcript)
+    @exporter_secret.clear
+    @exporter_secret.concat(@schedule.derive_secret(master, "exp master", transcript))
 
     # The client's flight: a ChangeCipherSpec for middleboxes (appendix
     # D.4), unless it went with the early data; EndOfEarlyData under the
@@ -2893,8 +2894,15 @@ pub class TlsClient < TlsConnection
       identity = (ech = @ech) && ech.rejected ? nil : @config.identity
       scheme = identity ? identity.scheme_for(@requested_schemes) : nil
       if identity && scheme
-        entries = [] of UInt8
-        identity.chain.each { |der| entries = entries + TlsBytes.u24(der.size) + der + [0_u8, 0_u8] }
+        entry_size = 0
+        identity.chain.each { |der| entry_size += 5 + der.size }
+        entries = Array(UInt8).new(entry_size)
+        identity.chain.each do |der|
+          entries.concat(TlsBytes.u24(der.size))
+          entries.concat(der)
+          entries << 0_u8 << 0_u8
+          nil
+        end
         presented = TlsBytes.message(11, [context.size.to_u8] + context + TlsBytes.u24(entries.size) + entries)
         sent = send_flight(presented)
         return sent if sent
@@ -5096,12 +5104,15 @@ struct TlsKeys
       named = algorithm[1].oid
       return named.is_a?(String) ? named : p256
     end
-    fields.each_with_index do |field, i|
-      next unless i >= 2 && field.context?(0)
-      inner = field.explicit(0)
-      named = inner.is_a?(Asn1Error) ? inner : inner.oid
-      return named.is_a?(String) ? named : p256
-      nil
+    i = 2
+    while i < fields.size
+      field = fields[i]
+      if field.context?(0)
+        inner = field.explicit(0)
+        curve_name = inner.is_a?(Asn1Error) ? inner : inner.oid
+        return curve_name.is_a?(String) ? curve_name : p256
+      end
+      i += 1
     end
     secret = fields.size < 2 ? nil : fields[1].octet_string
     secret.is_a?(Array(UInt8)) && secret.size == 48 ? EcdsaCurve::P384.oid : p256
@@ -5640,7 +5651,8 @@ pub class TlsServer < TlsConnection
     @client_application.clear
     @client_application.concat(@schedule.derive_secret(master, "c ap traffic", transcript))
     server_application = @schedule.derive_secret(master, "s ap traffic", transcript)
-    @exporter_secret = @schedule.derive_secret(master, "exp master", transcript)
+    @exporter_secret.clear
+    @exporter_secret.concat(@schedule.derive_secret(master, "exp master", transcript))
     # This side's Finished is sent: what it writes from here, an alert
     # included, is under the application keys (section 7.3), as a client
     # reads it.

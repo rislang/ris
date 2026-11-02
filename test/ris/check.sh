@@ -1070,6 +1070,7 @@ for mode in clear store pop 'pop?' argument condition if words \
 done
 # A holder struct that shrinks what it holds is refused at compile time.
 expect loop_shrink_holder 'cannot shrink tape storage with a live view of Array(Int32)'
+expect loop_shrink_holder_named 'cannot shrink tape storage with a live view'
 expect loop_shrink_builder 'cannot shrink tape storage with a live view of String::Builder'
 # A value's to_s, called by the runtime's interpolation, is checked.
 expect interpolated_to_s 'cannot store data made in this block'

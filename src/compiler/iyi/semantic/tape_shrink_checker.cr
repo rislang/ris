@@ -1683,6 +1683,20 @@ class Iyi::TapeShrinkChecker
     type.is_a?(ProcInstanceType)
   end
 
+  private def argument_value(node : ASTNode, env : Env) : Value
+    input = value(node, env)
+    return input if @text_only || !value_holder?(node.type?)
+    # A passed holder lends its current storage handles for the call.
+    # Read slots here, rather than pinning constructor arguments on the
+    # holder after its fields have been replaced.
+    borrowed = env.slots.flat_map do |root, contents|
+      contains_root?(input.roots, root) ? contents.roots : [] of UInt64
+    end.select { |root| storage_type?(field_type(root)) }
+    Value.new(input.roots,
+      (input.views + borrowed.map { |root| view(root) }).uniq,
+      input.procs, input.unknown_proc)
+  end
+
   def value(node : ASTNode, env : Env) : Value
     result = evaluate(node, env)
     result = tape_text(node, result)
@@ -1942,10 +1956,10 @@ class Iyi::TapeShrinkChecker
       end || false)
       receiver = node.obj.try { |obj| value(obj, env) } ||
                  (top_level ? EMPTY : env["self"]?) || EMPTY
-      args = node.args.map { |arg| value(arg, env) }
+      args = node.args.map { |arg| argument_value(arg, env) }
       named = Hash(String, Value).new
       node.named_args.try &.each do |arg|
-        named[arg.name] = v = value(arg.value, env)
+        named[arg.name] = v = argument_value(arg.value, env)
         args << v
       end
       node.block_arg.try { |arg| args << value(arg, env) }
@@ -2345,10 +2359,15 @@ class Iyi::TapeShrinkChecker
             @allocating_structs << node.object_id
           end
           holder = node.name == "new" && struct_value?(node.object_id)
+          # Tracked fields carry replaceable borrows. A duplicate on the
+          # aggregate would survive an assignment emptying its field.
+          tracked = env.slots.each_key.any? do |root|
+            contains_root?([node.object_id], root)
+          end
           borrowed = if @text_only && node.name.in?("new", "dup") &&
                         type_name(node.type) != "String"
                        derived.views + derived.roots.map { |root| view(root) }
-                     elsif holder
+                     elsif holder && !tracked
                        args.flat_map { |a| a.views + a.roots.reject { |r| struct_value?(r) }.map { |root| view(root) } }
                      else
                        [] of View
