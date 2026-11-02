@@ -18,8 +18,7 @@ Testing ris programs can start now: what a program hits comes first.
 The items are below; this is only their order.
 
 1. The user's own ris programs: each obstacle becomes an item here.
-2. Trial program obstacles, in this order: `OptionParser` String option,
-   bench/std_json_exercise.iyi.
+2. Trial program obstacles: `OptionParser` String option.
 3. `text.split` not refused in a round or yield: find the cause first,
    it can leave a program using freed memory. Then `until` rounds,
    TlsClient's ticket and SocketError in a socket union.
@@ -57,12 +56,6 @@ first; samples/ris/trial/run.sh is their gate:
 
 * `OptionParser` cannot set a String option.
 
-* bench/std_json_exercise.iyi is far behind, not 2 lines: Hash and
-  nested from_json, derive on non-pub types (`::{{@type}}`), a Hash
-  field in a derive (SPEC 2.2), Any#dig? and read_value refused by
-  SPEC 1.9, write_value's key check by SPEC 1.1, round data stored in
-  outer arrays. A partial port: ~/patches/ris1-std_json_exercise_partial.patch.
-
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
 
 * `h.update(k) { |v| w.downcase }` builds: Hash keeps the block's value,
@@ -72,6 +65,13 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 * test/ris/sse.ri is refused and is not in check.sh: EventParser replaces
   `@line` and `@data` with a new builder in a round, and keeps `@type` and
   `@id_buffer` from `SSE.clean`'s scratch. Give them stable storage.
+
+* An `Any` made in a round and pushed onto an outer `Array(Any)` builds
+  and dies of a memory fault: `1000.times { |i| h = {} of String => Any;
+  h["x"] = Any.new(i); objects << Any.new(h) }`.
+* A def with several returns loses what its answer views: read_union's
+  `Array(String)` member was taken as made in its caller's scratch and
+  refused (SPEC 1.9); std/json reads it by a tail call instead.
 
 * `def load(t : String) : T; T.from_json(t); end` builds: an @[OnTape]
   struct's String may view the document's decoded text, in load's scratch.
