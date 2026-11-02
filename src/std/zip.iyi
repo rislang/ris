@@ -795,7 +795,7 @@ class ZipFeed < Reader
     n = @left < count.to_i64 ? @left.to_i32 : count
     got = @source.read_at(@at, n)
     if got.is_a?(ZipError)
-      @error = got
+      @error = got.copy_to(Program.tape)
       return nil
     end
     @at = @at + n.to_i64

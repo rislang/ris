@@ -6192,7 +6192,11 @@ pub class TlsServer < TlsConnection
       @ech_context = context
       @ech_named = {kdf, aead, id}
       @ech_accepted = true
-      @outer_server_name = TlsEch.server_name(parts)
+      if outer_name = TlsEch.server_name(parts)
+        from = @server_name_text.bytesize
+        @server_name_text << outer_name
+        @outer_server_name = @server_name_text.finish[from, outer_name.bytesize]
+      end
       return inner
     end
     @ech_rejected = true

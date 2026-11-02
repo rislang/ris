@@ -25,9 +25,7 @@ if dir.empty?
   puts "usage: ls [-l] [-e EXT] DIR"
   exit 2
 end
-names = [] of String
-Dir.each_child(dir) { |name| names << name.copy_to(Program.tape) }
-names.sort.each do |name|
+Dir.children(dir).sort.each do |name|
   next unless name.ends_with?(ext)
   if long
     puts "#{File.size(File.join(dir, name))} #{name}"

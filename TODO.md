@@ -28,9 +28,6 @@ Fix a checker hole below only when a cluster hits it.
 Trial programs (samples/ris/trial/blocked/ has the repros), most blocking
 first; samples/ris/trial/run.sh is their gate:
 
-* Unrefused, wrong output: a Hash key made in a block round is freed
-  (`hash_key_freed`); `Dir.children` answers freed names
-  (`dir_children_garbage`). Refuse or fix them first.
 * `HTTP.get` answers an empty body with its headers; maybe http_coding's.
 * `OptionParser` cannot set a String option; `ris doc std/http` fails;
   Tuple has no `<` for sort_by; `out` as a name gets an unclear error;
@@ -42,6 +39,14 @@ first; samples/ris/trial/run.sh is their gate:
 * bench/std_json_exercise.iyi has 2 lines on JSON's old API.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
+
+* `h.update(k) { |v| w.downcase }` builds: Hash keeps the block's value,
+  made in a block round. Any other runtime def keeping a block's value too.
+* A yield is judged per def, not per argument: `each_field`'s name is a
+  view, its joined value is fresh, and storing either is refused.
+* test/ris/sse.ri is refused and is not in check.sh: EventParser replaces
+  `@line` and `@data` with a new builder in a round, and keeps `@type` and
+  `@id_buffer` from `SSE.clean`'s scratch. Give them stable storage.
 
 * `def load(t : String) : T; T.from_json(t); end` builds: an @[OnTape]
   struct's String may view the document's decoded text, in load's scratch.

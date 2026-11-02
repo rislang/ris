@@ -1,0 +1,19 @@
+# A String? a call made is on this round's scratch, as a String is.
+module test/ris/refused/optional_result_store
+
+def read_name(i : Int32) : String?
+  return nil if i > 2
+  "x#{i}"
+end
+
+def names : Array(String)
+  res = [] of String
+  i = 0
+  while name = read_name(i)
+    res << name
+    i += 1
+  end
+  res
+end
+
+puts names.size

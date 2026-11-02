@@ -689,7 +689,7 @@ pub struct X509
       purpose : X509Purpose, chain : Array(Certificate)) : Array(Certificate) | X509Error
     problem = leaf_error(leaf, host, now, purpose)
     return X509Error.new(problem) if problem
-    failures = [] of String
+    failures = String::Builder.new
     checks = [0]
     count = grow(chain, intermediates, roots, now, failures, purpose, checks, 1)
     if count > 0
@@ -701,7 +701,7 @@ pub struct X509
     if checks[0] > MAX_SIGNATURE_CHECKS
       return X509Error.new("no chain from #{leaf.subject_name} within #{MAX_SIGNATURE_CHECKS} signature checks")
     end
-    return X509Error.new(failures[0]) unless failures.empty?
+    return X509Error.new(failures.finish) unless failures.length == 0
     X509Error.new("no certificate here issued #{leaf.issuer_name}, the issuer of #{leaf.subject_name}")
   end
 
@@ -813,7 +813,7 @@ pub struct X509
   # candidate weighed counts in *checks*, and past `MAX_SIGNATURE_CHECKS`
   # the search gives up.
   private def self.grow(chain : Array(Certificate), intermediates : Array::View(Certificate), roots : Array::View(Certificate),
-                        now : Time, failures : Array(String), purpose : X509Purpose, checks : Array(Int32), depth : Int32) : Int32
+                        now : Time, failures : String::Builder, purpose : X509Purpose, checks : Array(Int32), depth : Int32) : Int32
     child = chain[depth - 1]
     roots.each do |root|
       next unless root.subject == child.issuer
@@ -821,7 +821,7 @@ pub struct X509
       return 0 if checks[0] > MAX_SIGNATURE_CHECKS
       problem = issuer_error(child, root, chain[0, depth], now, purpose)
       if problem
-        failures << problem
+        failures << problem if failures.length == 0
       else
         chain[depth] = root
         return depth + 1
@@ -837,7 +837,7 @@ pub struct X509
       return 0 if checks[0] > MAX_SIGNATURE_CHECKS
       problem = issuer_error(child, candidate, chain[0, depth], now, purpose)
       if problem
-        failures << problem
+        failures << problem if failures.length == 0
         next
       end
       chain[depth] = candidate

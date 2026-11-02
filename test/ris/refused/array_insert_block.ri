@@ -1,0 +1,6 @@
+# `insert` keeps its element: made in a block round, it is freed.
+module test/ris/refused/array_insert_block
+
+words = [] of String
+"The fox".split.each { |word| words.insert(0, word.downcase) }
+puts words.size

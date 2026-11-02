@@ -1,0 +1,10 @@
+# What a def makes and yields ends with that def: Dir.each_child's name.
+module test/ris/refused/yield_fresh_store
+
+def each_name(& : String -> Nil) : Nil
+  2.times { |i| yield "x#{i}" }
+end
+
+names = [] of String
+each_name { |name| names << name }
+puts names.size

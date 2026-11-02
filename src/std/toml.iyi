@@ -1213,12 +1213,19 @@ struct TapeReader
     while true
       skip_blanks
       starts << pos
-      parts << simple_key!
+      parts << held_key(simple_key!)
       skip_blanks
       break unless pos < input_size && input[pos] == 46_u8
       self.pos = pos + 1
     end
     nil
+  end
+
+  # A key part copied into `@texts`: it outlives the round that read it.
+  private def held_key(part : String) : String
+    from = @texts.length
+    @texts << part
+    @texts.finish[from, part.bytesize]
   end
 
   private def simple_key : String | TOMLError
@@ -1290,7 +1297,7 @@ struct TapeReader
     while true
       skip_blanks
       start = pos
-      part = simple_key!
+      part = held_key(simple_key!)
       if @key_used < @key_parts.size
         @key_parts[@key_used] = part
         @key_starts[@key_used] = start

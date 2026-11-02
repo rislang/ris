@@ -1,0 +1,16 @@
+# Dir answers names that stay valid after the listing ends.
+module test/ris/dir_children
+
+import std/dir::{Dir}
+
+data = "samples/ris/trial/data"
+Dir.children(data).sort.each { |name| puts name }
+puts Dir.entries(data).size
+dir = Dir.new(data)
+puts dir.children.size
+puts dir.entries.size
+dir.close
+"overwrite the scratch".split.each { |word| puts word.size }
+kept = [] of String
+Dir.each_child(data) { |name| kept << name.copy_to(Program.tape) }
+puts kept.sort.first

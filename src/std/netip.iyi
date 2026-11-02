@@ -1066,9 +1066,9 @@ struct NetipBits
     value = value << (16 * skipped)
     index = parts.size - low
     while index < parts.size
-      group = read_hextet(parts[index])
-      return group if group.is_a?(String)
-      value = (value << 16) | group
+      low_group = read_hextet(parts[index])
+      return low_group if low_group.is_a?(String)
+      value = (value << 16) | low_group
       index = index + 1
     end
     value

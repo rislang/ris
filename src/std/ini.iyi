@@ -129,13 +129,13 @@ pub struct INI
               "cannot be written: #{why}"
       end
       ini.each(section) do |key, value|
-        if why = unwritable_key(key)
+        if bad_key = unwritable_key(key)
           raise "INI.build: key #{key.inspect} in section " \
-                "#{section.inspect} cannot be written: #{why}"
+                "#{section.inspect} cannot be written: #{bad_key}"
         end
-        if why = unwritable_value(value)
+        if bad_value = unwritable_value(value)
           raise "INI.build: the value of #{key.inspect} in " \
-                "section #{section.inspect} cannot be written: #{why}"
+                "section #{section.inspect} cannot be written: #{bad_value}"
         end
       end
     end

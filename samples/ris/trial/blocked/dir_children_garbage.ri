@@ -1,6 +1,0 @@
-# Dir.children's names are freed: prints garbage, then panics in File.size.
-module samples/trial/blocked/dir_children_garbage
-
-import std/dir::{Dir}
-
-Dir.children(Program.args[0]).sort.each { |name| puts name }

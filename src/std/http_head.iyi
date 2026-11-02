@@ -46,6 +46,39 @@ pub struct ParsedHead
     end
   end
 
+  # How many lines the head has.
+  def field_count : Int32
+    @fields.size
+  end
+
+  def field_name(index : Int32) : String
+    @fields[index].name
+  end
+
+  # Line *index*'s value: where it lies, or for a repeated field all its
+  # values joined in *texts*, which outlives this def.
+  def field_held(index : Int32, texts : String::Builder) : String?
+    return nil if repeated?(index)
+    name = @fields[index].name
+    lines = 1
+    k = index + 1
+    while k < @fields.size
+      lines += 1 if same_field?(@fields[k].name, name)
+      k += 1
+    end
+    return @fields[index].value if lines == 1
+    from = texts.bytesize
+    texts << @fields[index].value
+    k = index + 1
+    while k < @fields.size
+      if same_field?(@fields[k].name, name)
+        texts << ", " << @fields[k].value
+      end
+      k += 1
+    end
+    texts.finish[from, texts.bytesize - from]
+  end
+
   # The body's length as `Content-Length` says it, read where it lies: 0
   # without the field, nil when it is not one length (RFC 9110 §8.6:
   # digits and nothing else; each line, and each value of a list, the

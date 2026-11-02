@@ -1259,6 +1259,13 @@ pub class BodyReader
     end
   end
 
+  # *text* copied into the reader's own texts: it lives as the reader does.
+  protected def hold(text : String) : String
+    from = @fault_text.bytesize
+    @fault_text << text
+    @fault_text.finish[from, text.bytesize]
+  end
+
   # *fault* kept, its texts copied into the reader's own: every read
   # after it answers the same.
   protected def remember(fault : HTTPError | Cancelled | SocketError) : HTTPError | Cancelled | SocketError
@@ -1656,8 +1663,9 @@ pub class Request
     end
     got = @reader.read_all(Server::MAX_BODY.to_i64)
     raise got.message unless got.is_a?(String)
-    @text = got
-    got
+    held = @reader.hold(got)
+    @text = held
+    held
   end
 
   # The pairs of the request's `Cookie` header, the first of a name kept.
@@ -2113,7 +2121,7 @@ pub class Response
     else
       headers["Vary"] = "Accept-Encoding"
     end
-    headers["Content-Encoding"] = coding
+    headers["Content-Encoding"] = @held.note(coding)
     nil
   end
 
@@ -3192,13 +3200,18 @@ pub struct Server
     # The table is filled once, the Host line's value replaced by the
     # target's authority: no key of the table is held while it grows.
     named_host = false
-    head.each_field do |name, value|
-      if host && HTTP.same_name?(name, "Host")
-        named_host = true
-        headers[name] = host
-      else
-        headers[name] = value
+    field = 0
+    while field < head.field_count
+      name = head.field_name(field)
+      if value = head.field_held(field, texts)
+        if host && HTTP.same_name?(name, "Host")
+          named_host = true
+          headers[name] = host
+        else
+          headers[name] = value
+        end
       end
+      field = field + 1
     end
     if host && !named_host
       headers["Host"] = host

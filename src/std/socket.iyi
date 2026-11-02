@@ -4200,12 +4200,12 @@ pub class Resolver
         got = ask(server, name, type, at)
         return got if got.is_a?(Cancelled)
         if got.is_a?(DnsError)
-          failure = got
+          failure = at.keep(got)
           next
         end
         read = Resolver.read_rcode(got, name, server.label, at)
         return read if read.is_a?(DnsReply) || read.not_found?
-        failure = read
+        failure = at.keep(read)
       end
       attempt = attempt + 1
     end

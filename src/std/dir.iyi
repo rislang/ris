@@ -352,13 +352,39 @@ pub class Dir
     end
   end
 
-  def entries : Array(String)
-    res = [] of String
+  # The names, each with a NUL behind it (no name holds one), on the
+  # caller's tape: `split_names` answers views of it.
+  protected def listing(dots : Bool) : String
+    names = String::Builder.new
     rewind
     while entry = read
-      res << entry
+      next if !dots && (entry == "." || entry == "..")
+      names << entry
+      names.push(0_u8)
     end
-    res
+    names.finish
+  end
+
+  protected def self.listing(dirname : String | Path, dots : Bool) : String
+    dir = Dir.new(dirname)
+    defer dir.close
+    dir.listing(dots)
+  end
+
+  protected def self.split_names(text : String) : Array(String)
+    names = [] of String
+    from = 0
+    text.bytesize.times do |i|
+      if text[i] == 0_u8
+        names << text[from, i - from]
+        from = i + 1
+      end
+    end
+    names
+  end
+
+  def entries : Array(String)
+    Dir.split_names(listing(true))
   end
 
   def each_child(& : String -> Nil) : Nil
@@ -371,11 +397,7 @@ pub class Dir
   end
 
   def children : Array(String)
-    res = [] of String
-    each_child do |entry|
-      res << entry
-    end
-    res
+    Dir.split_names(listing(false))
   end
 
   def to_s : String
@@ -491,10 +513,7 @@ pub class Dir
   end
 
   def self.entries(dirname : String | Path) : Array(String)
-    Dir.open(dirname) do |dir|
-      return dir.entries
-    end
-    [] of String
+    Dir.split_names(Dir.listing(dirname, true))
   end
 
   def self.each_child(dirname : String | Path, & : String -> Nil) : Nil
@@ -506,10 +525,7 @@ pub class Dir
   end
 
   def self.children(dirname : String | Path) : Array(String)
-    Dir.open(dirname) do |dir|
-      return dir.children
-    end
-    [] of String
+    Dir.split_names(Dir.listing(dirname, false))
   end
 
   @[TapeUnsafe("Borrow NUL-terminated text at the OS boundary")]

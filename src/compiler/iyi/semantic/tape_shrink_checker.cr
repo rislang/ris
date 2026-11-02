@@ -487,7 +487,7 @@ class Iyi::TapeShrinkChecker
   # block's storage, as an allocated Array is.
   private def tape_text(node : ASTNode, result : Value) : Value
     return result if @tape_blocks.empty? || !@checking
-    return result unless node.type?.try { |t| type_name(t.remove_typedef) } == "String"
+    return result unless TapeChecker.possible_string?(node.type?)
     # A call that allocates and answers text made its bytes, though its
     # summary may show only the inputs it read (interpolation, inspect):
     # unless it is known to answer a view, the text is fresh too.
@@ -512,6 +512,7 @@ class Iyi::TapeShrinkChecker
     made = copied_text || node.is_a?(StringInterpolation) ||
            (node.is_a?(Call) && !node.expanded && @graph.allocates?(node))
     return result unless made
+    @made_texts << node.object_id
     @root_scopes[node.object_id] = @scopes.dup
     @root_types[node.object_id] = node.type
     @root_births[node.object_id] = @uses.size
@@ -1488,13 +1489,20 @@ class Iyi::TapeShrinkChecker
   end
 
   private def loop_value(body : ASTNode, env : Env,
-                         cond : ASTNode? = nil, kind = "loop round") : Value
+                         cond : ASTNode? = nil, kind = "loop round",
+                         fresh_args : Array(Var)? = nil) : Value
     @scopes << body.object_id
     # A marked body frees its scratch at its end (SPEC 1.1).
     scoped = !TapeScopeChecker.parts(body).nil?
     if scoped
       @tape_blocks << body.object_id
       @tape_kinds[body.object_id] = kind
+    end
+    fresh_args.try &.each do |arg|
+      @root_types[arg.object_id] = arg.type
+      @yielded_roots << arg.object_id
+      @root_scopes[arg.object_id] = @scopes.dup
+      note_fresh(arg.object_id)
     end
     start = @uses.size
     shrink_start = @shrinks.size
@@ -1559,6 +1567,114 @@ class Iyi::TapeShrinkChecker
     result
   end
 
+  # A Hash keeps its key as it keeps its value.
+  private def store_hash_key(node : Call, receiver : Value, args : Array(Value), env : Env) : Nil
+    return unless node.name == "[]=" && args.size == 2
+    return unless node.obj.try(&.type?).try { |t| type_name(t.remove_typedef).starts_with?("Hash(") }
+    return unless reference?(node.args.first)
+    store(receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }, args.first, env, node, false)
+  end
+
+  # These runtime defs keep their last argument, with no summary to say
+  # so: `insert`'s and `unshift`'s element and a Set's (SPEC 3.6).
+  private def store_kept_argument(node : Call, receiver : Value, args : Array(Value), env : Env) : Nil
+    return unless {"unshift", "insert", "add"}.includes?(node.name)
+    type = node.obj.try(&.type?)
+    return unless type
+    name = type_name(type.remove_typedef)
+    return unless name.starts_with?("Set(") ? node.name == "add" : (name.starts_with?("Array(") && node.name != "add")
+    kept = args.last?
+    return unless kept && node.args.last?.try { |arg| reference?(arg) } != false
+    store(receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }, kept, env, node, false)
+  end
+
+  private def fresh_block_args(node : Call, block : Block, targets : Array(Def)?,
+                               yielded : Value, outer : Env) : Array(Var)?
+    return nil unless @checking && !@text_only && node.name != "tape"
+    return nil unless targets.try(&.any? { |t| yields_fresh?(t) })
+    fresh = block.args.select { |arg| reference?(arg) }
+    fresh.each { |arg| outer[arg.name] = merge(yielded, Value.new([arg.object_id], [] of View)) }
+    fresh
+  end
+
+  # Whether *target* yields tape data it made itself, or a view of it:
+  # a stored block argument would outlive that data. A view of what the
+  # caller handed in is no such data. Unknown allocation counts as made.
+  @yields_fresh = Hash(UInt64, Bool).new
+  @yielded_roots = Set(UInt64).new
+  @made_texts = Set(UInt64).new
+
+  def yields_fresh?(target : Def) : Bool
+    id = target.object_id
+    known = @yields_fresh[id]?
+    return known unless known.nil?
+    @yields_fresh[id] = false
+    return false if target.is_a?(External)
+    scan = YieldScan.new(self)
+    loop do
+      before = scan.names.size
+      target.body.accept scan
+      break if scan.found || scan.names.size == before
+    end
+    @yields_fresh[id] = scan.found
+  end
+
+  def yield_targets(node : Call) : Array(Def)
+    @graph.targets(node) || [] of Def
+  end
+
+  def fresh_text?(node : ASTNode, names : Set(String)) : Bool
+    case node
+    when Var               then names.includes?(node.name)
+    when StringInterpolation then true
+    when TupleLiteral      then node.elements.any? { |e| fresh_text?(e, names) }
+    when Expressions       then node.expressions.last?.try { |e| fresh_text?(e, names) } || false
+    when If                then fresh_text?(node.then, names) || fresh_text?(node.else, names)
+    when Assign            then fresh_text?(node.value, names)
+    when Cast, NilableCast then fresh_text?(node.obj, names)
+    when Call
+      return false unless reference?(node)
+      return false if {"copy_to", "to_heap"}.includes?(node.name)
+      obj = node.obj
+      if obj && (VIEWS.includes?(node.name) || TEXT_VIEWS.includes?(node.name))
+        return fresh_text?(obj, names)
+      end
+      @graph.allocates?(node)
+    else
+      false
+    end
+  end
+
+  class YieldScan < Visitor
+    getter names = Set(String).new
+    getter found = false
+
+    def initialize(@checker : TapeShrinkChecker)
+    end
+
+    def visit(node : Assign)
+      target = node.target
+      names << target.name if target.is_a?(Var) && @checker.fresh_text?(node.value, names)
+      true
+    end
+
+    def visit(node : Yield)
+      @found ||= node.exps.any? { |e| @checker.fresh_text?(e, names) }
+      true
+    end
+
+    def visit(node : Call)
+      if (block = node.block) && @checker.yield_targets(node).any? { |t| @checker.yields_fresh?(t) }
+        block.args.each { |arg| names << arg.name }
+      end
+      true
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
+  end
+
   # The scopes *root* was made in, outermost first.
   private def root_tapes_of(root : UInt64) : Array(UInt64)?
     declaration = root
@@ -1602,6 +1718,11 @@ class Iyi::TapeShrinkChecker
         # Unknown is refused: what a non-flat value holds must come from
         # a parameter, `self` or program data.
         next if from_caller?(source)
+        # Text a call made, in a union RESULT moves down whole (an error
+        # or its sentence): it leaves as a String does.
+        next if @made_texts.includes?(source) && type && moved_type?(type.remove_typedef)
+        # What the def yielded goes back to that def, which holds it.
+        next if !node.is_a?(Def) && @yielded_roots.includes?(source)
         # A block's value made before the block (the def's builder that
         # its block appends to) is older than the block's scratch.
         next if !node.is_a?(Def) && blocks && !blocks.includes?(scope)
@@ -2267,7 +2388,9 @@ class Iyi::TapeShrinkChecker
         if (element = args.last?) && !builder_copy && node.args.last?.try { |arg| reference?(arg) } != false
           store(receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }, element, env, node, false)
         end
+        store_hash_key(node, receiver, args, env)
       end
+      store_kept_argument(node, receiver, args, env)
       element_result : Value? = nil
       if node.obj.try do |obj|
            obj.type?.try do |t|
@@ -2413,7 +2536,7 @@ class Iyi::TapeShrinkChecker
             # A tape struct (an @[OnTape] answer) holding what the callee
             # allocated is made here the same way.
             if !@tape_blocks.empty? && !{"copy_to", "to_heap"}.includes?(node.name) && (@graph.fresh?(node) ||
-               (node.type?.try { |t| type_name(t.remove_typedef) == "String" || tape_struct?(t) } &&
+               (node.type?.try { |t| TapeChecker.possible_string?(t) || tape_struct?(t) } &&
                 @graph.allocates?(node)))
               @root_scopes[node.object_id] ||= @scopes.dup
               note_fresh(node.object_id) unless @root_tapes.has_key?(node.object_id)
@@ -2546,6 +2669,9 @@ class Iyi::TapeShrinkChecker
         end
         yielded = Value.new(derived.roots, yielded_views)
         block.args.each { |arg| outer[arg.name] = reference?(arg) ? yielded : EMPTY }
+        # What the called def made and yields ends with that def or its
+        # round: to the block it is scratch (SPEC 3.2, 3.6).
+        fresh_args = fresh_block_args(node, block, targets, yielded, outer)
         @callback_chain << "#{node.name} block"
         @scopes << block.object_id
         if node.name == "tape"
@@ -2558,7 +2684,7 @@ class Iyi::TapeShrinkChecker
           check_leaving(block.object_id, block_value, outer, block.body.type?, block) if explicit
           @tape_blocks.pop if explicit
         else
-          block_value = loop_value(block.body, outer, kind: "block")
+          block_value = loop_value(block.body, outer, kind: "block", fresh_args: fresh_args)
           # A program constant's initializer runs on the program's tape:
           # its value is the constant's, made on its owner.
           check_leaving(block.body.object_id, block_value, outer, block.body.type?, block) unless node.program_initializer?

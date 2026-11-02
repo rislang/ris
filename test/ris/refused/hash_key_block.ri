@@ -1,0 +1,9 @@
+# A Hash key made in a block round is freed with the round (SPEC 3.6).
+module test/ris/refused/hash_key_block
+
+counts = Hash(String, Int32).new
+"The fox".split.each do |word|
+  key = word.downcase
+  counts[key] = counts.fetch(key, 0) + 1
+end
+puts counts.size

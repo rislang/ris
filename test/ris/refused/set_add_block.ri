@@ -1,0 +1,6 @@
+# A Set keeps what `add` takes: made in a block round, it is freed.
+module test/ris/refused/set_add_block
+
+seen = Set(String).new
+"The fox".split.each { |word| seen.add(word.downcase) }
+puts seen.size

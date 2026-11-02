@@ -169,6 +169,20 @@ expect store_borrowed_or_fresh 'cannot store data made in this def'
 expect copy_current_store 'cannot store data made in this'
 expect growing_text_element 'cannot store data made in this tape block'
 expect growing_text_field 'cannot store data made in this def'
+expect hash_key_block 'cannot store data made in this block'
+expect set_add_block 'cannot store data made in this block'
+expect array_insert_block 'cannot store data made in this block'
+expect optional_result_store 'cannot store data made in this loop round'
+expect yield_fresh_store 'cannot store data made in this block'
+
+# Dir's names stay valid after the listing ends.
+out=$("$RIS" run test/ris/dir_children.ri 2>&1)
+want=$'config.json\nsales.csv\nwords.txt\n5\n3\n5\n9\n3\n7\nconfig.json'
+if [ "$out" = "$want" ]; then
+  echo 'runs     dir_children'
+else
+  echo "FAILED   dir_children: $out"; status=1
+fi
 
 # HPKE owners refill their contexts for all three supported KEMs.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/hpke_owners.ri 2>&1)

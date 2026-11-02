@@ -87,7 +87,7 @@ rounds = {{ flag?(:release) ? 1_000_000 : 1000 }}
 while iterations < rounds
   r = X25519.shared(k, u).or_panic
   u = k
-  k = r
+  k = r.copy_to(Program.tape)
   iterations = iterations + 1
   assert_str "422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079", hex(k), "rfc 7748 after one iteration" if iterations == 1
   assert_str "684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51", hex(k), "rfc 7748 after 1,000 iterations" if iterations == 1000
