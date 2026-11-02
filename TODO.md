@@ -62,7 +62,8 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 * SPEC 3.3: `v = w.rows`, `w.rows.clear`, `puts v.size` passes: a view
   taken through a getter stays live over the clear. Refuse it.
 * SPEC 2.2: `initialize` may pass `self` to a helper that grows a field
-  mid-construction, unrefused. Refuse it or allow it in the SPEC.
+  mid-construction, unrefused. Refuse it, as 2.2 already says; the error
+  names the safe form: grow after `new`. No SPEC change.
 * `IyiSocket.listen_result` answered a socket made after other work
   inside a union (`IyiSocket | SocketError`), unrefused; the socket was
   freed with the def and every worker accepted on fd 0. Refuse a class
