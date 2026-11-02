@@ -19,7 +19,6 @@ The items are below; this is only their order.
 
 1. The user's own ris programs: each obstacle becomes an item here.
 2. Trial program obstacles, in this order: `OptionParser` String option,
-   Tuple `<`, `out` as a name, `ris doc std/http`, LEARN.md,
    bench/std_json_exercise.iyi.
 3. `text.split` not refused in a round or yield: find the cause first,
    it can leave a program using freed memory. Then `until` rounds,
@@ -56,9 +55,7 @@ Fix a checker hole below only when a cluster hits it.
 Trial programs (samples/ris/trial/blocked/ has the repros), most blocking
 first; samples/ris/trial/run.sh is their gate:
 
-* `OptionParser` cannot set a String option; `ris doc std/http` fails;
-  Tuple has no `<` for sort_by; `out` as a name gets an unclear error;
-  LEARN.md lacks `Program.args` and `import std/int`.
+* `OptionParser` cannot set a String option.
 
 * bench/std_json_exercise.iyi has 2 lines on JSON's old API.
 

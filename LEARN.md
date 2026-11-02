@@ -16,6 +16,13 @@ Text parameters take `String` and borrow it; nothing copies it to accept it.
   the import path; there is no `require`.
 * `import shop/order` (names stay `order::f`), `import shop/order::{f, T}`,
   `import shop/order::*`; a URL works too: `import github.com/x/y::{Y}`.
+* Command-line arguments are `Program.args : Array(String)`, without the
+  program name. With `args = Program.args`, check `args.size` before
+  indexing; `args[0]` is the first argument. For example,
+  `ris run app.ri -- input.txt` passes `input.txt`.
+* `import std/int` gives integers `<=>`, bit counts and the rest of the
+  integer tower's arithmetic and conversions. Add it before using those
+  methods; the prelude carries only the small core (`ris doc std/int`).
 * `pub` exports. Every `pub def` writes all parameter and return types.
 * No reopening: classes are closed; `impl` goes in the trait's or type's module.
 * No pointers: `s[i]`, `s.byte_at(i)`, `s[a, n]`; a C module is `@[Ffi]`, a
