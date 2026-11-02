@@ -94,7 +94,7 @@ pub struct P384PrivateKey
   def initialize(@d : P384Num, @public_key : EcdsaPublicKey, @public_point : Array(UInt8))
   end
 
-  def copy_into_identity(store) : P384PrivateKey
+  def copy_into_identity(store : S) : P384PrivateKey forall S
     P384PrivateKey.new(@d, store.certificate_key(@public_key),
       store.identity_point(@public_point))
   end

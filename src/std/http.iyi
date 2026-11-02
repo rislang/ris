@@ -2467,7 +2467,7 @@ pub struct Server
     HeadParser.parse_head(bytes, from, complete, fields)
   end
 
-  def self.parse_head(bytes : String, from : Int32, complete : Bool)
+  macro parse_head(bytes, from, complete)
     {% raise "Server.parse_head(bytes, from, complete) takes the fields'\n" +
       "Array too: Server.parse_head(bytes, 0, true, fields), with\n" +
       "fields = Array(Field).new(16) on the caller's tape." %}
@@ -3144,7 +3144,7 @@ pub struct Server
 
   # The one-argument form answered a RequestHead, never a ParsedHead: a
   # caller testing is_a?(ParsedHead) compiled and always failed.
-  def self.parse_head(text : String)
+  macro parse_head(text)
     {% raise "Server.parse_head(text) is gone: call\n" +
       "Server.parse_head(bytes, 0, true, fields), which answers\n" +
       "ParsedHead | HeadError | Nil, its fields views into bytes." %}
@@ -4529,7 +4529,7 @@ pub struct HTTP
   # server, at best, as a plain GET: the gate's proxy, which drops
   # `Connection`, leaves std/websocket's server a request it answers 400.
   # A *client* sends it under its own `tls:` configuration.
-  def self.upgrade(*args, **options)
+  macro upgrade(*args, **options)
     {% raise "HTTP.upgrade returns no owner: declare up = Upgraded.new,
 " +
       "then up.connect(url, protocol, headers, ...)." %}

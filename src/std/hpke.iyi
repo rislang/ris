@@ -404,7 +404,7 @@ pub struct HpkeSuite
   # which of *psk* and *psk_id*, and *sender_key*, are given: the sender's
   # context, whose `enc` goes to the recipient. An `HpkeError` when the
   # encapsulation is refused (*recipient* is an X25519 key of small order).
-  def sender(*args, **options)
+  def sender(*args : *T, **options : **U) : NoReturn forall T, U
     {% raise "HpkeSuite#sender returns no owner: declare context = HpkeSender.new,
 " +
       "then context.setup(suite, recipient, info, randomness, ...)." %}
@@ -414,7 +414,7 @@ pub struct HpkeSuite
   # recipient's context for *enc*, or an `HpkeError` when *enc* is refused.
   # The mode is chosen as `sender`'s is, by *sender_public* in place of
   # the sender's key.
-  def recipient(*args, **options)
+  def recipient(*args : *T, **options : **U) : NoReturn forall T, U
     {% raise "HpkeSuite#recipient returns no owner: declare context = HpkeRecipient.new,
 " +
       "then context.setup(suite, key, enc, info, ...)." %}

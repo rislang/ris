@@ -400,7 +400,7 @@ pub struct RsaPrivateKey
     @e = @public_key.exponent
   end
 
-  def copy_into_identity(store) : RsaPrivateKey
+  def copy_into_identity(store : S) : RsaPrivateKey forall S
     RsaPrivateKey.new(store.certificate_key(@public_key),
       store.certificate_number(@p), store.certificate_number(@q),
       store.certificate_number(@dp), store.certificate_number(@dq),

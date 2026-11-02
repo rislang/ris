@@ -237,7 +237,7 @@ pub struct EcdsaPublicKey
   end
 
   # Copy the finite key shape into a certificate owner's limb runs.
-  def copy_into_certificate(store) : EcdsaPublicKey
+  def copy_into_certificate(store : S) : EcdsaPublicKey forall S
     EcdsaPublicKey.new(@curve, store.certificate_number(@x),
       store.certificate_number(@y),
       EcdsaGroup.new(store.certificate_number(@group.p),

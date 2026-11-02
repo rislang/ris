@@ -32,5 +32,8 @@ for name in wc json_edit ls csv_sum http_trial tuple_order; do
     failed=$((failed + 1))
   fi
 done
+if ! sh "$root/test/ris/http_doc.sh"; then
+  failed=$((failed + 1))
+fi
 echo "FAILED count: $failed"
 [ "$failed" -eq 0 ]

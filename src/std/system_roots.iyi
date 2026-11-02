@@ -223,7 +223,7 @@ pub class SystemRoots
   def initialize
   end
 
-  def self.load
+  macro load
     {% raise "SystemRoots.load returns no owner. Declare roots = " +
       "SystemRoots.new, then call roots.read_system and check its error." %}
   end

@@ -629,13 +629,13 @@ pub class TlsConfig
     nil
   end
 
-  def self.on_program(*args)
+  def self.on_program(*args : *T) : NoReturn forall T
     {% raise "Declare config = TlsConfig.new(alpn), then use
 " +
       "config.copy_to(Program.tape), or declare a program constant." %}
   end
 
-  def dup(*args)
+  def dup(*args : *T) : NoReturn forall T
     {% raise "A config is an owner: declare copy = TlsConfig.new,
 " +
       "then copy.refill(config)." %}
@@ -2606,13 +2606,13 @@ pub class TlsClient < TlsConnection
     problem ? fail(problem) : nil
   end
 
-  def self.over(*args, **options)
+  def self.over(*args : *T, **options : **U) : NoReturn forall T, U
     {% raise "TlsClient.over returns no owner: declare client =
 " +
       "TlsClient.new(socket, host, config, session), then client.over(timeout_ms)." %}
   end
 
-  def self.connect(*args, **options)
+  def self.connect(*args : *T, **options : **U) : NoReturn forall T, U
     {% raise "TlsClient.connect returns no owner: declare client =
 " +
       "TlsClient.new(host, config, session), then client.connect(port, timeout_ms)." %}
@@ -4615,13 +4615,13 @@ pub class TlsIdentity
     nil
   end
 
-  def self.from_pem(*args, **options)
+  def self.from_pem(*args : *T, **options : **U) : NoReturn forall T, U
     {% raise "TlsIdentity.from_pem returns no owner: declare identity =
 " +
       "TlsIdentity.new(certificates, private_key), then check identity.error." %}
   end
 
-  def self.from_der(*args, **options)
+  def self.from_der(*args : *T, **options : **U) : NoReturn forall T, U
     {% raise "TlsIdentity.from_der returns no owner: declare identity =
 " +
       "TlsIdentity.new(chain, key), then check identity.error." %}
@@ -5010,14 +5010,14 @@ pub class TlsServerConfig
   end
 
   # A config is an owner (SPEC 2.1): a def does not make and return one.
-  def self.from_pem(certificates : String, private_key : String)
+  macro from_pem(certificates, private_key)
     {% raise "TlsServerConfig.from_pem is gone: a config is an owner, made\n" +
       "at a named declaration (SPEC 2.1). Write\n" +
       "identity = TlsIdentity.new(certificates, private_key)\n" +
       "and then config = TlsServerConfig.new(identity)." %}
   end
 
-  def self.from_der(chain : (Array(Array(UInt8)) | Array(Array::View(UInt8))), key)
+  macro from_der(chain, key)
     {% raise "TlsServerConfig.from_der is gone: a config is an owner, made\n" +
       "at a named declaration (SPEC 2.1). Write\n" +
       "identity = TlsIdentity.new(chain, key)\n" +
@@ -5615,7 +5615,7 @@ pub class TlsServer < TlsConnection
     within(timeout_ms) { handshake }
   end
 
-  def self.over(socket : IyiSocket, config : TlsServerConfig, timeout_ms : Int32 = HANDSHAKE_TIMEOUT_MS, early_data : Bool = true)
+  macro over(socket, config, timeout_ms = HANDSHAKE_TIMEOUT_MS, early_data = true)
     {% raise "TlsServer.over is gone: a server is an owner, made at a named\n" +
       "declaration (SPEC 2.1). Write server = TlsServer.new(socket, config)\n" +
       "and then problem = server.accept(timeout_ms, early_data)." %}

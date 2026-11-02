@@ -96,7 +96,7 @@ pub struct P256PrivateKey
   def initialize(@d : P256Num, @public_key : EcdsaPublicKey, @public_point : Array(UInt8))
   end
 
-  def copy_into_identity(store) : P256PrivateKey
+  def copy_into_identity(store : S) : P256PrivateKey forall S
     P256PrivateKey.new(@d, store.certificate_key(@public_key),
       store.identity_point(@public_point))
   end

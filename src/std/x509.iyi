@@ -351,7 +351,7 @@ pub struct Certificate
     @ocsp_nocheck = extensions.ocsp_nocheck
   end
 
-  def initialize(source : Certificate, store)
+  def initialize(source : Certificate, store : S) forall S
     @version = source.@version
     # Rebuilt: a Time's location is not the store's to keep.
     @not_before = Time.unix(source.@not_before.to_unix)
@@ -553,7 +553,7 @@ pub struct Certificate
 
   # Every CERTIFICATE block in a PEM text, read; the first one that is not
   # a certificate is the answer.
-  def self.from_pem(text : String)
+  macro from_pem(text)
     {% raise "Certificate.from_pem returns no owner. Declare store = " +
       "RisCertificateStore.new, check store.read_pem(text), then use " +
       "store.kept_certificates." %}
