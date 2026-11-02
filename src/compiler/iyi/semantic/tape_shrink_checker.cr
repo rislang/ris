@@ -1769,6 +1769,12 @@ class Iyi::TapeShrinkChecker
     end
     return nil unless parent = @parents[root]?
     type = one_class(summary_root_type(parent[0], summary, target))
+    # A cycle can carry the element slot as well as its Array field.
+    # Preserve the element type instead of treating [] as an ivar.
+    if parent[1] == "[]" && type.is_a?(GenericClassInstanceType) &&
+       type_name(type).starts_with?("Array(")
+      return type.type_vars["T"]?.try { |v| v.as?(Var).try(&.type?) }
+    end
     return nil unless type.is_a?(InstanceVarContainer)
     type.instance_vars[parent[1]]?.try(&.type?)
   end
@@ -1778,6 +1784,11 @@ class Iyi::TapeShrinkChecker
   private def flat_field_type?(type : Type?, root : UInt64) : Bool
     return false unless type
     return false unless parent = @parents[root]?
+    # A plain element has no callee storage to retain. Elements holding
+    # text or other borrows still need the ordinary store checks.
+    if parent[1] == "[]"
+      return flat_store_element?(type)
+    end
     return false unless parent[1].starts_with?('@')
     type = type.remove_typedef
     return true if type.is_a?(NonGenericClassType) && type.struct? &&
@@ -1786,6 +1797,17 @@ class Iyi::TapeShrinkChecker
     return false unless type_name(type).starts_with?("Array(")
     element = type.type_vars["T"]?.try { |v| v.as?(Var).try(&.type?) }
     !element.nil? && !reference_type?(element) && !storage_type?(element)
+  end
+
+  private def flat_store_element?(type : Type) : Bool
+    return true unless reference_type?(type)
+    type = type.remove_typedef
+    return false if type.is_a?(PointerInstanceType)
+    return false if storage_type?(type) || !type.struct?
+    return false unless type.is_a?(InstanceVarContainer)
+    type.instance_vars.each_value.all? do |var|
+      (field = var.type?) && flat_store_element?(field)
+    end
   end
 
   # A class instance's Array of scalars (a byte stage) or struct value:

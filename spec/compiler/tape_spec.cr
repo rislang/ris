@@ -298,3 +298,40 @@ describe "ris String parameter retention" do
       CODE
   end
 end
+
+describe "ris recursive store summaries" do
+  it "keeps flat node field types through mutual recursion" do
+    tape_compile(<<-'CODE')
+      @[OnTape]
+      struct N
+        getter a : Int32
+        def initialize(@a : Int32 = -1)
+        end
+      end
+
+      @[OnTape]
+      struct P
+        def initialize
+          @nodes = Array(N).new(8)
+        end
+
+        def node(a : Int32) : Int32
+          @nodes << N.new(a)
+          @nodes.size - 1
+        end
+
+        def pipe(d : Int32) : Int32
+          return 0 if d > 3
+          b = other(d + 1)
+          node(b)
+        end
+
+        def other(d : Int32) : Int32
+          pipe(d)
+        end
+      end
+      p = P.new
+      puts p.pipe(0)
+      CODE
+  end
+end

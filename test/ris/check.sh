@@ -70,6 +70,16 @@ else
 fi
 expect deep_holder_shrink 'cannot shrink tape storage with a live view'
 
+# Mutual recursion keeps the type of flat node stores through the cycle.
+out=$("$RIS" run test/ris/mutual_store_root.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '3' ]; then
+  echo 'runs     mutual_store_root'
+else
+  echo "FAILED   mutual_store_root: $out"; status=1
+fi
+
+expect mutual_store_borrow 'cannot store data made in this def'
+
 # Scalar/nil union stores do not retain a callee's scratch.
 out=$("$RIS" run test/ris/plain_union_stores.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'true' ]; then
