@@ -1,7 +1,7 @@
 module test/secure_dns
 
 import std/secure_dns::{DnsOverHttps, DnsOverTls}
-import std/dns::{DnsError}
+import std/dns::{DnsError, ResolvConf}
 import std/socket::{DnsUpstream, IPAddress, Resolver}
 import std/tls::{TlsConfig}
 import std/x509::{RisCertificateStore, Certificate}
@@ -10,7 +10,9 @@ import std/x509::{RisCertificateStore, Certificate}
 # on loopback (its directory the first argument): a resolver asking DNS
 # over TLS, then DNS over HTTPS by POST and GET. Each upstream connects
 # by address and looks nothing up, so no exchange calls back into the
-# resolver that asks it (SPEC 3.5).
+# resolver that asks it (SPEC 3.5). No resolv.conf is read: a search
+# domain on the host (a CI container has one) would turn missing.zone.test
+# into a name the server refuses.
 
 dir = Program.arguments[0]
 roots_store = RisCertificateStore.new
@@ -44,7 +46,7 @@ tape do
   config(tls, roots)
   dot = DnsOverTls.new("dns.test", "127.0.0.1", dot_port, tls)
   resolver = Resolver.new
-  resolver.read_system
+  resolver.refill(ResolvConf.new, "")
   resolver.encrypt([dot] of DnsUpstream)
   ask(resolver, "a.zone.test")
   ask(resolver, "dual.zone.test")
@@ -58,14 +60,14 @@ tape do
   url = "https://dns.test:#{doh_port}/dns-query"
   post = DnsOverHttps.new(url, "127.0.0.1", tls)
   resolver = Resolver.new
-  resolver.read_system
+  resolver.refill(ResolvConf.new, "")
   resolver.encrypt([post] of DnsUpstream)
   ask(resolver, "a.zone.test")
   ask(resolver, "six.zone.test")
   puts "post connections #{post.connections_made} reused #{post.connections_reused}"
   resolver.close
   get = DnsOverHttps.new(url, "127.0.0.1", tls, "GET")
-  resolver.read_system
+  resolver.refill(ResolvConf.new, "")
   resolver.encrypt([get] of DnsUpstream)
   ask(resolver, "dual.zone.test")
   ask(resolver, "missing.zone.test")
@@ -73,7 +75,7 @@ tape do
   # The URL's host an address: nothing to bootstrap; the certificate
   # names 127.0.0.1 too.
   bare = DnsOverHttps.new("https://127.0.0.1:#{doh_port}/dns-query", nil, tls)
-  resolver.read_system
+  resolver.refill(ResolvConf.new, "")
   resolver.encrypt([bare] of DnsUpstream)
   ask(resolver, "alias.zone.test")
   resolver.close

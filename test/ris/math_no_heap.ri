@@ -1,10 +1,12 @@
 module test/ris/math_no_heap
 
+import std/float
 import std/math::{Math}
 
 # Exact bits captured before moving the tables to StaticArray.
 # Include small, ordinary, large and out-of-domain arguments.
-# NaN results are checked by bits too, including their sign and payload.
+# A NaN result is checked with nan?: its sign is the CPU's (x86 sets it,
+# aarch64 does not), so its bits differ between them.
 
 raise "Math.sin(0.125)" unless
   IyiFloatText.bits_of(Math.sin(0.125)) == 4593648181988224566_u64
@@ -157,9 +159,9 @@ raise "Math.asinh(20.0)" unless
 raise "Math.asinh(1.0e100)" unless
   IyiFloatText.bits_of(Math.asinh(1.0e100)) == 4642329905580363564_u64
 raise "Math.acosh(0.125)" unless
-  IyiFloatText.bits_of(Math.acosh(0.125)) == 18444492273895866368_u64
+  Math.acosh(0.125).nan?
 raise "Math.acosh(0.75)" unless
-  IyiFloatText.bits_of(Math.acosh(0.75)) == 18444492273895866368_u64
+  Math.acosh(0.75).nan?
 raise "Math.acosh(1.25)" unless
   IyiFloatText.bits_of(Math.acosh(1.25)) == 4604418534313441775_u64
 raise "Math.acosh(20.0)" unless
@@ -171,11 +173,11 @@ raise "Math.atanh(0.125)" unless
 raise "Math.atanh(0.75)" unless
   IyiFloatText.bits_of(Math.atanh(0.75)) == 4606938819767458391_u64
 raise "Math.atanh(1.25)" unless
-  IyiFloatText.bits_of(Math.atanh(1.25)) == 18444492273895866368_u64
+  Math.atanh(1.25).nan?
 raise "Math.atanh(20.0)" unless
-  IyiFloatText.bits_of(Math.atanh(20.0)) == 18444492273895866368_u64
+  Math.atanh(20.0).nan?
 raise "Math.atanh(1.0e100)" unless
-  IyiFloatText.bits_of(Math.atanh(1.0e100)) == 18444492273895866368_u64
+  Math.atanh(1.0e100).nan?
 raise "Math.erf(0.125)" unless
   IyiFloatText.bits_of(Math.erf(0.125)) == 4594223444351794057_u64
 raise "Math.erf(0.75)" unless
