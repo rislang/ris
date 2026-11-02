@@ -1,0 +1,24 @@
+# Tuple keys order counts descending, then names ascending.
+module samples/trial/tuple_order
+
+import std/tuple
+
+def check(value : Bool) : Nil
+  raise "tuple order failed" unless value
+end
+
+check({1, "a"} < {1, "b"})
+check(!({1, "b"} < {1, "a"}))
+check({0, "z"} < {1, "a"})
+check(!({1, "a"} < {1, "a"}))
+check(Tuple.new < {1})
+check(!({1} < Tuple.new))
+check(!(Tuple.new < Tuple.new))
+check({1} < {1, 0})
+check(!({1, 0} < {1}))
+check({1_i64, "a"} < {1, "b"})
+check({ {1, 2}, "z" } < { {1, 3}, "a" })
+rows = [{"fox", 2}, {"the", 4}, {"brown", 1}, {"ant", 2}]
+rows.sort_by { |entry| {-entry[1], entry[0]} }.each do |entry|
+  puts "#{entry[0]} #{entry[1]}"
+end

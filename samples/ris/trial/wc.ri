@@ -19,9 +19,7 @@ counts = Hash(String, Int32).new
 total = count_words(text, counts)
 puts "words #{total}"
 puts "distinct #{counts.size}"
-sorted = counts.to_a.sort do |a, b|
-  a[1] == b[1] ? a[0] <=> b[0] : b[1] <=> a[1]
-end
+sorted = counts.to_a.sort_by { |entry| {-entry[1], entry[0]} }
 sorted.first(3).each do |pair|
   puts "#{pair[0]} #{pair[1]}"
 end

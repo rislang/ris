@@ -115,6 +115,16 @@ struct Tuple
     {{ T.size == U.size }}
   end
 
+  # Lexicographic order for sorting by a tuple key. Compare each shared
+  # position in both directions, then put the shorter equal prefix first.
+  def <(other : Tuple(*U)) : Bool forall U
+    {% for i in 0...(T.size < U.size ? T.size : U.size) %}
+      return true if self[{{i}}] < other[{{i}}]
+      return false if other[{{i}}] < self[{{i}}]
+    {% end %}
+    {{ T.size < U.size }}
+  end
+
   # Each member's own `===`: `when {Nil, Bool}` holds for `{nil, false}`,
   # which `==` - a class against a value - never did.
   def ===(other : Tuple(*U)) : Bool forall U

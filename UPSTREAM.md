@@ -8,6 +8,9 @@ back.
 
 ## To take to iyi
 
+* Tuple#< compares members lexicographically, then equal-prefix lengths,
+  so Array#sort_by accepts tuple keys. Gate: trial/tuple_order.ri.
+
 * IO#read_line finds its newline 8 bytes a step (`newline_from`); ris's gate
   is test/ris/read_line_words.ri. iyi's loop goes byte by byte.
 

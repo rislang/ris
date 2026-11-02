@@ -12,9 +12,10 @@ args_json_edit="data/config.json $work/out.json"
 args_ls="-l data"
 args_csv_sum="data/sales.csv"
 args_http_trial=""
+args_tuple_order=""
 
 failed=0
-for name in wc json_edit ls csv_sum http_trial; do
+for name in wc json_edit ls csv_sum http_trial tuple_order; do
   if ! "$root/bin/ris" build -o "$work/$name" "$name.ri" >"$work/log" 2>&1; then
     echo "FAILED $name: does not build"
     tail -5 "$work/log"
