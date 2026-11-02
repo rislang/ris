@@ -29,8 +29,10 @@ ris is iyi plus Goose's tape memory. These rules are for every agent.
 * It pays where much short-lived data is made and dropped together: a
   request, a parse, a render, a response. What a caller retains is copied
   to a longer-lived owner with `copy_to` (e.g. `Program.tape`); no heap.
-* Speed measurement is off for now: Goose has proven tape fast; the goal is
-  tape everywhere. Whole-project speed tests come later, not per change.
+* Goose has proven tape fast; the goal is tape everywhere. At the end of
+  each Now step (TODO.md), time the ports with ris-bench's goose-evals.sh
+  on minitest: one line per port in the commit body. A timing never fails
+  a gate; nothing is timed per change.
 * The rules: [SPEC.md](SPEC.md), ris's specification. Other languages
   are in [ris-bench](https://github.com/rislang/ris-bench), which keeps a
   copy of `samples/ris/respond.ri`: change both in one go.
