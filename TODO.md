@@ -25,6 +25,51 @@ refusal of a file at once, fix by message, rerun only that cluster's
 files; one full check.sh on minitest per finished step, not per fix.
 Fix a checker hole below only when a cluster hits it.
 
+1. First: mutual recursion loses a store root's type (jq blocker).
+   jq/ris/jqg.ri:424 and this repro refuse `b = other(d + 1)` with
+   "cannot store data made in this def": `pipe` <-> `other` both
+   reach `node`, which does `@nodes << N.new(a)` (@[OnTape] P and N).
+   RIS_DBG=1 shows `fresh-store other root=72 type=` (no type):
+   the cycle's summary drops the root's type, so `flat_field_type?`
+   and `flat_array_field?` in `refuse_fresh_store`
+   (tape_shrink_checker.cr ~2180) cannot exempt it. Passes with
+   Array(Int32), without @[OnTape], or with only `pipe -> pipe`.
+   Keep the type through the cycle (as direct recursion does); add
+   the repro as a compiler spec; check jq passes. No SPEC change.
+
+   ```
+   @[OnTape]
+   struct N
+     getter a : Int32
+     def initialize(@a : Int32 = -1)
+     end
+   end
+
+   @[OnTape]
+   struct P
+     def initialize
+       @nodes = Array(N).new(8)
+     end
+
+     def node(a : Int32) : Int32
+       @nodes << N.new(a)
+       @nodes.size - 1
+     end
+
+     def pipe(d : Int32) : Int32
+       return 0 if d > 3
+       b = other(d + 1)
+       node(b)
+     end
+
+     def other(d : Int32) : Int32
+       pipe(d)
+     end
+   end
+   p = P.new
+   puts p.pipe(0)
+   ```
+
 2. Docs to the SPEC (doc-only: no build, no check.sh). Run
    `/egm:egm-drift-report` on AGENTS.md, LEARN.md, README.md and
    UPSTREAM.md (CONTRIBUTING.md, Design checks) and fix the drift; the
