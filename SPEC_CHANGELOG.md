@@ -4,6 +4,27 @@ Every change to SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one. Entries before 2026-10-31 name the file by its old name, TAPE_SPEC.md.
 
+## 2026-11-02: 3.5 allows passed-on growing storage; 3.7 cycle stores
+
+* Was: 3.5 banned any "growing local or parameter" live at a call into
+  a cycle. Since 1.4 makes every Array a handle, that read as a ban on
+  growing a passed owner's field, the "pass scratch" 3.5 recommends.
+  Nothing said what a cycle may store: the compiler refused a literal
+  stored into self's Array under mutual recursion, not direct.
+* Now: 3.5 bans only storage the calling def owns; growing storage comes
+  from a passed-on parameter, and a back edge passing other growing
+  storage is refused at the call (Goose's pool rule). New 3.7: a cycle
+  stores a value only where every root is outside the cycle (literal,
+  program data, passed-on parameter, captured outer local); otherwise
+  refused at the store. Direct and mutual recursion are checked alike.
+* Why: jq's parser (mutual recursion) was refused at a store of a
+  literal; Goose §7.8 allows it. Depth checks (3.2) cannot tell two
+  activations of one def apart, so stores need the cycle rule. Not
+  adopted: Goose's second-tier roots and per-activation checking (its
+  future work); a `recursive` annotation (ris finds cycles itself).
+  EGM review (zoom out, comprehension, critic) asked to split the rule,
+  define the terms and give refused examples; the draft was revised.
+
 ## 2026-11-01: 2.1 an owner is a class with growing fields
 
 * Was: 2.1 made an owner an @[Owner] struct with one named binding: no

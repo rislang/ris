@@ -33,11 +33,19 @@ Fix a checker hole below only when a cluster hits it.
    below), and the jq `Node` (String `kind`/`text`, SlicePool::Run
    `args`) at goose-evaluations jq/ris/jqg.ri:424
    `return node("As", t, body, id: id)`. Passes with direct recursion
-   only (`pipe -> pipe`). `struct P` or `class P` fails alike. A
-   literal or a parameter the caller passes is not this def's scratch:
-   let the cycle's summary keep the stored value's roots as direct
-   recursion does; add both repros (String array; struct with String
-   and Run fields) as compiler specs; check jq passes. No SPEC change.
+   only (`pipe -> pipe`). Goose §7.8's cycle store rule admits a store
+   whose roots are all outside the cycle: a literal or program data, or
+   a parameter (self included) that every call back into the cycle
+   passes on as itself or a field or view of it. Let the
+   cycle's summary keep those roots as direct recursion does. A root
+   in a cycle def's own scratch (a local, an interpolation) or in a
+   parameter some back edge gives other storage stays refused.
+   Specs, with `class P` (2.1 names class owners only; drop the
+   repro's @[OnTape]): pass for the String array and for a class
+   with String and Run fields; refuse the two cases in
+   doc/drafts/spec-3.5-cycle-roots.md (a store of a parameter a back
+   edge passes scratch, at the store; a back edge passing other growing
+   storage, at the call). Check jq passes. Rules: SPEC 3.5 and 3.7 (2026-11-02).
 
    ```
    @[OnTape]

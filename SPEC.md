@@ -92,16 +92,28 @@ section; a removed one leaves its number unused.
   allocation, roots, shrink, suspension, without annotations (Goose §10).
   Unknown targets and iyimod need checked contracts. Unproved: safe form and
   chain.
-* 3.5 Recursion (Goose §7.8): no owner, growing local or parameter,
-  temporary, or result under construction outside its caller's
-  destination is live at a call into a cycle (callbacks too): pass
-  scratch. A call that is a return's whole value builds in the caller's
-  destination (1.5) and is allowed.
+* 3.5 Recursion (Goose §7.8): at a call into a cycle (a call that can
+  lead back to the caller, blocks and dispatch too; cycles come from the
+  call graph after specialization, 3.4) no owner the calling def
+  declares, growing local, temporary, or result under construction
+  outside its caller's destination is live: pass scratch in. Growing
+  storage a cycle uses comes from a passed-on parameter: one, self
+  included, that every call back into the cycle passes as itself or a
+  field or view of it; a back edge passing other growing storage is
+  refused at the call. A call that is a return's whole value builds in
+  the caller's destination (1.5) and is allowed.
 * 3.6 A scope the compiler cannot prove keeps nothing past its end is a
   compile error at the store or call that keeps it, naming the safe form
   (copy_to(owner), a parameter to write into, clear and refill, read the
   value before the loop); never a scope that silently keeps its scratch.
   Goose refuses what it cannot place the same way (§7.8).
+* 3.7 Cycle stores (Goose §7.8): a def is in its cycle for its whole
+  body; a value it makes or is passed, or one a def it calls stores, is
+  stored only where every root is outside the cycle: a literal, program
+  data, a passed-on parameter (3.5), or a captured local of an enclosing
+  def outside the cycle. A root in a cycle def's scratch, or in a
+  parameter a back edge passes other storage, is refused at the store,
+  naming the safe forms: pass the storage in, or copy_to(owner).
 ## 4. Failure, cleanup and exit (iyi III.1, III.1.4; Goose §7.9, §9.3)
 * 4.1 Errors, panics, defer and exit are iyi's: defer runs innermost first on
   normal scope exit, panic unwind and exit (the calling task's only), on current
