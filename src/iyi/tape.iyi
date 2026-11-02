@@ -215,10 +215,38 @@ struct String
     self
   end
 
+  # Eight bytes per multiply, as Goose's hash. A last part shorter than a
+  # word is read in reach of the String's own bytes: it may end just before
+  # a guard page. Hash masks the low bits, so all the input is spread there.
   def hash : Int32
-    value = -2128831035
-    each_byte { |byte| value = (value ^ byte.to_i32) &* 16777619 }
-    value
+    at = @ptr
+    left = @bytesize
+    value = 0x9E3779B97F4A7C15_u64 ^ left.unsafe_to_u64
+    while left > 8
+      value = __hash_mix(value, at.as(Pointer(UInt64)).unaligned_value)
+      at += 8
+      left -= 8
+    end
+    if @bytesize >= 8
+      last = (at + (left - 8)).as(Pointer(UInt64)).unaligned_value
+    elsif left >= 4
+      # Int32: the prelude's UInt32 has no conversions.
+      low = at.as(Pointer(Int32)).unaligned_value.unsafe_to_u64
+      high = (at + (left - 4)).as(Pointer(Int32)).unaligned_value.unsafe_to_u64
+      last = (low & 0xFFFFFFFF_u64) | high.unsafe_shl(32_u64)
+    elsif left > 0
+      last = at[0].to_u64 | (at[left // 2].to_u64.unsafe_shl(8_u64)) |
+             (at[left - 1].to_u64.unsafe_shl(16_u64))
+    else
+      last = 0_u64
+    end
+    __hash_mix(__hash_mix(value, last), 0_u64).unsafe_to_i32
+  end
+
+  @[AlwaysInline]
+  private def __hash_mix(value : UInt64, word : UInt64) : UInt64
+    mixed = (value ^ word) &* 0x9FB21C651E98DF25_u64
+    mixed ^ mixed.unsafe_shr(32_u64)
   end
 
   def ===(other : String) : Bool

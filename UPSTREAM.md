@@ -8,6 +8,10 @@ back.
 
 ## To take to iyi
 
+* String#hash: iyi's byte-wise FNV-32 now takes 8 bytes a step, reads only
+  the String's own bytes and spreads into the low bits Hash masks (ris's
+  gates: test/ris/string_hash.ri, test/ris/src/iyi/string_hash_page.ri).
+
 * std/tls: the Error implementation of TlsError.message recursed into
   itself, shadowing its formatter. Call the named formatter instead;
   check both a plain error and one carrying an alert.

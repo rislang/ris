@@ -1883,6 +1883,20 @@ else
 fi
 rm -rf "$marks"
 
+# String#hash: word-wise, in reach of its bytes, spread into the low bits.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/string_hash.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: string_hash' <<<"$out"; then
+  echo "runs     string_hash"
+else
+  echo "FAILED   string_hash: $out"; status=1
+fi
+out=$("$RIS" run test/ris/src/iyi/string_hash_page.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: string_hash_page' <<<"$out"; then
+  echo "runs     string_hash_page (ends before a guard page)"
+else
+  echo "FAILED   string_hash_page: $out"; status=1
+fi
+
 # A session reuses fixed ticket slots; take rebuilds caller-owned bytes
 # and certificates after the receiving connection's scope has ended.
 out=$(timeout 300 "$RIS" run test/ris/tls_session_tickets.ri 2>&1)

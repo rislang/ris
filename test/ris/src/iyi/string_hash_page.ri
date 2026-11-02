@@ -1,0 +1,24 @@
+# String#hash reads no byte past the String's end: each length from 0 to 40,
+# ending at the last byte before a PROT_NONE page. Under a src/iyi/ directory:
+# only the runtime's own code may view an address.
+module test/ris/src/iyi/string_hash_page
+
+lib LibHashPage
+  fun mmap(addr : Pointer(Void), size : UInt64, prot : Int32, flags : Int32, fd : Int32, offset : Int64) : Pointer(UInt8)
+  fun mprotect(addr : Pointer(UInt8), size : UInt64, prot : Int32) : Int32
+end
+
+def hash_at_page_end : Nil
+  page = 4096_u64
+  base = LibHashPage.mmap(Pointer(Void).new(0_u64), page * 2, 3, 0x22, -1, 0_i64)
+  raise "mprotect" unless LibHashPage.mprotect(base + 4096, page, 0) == 0
+  size = 0
+  while size <= 40
+    text = String.new(base + (4096 - size), size)
+    raise "page end #{size}" unless text.hash == String.new(text).hash
+    size += 1
+  end
+end
+
+hash_at_page_end
+puts "PASS: string_hash_page"

@@ -1,0 +1,51 @@
+# String#hash takes 8 bytes a step and reads no byte past the String's end.
+# Equal text hashes equal however it was made, a change at any position
+# changes the hash, and keys spread over the low bits Hash masks.
+module test/ris/string_hash
+
+base = "0123456789abcdefghij"
+size = 0
+while size <= 18
+  text = base[0, size]
+  # A view of base and a copy of it are the same text.
+  raise "copy #{size}" unless text.hash == text.copy_to(Program.tape).hash
+  at = 0
+  while at < size
+    changed = ""
+    changed << text[0, at] << "~" << text[at + 1, size - at - 1]
+    raise "same at #{at} of #{size}" if changed.hash == text.hash
+    at += 1
+  end
+  size += 1
+end
+
+raise "length" if "".hash == "\0".hash || "\0".hash == "\0\0".hash
+raise "eight zeros" if "\0\0\0\0\0\0\0\0".hash == "\0\0\0\0\0\0\0\0\0".hash
+
+# k0..k999 over 1024 bins: a good spread leaves about 383 empty and no bin
+# deep; byte-wise FNV or an unmixed word would leave far more.
+bins = Array(Int32).new(1024, 0)
+i = 0
+while i < 1000
+  key = "k#{i}"
+  bins[key.hash & 1023] += 1
+  i += 1
+end
+empty = 0
+deep = 0
+bins.each do |count|
+  empty += 1 if count == 0
+  deep = count if count > deep
+  nil
+end
+raise "spread: #{empty} empty, #{deep} deep" unless empty < 450 && deep <= 8
+
+map = {} of String => Int32
+i = 0
+while i < 1000
+  map["key#{i}".copy_to(Program.tape)] = i
+  i += 1
+end
+raise "lookup" unless map["key"+"500"] == 500 && map.first_key == "key0"
+
+puts "PASS: string_hash"

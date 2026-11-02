@@ -120,23 +120,10 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 
 At the end of each Now step, run ris-bench's `goose-evals.sh medium`
 (the goose-evaluations ports jq, json, ninja and yaml against Goose)
-and put one line per port in the step's commit body. The items below
-are taken by the maintainer for now; others time, but leave them.
+and put one line per port in the step's commit body.
 x = ris time / Goose time, median of 5 runs; lower is faster. A
 timing is a baseline and never fails a gate; nothing is timed per
-change. Gates stay structural. No item below changes SPEC.
-
-* String#hash (src/iyi/tape.iyi:218) is byte-at-a-time FNV-32. perf
-  on ninja gen-small: `Hash#find` is 34% of the run, 70% of it
-  hashing; ninja is at 1.40x. Hash 8 bytes a step like Goose
-  (doc/reference/goose/docs/stdlib.md, Hashing), never read past a
-  short String's end (it may end before a guard page), and spread
-  the result into the low bits the table masks. Hash iterates in
-  insertion order (SPEC 7.2), so programs see no change. iyi has the
-  same FNV: list it in UPSTREAM.md. Gate: std hash/Hash specs; equal
-  copies and views hash equal; strings differing in one byte at each
-  position 0-17 hash differently; keys k0..k999 spread over the low
-  bits; a String ending at a page boundary hashes without a fault.
+change. Gates stay structural.
 
 ## Language and runtime
 
