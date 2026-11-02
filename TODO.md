@@ -25,6 +25,46 @@ refusal of a file at once, fix by message, rerun only that cluster's
 files; one full check.sh on minitest per finished step, not per fix.
 Fix a checker hole below only when a cluster hits it.
 
+1. First: mutual recursion still refuses tape data in a store root
+   (jq blocker). 3b4775fb5 kept the element type, so an @[OnTape]
+   struct of Int32 fields now passes, but an element holding tape data
+   is still refused with "cannot store data made in this def" at the
+   cycle call `b = other(d + 1)`: Array(String) with a literal (repro
+   below), and the jq `Node` (String `kind`/`text`, SlicePool::Run
+   `args`) at goose-evaluations jq/ris/jqg.ri:424
+   `return node("As", t, body, id: id)`. Passes with direct recursion
+   only (`pipe -> pipe`). `struct P` or `class P` fails alike. A
+   literal or a parameter the caller passes is not this def's scratch:
+   let the cycle's summary keep the stored value's roots as direct
+   recursion does; add both repros (String array; struct with String
+   and Run fields) as compiler specs; check jq passes. No SPEC change.
+
+   ```
+   @[OnTape]
+   struct P
+     def initialize
+       @nodes = Array(String).new(8)
+     end
+
+     def node(a : String) : Int32
+       @nodes << a
+       @nodes.size - 1
+     end
+
+     def pipe(d : Int32) : Int32
+       return 0 if d > 3
+       b = other(d + 1)
+       node("x")
+     end
+
+     def other(d : Int32) : Int32
+       pipe(d)
+     end
+   end
+   p = P.new
+   puts p.pipe(0)
+   ```
+
 2. Docs to the SPEC (doc-only: no build, no check.sh). Run
    `/egm:egm-drift-report` on AGENTS.md, LEARN.md, README.md and
    UPSTREAM.md (CONTRIBUTING.md, Design checks) and fix the drift; the
