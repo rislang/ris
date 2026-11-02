@@ -1,0 +1,9 @@
+module p13b
+import lib13::{Reg13, Found13}
+r = Reg13.new
+e = r.on("-e EXT", "ending")
+found = Found13.new
+r.parse(Program.args, found)
+first = found[e]? || ""
+r.parse(Program.args, found)
+puts first

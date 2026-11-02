@@ -1,0 +1,8 @@
+module p13a
+import lib13::{Reg13, Found13}
+r = Reg13.new
+e = r.on("-e EXT", "ending")
+found = Found13.new
+r.parse(Program.args, found)
+ext = found[e]? || ".txt"
+puts ext

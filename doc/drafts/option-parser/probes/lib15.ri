@@ -1,0 +1,33 @@
+module lib15
+pub struct Flag15
+  getter index : Int32
+  def initialize(@index : Int32)
+  end
+end
+pub class Reg15
+  @names : Array(String)
+  def initialize
+    @names = [] of String
+  end
+  def on(flag : String, description : String) : Flag15
+    @names << flag.split(' ')[0]
+    Flag15.new(@names.size - 1)
+  end
+  def parse(args : Array(String), found : Array({Int32, String})) : Nil
+    found.clear
+    i = 0
+    while i + 1 < args.size
+      at = @names.index(args[i])
+      if at
+        found << {at, args[i + 1]}
+        i = i + 1
+      end
+      i = i + 1
+    end
+  end
+  def value(found : Array({Int32, String}), flag : Flag15) : String?
+    answer = nil
+    found.each { |v| answer = v[1] if v[0] == flag.index }
+    answer
+  end
+end

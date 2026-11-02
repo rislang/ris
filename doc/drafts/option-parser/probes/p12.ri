@@ -1,0 +1,14 @@
+module p12
+class Reg
+  def parse(args : Array(String)) : Nil
+    {% raise "parse(args): use parse(args, found)" %}
+  end
+
+  def parse(args : Array(String), found : Array(String)) : Nil
+    found << args[0] if args.size > 0
+  end
+end
+r = Reg.new
+found = [] of String
+r.parse(Program.args, found)
+puts found.size

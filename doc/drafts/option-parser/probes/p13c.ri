@@ -1,0 +1,6 @@
+module p13c
+import lib13::{Reg13, Found13}
+ext = ""
+r = Reg13.new
+r.on("-e EXT", "ending") { |v| ext = v }
+puts ext

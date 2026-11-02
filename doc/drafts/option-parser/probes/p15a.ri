@@ -1,0 +1,8 @@
+module p15a
+import lib15::{Reg15}
+r = Reg15.new
+e = r.on("-e EXT", "ending")
+found = [] of {Int32, String}
+r.parse(Program.args, found)
+ext = r.value(found, e) || ".txt"
+puts ext

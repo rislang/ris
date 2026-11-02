@@ -1,0 +1,5 @@
+module p16
+import lib15::{Reg15}
+r = Reg15.new
+r.on("-e EXT", "ending")
+r.parse(Program.args)

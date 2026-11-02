@@ -1,0 +1,28 @@
+module p7
+class Keep
+  @blocks : Array((String -> Nil)?)
+  def initialize
+    @blocks = [] of (String -> Nil)?
+  end
+  def on(&block : String -> Nil) : Nil
+    @blocks << block
+  end
+  def on_none : Nil
+    @blocks << nil
+  end
+  def run(args : Array(String)) : Nil
+    args.each_with_index do |a, i|
+      b = @blocks[i % @blocks.size]?
+      b.call(a) if b
+    end
+  end
+end
+verbose = false
+n = 0
+k = Keep.new
+k.on { |v| verbose = true }
+k.on_none
+k.on { |v| n = v.to_i }
+k.run(Program.args)
+puts verbose
+puts n

@@ -1,0 +1,51 @@
+module lib13
+
+pub struct Flag13
+  getter index : Int32
+  def initialize(@index : Int32)
+  end
+end
+
+pub class Found13
+  @values : Array({Int32, String})
+  def initialize
+    @values = [] of {Int32, String}
+  end
+  def add(index : Int32, value : String) : Nil
+    @values << {index, value}
+  end
+  def reset : Nil
+    @values.clear
+  end
+  def []?(flag : Flag13) : String?
+    answer = nil
+    @values.each { |v| answer = v[1] if v[0] == flag.index }
+    answer
+  end
+end
+
+pub class Reg13
+  @names : Array(String)
+  def initialize
+    @names = [] of String
+  end
+  def on(flag : String, description : String) : Flag13
+    @names << flag.split(' ')[0]
+    Flag13.new(@names.size - 1)
+  end
+  def on(flag : String, description : String, &block : String -> Nil) : Nil
+    {% raise "on with a block: a ris program reads its flags after parse" %}
+  end
+  def parse(args : Array(String), found : Found13) : Nil
+    found.reset
+    i = 0
+    while i + 1 < args.size
+      at = @names.index(args[i])
+      if at
+        found.add(at, args[i + 1])
+        i = i + 1
+      end
+      i = i + 1
+    end
+  end
+end

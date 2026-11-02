@@ -1,0 +1,10 @@
+module p2
+import std/option_parser::{OptionParser}
+verbose = false
+n = 0
+parser = OptionParser.new
+parser.on("-v", "say more") { verbose = true }
+parser.on("-n N", "count") { |v| n = v.to_i }
+parser.parse(Program.args)
+puts verbose
+puts n

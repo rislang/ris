@@ -1,0 +1,39 @@
+module p5
+# Mini parser: keeps the caller's flag text as views, answers values
+# that view args; nothing is a proc.
+class Mini
+  @names : Array(String)
+  @help : Array({String, String})
+  def initialize
+    @names = [] of String
+    @help = [] of {String, String}
+  end
+  def on(flag : String, description : String) : Nil
+    @names << flag.split(' ')[0]
+    @help << {flag, description}
+  end
+  def help(io : String::Builder) : Nil
+    @help.each { |e| io << "  " << e[0] << "  " << e[1] << "\n" }
+  end
+  def parse(args : Array(String), found : Array({String, String})) : Nil
+    i = 0
+    while i < args.size
+      a = args[i]
+      if @names.includes?(a) && i + 1 < args.size
+        found << {a, args[i + 1]}
+        i = i + 1
+      end
+      i = i + 1
+    end
+  end
+end
+ext = ""
+m = Mini.new
+m.on("-e EXT", "ending")
+found = [] of {String, String}
+m.parse(Program.args, found)
+found.each { |f| ext = f[1] if f[0] == "-e" }
+puts ext
+b = String::Builder.new
+m.help(b)
+puts b.to_s

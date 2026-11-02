@@ -1,0 +1,4 @@
+module p17b
+import lib17::{Found17}
+f = Found17.new
+f.values << {0, "x"}

@@ -1,0 +1,14 @@
+module p10
+# The stub as it ships: no flag condition, and a second def that is
+# never called, which must report nothing.
+class Reg
+  def on(flag : String, &block : String -> Nil) : Nil
+    {% raise "on with a block: read the value after parse instead" %}
+  end
+
+  def parse(args : Array(String)) : Nil
+    {% raise "parse(args): use parse(args, found)" %}
+  end
+end
+r = Reg.new
+r.on("-v") { |v| }

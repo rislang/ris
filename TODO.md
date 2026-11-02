@@ -54,7 +54,11 @@ Fix a checker hole below only when a cluster hits it.
 Trial programs (samples/ris/trial/blocked/ has the repros), most blocking
 first; samples/ris/trial/run.sh is their gate:
 
-* `OptionParser` cannot set a String option.
+* `OptionParser` cannot set a String option; in fact no ris program can
+  use it. The design passed EGM review and is ready to implement:
+  doc/drafts/option-parser/option-parser.md, its Implementation Plan
+  (two phases, each one commit with a minitest gate). Probes are in
+  doc/drafts/option-parser/probes/; the name stays `OptionParser`.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
 

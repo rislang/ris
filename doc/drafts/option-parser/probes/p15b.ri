@@ -1,0 +1,9 @@
+module p15b
+import lib15::{Reg15}
+r = Reg15.new
+e = r.on("-e EXT", "ending")
+found = [] of {Int32, String}
+r.parse(Program.args, found)
+first = r.value(found, e) || ""
+r.parse(Program.args, found)
+puts first

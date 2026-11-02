@@ -1,0 +1,7 @@
+module p1
+def each_value(args : Array(String), &) : Nil
+  args.each { |a| yield a[1, a.bytesize - 1] }
+end
+ext = ""
+each_value(Program.args) { |v| ext = v }
+puts ext

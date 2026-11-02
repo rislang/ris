@@ -1,0 +1,10 @@
+module p9
+class Reg
+  def on(flag : String, &block : String -> Nil) : Nil
+    {% if flag?(:ris_no_gc) %}
+      {% raise "on with a block: read the value after parse instead" %}
+    {% end %}
+  end
+end
+r = Reg.new
+r.on("-v") { |v| }

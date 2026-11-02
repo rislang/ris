@@ -1,0 +1,54 @@
+module lib14
+
+pub struct Flag14
+  getter index : Int32
+  def initialize(@index : Int32)
+  end
+end
+
+pub class Found14
+  @values : Array({Int32, String})
+  def initialize
+    @values = [] of {Int32, String}
+  end
+  def values : Array({Int32, String})
+    @values
+  end
+  def add(index : Int32, value : String) : Nil
+    @values << {index, value}
+  end
+  def reset : Nil
+    @values.clear
+  end
+  def []?(flag : Flag14) : String?
+    answer = nil
+    @values.each { |v| answer = v[1] if v[0] == flag.index }
+    answer
+  end
+end
+
+pub class Reg14
+  @names : Array(String)
+  def initialize
+    @names = [] of String
+  end
+  def on(flag : String, description : String) : Flag14
+    @names << flag.split(' ')[0]
+    Flag14.new(@names.size - 1)
+  end
+  def on(flag : String, description : String, &block : String -> Nil) : Nil
+    {% raise "on with a block: a ris program reads its flags after parse" %}
+  end
+  def parse(args : Array(String), found : Found14) : Nil
+    found.reset
+    i = 0
+    while i + 1 < args.size
+      at = @names.index(args[i])
+      if at
+        found.values << {at, args[i + 1]}
+        i = i + 1
+      end
+      i = i + 1
+    end
+  end
+end

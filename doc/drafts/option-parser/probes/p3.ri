@@ -1,0 +1,10 @@
+module p3
+import std/option_parser::{OptionParser}
+class Opts
+  property ext : String = ""
+end
+opts = Opts.new
+parser = OptionParser.new
+parser.on("-e EXT", "ending") { |v| opts.ext = v }
+parser.parse(Program.args)
+puts opts.ext

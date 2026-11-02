@@ -1,0 +1,5 @@
+module p4
+ext = ""
+f = ->(v : String) { ext = v; nil }
+f.call("x")
+puts ext

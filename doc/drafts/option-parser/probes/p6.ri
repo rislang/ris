@@ -1,0 +1,16 @@
+module p6
+class Keys
+  @long : Hash(String, Int32)
+  def initialize
+    @long = {} of String => Int32
+  end
+  def on(flag : String) : Nil
+    @long[flag.split(' ')[0]] = 1
+  end
+  def has?(a : String) : Bool
+    @long.has_key?(a)
+  end
+end
+k = Keys.new
+k.on("-e EXT")
+puts k.has?("-e")

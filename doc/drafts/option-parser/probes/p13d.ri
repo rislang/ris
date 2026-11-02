@@ -1,0 +1,12 @@
+module p13d
+import lib13::{Reg13, Found13}
+r = Reg13.new
+e = r.on("-e EXT", "ending")
+found = Found13.new
+3.times do |n|
+  args = [] of String
+  args << "-e"
+  args << "x#{n}"
+  r.parse(args, found)
+end
+puts found[e]?
