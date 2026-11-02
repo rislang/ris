@@ -14,9 +14,8 @@ How to work (fewer tokens, faster to the goal):
 
 ## Now: code to the new SPEC (1.1, 1.5, 1.9, 2.1, 3.2, 3.3, 3.5, 3.6)
 
-Breakage between steps is fine; no transition stages. Steps 1 and 2
-and step 4's clusters not marked "After step 1" can run in parallel
-(different files); step 3 and the marked clusters follow 1.
+Breakage between steps is fine; no transition stages. Step 2 and
+step 4's clusters can run in parallel (different files).
 
 Fewest tokens: the compiler's refusals are the list. One task per
 clone (ris1/2/3) and per cluster below; build with
@@ -24,54 +23,6 @@ clone (ris1/2/3) and per cluster below; build with
 refusal of a file at once, fix by message, rerun only that cluster's
 files; one full check.sh on minitest per finished step, not per fix.
 Fix a checker hole below only when a cluster hits it.
-
-1. First: mutual recursion still refuses tape data in a store root
-   (jq blocker). 3b4775fb5 kept the element type, so an @[OnTape]
-   struct of Int32 fields now passes, but an element holding tape data
-   is still refused with "cannot store data made in this def" at the
-   cycle call `b = other(d + 1)`: Array(String) with a literal (repro
-   below), and the jq `Node` (String `kind`/`text`, SlicePool::Run
-   `args`) at goose-evaluations jq/ris/jqg.ri:424
-   `return node("As", t, body, id: id)`. Passes with direct recursion
-   only (`pipe -> pipe`). Goose §7.8's cycle store rule admits a store
-   whose roots are all outside the cycle: a literal or program data, or
-   a parameter (self included) that every call back into the cycle
-   passes on as itself or a field or view of it. Let the
-   cycle's summary keep those roots as direct recursion does. A root
-   in a cycle def's own scratch (a local, an interpolation) or in a
-   parameter some back edge gives other storage stays refused.
-   Specs, with `class P` (2.1 names class owners only; drop the
-   repro's @[OnTape]): pass for the String array and for a class
-   with String and Run fields; refuse the two cases in
-   doc/drafts/spec-3.5-cycle-roots.md (a store of a parameter a back
-   edge passes scratch, at the store; a back edge passing other growing
-   storage, at the call). Check jq passes. Rules: SPEC 3.5 and 3.7 (2026-11-02).
-
-   ```
-   @[OnTape]
-   struct P
-     def initialize
-       @nodes = Array(String).new(8)
-     end
-
-     def node(a : String) : Int32
-       @nodes << a
-       @nodes.size - 1
-     end
-
-     def pipe(d : Int32) : Int32
-       return 0 if d > 3
-       b = other(d + 1)
-       node("x")
-     end
-
-     def other(d : Int32) : Int32
-       pipe(d)
-     end
-   end
-   p = P.new
-   puts p.pipe(0)
-   ```
 
 2. Docs to the SPEC (doc-only: no build, no check.sh). Run
    `/egm:egm-drift-report` on AGENTS.md, LEARN.md, README.md and

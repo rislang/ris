@@ -80,6 +80,23 @@ fi
 
 expect mutual_store_borrow 'cannot store data made in this def'
 
+# Roots outside a cycle pass through it; others are refused (SPEC 3.5, 3.7).
+out=$("$RIS" run test/ris/mutual_store_text.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '3' ]; then
+  echo 'runs     mutual_store_text'
+else
+  echo "FAILED   mutual_store_text: $out"; status=1
+fi
+out=$("$RIS" run test/ris/mutual_store_node.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '4' ]; then
+  echo 'runs     mutual_store_node'
+else
+  echo "FAILED   mutual_store_node: $out"; status=1
+fi
+expect cycle_store_scratch 'cannot store data made in this def'
+expect cycle_other_storage 'cannot pass other growing storage'
+expect cycle_swap_storage 'cannot pass other growing storage'
+
 # Scalar/nil union stores do not retain a callee's scratch.
 out=$("$RIS" run test/ris/plain_union_stores.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'true' ]; then

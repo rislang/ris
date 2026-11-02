@@ -334,4 +334,31 @@ describe "ris recursive store summaries" do
       puts p.pipe(0)
       CODE
   end
+
+  it "keeps a literal text store through mutual recursion" do
+    tape_compile(<<-'CODE')
+      class P
+        def initialize
+          @nodes = Array(String).new(8)
+        end
+
+        def node(a : String) : Int32
+          @nodes << a
+          @nodes.size - 1
+        end
+
+        def pipe(d : Int32) : Int32
+          return 0 if d > 3
+          b = other(d + 1)
+          node("x")
+        end
+
+        def other(d : Int32) : Int32
+          pipe(d)
+        end
+      end
+      p = P.new
+      puts p.pipe(0)
+      CODE
+  end
 end

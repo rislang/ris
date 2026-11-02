@@ -2240,7 +2240,15 @@ class Iyi::TapeShrinkChecker
               end
               @store_site = @store_sites[target.object_id]?.try &.[root]?
               begin
-                store(destinations, incoming, call_env, node, store_kind: store_kind)
+                # A marked callee refused its own scratch at the store, so
+                # what its store answers here is not fresh: a def that only
+                # forwards it (`other` in a cycle) must not read it as made.
+                kind = !@text_only && summary_marked?(target) ? 1_u8 : store_kind
+                # A cycle's summary is still being solved when it is read:
+                # an answer that replaced the slot would drop what this
+                # def stored, and the store would stay dropped (SPEC 3.7).
+                store(destinations, incoming, call_env, node,
+                  replace: !@graph.in_cycle?(target), store_kind: kind)
               ensure
                 @store_site = nil
               end

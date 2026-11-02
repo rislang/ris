@@ -1021,7 +1021,7 @@ struct TapeReader
         header!
         line_end!
       else
-        pair(@current.value, @path.value)!
+        pair(@current.value, false)!
         line_end!
       end
     end
@@ -1307,8 +1307,10 @@ struct TapeReader
   end
 
   # `key = value`, into `table`, whose header's key is `path`.
-  private def pair(table : TapeTable,
-                   path : Array(String)) : Nil | TOMLError
+  private def pair(table : TapeTable, inline : Bool) : Nil | TOMLError
+    # An inline table's keys are named from the table itself. The path is
+    # read here, not passed through the value's recursion (SPEC 3.5).
+    path = inline ? @empty_path : @path.value
     input = bytes
     input_size = size
     mark = @key_used
@@ -1862,7 +1864,6 @@ struct TapeReader
     start = pos
     self.pos = pos + 1
     table = TapeTable.new(depth, false, false, @slot_pool)
-    empty = @empty_path
     skip_blanks
     if pos < input_size && input[pos] == 125_u8
       self.pos = pos + 1
@@ -1878,7 +1879,7 @@ struct TapeReader
       if input[pos] == 125_u8
         return fail("a comma after the last pair of an inline table", pos)
       end
-      pair(table, empty)!
+      pair(table, true)!
       skip_blanks
       return fail("an inline table that does not close", start) if pos >= input_size
       b = input[pos]

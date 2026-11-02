@@ -348,6 +348,18 @@ class Iyi::TapeCallGraph
     @edges[from]?.try &.each { |id| collect_reachable(id, seen) }
   end
 
+  # Whether *target* is *owner* or can call back into it.
+  def reaches?(target : Def, owner : Def) : Bool
+    target.same?(owner) ||
+      @reachable[target.object_id]?.try(&.includes?(owner.object_id)) == true
+  end
+
+  def in_cycle?(target : Def) : Bool
+    @edges[target.object_id]?.try(&.any? { |id|
+      id == target.object_id || @reachable[id]?.try(&.includes?(target.object_id)) == true
+    }) == true
+  end
+
   def cycle?(owner : Def, call : Call) : Bool
     targets(call).try(&.any? do |target|
       target.same?(owner) ||

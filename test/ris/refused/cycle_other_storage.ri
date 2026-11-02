@@ -1,0 +1,19 @@
+# SPEC 3.5: a back edge passes growing storage that is not the parameter.
+class P
+  def initialize
+    @nodes = Array(String).new(8)
+    @other = Array(String).new(8)
+  end
+
+  def fill(dest : Array(String), d : Int32) : Int32
+    dest << "x"
+    return 0 if d > 3
+    fill(@other, d + 1)
+  end
+
+  def go : Int32
+    fill(@nodes, 0)
+  end
+end
+p = P.new
+puts p.go

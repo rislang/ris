@@ -1,0 +1,35 @@
+# jq's shape: a class owner of nodes holding String and SlicePool::Run
+# fields, stored through mutual recursion (SPEC 3.5, 3.7).
+@[OnTape]
+struct Node
+  getter kind : String
+  getter args : SlicePool::Run(Int32)
+
+  def initialize(@kind : String, @args : SlicePool::Run(Int32))
+  end
+end
+
+class P
+  def initialize
+    @nodes = Array(Node).new(8)
+    @runs = SlicePool(Int32).new(8)
+  end
+
+  def node(kind : String, id : Int32) : Int32
+    run = @runs.alloc_slice(1)
+    @nodes << Node.new(kind, run)
+    id
+  end
+
+  def pipe(d : Int32) : Int32
+    return 0 if d > 3
+    body = other(d + 1)
+    node("As", body + 1)
+  end
+
+  def other(d : Int32) : Int32
+    pipe(d)
+  end
+end
+p = P.new
+puts p.pipe(0)

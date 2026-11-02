@@ -1,0 +1,19 @@
+# SPEC 3.5: a back edge swaps two growing parameters.
+class P
+  def initialize
+    @nodes = Array(String).new(8)
+    @other = Array(String).new(8)
+  end
+
+  def fill(a : Array(String), b : Array(String), d : Int32) : Int32
+    a << "x"
+    return 0 if d > 3
+    fill(b, a, d + 1)
+  end
+
+  def go : Int32
+    fill(@nodes, @other, 0)
+  end
+end
+p = P.new
+puts p.go

@@ -1,0 +1,15 @@
+# SPEC 3.7: t may be a back edge's scratch, so storing it is refused.
+class P
+  def initialize
+    @nodes = Array(String).new(8)
+  end
+
+  def walk(t : String, d : Int32) : Int32
+    @nodes << t
+    return 0 if d > 3
+    s = "#{t}/#{d}"
+    walk(s, d + 1)
+  end
+end
+p = P.new
+puts p.walk("root", 0)
