@@ -70,6 +70,18 @@ class File
   end
 
   def self.read(path : String) : String
+    read_with(path) { |io, size| io.read_all(size) }
+  end
+
+  # The file on *owner*'s tape: `File.read(path).copy_to(owner)` without the
+  # file twice in memory. The compiler's rules for `copy_to` hold, by name:
+  # the result lives on the owner and a thread rules out the program tape.
+  # The reader stays on the caller's tape.
+  def self.copy_to(owner : Program::TapeOwner, path : String) : String
+    read_with(path) { |io, size| owner.run { io.read_all(size) } }
+  end
+
+  private def self.read_with(path : String, & : IyiIO, Int64 -> String) : String
     fd = __iyi_open_read(c_path(path))
     if fd < 0_i64
       # POSIX opens a directory and fails at the read, which is where the
@@ -85,7 +97,7 @@ class File
     end
     io = IyiIO.new(fd, 4096, false)
     defer io.close
-    text = io.read_all(size_of(fd))
+    text = yield io, size_of(fd)
     raise "cannot read #{path}: it is a directory, or the read failed" if io.read_failed?
     text
   end

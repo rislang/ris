@@ -1,0 +1,51 @@
+# File.copy_to(Program.tape, path) puts the file on the program tape in one
+# go: a class keeps views of the text, in a def as well, and the file is in
+# memory once.
+module test/ris/file_copy_to
+
+class Keeper
+  getter kept : Array(String)
+
+  def initialize
+    @kept = Array(String).new
+  end
+
+  def keep(text : String) : Nil
+    at = 0
+    while at + 4 <= text.bytesize
+      @kept << text[at, 4]
+      at += 4096
+    end
+  end
+end
+
+def load(keeper : Keeper, path : String) : String
+  text = File.copy_to(Program.tape, path)
+  keeper.keep(text)
+  text
+end
+
+def peak_kb : Int64
+  status = File.read("/proc/self/status")
+  at = (status.index("VmHWM:") || 0) + 6
+  while status[at] == 32_u8 || status[at] == 9_u8
+    at += 1
+  end
+  value = 0_i64
+  while status[at] >= 48_u8 && status[at] <= 57_u8
+    value = value * 10 + (status[at] - 48_u8).to_i64
+    at += 1
+  end
+  value
+end
+
+path = Program.arguments[0]
+size_kb = 16 * 1024
+before = peak_kb
+keeper = Keeper.new
+text = load(keeper, path)
+raise "size" unless text.bytesize == size_kb * 1024
+raise "kept" unless keeper.kept.size == 4096 && keeper.kept[5] == "abcd"
+grown = peak_kb - before
+raise "file in memory twice: #{grown} KB" if grown > size_kb + size_kb // 2
+puts "PASS: file_copy_to"

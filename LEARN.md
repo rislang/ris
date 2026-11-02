@@ -55,8 +55,10 @@ end
   read-only; `s << x` on a local or field grows it in place. `Array(T)`,
   `Hash`, `RisTree(T)`, `@[OnTape]` structs and classes hold the rest, all on
   the tape: no heap, no GC. `copy_to(owner)` copies what must outlive its
-  scope (`Program.tape`). A nested `tape` shares it. Every def, loop round
-  and block frees its temporaries when it ends; keeping one past its end is
+  scope (`Program.tape`); `File.copy_to(Program.tape, path)` reads a kept
+  file there without a second copy. A nested `tape` shares it. Every def,
+  loop round and block frees its temporaries when it ends; keeping one past
+  its end is
   a compile error naming the safe form (SPEC 1.1, 3.6).
 * A def's result is built in its caller's scope: end the def with the call,
   grow a local and return it, or append to a parameter (SPEC 1.5, 1.9).

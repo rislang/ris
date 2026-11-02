@@ -1,0 +1,2 @@
+IyiThread.start { nil }.join
+puts File.copy_to(Program.tape, "/proc/self/stat").bytesize

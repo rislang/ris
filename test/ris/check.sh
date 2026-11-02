@@ -1897,6 +1897,27 @@ else
   echo "FAILED   string_hash_page: $out"; status=1
 fi
 
+# File.copy_to reads straight onto the owner: views of it stay, the file is
+# in memory once, and a thread rules out the program tape as copy_to does.
+out=$(dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT
+  python3 -c "open('$dir/f','wb').write(b'abcd'*(4*1024*1024))"
+  "$RIS" run test/ris/file_copy_to.ri -- "$dir/f" 2>&1)
+if [ "$?" -eq 0 ] && grep -qxF 'PASS: file_copy_to' <<<"$out"; then
+  echo "runs     file_copy_to"
+else
+  echo "FAILED   file_copy_to: $out"; status=1
+fi
+
+out=$("$RIS" run test/ris/file_copy_to.ri -- /nonexistent/copy_to 2>&1)
+if [ "$?" -ne 0 ] && grep -qF 'cannot read /nonexistent/copy_to' <<<"$out"; then
+  echo "runs     file_copy_to (a missing file)"
+else
+  echo "FAILED   file_copy_to (a missing file): $out"; status=1
+fi
+
+expect file_copy_to_threads \
+  'program tape writes require a single kernel thread'
+
 # A session reuses fixed ticket slots; take rebuilds caller-owned bytes
 # and certificates after the receiving connection's scope has ended.
 out=$(timeout 300 "$RIS" run test/ris/tls_session_tickets.ri 2>&1)
