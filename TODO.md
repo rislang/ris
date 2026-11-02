@@ -28,14 +28,21 @@ Fix a checker hole below only when a cluster hits it.
    default is refused at the call with "cannot store data made in this
    def" when the callee stores it; the same value written as an
    argument passes. `text : String = ""` with `node("As", b)` fails,
-   `node("As", b, "")` passes; likewise `v : C = C.new` and
+   `node("As", b, "")` passes; likewise `value : Cell = Cell.new`
+   (Cell is a plain value struct, no tape fields) and
    `args : SlicePool::Run(Int32) = @arguments.alloc_slice(0)` (a run
    of self's pool). A literal is outside the cycle (SPEC 3.7): give a
-   default the roots its expression has, as if written at the call.
+   default the roots its expression has, as if written at the call
+   (Goose §7.1: a default is checked as the argument written in its
+   place). `@ivar` in a default is the receiver's field: its root is
+   the receiver (`self`, or `other` in `other.node(...)`).
    goose-evaluations jq/ris/jqg.ri:424 `return node("As", t, body,
    id: id)` hits it for all three defaults. Add the repro as a
-   compiler spec (also with the C.new and alloc_slice defaults);
-   check jq passes. No SPEC change.
+   compiler spec (also with the value-struct and alloc_slice
+   defaults); check jq passes. No SPEC change.
+   Keep refused: a class default `v : C = C.new` builds C in the cycle
+   def's scratch, refused as when written at the call (SPEC 3.7); add
+   it as a refusal spec.
 
    ```
    @[OnTape]
