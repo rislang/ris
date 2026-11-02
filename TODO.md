@@ -57,7 +57,11 @@ first; samples/ris/trial/run.sh is their gate:
 
 * `OptionParser` cannot set a String option.
 
-* bench/std_json_exercise.iyi has 2 lines on JSON's old API.
+* bench/std_json_exercise.iyi is far behind, not 2 lines: Hash and
+  nested from_json, derive on non-pub types (`::{{@type}}`), a Hash
+  field in a derive (SPEC 2.2), Any#dig? and read_value refused by
+  SPEC 1.9, write_value's key check by SPEC 1.1, round data stored in
+  outer arrays. A partial port: ~/patches/ris1-std_json_exercise_partial.patch.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
 
