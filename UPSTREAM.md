@@ -144,10 +144,9 @@ back.
   Ruby's symbols, `iyiNamedArgument`, with its tests.
 * std/aead `seal_at`/`open_at` and std/tls records opened and sealed in
   place (`TlsRecordCipher#seal_at`, `#open_at`): no tape, nothing per record.
-* CI differs from iyi's here, for a faster run (99 minutes was darwin's
-  job): darwin's std foundation is a job of its own, the cursor sweep
-  (`lsp_positions.py --shard K/N`) four shards, and the Linux and Windows
-  std siblings eight; take to iyi, or keep apart when merging iyi.yml.
+* CI is ris's own: `.github/workflows/ris.yml` builds from a clean checkout
+  and runs ris's gates on Linux only. iyi's `iyi.yml` is not kept: when
+  merging iyi, drop its workflow changes.
 * Fixed lookup tables in time, cookies, DNS, MIME, system roots,
   compression, HPACK, JSON and TLS use static storage; `StaticArray#find`
   reads it without an Array copy.

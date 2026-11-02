@@ -50,6 +50,10 @@ For compiler or inherited runtime changes, run the relevant Crystal specs;
 broader suites. Check formatting of changed Crystal files with
 `./bin/crystal tool format --check PATH`.
 
+CI (`.github/workflows/ris.yml`) builds ris from a clean checkout with
+Crystal 1.21 and LLVM 23, then runs `test/ris/check.sh` on x86_64 and aarch64
+and `make std_spec`.
+
 ## Design and review
 
 * Library APIs work on the caller's tape: take `String`, return tape views,

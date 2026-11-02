@@ -1,6 +1,6 @@
-# std/debug's walk where this repository's own gate cannot run it: CI
+# std/debug's walk where this repository's own gate cannot run it: iyi's CI
 # cross-compiles this for aarch64 and for musl and runs it in its
-# cross-run job (`.github/workflows/iyi.yml`), where the trace must name
+# cross-run job (iyi's `.github/workflows/iyi.yml`), where the trace must name
 # gamma at the raise, line 15, then beta and alpha at their calls, lines
 # 20 and 24. The x86-64 glibc arm is bench/std_debug_exercise.sh's.
 #

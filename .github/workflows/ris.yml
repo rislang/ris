@@ -1,157 +1,141 @@
-# ris: the release tarballs, built with a static LLVM so they need no
-# Crystal and no LLVM where they land. iyi.yml stays iyi's, so iyi merges.
-#
-# Every run builds and proves the tarballs; a `ris-v*` tag also publishes
-# them, with SHA256SUMS, as the release `install_ris.sh` installs from.
-name: ris release
+name: ris
 
+# ris's gates: the compiler built from a clean checkout, test/ris/check.sh on
+# the two targets ris programs have (SPEC 7.1), and the library's specs.
+#
+# Never upload or restore .build/crystal here. bin/crystal prefers it to the
+# Crystal on PATH, and a compiler built from this source has String as a
+# struct, so it cannot build the compiler again. `make ris` goes straight from
+# the image's Crystal to .build/iyi.
 on:
   push:
-    tags: ["ris-v*"]
+    branches: [main]
+    tags: ["editor-v*"]
+  pull_request:
   workflow_dispatch:
+
+# git refuses a workspace another user owns; a container job's is one.
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: safe.directory
+  GIT_CONFIG_VALUE_0: "*"
+  LLVM_CONFIG: llvm-config-23
 
 permissions: {}
 
+# A new push replaces a pull request's run, but every commit on main is judged.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
-  linux:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
     container:
       image: crystallang/crystal:1.21.0-build
-    name: "The ris tarball, linux x86-64"
+      # check.sh serves many sockets. The stack is for the compiler: its tape
+      # checkers recurse past 8 MB on test/ris/std_small_tape.ri.
+      options: >-
+        --ulimit nofile=65536:65536
+        --ulimit stack=67108864:67108864
+    name: "check.sh, ${{ matrix.arch }}"
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-
-      - name: Restore the static LLVM
-        id: llvm-cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/llvm-static
-          key: llvm-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-static-llvm.sh') }}
-      - name: Build the static LLVM (cache miss)
-        if: steps.llvm-cache.outputs.cache-hit != 'true'
-        run: |
-          apt-get update -qq && apt-get install -y -qq cmake curl xz-utils > /dev/null
-          bash scripts/build-static-llvm.sh /tmp/llvm-static
-
-      - name: Build ris and package it
-        run: make ris-tarball LLVM_CONFIG=/tmp/llvm-static/bin/llvm-config
-
-      - name: Stage the tarball
-        run: mkdir -p dist && cp .build/ris-*-linux-*.tar.gz dist/
-
-      - uses: actions/upload-artifact@v5
-        with:
-          name: ris-linux-x86_64
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
-
-  clean-room:
-    needs: linux
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    name: "install_ris.sh, on a machine with only gcc"
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@v5
-        with:
-          name: ris-linux-x86_64
-          path: dist/
-
-      - name: The tarball names nothing it does not carry
-        run: |
-          mkdir -p room && tar -xzf dist/*.tar.gz -C room
-          bash scripts/bundle-runtime-libs.sh room --verify-only
-
-      - name: Install it in a bare image, then hello world
-        run: |
-          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
-          docker run --rm -v "$PWD:/src" ubuntu:26.04 sh -c '
-            set -e
-            apt-get update -qq
-            apt-get install -y -qq gcc curl ca-certificates > /dev/null
-            RIS_RELEASE_URL=file:///src/dist sh /src/install_ris.sh
-            export PATH="$HOME/.local/bin:$PATH"
-            ris version
-            ris init hello "$HOME/hello"
-            cd "$HOME/hello"
-            ris run hello.ri
-            ris run "$HOME/.local/lib/ris/share/ris/samples/hello.ri"
-          '
-
-  darwin:
-    runs-on: macos-14
-    timeout-minutes: 180
-    name: "The ris tarball, darwin arm64"
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Install the bootstrap toolchain
-        run: |
-          brew install crystal coreutils pkgconf
-          echo "$(brew --prefix)/opt/coreutils/libexec/gnubin" >> "$GITHUB_PATH"
-
-      - name: Restore the static LLVM
-        id: llvm-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/llvm-static
-          key: llvm-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-static-llvm.sh') }}
-      - name: Build the static LLVM (cache miss)
-        if: steps.llvm-cache.outputs.cache-hit != 'true'
-        run: bash scripts/build-static-llvm.sh "$HOME/llvm-static"
-
-      - name: Build ris and package it
-        run: make ris-tarball LLVM_CONFIG="$HOME/llvm-static/bin/llvm-config"
-
-      - name: install_ris.sh, then hello world
-        run: |
-          mkdir -p dist && cp .build/ris-*-darwin-*.tar.gz dist/
-          (cd dist && shasum -a 256 *.tar.gz > SHA256SUMS)
-          RIS_RELEASE_URL="file://$PWD/dist" RIS_PREFIX="$RUNNER_TEMP/r" \
-            sh install_ris.sh
-          cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/r/bin/ris" init hello "$RUNNER_TEMP/hello"
-          cd "$RUNNER_TEMP/hello" && "$RUNNER_TEMP/r/bin/ris" run hello.ri
-          rm "$GITHUB_WORKSPACE/dist/SHA256SUMS"
-
-      - uses: actions/upload-artifact@v5
-        with:
-          name: ris-darwin-arm64
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/ris-v')
-    needs: [clean-room, darwin]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v5
-        with:
-          name: ris-linux-x86_64
-          path: dist/
-      - uses: actions/download-artifact@v5
-        with:
-          name: ris-darwin-arm64
-          path: dist/
-      - name: Create the release from the proven tarballs
+      - name: LLVM 23 and the checks' tools
+        run: bash .github/ci-setup.sh
+      - name: Build ris
+        run: make ris
+      - name: The respond sample runs
+        run: ./bin/ris run samples/ris/respond.ri
+      - name: test/ris/check.sh
+        run: bash test/ris/check.sh
         env:
-          GH_TOKEN: ${{ github.token }}
+          RIS_CHECK_TIMEOUT: "600"
+
+  # The compiler is still a Crystal program built with this library.
+  std-spec:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    container:
+      image: crystallang/crystal:1.21.0-build
+    name: "The library's specs"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: LLVM 23 and the checks' tools
+        run: bash .github/ci-setup.sh
+      - name: make std_spec
+        run: make std_spec
+
+  vscode:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    name: "The VS Code client packages, and a tag publishes it"
+    # A step's `if` cannot read the `secrets` context, and the job's `env`
+    # can: that is what lets a registry whose token is not set yet be
+    # skipped instead of failing the tag that publishes to the other one.
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Package the extension
+        working-directory: editors/vscode
         run: |
-          tag="${GITHUB_REF_NAME}"
-          (cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS)
-          gh release create "$tag" --title "ris ${tag#ris-v}" --latest \
-            --notes "ris ${tag#ris-v}: install with install_ris.sh (README.md)." \
-            dist/*.tar.gz dist/SHA256SUMS
+          npm ci
+          npx --yes @vscode/vsce package
+
+      # A tag that disagrees with the manifest publishes the wrong version
+      # under the right name, and the Marketplace keeps what it is given.
+      - name: The tag names the version the manifest carries
+        if: startsWith(github.ref, 'refs/tags/editor-v')
+        working-directory: editors/vscode
+        run: |
+          manifest=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#editor-v}"
+          [ "$manifest" = "$tag" ] || {
+            echo "package.json says $manifest, the tag says $tag"
+            exit 1
+          }
+
+      # `--packagePath` publishes the file the step above built and CI
+      # already looked at, rather than packaging a second time.
+      - name: Publish to the Visual Studio Marketplace
+        if: startsWith(github.ref, 'refs/tags/editor-v') && env.VSCE_PAT != ''
+        working-directory: editors/vscode
+        run: |
+          npx --yes @vscode/vsce publish \
+            --packagePath "iyi-${GITHUB_REF_NAME#editor-v}.vsix"
+
+      # The same file, to the registry every VS Code fork reads. `ovsx`
+      # takes the token from OVSX_PAT, and the namespace must exist first:
+      # `npx ovsx create-namespace iyilang`, once.
+      - name: Publish to Open VSX
+        if: startsWith(github.ref, 'refs/tags/editor-v') && env.OVSX_PAT != ''
+        working-directory: editors/vscode
+        run: npx --yes ovsx publish "iyi-${GITHUB_REF_NAME#editor-v}.vsix"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: iyi-vscode
+          path: editors/vscode/*.vsix
+          retention-days: 7

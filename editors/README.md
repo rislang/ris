@@ -43,7 +43,7 @@ For hacking on it, open `editors/vscode` in VS Code and press F5.
 ### Publishing it
 
 A release is a tag, like every other release here: push `editor-v<version>`
-and the `vscode` job in [`.github/workflows/iyi.yml`](../.github/workflows/iyi.yml)
+and the `vscode` job in [`.github/workflows/ris.yml`](../.github/workflows/ris.yml)
 packages the manifest it finds and sends that one `.vsix` to both
 registries, with the `VSCE_PAT` and `OVSX_PAT` secrets. Either step is
 skipped when its token is not set, so a tag publishes wherever it can. The
