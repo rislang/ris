@@ -3130,7 +3130,7 @@ pub struct DocumentParser
 
   def parse : Nil
     return fail("empty JSON input", 1, 1) if token.kind == TokenKind::EOF
-    parse_value(0, 0, 0)
+    parse_values
     return unless @error.nil?
     fail("unexpected #{token_text} after JSON root value") unless token.kind == TokenKind::EOF
   end
@@ -3159,9 +3159,143 @@ pub struct DocumentParser
     @lexer.next_token(@input)
   end
 
-  # The value at the current token, in its object under the key at
+  # The document, read without recursion: a container opened goes on
+  # `@open`, its tree node, and `@counts`, an object's keys so far or -1
+  # for an array. A recursive reader took 3.5 KB of a plain build's stack
+  # a level, and a task (256 KB) died of a stack overflow at 128 levels.
+  private def parse_values : Nil
+    @open.clear
+    @counts.clear
+    flags = 0
+    key_at = 0
+    key_size = 0
+    while true
+      kind = token.kind
+      if kind == TokenKind::BeginArray || kind == TokenKind::BeginObject
+        return unless nest
+        array = kind == TokenKind::BeginArray
+        kind_value = array ? Document::Kind::Array.value : Document::Kind::Object.value
+        @open << @tree.open(Node.new(kind_value | flags, key_at, key_size, 0_i64))
+        @counts << (array ? -1 : 0)
+        @lexer.next_token(@input) # '[' or '{'
+        if token.kind == (array ? TokenKind::EndArray : TokenKind::EndObject)
+          @lexer.next_token(@input)
+          close_container
+        else
+          flags = 0
+          key_at = 0
+          key_size = 0
+          unless array
+            return unless object_key
+            flags = @key_flags
+            key_at = @key_at
+            key_size = @key_size
+          end
+          next
+        end
+      else
+        parse_scalar(flags, key_at, key_size)
+        return unless @error.nil?
+      end
+      # A value is complete: go on in the containers it closes.
+      while true
+        return if @open.empty?
+        array = @counts[@counts.size - 1] < 0
+        if token.kind == TokenKind::Comma
+          comma_line = token.line_number
+          comma_col = token.column_number
+          @lexer.next_token(@input)
+          if array
+            return fail("trailing comma in array", comma_line, comma_col) if token.kind == TokenKind::EndArray
+            flags = 0
+            key_at = 0
+            key_size = 0
+          else
+            return fail("trailing comma in object", comma_line, comma_col) if token.kind == TokenKind::EndObject
+            return unless object_key
+            flags = @key_flags
+            key_at = @key_at
+            key_size = @key_size
+          end
+          break
+        elsif token.kind == (array ? TokenKind::EndArray : TokenKind::EndObject)
+          @lexer.next_token(@input)
+          close_container
+        else
+          return fail(array ? "expected ',' or ']' in array" : "expected ',' or '}' in object")
+        end
+      end
+    end
+  end
+
+  # The containers being read, innermost last; refilled by each parse.
+  @open : Array(Int32) = Array(Int32).new(MAX_NESTING + 1)
+  @counts : Array(Int32) = Array(Int32).new(MAX_NESTING + 1)
+  # The key `object_key` read, for the value after it.
+  @key_flags : Int32 = 0
+  @key_at : Int32 = 0
+  @key_size : Int32 = 0
+
+  private def close_container : Nil
+    @tree.close(@open.pop)
+    @counts.pop
+    @nesting = @nesting - 1
+  end
+
+  # The key at the current token in the innermost object, refused if the
+  # object has it already, and the ':' after it; false when refused.
+  private def object_key : Bool
+    fail("expected string key in object") unless token.kind == TokenKind::String
+    return false unless @error.nil?
+    at = @open[@open.size - 1]
+    count = @counts[@counts.size - 1]
+    name_at = token.raw_start
+    name_size = token.raw_size
+    name_flags = 0
+    if token.escaped
+      name_flags = Node::ESCAPED_KEY
+      name_at = @decoded.bytesize
+      name_size = decode(token.raw_start, name_size)
+    end
+    # Past this many keys, the object's are looked up by a hash of their
+    # text in the parser's own table rather than compared one by one; a
+    # hash seen before is checked by comparing.
+    if count >= 32
+      h = key_hash(at, name_at, name_size, name_flags)
+      if @key_hashes.has_key?(h) && duplicate?(at, name_at, name_size, name_flags)
+        fail("duplicate key '#{key_s(name_at, name_size, name_flags)}'")
+        return false
+      end
+      @key_hashes[h] = true
+    else
+      if duplicate?(at, name_at, name_size, name_flags)
+        fail("duplicate key '#{key_s(name_at, name_size, name_flags)}'")
+        return false
+      end
+      if count == 31
+        child = at + 1
+        while child < @tree.size
+          node = @tree[child]
+          @key_hashes[key_hash(at, node.key_at, node.key_size, node.flags)] = true
+          child = @tree.stop(child)
+        end
+        @key_hashes[key_hash(at, name_at, name_size, name_flags)] = true
+      end
+    end
+    @counts[@counts.size - 1] = count + 1
+    @lexer.next_token(@input) # the key
+    fail("expected ':' after object key") unless token.kind == TokenKind::Colon
+    return false unless @error.nil?
+    @lexer.next_token(@input) # ':'
+    @key_flags = name_flags
+    @key_at = name_at
+    @key_size = name_size
+    true
+  end
+
+  # The scalar at the current token, in its object under the key at
   # *key_at* (*flags* saying whether it holds an escape).
-  private def parse_value(flags : Int32, key_at : Int32, key_size : Int32) : Nil
+  private def parse_scalar(flags : Int32, key_at : Int32, key_size : Int32) : Nil
     case token.kind
     when TokenKind::Null
       leaf(Document::Kind::Null, flags, key_at, key_size, 0_i64)
@@ -3185,10 +3319,6 @@ pub struct DocumentParser
         size = decode(token.raw_start, size)
       end
       leaf(Document::Kind::String, flags, key_at, key_size, (at.to_i64 << 32) | size.to_i64)
-    when TokenKind::BeginArray
-      parse_array(flags, key_at, key_size)
-    when TokenKind::BeginObject
-      parse_object(flags, key_at, key_size)
     else
       fail("unexpected #{token_text}")
     end
@@ -3206,95 +3336,6 @@ pub struct DocumentParser
     return true if @nesting <= MAX_NESTING
     fail("nesting depth of #{@nesting} exceeds maximum depth #{MAX_NESTING}")
     false
-  end
-
-  private def parse_array(flags : Int32, key_at : Int32, key_size : Int32) : Nil
-    return unless nest
-    at = @tree.open(Node.new(Document::Kind::Array.value | flags, key_at, key_size, 0_i64))
-    @lexer.next_token(@input) # '['
-    if token.kind == TokenKind::EndArray
-      @lexer.next_token(@input)
-    else
-      while true
-        parse_value(0, 0, 0)
-        return unless @error.nil?
-        if token.kind == TokenKind::Comma
-          comma_line = token.line_number
-          comma_col = token.column_number
-          @lexer.next_token(@input)
-          return fail("trailing comma in array", comma_line, comma_col) if token.kind == TokenKind::EndArray
-        elsif token.kind == TokenKind::EndArray
-          @lexer.next_token(@input)
-          break
-        else
-          return fail("expected ',' or ']' in array")
-        end
-      end
-    end
-    @tree.close(at)
-    @nesting = @nesting - 1
-  end
-
-  private def parse_object(flags : Int32, key_at : Int32, key_size : Int32) : Nil
-    return unless nest
-    at = @tree.open(Node.new(Document::Kind::Object.value | flags, key_at, key_size, 0_i64))
-    @lexer.next_token(@input) # '{'
-    # Past this many keys, the object's are looked up by a hash of their
-    # text in the parser's own table rather than compared one by one; a
-    # hash seen before is checked by comparing.
-    count = 0
-    if token.kind == TokenKind::EndObject
-      @lexer.next_token(@input)
-    else
-      while true
-        return fail("expected string key in object") unless token.kind == TokenKind::String
-        name_at = token.raw_start
-        name_size = token.raw_size
-        name_flags = 0
-        if token.escaped
-          name_flags = Node::ESCAPED_KEY
-          name_at = @decoded.bytesize
-          name_size = decode(token.raw_start, name_size)
-        end
-        if count >= 32
-          h = key_hash(at, name_at, name_size, name_flags)
-          if @key_hashes.has_key?(h) && duplicate?(at, name_at, name_size, name_flags)
-            return fail("duplicate key '#{key_s(name_at, name_size, name_flags)}'")
-          end
-          @key_hashes[h] = true
-        else
-          return fail("duplicate key '#{key_s(name_at, name_size, name_flags)}'") if duplicate?(at, name_at, name_size, name_flags)
-          if count == 31
-            child = at + 1
-            while child < @tree.size
-              node = @tree[child]
-              @key_hashes[key_hash(at, node.key_at, node.key_size, node.flags)] = true
-              child = @tree.stop(child)
-            end
-            @key_hashes[key_hash(at, name_at, name_size, name_flags)] = true
-          end
-        end
-        count = count + 1
-        @lexer.next_token(@input) # the key
-        return fail("expected ':' after object key") unless token.kind == TokenKind::Colon
-        @lexer.next_token(@input) # ':'
-        parse_value(name_flags, name_at, name_size)
-        return unless @error.nil?
-        if token.kind == TokenKind::Comma
-          comma_line = token.line_number
-          comma_col = token.column_number
-          @lexer.next_token(@input)
-          return fail("trailing comma in object", comma_line, comma_col) if token.kind == TokenKind::EndObject
-        elsif token.kind == TokenKind::EndObject
-          @lexer.next_token(@input)
-          break
-        else
-          return fail("expected ',' or '}' in object")
-        end
-      end
-    end
-    @tree.close(at)
-    @nesting = @nesting - 1
   end
 
   # The key at *at*, in the decoded text if it held an escape.
