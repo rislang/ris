@@ -111,8 +111,9 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 ## Speed
 
 At the end of each Now step, run ris-bench's `goose-evals.sh medium`
-on minitest (the goose-evaluations ports jq, json, ninja and yaml
-against Goose) and put one line per port in the step's commit body.
+(the goose-evaluations ports jq, json, ninja and yaml against Goose)
+and put one line per port in the step's commit body. The items below
+are taken by the maintainer for now; others time, but leave them.
 x = ris time / Goose time, median of 5 runs; lower is faster. A
 timing is a baseline and never fails a gate; nothing is timed per
 change. Gates stay structural. No item below changes SPEC.

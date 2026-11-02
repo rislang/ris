@@ -27,9 +27,12 @@ Run the relevant program or spec first. For tape rules, add an accepted
 example in `test/ris/` and a rejected example in `test/ris/refused/` when
 applicable; each refusal must name the safe replacement.
 
-Run larger builds and test suites on the `minitest` server. The helper
-sends tracked and unignored files to an isolated source snapshot, builds
-with LLVM 23 and keeps the build and test logs on the server:
+`minitest` is the maintainers' build server (32 cores, LLVM 23),
+reached as `ssh minitest`. Without access, run the same builds and
+suites locally. With it, run larger builds and test suites there. The
+helper sends tracked and unignored files to an isolated source
+snapshot, builds with LLVM 23 and keeps the build and test logs on the
+server:
 
 ```sh
 bin/minitest-check build
