@@ -1,0 +1,6 @@
+region,item,amount
+north,apple,10
+south,pear,5
+north,pear,7
+east,apple,3
+south,apple,20

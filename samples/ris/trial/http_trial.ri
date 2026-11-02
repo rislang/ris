@@ -1,0 +1,68 @@
+# A plain HTTP server with two routes and a client request against it.
+module samples/trial/http_trial
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Incoming, Outgoing}
+
+struct Settings
+  getter port : Int32
+  def initialize(@port)
+  end
+end
+
+struct Ready
+end
+
+struct Handler
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.header("Content-Type", "text/plain")
+    case req.path
+    when "/hello"
+      res.body << "hello"
+    when "/time"
+      res.body << "noon"
+    else
+      res.status = 404
+      res.body << "not found"
+    end
+  end
+end
+
+# HTTP.get's body comes back empty (blocked/http_get_empty_body.ri), so the
+# client is a socket: it prints the answer's status line and its body.
+def show(port : Int32, path : String) : Nil
+  client = IyiSocket.connect("127.0.0.1", port).or_panic
+  client.write("GET #{path} HTTP/1.1\r\nHost: x\r\n" \
+    "Connection: close\r\n\r\n").or_panic
+  answer = String::Builder.new
+  while client.read(answer, 4096).or_panic > 0
+  end
+  client.close
+  text = answer.to_s
+  puts text[0, text.index("\r\n") || 0]
+  puts text[(text.index("\r\n\r\n") || 0) + 4..]
+end
+
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
+RisBoard.post(Settings.new(port))
+group do |g|
+  g.spawn do
+    settings = RisBoard.take(Settings).or_panic
+    Server.answer("127.0.0.1", settings.port, 0, Handler, max_connections: 1)
+    0
+  end
+  RisBoard.take(Ready).or_panic
+  show(port, "/hello")
+  show(port, "/time")
+  show(port, "/nope")
+  exit 0
+end

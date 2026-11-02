@@ -43,6 +43,19 @@ Fix a checker hole below only when a cluster hits it.
    * secure_dns exceeds the 300-second gate timeout in the scope checker.
 5. Benches: build each, group the refusals by message, fix per group.
 
+Trial programs (samples/ris/trial/blocked/ has the repros), most blocking
+first; samples/ris/trial/run.sh is their gate:
+
+* Unrefused, wrong output: a Hash key made in a block round is freed
+  (`hash_key_freed`); `Dir.children` answers freed names
+  (`dir_children_garbage`). Refuse or fix them first.
+* std's common entry points are refused inside std: `JSON.parse`,
+  `from_json` with derive serializable, `CSVReader#next`.
+* `HTTP.get` answers an empty body with its headers; maybe http_coding's.
+* `OptionParser` cannot set a String option; `ris doc std/http` fails;
+  Tuple has no `<` for sort_by; `out` as a name gets an unclear error;
+  LEARN.md lacks `Program.args` and `import std/int`.
+
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
 
 * An unmarked one-call def with an untyped class default still loses

@@ -1,0 +1,5 @@
+words 14
+distinct 10
+the 4
+fox 2
+brown 1

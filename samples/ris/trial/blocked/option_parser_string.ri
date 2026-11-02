@@ -1,0 +1,10 @@
+# OptionParser cannot set a String option: the block becomes a proc.
+module samples/trial/blocked/option_parser_string
+
+import std/option_parser::{OptionParser}
+
+ext = ""
+parser = OptionParser.new
+parser.on("-e EXT", "ending") { |v| ext = v }
+parser.parse(Program.args)
+puts ext

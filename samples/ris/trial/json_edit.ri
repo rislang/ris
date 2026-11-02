@@ -1,0 +1,31 @@
+# Reads a JSON file, changes values and writes the result back.
+module samples/trial/json_edit
+
+import std/json::{JSON}
+
+input = Program.args[0]
+output = Program.args[1]
+doc = JSON.document(File.read(input))
+root = doc.root
+tags = doc.at(root, "tags")
+meta = doc.at(root, "meta")
+result = String::Builder.new
+result.json do |json|
+  json.object do
+    json.field "name", doc.string(doc.at(root, "name"))
+    json.field "version", doc.int(doc.at(root, "version")) + 1
+    json.field "tags" do
+      json.array do
+        doc.each(tags) { |tag| json.string doc.string(tag) }
+        json.string "trial"
+      end
+    end
+    json.field "meta" do
+      json.object do
+        json.field "stars", doc.int(doc.at(meta, "stars")) + 5
+      end
+    end
+  end
+end
+File.write(output, result.to_s)
+puts File.read(output)

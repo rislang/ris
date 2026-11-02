@@ -1,0 +1,27 @@
+# Counts the words of a file: total, distinct, and the most common three.
+module samples/trial/wc
+
+import std/int
+
+pub def count_words(text : String, counts : Hash(String, Int32)) : Int32
+  total = 0
+  text.split.each do |word|
+    key = word.downcase.copy_to(Program.tape)
+    counts[key] = counts.fetch(key, 0) + 1
+    total += 1
+  end
+  total
+end
+
+path = Program.args[0]
+text = File.read(path)
+counts = Hash(String, Int32).new
+total = count_words(text, counts)
+puts "words #{total}"
+puts "distinct #{counts.size}"
+sorted = counts.to_a.sort do |a, b|
+  a[1] == b[1] ? a[0] <=> b[0] : b[1] <=> a[1]
+end
+sorted.first(3).each do |pair|
+  puts "#{pair[0]} #{pair[1]}"
+end

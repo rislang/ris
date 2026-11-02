@@ -1,0 +1,6 @@
+# JSON.parse, the documented entry, does not compile in a program.
+module samples/trial/blocked/json_parse
+
+import std/json::{JSON}
+
+puts JSON.parse("1").as_i
