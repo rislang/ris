@@ -11,6 +11,9 @@ its processes and reported FAILED, so one hung test cannot hold the
 suite.
 RIS_CHECK_SERIAL=1 bash test/ris/check.sh runs it in order.
 RIS_CHECK_MATCH selects blocks by regex and skips unrelated heap workloads.
+RIS_CHECK_SHARD=k/n runs every n-th block from the k-th (1-based) and no
+heap gate; RIS_CHECK_SHARD=heap runs the heap gate alone. CI runs the n
+block shards and the heap shard as separate jobs.
 """
 import concurrent.futures
 import os
@@ -104,6 +107,15 @@ def main():
         if not blocks:
             print("FAIL: no ris checks match RIS_CHECK_MATCH")
             return 1
+    shard = os.environ.get("RIS_CHECK_SHARD", "")
+    if shard == "heap":
+        blocks = []
+    elif shard:
+        k, n = (int(part) for part in shard.split("/"))
+        if not 1 <= k <= n:
+            print(f"FAIL: RIS_CHECK_SHARD={shard} is not k/n with 1 <= k <= n")
+            return 1
+        blocks = blocks[k - 1::n]
     workers = int(os.environ.get("RIS_CHECK_JOBS", os.cpu_count() or 1))
     with tempfile.TemporaryDirectory(prefix="ris-check-") as scratch:
         with concurrent.futures.ThreadPoolExecutor(workers) as pool:
@@ -115,12 +127,14 @@ def main():
                 sys.stdout.write(out)
                 sys.stdout.flush()
                 status |= code != 0
-        if not pattern:
+        if not pattern and (not shard or shard == "heap"):
             code, out = heap(scratch)
             sys.stdout.write(out)
             sys.stdout.flush()
             status |= code != 0
     label = "selected ris checks" if pattern else "all ris checks"
+    if shard:
+        label = f"ris checks, shard {shard}"
     print(f"PASS: {label}" if status == 0 else f"FAIL: {label}")
     return status
 

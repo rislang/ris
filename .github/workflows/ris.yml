@@ -29,17 +29,21 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # check.sh in four parts per target, each its own runner: the blocks in
+  # three shards and the heap gate alone (check_parallel.py). On one 4-CPU
+  # runner the whole suite took 14 minutes.
   check:
     strategy:
       fail-fast: false
       matrix:
-        include:
+        target:
           - arch: x86_64
             runner: ubuntu-24.04
           - arch: aarch64
             runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+        shard: ["1/3", "2/3", "3/3", heap]
+    runs-on: ${{ matrix.target.runner }}
+    timeout-minutes: 30
     container:
       image: crystallang/crystal:1.21.0-build
       # check.sh serves many sockets. The stack is for the compiler: its tape
@@ -47,7 +51,7 @@ jobs:
       options: >-
         --ulimit nofile=65536:65536
         --ulimit stack=67108864:67108864
-    name: "check.sh, ${{ matrix.arch }}"
+    name: "check.sh ${{ matrix.shard }}, ${{ matrix.target.arch }}"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -57,10 +61,12 @@ jobs:
       - name: Build ris
         run: make ris
       - name: The respond sample runs
+        if: matrix.shard == 'heap'
         run: ./bin/ris run samples/ris/respond.ri
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:
+          RIS_CHECK_SHARD: ${{ matrix.shard }}
           RIS_CHECK_TIMEOUT: "600"
 
   # The compiler is still a Crystal program built with this library.
