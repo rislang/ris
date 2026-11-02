@@ -639,15 +639,28 @@ pub struct Any
   end
 
   def dig?(k : String, *subkeys : String | Int32) : Any?
-    v = self[k]?
-    return nil unless v
-    v.dig?(*subkeys)
+    at = step?(@index, k)
+    subkeys.size.times { |i| at = step?(at, subkeys[i]) }
+    at < 0 ? nil : Any.new(@document, at)
   end
 
   def dig?(idx : Int32, *subkeys : String | Int32) : Any?
-    v = self[idx]?
-    return nil unless v
-    v.dig?(*subkeys)
+    at = step?(@index, idx)
+    subkeys.size.times { |i| at = step?(at, subkeys[i]) }
+    at < 0 ? nil : Any.new(@document, at)
+  end
+
+  # The child of *at* under *key*, or -1 when there is none.
+  private def step?(at : Int32, key : String | Int32) : Int32
+    return -1 if at < 0
+    kind = @document.kind(at)
+    if key.is_a?(String)
+      return -1 unless kind == Document::Kind::Object
+      @document.at(at, key)
+    else
+      return -1 unless kind == Document::Kind::Array
+      @document.at(at, key < 0 ? key + @document.size(at) : key)
+    end
   end
 
   def dig(key : String) : Any
@@ -3713,15 +3726,28 @@ pub struct JSON
   # Any other key is written by its `to_s`, `nil` as `"null"`, the word a
   # JSON null is, so two keys can be one text: `{nil => 1, "null" => 2}`
   # was written `{"null":1,"null":2}`, which `JSON.parse` refuses
-  # ("duplicate key 'null' at line 1, column 11"). The texts written are
-  # kept, and a repeat is refused, naming both keys.
+  # ("duplicate key 'null' at line 1, column 11"). The builder refuses a
+  # text written twice, naming both Strings. Keys of a union or `Nil` are
+  # checked here first, to name the keys rather than their one text: each
+  # against the keys before it, its text made again, as a round's text
+  # cannot outlive the round (SPEC 1.1). Keys of one other type have
+  # distinct texts.
   def self.write_value(val : Hash(K, V), b : Builder) : Nil forall K, V
-    written = Hash(String, K).new
     b.object do
+      {% if K.union? || K == ::Nil %}
+        seen = 0
+      {% end %}
       val.each do |k, v|
         text = key_text(k)
-        raise "the keys #{written[text].inspect} and #{k.inspect} are both written as #{text.inspect}" if written.has_key?(text)
-        written[text] = k
+        {% if K.union? || K == ::Nil %}
+          before = 0
+          val.each_key do |earlier|
+            next if before >= seen
+            before += 1
+            raise "the keys #{earlier.inspect} and #{k.inspect} are both written as #{text.inspect}" if key_text(earlier) == text
+          end
+          seen += 1
+        {% end %}
         b.field(text)
         write_or_null(v, b)
       end
