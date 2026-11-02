@@ -28,14 +28,10 @@ Fix a checker hole below only when a cluster hits it.
 Trial programs (samples/ris/trial/blocked/ has the repros), most blocking
 first; samples/ris/trial/run.sh is their gate:
 
-* `HTTP.get` answers an empty body with its headers; maybe http_coding's.
 * `OptionParser` cannot set a String option; `ris doc std/http` fails;
   Tuple has no `<` for sort_by; `out` as a name gets an unclear error;
   LEARN.md lacks `Program.args` and `import std/int`.
 
-* json_buffer FAILED: PullParser's `initialize` calls `read_next`, refused
-  by SPEC 2.2, so `PullParser.new` does not compile. Read lazily or make
-  the first read a separate call; fix the test's old API with it.
 * bench/std_json_exercise.iyi has 2 lines on JSON's old API.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
@@ -195,9 +191,6 @@ String, Array, Hash or tape, so it can hide a refusal: tighten it.
   std, samples and tests that keep scratch past a scope or return a
   non-flat value made in a def are refused until steps 4-5 migrate them
   (see step 4's list).
-* check.sh (2026-10-31): samples/ris/web prints `000` (no answer);
-  http_answer_scope panics `cannot create a socket: error 24` (EMFILE),
-  also run alone and already at d056d2aa2.
 * compiler_spec does not build: spec/compiler/iyi_import_spec.cr calls
   artifact_signature, removed in d5742ac68. Before that: 58 failures,
   427 errors in 93 files (General allocation unavailable, Crystal

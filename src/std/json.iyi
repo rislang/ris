@@ -1646,11 +1646,37 @@ pub class PullParser
   ROOT_DONE    = 9 # after it: the end of the input
 
   @lexer : Lexer
-  getter kind : Kind
-  getter bool_value : Bool
-  getter int_value : Int64
-  getter float_value : Float64
-  getter string_value : String
+  @kind : Kind
+  @started : Bool = false
+
+  def kind : Kind
+    read_next unless @started
+    @kind
+  end
+  @bool_value : Bool
+
+  def bool_value : Bool
+    kind
+    @bool_value
+  end
+  @int_value : Int64
+
+  def int_value : Int64
+    kind
+    @int_value
+  end
+  @float_value : Float64
+
+  def float_value : Float64
+    kind
+    @float_value
+  end
+  @string_value : String
+
+  def string_value : String
+    kind
+    @string_value
+  end
   @raw_input : String
   @raw_start : Int32
   @raw_size : Int32
@@ -1672,11 +1698,11 @@ pub class PullParser
     @keys = [] of String
     @max_nesting = MAX_NESTING
     @states = [ROOT]
-    read_next
   end
 
   # The number the reader is on, as it was written.
   def raw_value : String
+    kind
     @raw_input[@raw_start, @raw_size]
   end
 
@@ -1735,6 +1761,7 @@ pub class PullParser
   end
 
   def read_next : Kind
+    @started = true
     while true
       tok = @lexer.next_token
       case tok.kind
@@ -1824,47 +1851,47 @@ pub class PullParser
   end
 
   def read_begin_array : Nil
-    parse_error("expected begin of array, got #{@kind}") unless @kind == Kind::BeginArray
+    parse_error("expected begin of array, got #{kind}") unless kind == Kind::BeginArray
     read_next
   end
 
   def read_end_array : Nil
-    parse_error("expected end of array, got #{@kind}") unless @kind == Kind::EndArray
+    parse_error("expected end of array, got #{kind}") unless kind == Kind::EndArray
     read_next
   end
 
   def read_begin_object : Nil
-    parse_error("expected begin of object, got #{@kind}") unless @kind == Kind::BeginObject
+    parse_error("expected begin of object, got #{kind}") unless kind == Kind::BeginObject
     read_next
   end
 
   def read_end_object : Nil
-    parse_error("expected end of object, got #{@kind}") unless @kind == Kind::EndObject
+    parse_error("expected end of object, got #{kind}") unless kind == Kind::EndObject
     read_next
   end
 
   def read_object_key : String
-    parse_error("expected object key string, got #{@kind}") unless @kind == Kind::String
+    parse_error("expected object key string, got #{kind}") unless kind == Kind::String
     key = @string_value
     read_next
     key
   end
 
   def read_null : Nil
-    parse_error("expected null, got #{@kind}") unless @kind == Kind::Null
+    parse_error("expected null, got #{kind}") unless kind == Kind::Null
     read_next
     nil
   end
 
   def read_bool : Bool
-    parse_error("expected bool, got #{@kind}") unless @kind == Kind::Bool
+    parse_error("expected bool, got #{kind}") unless kind == Kind::Bool
     val = @bool_value
     read_next
     val
   end
 
   def read_int : Int64
-    parse_error("expected int, got #{@kind}") unless @kind == Kind::Int
+    parse_error("expected int, got #{kind}") unless kind == Kind::Int
     val = @int_value
     read_next
     val
@@ -1872,26 +1899,26 @@ pub class PullParser
 
   # A float, or an integer read as one.
   def read_float : Float64
-    if @kind == Kind::Float
+    if kind == Kind::Float
       val = @float_value
       read_next
       val
-    elsif @kind == Kind::Int
+    elsif kind == Kind::Int
       val = @int_value.to_f64
       read_next
       val
     else
-      parse_error("expected float, got #{@kind}")
+      parse_error("expected float, got #{kind}")
     end
   end
 
   # Refuses anything after the root value.
   def expect_end : Nil
-    raise "unexpected value after JSON root value at line #{line_number}, column #{column_number}" unless @kind.eof?
+    raise "unexpected value after JSON root value at line #{line_number}, column #{column_number}" unless kind.eof?
   end
 
   def read_string : String
-    parse_error("expected string, got #{@kind}") unless @kind == Kind::String
+    parse_error("expected string, got #{kind}") unless kind == Kind::String
     val = @string_value
     read_next
     val
@@ -1899,7 +1926,7 @@ pub class PullParser
 
   def read_array(& : -> Nil) : Nil
     read_begin_array
-    while @kind != Kind::EndArray
+    while kind != Kind::EndArray
       yield
     end
     read_end_array
@@ -1911,7 +1938,7 @@ pub class PullParser
     read_begin_object
     mark = @keys.size
     object = next_object
-    while @kind != Kind::EndObject
+    while kind != Kind::EndObject
       yield read_object_key(mark, object)
     end
     drop_keys(mark)
@@ -1929,7 +1956,7 @@ pub class PullParser
   KEYS_SCANNED = 32
 
   private def read_object_key(mark : Int32, object : UInt64) : String
-    parse_error("expected object key string, got #{@kind}") unless @kind == Kind::String
+    parse_error("expected object key string, got #{kind}") unless kind == Kind::String
     key = @string_value
     if @keys.size - mark < KEYS_SCANNED
       repeated_key(key, mark)
@@ -1984,13 +2011,13 @@ pub class PullParser
 
   # Passes over the value the reader is on, whole.
   def skip : Nil
-    if @kind == Kind::BeginArray
+    if kind == Kind::BeginArray
       read_begin_array
-      while @kind != Kind::EndArray
+      while kind != Kind::EndArray
         skip
       end
       read_end_array
-    elsif @kind == Kind::BeginObject
+    elsif kind == Kind::BeginObject
       read_object do |_key|
         skip
       end
@@ -2000,7 +2027,7 @@ pub class PullParser
   end
 
   def read_null? : Bool
-    if @kind == Kind::Null
+    if kind == Kind::Null
       read_next
       true
     else
@@ -2014,7 +2041,7 @@ pub class PullParser
     found = false
     mark = @keys.size
     object = next_object
-    while @kind != Kind::EndObject
+    while kind != Kind::EndObject
       current_key = read_object_key(mark, object)
       if current_key == key
         found = true
@@ -2039,24 +2066,24 @@ pub class PullParser
   # `1.2345678901234567e+19` and `1E+2` as `100.0`, and a UInt64 id passed
   # through here did not read back as itself.
   def read_raw(json : Builder) : Nil
-    if @kind == Kind::Null
+    if kind == Kind::Null
       read_next
       json.null
-    elsif @kind == Kind::Bool
+    elsif kind == Kind::Bool
       json.bool(read_bool)
-    elsif @kind == Kind::Int || @kind == Kind::Float
+    elsif kind == Kind::Int || kind == Kind::Float
       number_text = raw_value
       read_next
       json.raw(number_text)
-    elsif @kind == Kind::String
+    elsif kind == Kind::String
       json.string(read_string)
-    elsif @kind == Kind::BeginArray
+    elsif kind == Kind::BeginArray
       json.array do
         read_array do
           read_raw(json)
         end
       end
-    elsif @kind == Kind::BeginObject
+    elsif kind == Kind::BeginObject
       json.object do
         read_object do |k|
           json.field(k)
@@ -2064,7 +2091,7 @@ pub class PullParser
         end
       end
     else
-      parse_error("expected a value, got #{@kind}")
+      parse_error("expected a value, got #{kind}")
     end
   end
 

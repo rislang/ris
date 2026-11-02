@@ -3,33 +3,46 @@ module test/ris/json_buffer
 
 import std/json::{JSON, Parser, PullParser, Builder}
 
+# The first token is read after construction, including direct accessors.
+scalar = PullParser.new("42")
+raise "lazy integer" unless scalar.int_value == 42
+raise "lazy raw" unless scalar.raw_value == "42"
+raise "lazy kind" unless scalar.kind.int?
+scalar.read_next
+raise "lazy end" unless scalar.kind.eof?
+text_token = PullParser.new("\"hello\\n\"")
+raise "lazy string" unless text_token.string_value == "hello\n"
+explicit = PullParser.new("true")
+raise "explicit first read" unless explicit.read_next.bool?
+raise "explicit value" unless explicit.bool_value
+
 saved = ""
 100.times do
   tape do
-    parsed = JSON.parse("[\"first\\nvalue\",\"second\\tvalue\",\"\\u00e9\"]".to_heap)
+    parsed = JSON.parse("[\"first\\nvalue\",\"second\\tvalue\",\"\\u00e9\"]")
     raise "first text changed" unless parsed[0].as_s == "first\nvalue"
     raise "second text changed" unless parsed[1].as_s == "second\tvalue"
     raise "unicode" unless parsed[2].as_s == "é"
     saved = parsed[0].as_s.copy_to(Program.tape)
-    pull = PullParser.new("[\"one\\n\",\"two\\t\"]".to_heap)
-    first = ""
-    second = ""
+    pull = PullParser.new("[\"one\\n\",\"two\\t\"]")
+    first = String::Builder.new(16)
+    second = String::Builder.new(16)
     pull.read_array do
-      if first.empty?
-        first = pull.read_string
+      if first.bytesize == 0
+        first << pull.read_string
       else
-        second = pull.read_string
+        second << pull.read_string
       end
     end
-    raise "pull reuse" unless first == "one\n" && second == "two\t"
+    raise "pull reuse" unless first.finish == "one\n" && second.finish == "two\t"
     builder = Builder.new
     alias_builder = builder
     builder.start_array
-    alias_builder.string("escaped\ntext".to_heap)
+    alias_builder.string("escaped\ntext")
     builder.end_array
     text = builder.to_s
     raise "builder alias" unless text == "[\"escaped\\ntext\"]"
-    parser = Parser.new("[\"valid\\n\",\"bad\\q\"]".to_heap)
+    parser = Parser.new("[\"valid\\n\",\"bad\\q\"]")
     parser.parse
     raise "missing error" if parser.error.nil?
   end
