@@ -2701,7 +2701,7 @@ end
 # was refused as "'serializable' is ambiguous here", and `derive` takes no
 # qualified name. A type that is both writes `derive serializable,
 # yaml_serializable`; what the two generate shares no method (`to_json`,
-# `from_json` and `initialize(pull)` against `to_yaml`, `from_yaml`,
+# `from_json` and `initialize(doc, at)` against `to_yaml`, `from_yaml`,
 # `to_yaml_any` and `initialize(yaml)`).
 pub macro yaml_serializable(declaration)
   impl ::Std::Yaml::ToYAML for {{ declaration[:name].id }}

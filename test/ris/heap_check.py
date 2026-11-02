@@ -161,7 +161,9 @@ def main():
             if line and not line.startswith("#"):
                 path, sites, allocations, mode = line.split()
                 budgets[path] = (int(sites), int(allocations), mode)
-    files = sorted(str(p) for p in Path("samples/ris").rglob("*.ri"))
+    # samples/ris/trial has its own gate; blocked/ holds failing repros.
+    files = sorted(str(p) for p in Path("samples/ris").rglob("*.ri")
+                   if "trial" not in p.parts)
     if not RECORD and set(files) != set(budgets):
         raise RuntimeError("sample list differs from heap_budget.txt")
 

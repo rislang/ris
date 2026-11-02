@@ -16,7 +16,8 @@
 #
 # `CSVReader` reads the same rules a row at a time, from a `String` or an
 # `IyiIO`, so a file far larger than memory is read through a 64 KiB
-# window and one field's buffer, both reused: `next_row` gives the fields,
+# window and one field's buffer, both reused, so a row is valid until the
+# next read (`copy_to(owner)` keeps it): `next_row` gives the fields,
 # `next` a `CSVRow` that also answers by the header's names when the
 # reader was made with `headers: true` (the first row; a later name of
 # the same text wins, and blank lines are passed over, as Python's
@@ -299,8 +300,10 @@ struct CSVBytes
 end
 
 # One row as `CSVReader#next` gives it: its fields, by position or by the
-# header's names.
-pub class CSVRow
+# header's names. It views the reader's own row: valid until the reader's
+# next read; `copy_to(owner)` keeps it longer.
+@[OnTape]
+pub struct CSVRow
   getter fields : Array(String)
   # The header row, or none when the reader was made without one.
   getter headers : Array(String)

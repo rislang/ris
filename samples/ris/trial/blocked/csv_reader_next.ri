@@ -1,9 +1,0 @@
-# CSVReader#next, as std/csv's doc shows, is refused inside std/csv.
-module samples/trial/blocked/csv_reader_next
-
-import std/csv::{CSVReader}
-
-reader = CSVReader.new("a\n1\n", headers: true)
-while row = reader.next.or_panic
-  puts row["a"]
-end

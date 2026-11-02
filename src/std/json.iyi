@@ -8,8 +8,8 @@
 # other number is `Float64` (a fraction, an exponent, or an integer past what
 # Int64 holds, read as the nearest double), a string is `String` with its
 # escapes decoded (`\uXXXX` pairs into one code point), an array is
-# `Array(Any)` and an object is `Hash(String, Any)` in the order the keys
-# were written.
+# `Array(Any)` and an object is a `RisJsonFields` in the order the keys
+# were written: a view read as a Hash is read.
 #
 # What the reader refuses, each with the line and column it stopped at:
 # anything that is not a JSON document (bare words, leading zeros, a trailing
@@ -95,6 +95,11 @@ class StringBuffer
     @writer.finish.dup
   end
 
+  # A view of what it holds: valid until it is cleared.
+  def view(start : Int32, size : Int32) : String
+    @writer.finish[start, size]
+  end
+
   def slice_from(start : Int32) : String
     @writer.finish[start, size - start].dup
   end
@@ -163,6 +168,13 @@ end
 #
 #     Coord.from_json(%({"x": 1.5, "label": "a"})).x   # => 1.5
 #     coord.to_json                                    # => {"x":1.5,"label":"a"}
+#
+# `from_json` is a macro: its value views a document made where it is called,
+# so keep it in that scope, or `copy_to(owner)` before the scope ends; never
+# return it from the def that called `from_json`. An `Array` of an `Array`, a
+# `Hash` or a type holding tape data is refused: read those with
+# `JSON.document(text)` and `doc.each`. The sentence that refuses a value of
+# the wrong kind names no line or column; one for bad JSON does.
 #
 # A field's value is read and written as `JSON.read_value` and
 # `JSON.write_value` read and write its type: the built-in values, an enum,
@@ -253,11 +265,16 @@ pub macro serializable(declaration)
     ::Std::Json::JSON.build { |json| to_json(json) }
   end
 
-  def self.from_json(text : String) : self
-    ::Std::Json::JSON.from_json(text, self)
+  # A macro: a constructor's value stays in the scope that makes it.
+  macro from_json(text)
+    %doc = ::Std::Json::JSON.document(\{{ text }})
+    ::{{ @type }}.new(%doc, %doc.root)
   end
 
-  def initialize(pull : ::Std::Json::PullParser)
+  # Tells `JSON.read_value` and an outer derive that it reads itself.
+  JSON_DERIVED = true
+
+  def initialize(json_doc : ::Std::Json::Document, json_at : Int32)
     # Each field's type is asked of the field itself (`typeof`): written
     # out, a type from this module arrives fully qualified, and a qualified
     # name reaches a type the way another module would. A field that may
@@ -295,59 +312,12 @@ pub macro serializable(declaration)
         \{% json_key_{{ field[:name][1..].id }} = json_key %}
         \{% json_converter_{{ field[:name][1..].id }} = json_ann ? json_ann[:converter] : nil %}
         \{% json_default_{{ field[:name][1..].id }} = json_ivar && json_ivar.has_default_value? %}
-        json_value_{{ field[:name][1..].id }} = nil
-        json_found_{{ field[:name][1..].id }} = false
+        \{% json_type = json_ivar.type %}
+        \{% json_type = json_type.union_types.reject { |t| t == ::Nil }.first if json_type.union? && json_type.union_types.size == 2 && json_type.nilable? %}
+        \{% json_hash_{{ field[:name][1..].id }} = !json_ivar.type.union? && json_ivar.type < ::Hash %}
+        \{% json_nested_{{ field[:name][1..].id }} = !json_type.union? && json_type.type_vars.empty? && json_type.has_constant?("JSON_DERIVED") %}
       {% end %}
-      pull.read_object do |json_key|
-        \{% if json_readable == 0 %}
-          pull.skip
-        \{% else %}
-          # `json_found_` tells a key that was not there, where a field
-          # keeps its default, from a `null`.
-          case json_key
-          {% for field in declaration[:fields] %}
-            \{% if json_read_{{ field[:name][1..].id }} %}
-              when \{{ json_key_{{ field[:name][1..].id }} }}
-                json_found_{{ field[:name][1..].id }} = true
-                {% if field[:type].nilable? %}
-                  \{% if json_converter_{{ field[:name][1..].id }} %}
-                    json_value_{{ field[:name][1..].id }} = pull.read_null? ? nil : \{{ json_converter_{{ field[:name][1..].id }} }}.from_json(pull)
-                  \{% else %}
-                    json_value_{{ field[:name][1..].id }} = pull.read_null? ? nil : ::Std::Json::JSON.read_value(pull, typeof({{ field[:name].id }} || raise("")))
-                  \{% end %}
-                {% else %}
-                  # A `null` for a field with a default whose type does not
-                  # admit nil is no value, and the field keeps its default, as
-                  # the other library's derive reads it; it was refused as not
-                  # the type.
-                  \{% if json_default_{{ field[:name][1..].id }} %}
-                    \{% if json_converter_{{ field[:name][1..].id }} %}
-                      json_value_{{ field[:name][1..].id }} = pull.read_null? ? nil : \{{ json_converter_{{ field[:name][1..].id }} }}.from_json(pull)
-                    \{% else %}
-                      json_value_{{ field[:name][1..].id }} = pull.read_null? ? nil : ::Std::Json::JSON.read_value(pull, typeof({{ field[:name].id }}))
-                    \{% end %}
-                  \{% elsif json_converter_{{ field[:name][1..].id }} %}
-                    json_value_{{ field[:name][1..].id }} = \{{ json_converter_{{ field[:name][1..].id }} }}.from_json(pull)
-                  \{% else %}
-                    json_value_{{ field[:name][1..].id }} = ::Std::Json::JSON.read_value(pull, typeof({{ field[:name].id }}))
-                  \{% end %}
-                {% end %}
-            \{% end %}
-          {% end %}
-          else
-            pull.skip
-          end
-        \{% end %}
-      end
-      # A field written with a default (`@port : Int32 = 8080`) holds it
-      # already, so on a missing key, or a `null` its type does not admit, it
-      # keeps its default; a key that is there wins, `null` included where the
-      # type admits nil. Whether there is a default is asked of the type when
-      # this method is compiled, not of the declaration, which carries names
-      # and types only: the port was refused by name, and
-      # `@host : String? = "localhost"` was overwritten with nil. A field that
-      # is not read keeps its default, or is nil; one with neither cannot be
-      # made, and is refused when the type is compiled.
+      # By key, with no block: what a field reads stays in this scope.
       {% for field in declaration[:fields] %}
         \{% if !json_read_{{ field[:name][1..].id }} %}
           \{% if json_default_{{ field[:name][1..].id }} %}
@@ -356,22 +326,93 @@ pub macro serializable(declaration)
           \{% else %}
             \{% raise "JSON::Field on #{@type}'s #{ {{ field[:name][1..] }}.id }: a field that is not read needs a default, or a type that admits nil" %}
           \{% end %}
-        \{% elsif json_default_{{ field[:name][1..].id }} %}
-          {% if field[:type].nilable? %}
-            {{ field[:name].id }} = json_value_{{ field[:name][1..].id }} if json_found_{{ field[:name][1..].id }}
-          {% else %}
-            json_field_{{ field[:name][1..].id }} = json_value_{{ field[:name][1..].id }}
-            {{ field[:name].id }} = json_field_{{ field[:name][1..].id }} unless json_field_{{ field[:name][1..].id }}.nil?
-          {% end %}
-        \{% elsif {{ field[:type].nilable? }} %}
-          {{ field[:name].id }} = json_value_{{ field[:name][1..].id }}
         \{% else %}
-          json_field_{{ field[:name][1..].id }} = json_value_{{ field[:name][1..].id }}
-          raise "JSON for #{ {{ declaration[:name] }} } has no key #{ \{{ json_key_{{ field[:name][1..].id }} }}.inspect }" if json_field_{{ field[:name][1..].id }}.nil?
-          {{ field[:name].id }} = json_field_{{ field[:name][1..].id }}
+          json_at_{{ field[:name][1..].id }} = json_doc.at(json_at, \{{ json_key_{{ field[:name][1..].id }} }})
+          # A key that is missing keeps the default; so does a `null` its
+          # type does not admit. A field with neither is refused by name.
+          \{% if json_default_{{ field[:name][1..].id }} %}
+            {% if field[:type].nilable? %}
+              if json_at_{{ field[:name][1..].id }} >= 0
+            {% else %}
+              if json_at_{{ field[:name][1..].id }} >= 0 && !json_doc.null?(json_at_{{ field[:name][1..].id }})
+            {% end %}
+          \{% elsif {{ field[:type].nilable? }} %}
+            {{ field[:name].id }} = nil
+            if json_at_{{ field[:name][1..].id }} >= 0
+          \{% else %}
+            raise "JSON for #{ {{ declaration[:name] }} } has no key #{ \{{ json_key_{{ field[:name][1..].id }} }}.inspect }" if json_at_{{ field[:name][1..].id }} < 0
+          \{% end %}
+          \{% if json_converter_{{ field[:name][1..].id }} %}
+            {% if field[:type].nilable? %}
+              unless json_doc.null?(json_at_{{ field[:name][1..].id }})
+                {{ field[:name].id }} = \{{ json_converter_{{ field[:name][1..].id }} }}.from_json(::Std::Json::Any.new(json_doc, json_at_{{ field[:name][1..].id }}))
+              end
+            {% else %}
+              {{ field[:name].id }} = \{{ json_converter_{{ field[:name][1..].id }} }}.from_json(::Std::Json::Any.new(json_doc, json_at_{{ field[:name][1..].id }}))
+            {% end %}
+          \{% elsif json_nested_{{ field[:name][1..].id }} %}
+            {% if field[:type].nilable? %}
+              unless json_doc.null?(json_at_{{ field[:name][1..].id }})
+                {{ field[:name].id }} = typeof({{ field[:name].id }} || raise("")).new(json_doc, json_at_{{ field[:name][1..].id }})
+              end
+            {% else %}
+              {{ field[:name].id }} = typeof({{ field[:name].id }}).new(json_doc, json_at_{{ field[:name][1..].id }})
+            {% end %}
+          \{% else %}
+            \{% if json_hash_{{ field[:name][1..].id }} %}
+              {{ field[:name].id }} = typeof({{ field[:name].id }}).new
+              ::Std::Json::JSON.read_into(json_doc, json_at_{{ field[:name][1..].id }}, {{ field[:name].id }})
+            \{% else %}
+              {{ field[:name].id }} = ::Std::Json::JSON.read_value(json_doc, json_at_{{ field[:name][1..].id }}, typeof({{ field[:name].id }}))
+            \{% end %}
+          \{% end %}
+          \{% if json_default_{{ field[:name][1..].id }} || {{ field[:type].nilable? }} %}
+            end
+          \{% end %}
         \{% end %}
       {% end %}
     \{% end %}
+  end
+end
+
+# An object of a `Document`, as `Any#as_h` answers it: a view, read as a Hash
+# is read, its keys and values the document's.
+@[OnTape]
+pub struct RisJsonFields
+  def initialize(@document : Document, @index : Int32)
+  end
+
+  def size : Int32
+    @document.size(@index)
+  end
+
+  def empty? : Bool
+    size == 0
+  end
+
+  def has_key?(key : String) : Bool
+    @document.at(@index, key) >= 0
+  end
+
+  def [](key : String) : Any
+    child = @document.at(@index, key)
+    raise "no such key #{key.inspect}" if child < 0
+    Any.new(@document, child)
+  end
+
+  def []?(key : String) : Any?
+    child = @document.at(@index, key)
+    child < 0 ? nil : Any.new(@document, child)
+  end
+
+  def each(& : String, Any -> _) : Nil
+    @document.each(@index) { |child| yield @document.key(child), Any.new(@document, child) }
+  end
+
+  def keys : Array(String)
+    result = Array(String).new(size)
+    @document.each(@index) { |child| result << @document.key(child) }
+    result
   end
 end
 
@@ -396,24 +437,54 @@ pub struct Any
   def initialize(@document : Document, @index : Int32 = 0)
   end
 
-  def raw : Type
+  def raw : Nil | Bool | Int64 | Float64 | String | Array(Any) | RisJsonFields
+    if array?
+      elements
+    elsif object?
+      fields
+    else
+      scalar
+    end
+  end
+
+  private def array? : Bool
+    @document.kind(@index) == Document::Kind::Array
+  end
+
+  private def object? : Bool
+    @document.kind(@index) == Document::Kind::Object
+  end
+
+  protected def null? : Bool
+    @document.null?(@index)
+  end
+
+  protected def bool? : Bool
+    @document.kind(@index) == Document::Kind::Bool
+  end
+
+  # The value of a null, a bool, a number or a string; nil of a container.
+  private def scalar : Nil | Bool | Int64 | Float64 | String
     case @document.kind(@index)
     when Document::Kind::Null then nil
     when Document::Kind::Bool then @document.bool(@index)
     when Document::Kind::Int then @document.int(@index)
     when Document::Kind::Float then @document.float(@index)
     when Document::Kind::String then @document.string(@index)
-    when Document::Kind::Array
-      result = Array(Any).new(@document.size(@index))
-      @document.each(@index) { |child| result << Any.new(@document, child) }
-      result
-    else
-      result = Hash(String, Any).new(@document.size(@index))
-      @document.each(@index) do |child|
-        result[@document.key(child)] = Any.new(@document, child)
-      end
-      result
+    else nil
     end
+  end
+
+  # An array's values; the array is new, its elements view the document.
+  private def elements : Array(Any)
+    result = Array(Any).new(@document.size(@index))
+    @document.each(@index) { |child| result << Any.new(@document, child) }
+    result
+  end
+
+  # An object's fields: a view of the document, nothing is built.
+  private def fields : RisJsonFields
+    RisJsonFields.new(@document, @index)
   end
 
   def self.new(val : Int32) : Any
@@ -423,9 +494,9 @@ pub struct Any
   # The kind of value this is, in the word a refusal uses: `null`, `bool`,
   # `integer`, `float`, `string`, `array` or `object`.
   def kind : String
-    if raw.nil?
+    if null?
       "null"
-    elsif raw.is_a?(Bool)
+    elsif bool?
       "bool"
     elsif as_s?
       "string"
@@ -441,20 +512,17 @@ pub struct Any
   end
 
   def as_nil : Nil
-    raise "as_nil of a JSON #{kind}" unless raw.nil?
+    raise "as_nil of a JSON #{kind}" unless null?
     nil
   end
 
   def as_bool : Bool
-    raise "as_bool of a JSON #{kind}" unless raw.is_a?(Bool)
-    raw.as(Bool)
+    raise "as_bool of a JSON #{kind}" unless bool?
+    @document.bool(@index)
   end
 
   def as_bool? : Bool?
-    case r = raw
-    when Bool then r
-    else           nil
-    end
+    bool? ? @document.bool(@index) : nil
   end
 
   def as_i : Int32
@@ -476,7 +544,7 @@ pub struct Any
   end
 
   def as_i64? : Int64?
-    case r = raw
+    case r = scalar
     when Int64 then r
     else            nil
     end
@@ -488,7 +556,7 @@ pub struct Any
   end
 
   def as_f? : Float64?
-    case r = raw
+    case r = scalar
     when Float64 then r
     when Int64   then r.to_f64
     else              nil
@@ -496,7 +564,7 @@ pub struct Any
   end
 
   protected def float_value? : Float64?
-    case r = raw
+    case r = scalar
     when Float64 then r
     else              nil
     end
@@ -507,32 +575,23 @@ pub struct Any
   end
 
   def as_s? : String?
-    case r = raw
-    when String then r
-    else             nil
-    end
+    @document.kind(@index) == Document::Kind::String ? @document.string(@index) : nil
   end
 
   def as_a : Array(Any)
-    as_a? || raise "as_a of a JSON #{kind}"
+    array? ? elements : raise("as_a of a JSON #{kind}")
   end
 
   def as_a? : Array(Any)?
-    case r = raw
-    when Array(Any) then r
-    else                 nil
-    end
+    array? ? elements : nil
   end
 
-  def as_h : Hash(String, Any)
-    as_h? || raise "as_h of a JSON #{kind}"
+  def as_h : RisJsonFields
+    object? ? fields : raise("as_h of a JSON #{kind}")
   end
 
-  def as_h? : Hash(String, Any)?
-    case r = raw
-    when Hash(String, Any) then r
-    else                        nil
-    end
+  def as_h? : RisJsonFields?
+    object? ? fields : nil
   end
 
   # How many elements an array or an object holds. A scalar has no size.
@@ -541,39 +600,34 @@ pub struct Any
   end
 
   def size? : Int32?
-    if a = as_a?
-      a.size
-    elsif h = as_h?
-      h.size
-    else
-      nil
-    end
+    array? || object? ? @document.size(@index) : nil
   end
 
   def [](index : Int32) : Any
-    a = as_a? || raise "index #{index} into a JSON #{kind}"
-    actual = index < 0 ? index + a.size : index
-    if actual < 0 || actual >= a.size
-      raise "index #{index} out of range for #{a.size} elements"
-    end
-    a[actual]
+    raise "index #{index} into a JSON #{kind}" unless array?
+    count = @document.size(@index)
+    child = @document.at(@index, index < 0 ? index + count : index)
+    raise "index #{index} out of range for #{count} elements" if child < 0
+    Any.new(@document, child)
   end
 
   def []?(index : Int32) : Any?
-    a = as_a?
-    return nil if a.nil?
-    actual = index < 0 ? index + a.size : index
-    actual < 0 || actual >= a.size ? nil : a[actual]
+    return nil unless array?
+    child = @document.at(@index, index < 0 ? index + @document.size(@index) : index)
+    child < 0 ? nil : Any.new(@document, child)
   end
 
   def [](key : String) : Any
-    h = as_h? || raise "key #{key.inspect} into a JSON #{kind}"
-    h[key]? || raise "no such key #{key.inspect}"
+    raise "key #{key.inspect} into a JSON #{kind}" unless object?
+    child = @document.at(@index, key)
+    raise "no such key #{key.inspect}" if child < 0
+    Any.new(@document, child)
   end
 
   def []?(key : String) : Any?
-    h = as_h?
-    h.nil? ? nil : h[key]?
+    return nil unless object?
+    child = @document.at(@index, key)
+    child < 0 ? nil : Any.new(@document, child)
   end
 
   def dig?(key : String) : Any?
@@ -644,10 +698,10 @@ pub struct Any
 
   @[NoInline]
   protected def scalar_equals?(other : Any) : Bool
-    if raw.nil?
-      other.raw.nil?
-    elsif raw.is_a?(Bool)
-      other.raw.is_a?(Bool) && raw.as(Bool) == other.raw.as(Bool)
+    if null?
+      other.null?
+    elsif bool?
+      other.as_bool? == as_bool?
     elsif s = as_s?
       o = other.as_s?
       o.nil? ? false : s == o
@@ -721,10 +775,10 @@ pub struct Any
 
   @[NoInline]
   protected def scalar_hash : Int32
-    if raw.nil?
+    if null?
       0
-    elsif raw.is_a?(Bool)
-      raw.as(Bool) ? 1 : 2
+    elsif bool?
+      @document.bool(@index) ? 1 : 2
     elsif s = as_s?
       s.hash
     elsif i = as_i64?
@@ -768,7 +822,7 @@ pub struct Any
   def to_s : String
     if s = as_s?
       s
-    elsif raw.nil?
+    elsif null?
       ""
     else
       to_json
@@ -1831,6 +1885,11 @@ pub class PullParser
     end
   end
 
+  # Refuses anything after the root value.
+  def expect_end : Nil
+    raise "unexpected value after JSON root value at line #{line_number}, column #{column_number}" unless @kind.eof?
+  end
+
   def read_string : String
     parse_error("expected string, got #{@kind}") unless @kind == Kind::String
     val = @string_value
@@ -1851,10 +1910,9 @@ pub class PullParser
   def read_object(& : String -> Nil) : Nil
     read_begin_object
     mark = @keys.size
-    seen = nil.as(Hash(String, Bool)?)
+    object = next_object
     while @kind != Kind::EndObject
-      key, seen = read_object_key(mark, seen)
-      yield key
+      yield read_object_key(mark, object)
     end
     drop_keys(mark)
     read_end_object
@@ -1870,35 +1928,53 @@ pub class PullParser
   # with thousands of keys is not a scan of all of them per key.
   KEYS_SCANNED = 32
 
-  private def read_object_key(mark : Int32, seen : Hash(String, Bool)?) : {String, Hash(String, Bool)?}
-    if @kind == Kind::String
-      candidate = @string_value
-      if seen
-        parse_error("duplicate key '#{candidate}'") if seen.has_key?(candidate)
-      else
-        i = mark
-        while i < @keys.size
-          parse_error("duplicate key '#{candidate}'") if @keys[i] == candidate
-          i = i + 1
-        end
-      end
-    end
-    key = read_object_key
-    if seen
-      seen[key] = true
+  private def read_object_key(mark : Int32, object : UInt64) : String
+    parse_error("expected object key string, got #{@kind}") unless @kind == Kind::String
+    key = @string_value
+    if @keys.size - mark < KEYS_SCANNED
+      repeated_key(key, mark)
     else
-      @keys << key
-      if @keys.size - mark > KEYS_SCANNED
-        seen = {} of String => Bool
-        i = mark
-        while i < @keys.size
-          seen[@keys[i]] = true
-          i = i + 1
-        end
+      hash = key_hash(key, object)
+      repeated_key(key, mark) if @key_hashes.has_key?(hash)
+      @key_hashes[hash] = true
+    end
+    @keys << key
+    if @keys.size - mark == KEYS_SCANNED
+      i = mark
+      while i < @keys.size
+        @key_hashes[key_hash(@keys[i], object)] = true
+        i = i + 1
       end
     end
-    {key, seen}
+    read_next
+    key
   end
+
+  # Refuses *key* if the object from *mark* has it.
+  private def repeated_key(key : String, mark : Int32) : Nil
+    i = mark
+    while i < @keys.size
+      parse_error("duplicate key '#{key}'") if @keys[i] == key
+      i = i + 1
+    end
+  end
+
+  # FNV-1a of *key* in the object numbered *object*: a plain number, as a
+  # hit is checked against the keys themselves.
+  private def key_hash(key : String, object : UInt64) : UInt64
+    h = 14695981039346656037_u64 ^ object
+    key.each_byte { |byte| h = (h ^ byte.to_u64) &* 1099511628211_u64 }
+    h
+  end
+
+  # A number for the object just opened.
+  private def next_object : UInt64
+    @objects = @objects &+ 1_u64
+    @objects
+  end
+
+  @objects : UInt64 = 0_u64
+  @key_hashes : Hash(UInt64, Bool) = {} of UInt64 => Bool
 
   private def drop_keys(mark : Int32) : Nil
     while @keys.size > mark
@@ -1937,9 +2013,9 @@ pub class PullParser
     read_begin_object
     found = false
     mark = @keys.size
-    seen = nil.as(Hash(String, Bool)?)
+    object = next_object
     while @kind != Kind::EndObject
-      current_key, seen = read_object_key(mark, seen)
+      current_key = read_object_key(mark, object)
       if current_key == key
         found = true
         yield
@@ -1954,32 +2030,7 @@ pub class PullParser
 
   # The value the reader is on, as an `Any`.
   def read_any : Any
-    if @kind == Kind::Null
-      read_next
-      Any.new(nil)
-    elsif @kind == Kind::Bool
-      Any.new(read_bool)
-    elsif @kind == Kind::Int
-      Any.new(read_int)
-    elsif @kind == Kind::Float
-      Any.new(read_float)
-    elsif @kind == Kind::String
-      Any.new(read_string)
-    elsif @kind == Kind::BeginArray
-      ary = [] of Any
-      read_array do
-        ary << read_any
-      end
-      Any.new(ary)
-    elsif @kind == Kind::BeginObject
-      obj = {} of String => Any
-      read_object do |k|
-        obj[k] = read_any
-      end
-      Any.new(obj)
-    else
-      parse_error("expected a value, got #{@kind}")
-    end
+    Any.new(JSON.document(read_raw))
   end
 
   # The value the reader is on, written into `json` as it is read. A number
@@ -2044,8 +2095,16 @@ pub class Builder
   @states : Array(Int32)
   # The key texts of every object still open, innermost last, each with the
   # String it was written from.
-  @keys : Hash(Tuple(Int32, String), String)
+  # Each open object's keys, one stack: where the key's text is in the buffer
+  # and its size, where its name is in `@key_names` and its size.
+  @keys : Array(Int32)
+  # Where each open object's keys begin, and its number.
   @key_scopes : Array(Int32)
+  @scope_ids : Array(Int32)
+  @key_names : String::Builder
+  # Past KEYS_SCANNED keys an object's are hashed too: plain numbers, a hit
+  # is checked against the keys.
+  @key_hashes : Hash(UInt64, Bool)
   @next_scope : Int32
 
   property max_nesting : Int32
@@ -2057,15 +2116,24 @@ pub class Builder
     @indent_str = nil
     @level = 0
     @states = [ROOT]
-    @keys = Hash(Tuple(Int32, String), String).new
+    @keys = Array(Int32).new(64)
     @key_scopes = Array(Int32).new(MAX_NESTING)
+    @scope_ids = Array(Int32).new(MAX_NESTING)
+    @key_names = String::Builder.new(256)
+    @key_hashes = Hash(UInt64, Bool).new
     @next_scope = 0
     @max_nesting = MAX_NESTING
     @ascii_only = false
   end
 
   def indent=(spaces : Int32) : Nil
-    @indent_str = spaces > 0 ? " " * spaces : nil
+    if spaces > 0
+      from = @key_names.bytesize
+      spaces.times { @key_names.push(32_u8) }
+      @indent_str = @key_names.finish[from, spaces]
+    else
+      @indent_str = nil
+    end
   end
 
   def indent=(str : String) : Nil
@@ -2191,7 +2259,8 @@ pub class Builder
     @level = @level + 1
     raise "nesting depth of #{@level} exceeds maximum depth #{@max_nesting}" if @level > @max_nesting
     @states << OBJECT_FIRST
-    @key_scopes << @next_scope
+    @key_scopes << @keys.size
+    @scope_ids << @next_scope
     @next_scope += 1
   end
 
@@ -2200,8 +2269,11 @@ pub class Builder
     raise "end_object with a field's value still due" if st == OBJECT_VALUE
     raise "end_object without start_object" unless st == OBJECT_FIRST || st == OBJECT_NEXT
     @states.pop
-    scope = @key_scopes.pop
-    @keys.reject_in_place { |key, _| key[0] == scope }
+    mark = @key_scopes.pop
+    @scope_ids.pop
+    while @keys.size > mark
+      @keys.pop
+    end
     @level = @level - 1
     write_indent if st == OBJECT_NEXT
     @buffer.append(125_u8) # '}'
@@ -2227,15 +2299,52 @@ pub class Builder
     write_indent
     from = @buffer.size
     write_escaped_string(name)
-    text = @buffer.slice_from(from)
-    key = {@key_scopes.last, text}
-    if earlier = @keys[key]?
-      raise "the key #{name.inspect} is written twice in one object" if earlier == name
-      raise "the keys #{earlier.inspect} and #{name.inspect} are both written as #{text}"
-    end
-    @keys[key] = name.dup
+    check_repeat(name, from, @buffer.size - from)
+    @keys << from
+    @keys << @buffer.size - from
+    @keys << @key_names.bytesize
+    @keys << name.bytesize
+    @key_names.append(name)
     @buffer.append(58_u8)                         # ':'
     @buffer.append(32_u8) unless @indent_str.nil? # ' '
+  end
+
+  # Refuses the key just written at *from* if this object has its text.
+  private def check_repeat(name : String, from : Int32, size : Int32) : Nil
+    mark = @key_scopes.last
+    count = (@keys.size - mark) // 4
+    if count >= KEY_SCAN
+      hash = key_hash(from, size)
+      if count == KEY_SCAN
+        i = mark
+        while i < @keys.size
+          @key_hashes[key_hash(@keys[i], @keys[i + 1])] = true
+          i = i + 4
+        end
+      end
+      had = @key_hashes.has_key?(hash)
+      @key_hashes[hash] = true
+      return unless had
+    end
+    written = @buffer.view(from, size)
+    i = mark
+    while i < @keys.size
+      if @keys[i + 1] == size && @buffer.view(@keys[i], size) == written
+        earlier = @key_names.finish[@keys[i + 2], @keys[i + 3]]
+        raise "the key #{name.inspect} is written twice in one object" if earlier == name
+        raise "the keys #{earlier.inspect} and #{name.inspect} are both written as #{written}"
+      end
+      i = i + 4
+    end
+  end
+
+  KEY_SCAN = 32
+
+  # FNV-1a of a key's text in the buffer, in this object.
+  private def key_hash(from : Int32, size : Int32) : UInt64
+    h = 14695981039346656037_u64 ^ @scope_ids.last.to_u64
+    @buffer.view(from, size).each_byte { |byte| h = (h ^ byte.to_u64) &* 1099511628211_u64 }
+    h
   end
 
   def field(name : String, & : -> Nil) : Nil
@@ -2649,27 +2758,10 @@ pub struct Writer
 
   # The key the value at *index* of *doc* has, as `field` writes a key: a
   # copy from one document into another puts nothing on the tape but what
-  # it writes. A key with an escape is decoded first, so the check for a
+  # it writes. A key with an escape is decoded already, so the check for a
   # repeat sees the key and not its spelling.
   def field(doc : Document, index : Int32) : Nil
-    node = doc.tree[index]
-    text = doc.input[node.key_at, node.key_size]
-    if (node.flags & Node::ESCAPED_KEY) == 0
-      field(text)
-    else
-      decoding(text) { |decoded| field(decoded) }
-    end
-  end
-
-  # A string in the document's input, a view handed to the escaper.
-  private def string_of(doc : Document, node : Node) : Nil
-    text = doc.input[(node.payload >> 32).to_i32, (node.payload & 0xFFFFFFFF).to_i32]
-    before_value
-    if (node.flags & Node::ESCAPED_TEXT) == 0
-      escaped(text)
-    else
-      decoding(text) { |decoded| escaped(decoded) }
-    end
+    field(doc.key(index))
   end
 
   # The value at *index* of *doc*, and all it holds, as the calls that
@@ -2686,7 +2778,7 @@ pub struct Writer
     when Document::Kind::Float
       number(doc.float(index))
     when Document::Kind::String
-      string_of(doc, node)
+      string(doc.string(index))
     when Document::Kind::Array
       start_array
       doc.each(index) { |child| value(doc, child) }
@@ -2698,14 +2790,6 @@ pub struct Writer
         value(doc, child)
       end
       end_object
-    end
-  end
-
-  # The text of an escaped string decoded on the caller's tape, in a
-  # nested scope that drops it once the block has written it.
-  private def decoding(text : String, & : String -> Nil) : Nil
-    tape do
-      yield JSON.decoded(text, true)
     end
   end
 
@@ -2724,14 +2808,18 @@ pub struct Writer
 end
 
 # One value of a `Document`, in 24 bytes: its kind and which of its
-# texts hold an escape, the span of its key in the input, and its payload:
-# an integer's or a bool's value, a float's bits, or a string's span (start
-# in the high half, size in the low). Spans, not `String`s, halve the
+# texts held an escape, the span of its key, and its payload: an integer's
+# or a bool's value, a float's bits, or a string's span (start in the high
+# half, size in the low). A span is of the input, or of the decoded text
+# when its flag says the text held an escape. Spans, not `String`s, halve the
 # stream: a parse writes it whole, past the tape's warm megabyte.
 @[OnTape]
 pub struct Node
   ESCAPED_TEXT = 256
   ESCAPED_KEY  = 512
+  # An integer past Int64 that UInt64 holds: its kind is Float, its payload
+  # the UInt64's bits.
+  UINT = 1024
 
   @flags : Int32
   @key_at : Int32
@@ -2765,7 +2853,8 @@ end
 # A document read by `JSON.parse(bytes : String)`: every value in one
 # `RisTree` in document order, its strings spans of the input, all of it
 # the caller's `tape`'s. A value is named by its index; the root's is
-# 0. A string with an escape is decoded when it is asked for.
+# 0. A string with an escape is decoded as it is read, into the document's
+# own text.
 @[OnTape]
 pub struct Document
   enum Kind
@@ -2780,8 +2869,11 @@ pub struct Document
 
   getter tree : RisTree::View(Node)
   getter input : String
+  # The strings and keys that held an escape, decoded when read.
+  getter decoded : String
 
-  def initialize(@tree : RisTree::View(Node), @input : String)
+  def initialize(@tree : RisTree::View(Node), @input : String,
+                 @decoded : String)
   end
 
   def to_json : String
@@ -2859,6 +2951,7 @@ pub struct Document
   def float(index : Int32) : Float64
     node = @tree[index]
     return node.payload.to_f64 if node.kind == Kind::Int
+    return node.payload.unsafe_to_u64.to_f64 if (node.flags & Node::UINT) != 0
     bits = expect(index, Kind::Float).payload
     pointerof(bits).as(Pointer(Float64)).value
   end
@@ -2867,18 +2960,42 @@ pub struct Document
     @tree[index].kind == Kind::Null
   end
 
-  # The string at *index*, decoded: the input's own bytes unless it holds
-  # an escape, a new string on the tape if it does.
+  # Whether the value at *index* is an integer past Int64 that UInt64 holds:
+  # a float to every other reader.
+  def uint?(index : Int32) : Bool
+    (@tree[index].flags & Node::UINT) != 0
+  end
+
+  def uint(index : Int32) : UInt64
+    @tree[index].payload.unsafe_to_u64
+  end
+
+  # Refuses a value of another kind.
+  def expect_kind(index : Int32, kind : Kind) : Nil
+    expect(index, kind)
+    nil
+  end
+
+  # The string at *index*, unchecked and making nothing: for a caller that
+  # stores it from a block, after `expect_kind`.
+  def view(index : Int32) : String
+    node = @tree[index]
+    at = (node.payload >> 32).to_i32
+    size = (node.payload & 0xFFFFFFFF).to_i32
+    (node.flags & Node::ESCAPED_TEXT) != 0 ? @decoded[at, size] : @input[at, size]
+  end
+
+  # The string at *index*, decoded: a view of the input, or of the document's
+  # decoded text if it held an escape. It lives as long as the document.
   def string(index : Int32) : String
-    node = expect(index, Kind::String)
-    text = @input[(node.payload >> 32).to_i32, (node.payload & 0xFFFFFFFF).to_i32]
-    JSON.decoded(text, (node.flags & Node::ESCAPED_TEXT) != 0)
+    expect(index, Kind::String)
+    view(index)
   end
 
   # The key *index* has in its object, decoded as `string` is.
   def key(index : Int32) : String
     node = @tree[index]
-    JSON.decoded(@input[node.key_at, node.key_size], (node.flags & Node::ESCAPED_KEY) != 0)
+    (node.flags & Node::ESCAPED_KEY) != 0 ? @decoded[node.key_at, node.key_size] : @input[node.key_at, node.key_size]
   end
 
   # The count of an array's values or an object's fields.
@@ -2913,13 +3030,7 @@ pub struct Document
     found = -1
     @tree.each_child(index) do |child|
       if found < 0
-        node = @tree[child]
-        key = @input[node.key_at, node.key_size]
-        if (node.flags & Node::ESCAPED_KEY) == 0
-          found = child if key == name
-        elsif JSON.decoded(key, true) == name
-          found = child
-        end
+        found = child if key(child) == name
       end
     end
     found
@@ -2942,8 +3053,12 @@ pub struct DocumentParser
   @tree : RisTree(Node)
   @nesting : Int32
   @error : String?
+  # Escaped strings and keys, decoded: never longer than the input.
+  @decoded : String::Builder
 
   def initialize(@input : String)
+    decoded = String::Builder.new(@input.bytesize + 1)
+    @decoded = decoded
     lexer = Lexer.new(true)
     lexer.next_token(@input)
     @lexer = lexer
@@ -2957,7 +3072,7 @@ pub struct DocumentParser
   end
 
   def document : Document
-    Document.new(@tree.view, @input)
+    Document.new(@tree.view, @input, @decoded.finish)
   end
 
   private def token : Token
@@ -3031,10 +3146,18 @@ pub struct DocumentParser
       leaf(Document::Kind::Int, flags, key_at, key_size, token.int_value)
     when TokenKind::Float
       real = token.float_value
+      big = token.raw_size > 0 ? JSON.big_integer?(text(token.raw_start, token.raw_size)) : nil
+      return leaf(Document::Kind::Float, flags | Node::UINT, key_at, key_size, big.unsafe_to_i64) if big
       leaf(Document::Kind::Float, flags, key_at, key_size, pointerof(real).as(Pointer(Int64)).value)
     when TokenKind::String
-      flags = flags | Node::ESCAPED_TEXT if token.escaped
-      leaf(Document::Kind::String, flags, key_at, key_size, (token.raw_start.to_i64 << 32) | token.raw_size.to_i64)
+      at = token.raw_start
+      size = token.raw_size
+      if token.escaped
+        flags = flags | Node::ESCAPED_TEXT
+        at = @decoded.bytesize
+        size = decode(token.raw_start, size)
+      end
+      leaf(Document::Kind::String, flags, key_at, key_size, (at.to_i64 << 32) | size.to_i64)
     when TokenKind::BeginArray
       parse_array(flags, key_at, key_size)
     when TokenKind::BeginObject
@@ -3042,6 +3165,13 @@ pub struct DocumentParser
     else
       fail("unexpected #{token_text}")
     end
+  end
+
+  # The escaped text at *at* onto the decoded text; its decoded size.
+  private def decode(at : Int32, size : Int32) : Int32
+    from = @decoded.bytesize
+    JSON.each_decoded_byte(@input[at, size]) { |byte| @decoded.push(byte) }
+    @decoded.bytesize - from
   end
 
   private def nest : Bool
@@ -3093,7 +3223,12 @@ pub struct DocumentParser
         return fail("expected string key in object") unless token.kind == TokenKind::String
         name_at = token.raw_start
         name_size = token.raw_size
-        name_flags = token.escaped ? Node::ESCAPED_KEY : 0
+        name_flags = 0
+        if token.escaped
+          name_flags = Node::ESCAPED_KEY
+          name_at = @decoded.bytesize
+          name_size = decode(token.raw_start, name_size)
+        end
         if count >= 32
           h = key_hash(at, name_at, name_size, name_flags)
           if @key_hashes.has_key?(h) && duplicate?(at, name_at, name_size, name_flags)
@@ -3135,9 +3270,9 @@ pub struct DocumentParser
     @nesting = @nesting - 1
   end
 
-  # The key at *at* decoded into a String.
+  # The key at *at*, in the decoded text if it held an escape.
   private def key_s(at : Int32, size : Int32, flags : Int32) : String
-    JSON.decoded(text(at, size), (flags & Node::ESCAPED_KEY) != 0)
+    (flags & Node::ESCAPED_KEY) != 0 ? @decoded.finish[at, size] : text(at, size)
   end
 
   # The keys of large objects, by `key_hash`: plain numbers, so a round
@@ -3185,7 +3320,7 @@ pub struct JSON
   #   written as `null` otherwise, where the other library leaves it out
   #   unless asked;
   # * `converter:` a type whose `self.to_json(value, json : Builder)` writes
-  #   the field and `self.from_json(pull : PullParser)` reads it.
+  #   the field and `self.from_json(value : Any)` reads it.
   #
   # An option it does not know, a key that is not a string, and two fields
   # written under one key are refused when the type is compiled.
@@ -3195,11 +3330,7 @@ pub struct JSON
   # The document as an `Any`; panics with the line and column of the first
   # thing it refuses.
   def self.parse(input : String) : Any
-    parser = Parser.new(input)
-    result = parser.parse
-    failure = parser.error
-    raise failure unless failure.nil?
-    result
+    Any.new(JSON.document(input))
   end
 
   # The document in *bytes* read onto the caller's tape, its strings views
@@ -3411,9 +3542,14 @@ pub struct JSON
 
   # The document as an `Any`, or `nil` when it is not one.
   def self.parse?(input : String) : Any?
-    parser = Parser.new(input)
-    result = parser.parse
-    parser.error.nil? ? result : nil
+    JSON.parsed_any?(DocumentParser.new(input))
+  end
+
+  # *parser*'s document as an `Any`, or nil when it refuses the bytes.
+  def self.parsed_any?(parser : DocumentParser) : Any?
+    parser.parse
+    return nil unless parser.error.nil?
+    Any.new(parser.document)
   end
 
   # Text written through a `Builder` the block is handed. `indent` is a
@@ -3623,21 +3759,17 @@ pub struct JSON
   # A member by its name, or by its number; a `@[Flags]` enum from the
   # array of its members' names. Anything else is refused, naming the
   # members there are.
-  private def self.read_enum(pull : PullParser, type : T.class) : T forall T
+  private def self.read_enum(doc : Document, at : Int32, type : T.class) : T forall T
     {% if T.annotation(Flags) %}
       found = T.from_value?(0) || raise "#{T} has no member for no flags"
-      pull.read_begin_array
-      while !pull.kind.end_array?
-        found = found | enum_member(pull.read_string, T)
-      end
-      pull.read_end_array
+      doc.each(at) { |child| found = found | enum_member(doc.string(child), T) }
       found
     {% else %}
-      if pull.kind.int?
-        number = pull.read_int
+      if doc.kind(at) == Document::Kind::Int
+        number = doc.int(at)
         return T.from_value?(number) || raise "#{number} is no #{T} member's value (#{T.names.map { |name| underscore(name) }.join(", ")})"
       end
-      enum_member(pull.read_string, T)
+      enum_member(doc.string(at), T)
     {% end %}
   end
 
@@ -3652,75 +3784,58 @@ pub struct JSON
   # serializable`, a union of them as `read_union` reads one, or an `Array`
   # or `Hash(String, V)` of those. An integer outside the type is refused,
   # as is anything after the root value.
+  # One call: the document is made in the caller's scope, which the value
+  # and its strings live in. A type with `derive serializable` has its own
+  # `Type.from_json(text)`: use that one, as no def answers what its
+  # constructor made (SPEC 1.9).
   def self.from_json(str : String, type : T.class) : T forall T
-    pull = PullParser.new(str)
-    value = read_value(pull, type)
-    raise "unexpected value after JSON root value at line #{pull.line_number}, column #{pull.column_number}" unless pull.kind.eof?
-    value
+    read_value(JSON.document(str), 0, type)
   end
 
-  def self.read_value(pull : PullParser, type : Nil.class) : Nil
-    pull.read_null
+  def self.read_value(doc : Document, at : Int32, type : Nil.class) : Nil
+    raise "expected Null, not #{doc.kind(at)}" unless doc.null?(at)
+    nil
   end
 
-  def self.read_value(pull : PullParser, type : Bool.class) : Bool
-    pull.read_bool
+  def self.read_value(doc : Document, at : Int32, type : Bool.class) : Bool
+    doc.bool(at)
   end
 
-  def self.read_value(pull : PullParser, type : Int32.class) : Int32
-    v = pull.read_int
+  def self.read_value(doc : Document, at : Int32, type : Int32.class) : Int32
+    v = doc.int(at)
     raise "integer #{v} out of Int32 range" if v < -2147483648_i64 || v > 2147483647_i64
     v.to_i32
   end
 
-  def self.read_value(pull : PullParser, type : Int64.class) : Int64
-    pull.read_int
+  def self.read_value(doc : Document, at : Int32, type : Int64.class) : Int64
+    doc.int(at)
   end
 
-  def self.read_value(pull : PullParser, type : UInt8.class) : UInt8
-    v = pull.read_int
+  def self.read_value(doc : Document, at : Int32, type : UInt8.class) : UInt8
+    v = doc.int(at)
     raise "integer #{v} out of UInt8 range" if v < 0_i64 || v > 255_i64
     v.to_u8
   end
 
-  # An integer past Int64 reaches the reader as a float that still carries
-  # its digits; those are read here, so the whole UInt64 range comes back.
-  def self.read_value(pull : PullParser, type : UInt64.class) : UInt64
-    if pull.kind.int?
-      v = pull.read_int
-      raise "integer #{v} out of UInt64 range" if v < 0_i64
-      return v.to_u64
+  # An integer past Int64 is a float that still holds its UInt64 value.
+  def self.read_value(doc : Document, at : Int32, type : UInt64.class) : UInt64
+    if doc.uint?(at)
+      return doc.uint(at)
     end
-    raw = pull.raw_value
-    if pull.kind.float? && integer_digits?(raw)
-      v = digits_to_u64?(raw) || raise "integer #{raw} out of UInt64 range"
-      pull.read_next
-      return v
-    end
-    pull.read_int.to_u64
+    v = doc.int(at)
+    raise "integer #{v} out of UInt64 range" if v < 0_i64
+    v.to_u64
   end
 
-  # Whether the number's text is an integer literal: an optional minus and
-  # digits, no fraction or exponent.
-  private def self.integer_digits?(raw : String) : Bool
-    bytes = raw
-    i = bytes[0] == 45_u8 ? 1 : 0
-    return false if i >= raw.bytesize
-    while i < raw.bytesize
-      return false unless bytes[i] >= 48_u8 && bytes[i] <= 57_u8
-      i = i + 1
-    end
-    true
-  end
-
-  # The UInt64 these digits spell, or nil when they do not fit.
-  private def self.digits_to_u64?(raw : String) : UInt64?
-    bytes = raw
-    return nil if bytes[0] == 45_u8
+  # The UInt64 a number's text spells, if it is an integer literal.
+  def self.big_integer?(raw : String) : UInt64?
+    return nil if raw[0] == 45_u8
     val = 0_u64
     i = 0
     while i < raw.bytesize
-      d = (bytes[i] - 48_u8).to_u64
+      c = raw[i]
+      return nil unless c >= 48_u8 && c <= 57_u8
+      d = (c - 48_u8).to_u64
       return nil if val > 1844674407370955161_u64 || (val == 1844674407370955161_u64 && d > 5_u64)
       val = val * 10_u64 + d
       i = i + 1
@@ -3728,51 +3843,70 @@ pub struct JSON
     val
   end
 
-  def self.read_value(pull : PullParser, type : Float64.class) : Float64
-    pull.read_float
+  def self.read_value(doc : Document, at : Int32, type : Float64.class) : Float64
+    doc.float(at)
   end
 
-  def self.read_value(pull : PullParser, type : String.class) : String
-    pull.read_string
+  def self.read_value(doc : Document, at : Int32, type : String.class) : String
+    doc.string(at)
   end
 
-  def self.read_value(pull : PullParser, type : Any.class) : Any
-    pull.read_any
+  def self.read_value(doc : Document, at : Int32, type : Any.class) : Any
+    Any.new(doc, at)
   end
 
-  def self.read_value(pull : PullParser, type : Array(T).class) : Array(T) forall T
-    ary = [] of T
-    pull.read_begin_array
-    while !pull.kind.end_array?
-      ary << read_value(pull, T)
-    end
-    pull.read_end_array
+  # Elements are stored from a block, so what is read must make nothing:
+  # a String is the document's view, a scalar has no storage. A derived
+  # type's or a nested collection's element is refused (SPEC 1.9); walk
+  # the document with `doc.each` into arrays the caller declares.
+  def self.read_value(doc : Document, at : Int32, type : Array(T).class) : Array(T) forall T
+    {% if !T.union? && (T < ::Array || T < ::Hash) %}
+      {% raise "JSON cannot read #{T} inside an Array: a round's collection is freed with the round (SPEC 1.9). Read JSON.parse(text) and walk it with as_a, or declare the outer arrays and copy_to(owner)" %}
+    {% end %}
+    doc.expect_kind(at, Document::Kind::Array)
+    ary = Array(T).new(doc.size(at))
+    {% if T == ::String %}
+      doc.each(at) do |child|
+        doc.expect_kind(child, Document::Kind::String)
+        ary << doc.view(child)
+      end
+    {% else %}
+      doc.each(at) { |child| ary << read_value(doc, child, T) }
+    {% end %}
     ary
   end
 
-  def self.read_value(pull : PullParser, type : Hash(String, V).class) : Hash(String, V) forall V
-    h = Hash(String, V).new
-    pull.read_object do |k|
-      h[k] = read_value(pull, V)
-    end
-    h
+  # A Hash is a class instance, made where it is declared: no def answers
+  # one it made (SPEC 1.9).
+  def self.read_value(doc : Document, at : Int32, type : Hash(String, V).class) : Hash(String, V) forall V
+    {% raise "JSON cannot answer a Hash: read JSON.parse(text).as_h, or declare h = Hash(String, V).new and call JSON.read_into(doc, at, h)" %}
   end
 
-  # A type that reads itself: the `initialize(pull)` a `derive
-  # serializable` wrote. A type that admits nil reads `null` as the nil and
-  # anything else as the other type (`x || raise`, as the derive asks it),
-  # the way `write_or_null` writes it. That was `T.new(pull)` too, and
-  # `Int32 | Nil` has no such `new`, so `JSON.from_json("5", Int32?)` and
-  # `Array(Int32?)` did not build. Any other union is `read_union`'s.
-  def self.read_value(pull : PullParser, type : T.class) : T forall T
-    {% if T.nilable? %}
-      pull.read_null? ? nil : read_value(pull, typeof(nil.as(T) || raise("")))
-    {% elsif T.union? %}
-      read_union(pull, T)
-    {% elsif T < ::Enum %}
-      read_enum(pull, T)
+  # The object at *at* into *h*, which the caller declared.
+  def self.read_into(doc : Document, at : Int32, h : Hash(String, V)) : Nil forall V
+    doc.expect_kind(at, Document::Kind::Object)
+    {% if V == ::String %}
+      doc.each(at) do |child|
+        doc.expect_kind(child, Document::Kind::String)
+        h[doc.key(child)] = doc.view(child)
+      end
     {% else %}
-      T.new(pull)
+      doc.each(at) { |child| h[doc.key(child)] = read_value(doc, child, V) }
+    {% end %}
+  end
+
+  # A type that reads itself: the `initialize(doc, at)` a `derive
+  # serializable` wrote. A type that admits nil reads `null` as the nil and
+  # anything else as the other type. Any other union is `read_union`'s.
+  def self.read_value(doc : Document, at : Int32, type : T.class) : T forall T
+    {% if T.nilable? %}
+      doc.null?(at) ? nil : read_value(doc, at, typeof(nil.as(T) || raise("")))
+    {% elsif T.union? %}
+      read_union(doc, at, T)
+    {% elsif T < ::Enum %}
+      read_enum(doc, at, T)
+    {% else %}
+      T.new(doc, at)
     {% end %}
   end
 
@@ -3796,7 +3930,7 @@ pub struct JSON
   # out: a name is looked up from here, where a type of a module this one
   # does not import is refused (iyi SPEC R-1) and a program's private type
   # is not found.
-  private def self.read_union(pull : PullParser, type : T.class) : T forall T
+  private def self.read_union(doc : Document, at : Int32, type : T.class) : T forall T
     {% begin %}
       {% members = T.union_types %}
       {% has_bool = members.any? { |m| m == ::Bool } %}
@@ -3821,63 +3955,58 @@ pub struct JSON
       {% if clash %}
         {% raise "JSON cannot read #{T}: which of #{clash.join(" and ").id} a value is read into would be a guess, as there is no rescue to try one and go back. A union read from JSON has one Array, one Hash and one other member at most besides Bool, Int64, UInt64, Int32, UInt8, Float64 and String." %}
       {% end %}
-      kind = pull.kind
+      kind = doc.kind(at)
       {% if has_bool %}
-        return pull.read_bool if kind.bool?
+        return doc.bool(at) if kind == Document::Kind::Bool
       {% end %}
       {% if has_i64 %}
-        return pull.read_int if kind.int?
+        return doc.int(at) if kind == Document::Kind::Int
       {% elsif has_u64 || has_i32 || has_u8 %}
-        if kind.int?
-          int = pull.int_value
+        if kind == Document::Kind::Int
+          int = doc.int(at)
           {% if has_u64 %}
-            return read_value(pull, ::UInt64) if int >= 0_i64
+            return int.to_u64 if int >= 0_i64
           {% end %}
           {% if has_i32 %}
-            return read_value(pull, ::Int32) if int >= -2147483648_i64 && int <= 2147483647_i64
+            return int.to_i32 if int >= -2147483648_i64 && int <= 2147483647_i64
           {% end %}
           {% if has_u8 %}
-            return read_value(pull, ::UInt8) if int >= 0_i64 && int <= 255_i64
+            return int.to_u8 if int >= 0_i64 && int <= 255_i64
           {% end %}
         end
       {% end %}
       {% if has_u64 %}
-        return read_value(pull, ::UInt64) if kind.float? && integer_digits?(pull.raw_value) && digits_to_u64?(pull.raw_value)
+        return doc.uint(at) if doc.uint?(at)
       {% end %}
       {% if has_f64 %}
-        return pull.read_float if kind.int? || kind.float?
+        return doc.float(at) if kind == Document::Kind::Int || kind == Document::Kind::Float
       {% end %}
       {% if has_string %}
-        return pull.read_string if kind.string?
+        return doc.string(at) if kind == Document::Kind::String
       {% end %}
       {% if arrays.size == 1 %}
-        if kind.begin_array?
-          return read_value(pull, typeof(begin
+        if kind == Document::Kind::Array
+          return read_value(doc, at, typeof(begin
             member = uninitialized T
             member.is_a?(::Array) ? member : raise("")
           end))
         end
       {% end %}
       {% if hashes.size == 1 %}
-        if kind.begin_object?
-          return read_value(pull, typeof(begin
+        if kind == Document::Kind::Object
+          return read_value(doc, at, typeof(begin
             member = uninitialized T
             member.is_a?(::Hash) ? member : raise("")
           end))
         end
       {% end %}
       {% if others.size == 1 %}
-        read_value(pull, typeof(begin
+        read_value(doc, at, typeof(begin
           member = uninitialized T
           member.is_a?(::Bool | ::Int64 | ::UInt64 | ::Int32 | ::UInt8 | ::Float64 | ::String) || member.is_a?(::Array) || member.is_a?(::Hash) ? raise("") : member
         end))
       {% else %}
-        {% if has_u64 || has_i32 || has_u8 %}
-          if kind.int? || (kind.float? && integer_digits?(pull.raw_value))
-            raise "integer #{pull.raw_value} out of #{T} range at line #{pull.line_number}, column #{pull.column_number}"
-          end
-        {% end %}
-        raise "expected #{T}, got #{kind} at line #{pull.line_number}, column #{pull.column_number}"
+        raise "expected #{T}, not #{kind}"
       {% end %}
     {% end %}
   end

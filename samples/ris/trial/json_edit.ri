@@ -5,24 +5,21 @@ import std/json::{JSON}
 
 input = Program.args[0]
 output = Program.args[1]
-doc = JSON.document(File.read(input))
-root = doc.root
-tags = doc.at(root, "tags")
-meta = doc.at(root, "meta")
+doc = JSON.parse(File.read(input))
 result = String::Builder.new
 result.json do |json|
   json.object do
-    json.field "name", doc.string(doc.at(root, "name"))
-    json.field "version", doc.int(doc.at(root, "version")) + 1
+    json.field "name", doc["name"].as_s
+    json.field "version", doc["version"].as_i + 1
     json.field "tags" do
       json.array do
-        doc.each(tags) { |tag| json.string doc.string(tag) }
+        doc["tags"].as_a.each { |tag| json.string tag.as_s }
         json.string "trial"
       end
     end
     json.field "meta" do
       json.object do
-        json.field "stars", doc.int(doc.at(meta, "stars")) + 5
+        json.field "stars", doc["meta"]["stars"].as_i + 5
       end
     end
   end

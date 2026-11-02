@@ -119,7 +119,7 @@ import std/asn1::{Der, Asn1Error}
 import std/http::{HTTP, HTTPClient, HTTPError, Request, Response}
 import std/socket::{SocketError}
 import std/tls::{TlsIdentity, TlsError}
-import std/json::{JSON, Any}
+import std/json::{JSON, Any, RisJsonFields}
 import std/base64::{Base64}
 import std/digest::{SHA256}
 import std/time::{Time, Span}
@@ -222,7 +222,7 @@ pub struct AcmeChallenge
   def initialize(@kind : String, @url : String, @token : String, @status : String, @error : AcmeError?)
   end
 
-  def self.from(object : Hash(String, Any)) : AcmeChallenge | AcmeError
+  def self.from(object : RisJsonFields) : AcmeChallenge | AcmeError
     kind = AcmeJson.text(object, "type")
     url = AcmeJson.text(object, "url")
     status = AcmeJson.text(object, "status")
@@ -248,7 +248,7 @@ pub struct AcmeAuthorization
   def initialize(@url : String, @identifier : String, @status : String, @wildcard : Bool, @challenges : Array(AcmeChallenge))
   end
 
-  def self.from(url : String, object : Hash(String, Any)) : AcmeAuthorization | AcmeError
+  def self.from(url : String, object : RisJsonFields) : AcmeAuthorization | AcmeError
     status = AcmeJson.text(object, "status")
     return AcmeError.new("the authorization #{url} has no status") unless status
     identifier = ""
@@ -285,7 +285,7 @@ pub struct AcmeOrder
                  @finalize_url : String, @certificate_url : String?, @error : AcmeError?)
   end
 
-  def self.from(url : String, object : Hash(String, Any)) : AcmeOrder | AcmeError
+  def self.from(url : String, object : RisJsonFields) : AcmeOrder | AcmeError
     status = AcmeJson.text(object, "status")
     finalize = AcmeJson.text(object, "finalize")
     return AcmeError.new("the order #{url} has no status or finalize URL") unless status && finalize
@@ -603,7 +603,7 @@ pub class AcmeClient
   # until its status is not one of *waiting*: each poll after the time its
   # answer's Retry-After asks, or `poll_ms`; `max_polls` polls and
   # `wait_ms` at most.
-  private def poll(url : String, response : AcmeResponse, waiting : Array(String), what : String) : Hash(String, Any) | AcmeError
+  private def poll(url : String, response : AcmeResponse, waiting : Array(String), what : String) : RisJsonFields | AcmeError
     started = AcmeClock.ms
     polls = 0
     while true
@@ -687,7 +687,7 @@ end
 # JSON read from an answer, where every field may be missing or of
 # another type and that is an answer, not a panic.
 struct AcmeJson
-  def self.object(text : String, what : String) : Hash(String, Any) | AcmeError
+  def self.object(text : String, what : String) : RisJsonFields | AcmeError
     doc = JSON.parse?(text)
     return AcmeError.new("#{what} is not JSON: #{excerpt(text)}") unless doc
     object = doc.as_h?
@@ -695,12 +695,12 @@ struct AcmeJson
     object
   end
 
-  def self.text(object : Hash(String, Any), key : String) : String?
+  def self.text(object : RisJsonFields, key : String) : String?
     value = object[key]?
     value ? value.as_s? : nil
   end
 
-  def self.flag(object : Hash(String, Any), key : String) : Bool
+  def self.flag(object : RisJsonFields, key : String) : Bool
     value = object[key]?
     return false unless value
     value.as_bool? || false
@@ -718,7 +718,7 @@ struct AcmeJson
     true
   end
 
-  def self.texts(object : Hash(String, Any), key : String) : Array(String)
+  def self.texts(object : RisJsonFields, key : String) : Array(String)
     out = [] of String
     if (value = object[key]?) && (list = value.as_a?)
       list.each do |item|
@@ -731,7 +731,7 @@ struct AcmeJson
 
   # Yields each object of the array at *key*, in place: no Array of
   # Hash is built (a Hash grows, so an Array cannot hold it).
-  def self.each_object(object : Hash(String, Any), key : String, &) : Nil
+  def self.each_object(object : RisJsonFields, key : String, &) : Nil
     if (value = object[key]?) && (list = value.as_a?)
       list.each do |item|
         fields = item.as_h?
@@ -744,13 +744,13 @@ struct AcmeJson
   # Its subproblems (RFC 8555 section 6.7.1) are read one level deep, as
   # the RFC defines them: a subproblem's own `subproblems` is not read,
   # so no growing list lives across a recursive call.
-  def self.problem(object : Hash(String, Any), status : Int32) : AcmeError
+  def self.problem(object : RisJsonFields, status : Int32) : AcmeError
     subproblems = [] of AcmeError
     each_object(object, "subproblems") { |sub| subproblems << problem_leaf(sub, status, nil) }
     problem_leaf(object, status, subproblems)
   end
 
-  private def self.problem_leaf(object : Hash(String, Any), status : Int32,
+  private def self.problem_leaf(object : RisJsonFields, status : Int32,
                                 subproblems : Array(AcmeError)?) : AcmeError
     kind = text(object, "type") || "about:blank"
     detail = text(object, "detail") || "(no detail)"

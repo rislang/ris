@@ -1,17 +1,15 @@
 # Reads a CSV with a header, groups by a column and sums another.
 module samples/trial/csv_sum
 
-import std/csv::{CSV}
+import std/csv::{CSVReader}
 
 totals = Hash(String, Int64).new
-first = true
-CSV.parse(File.read(Program.args[0])) do |row|
-  if first
-    first = false
-    next
-  end
+reader = CSVReader.new(File.read(Program.args[0]), headers: true)
+while row = reader.next.or_panic
   region = row[0]
-  totals[region] = totals.fetch(region, 0_i64) + row[2].to_i64
+  # A row is the reader's until its next read: a key that stays is copied.
+  key = totals.has_key?(region) ? region : region.copy_to(Program.tape)
+  totals[key] = totals.fetch(key, 0_i64) + row[2].to_i64
 end
 totals.keys.sort.each do |region|
   puts "#{region} #{totals[region]}"
