@@ -3929,7 +3929,7 @@ pub struct JSON
   # the document with `doc.each` into arrays the caller declares.
   def self.read_value(doc : Document, at : Int32, type : Array(T).class) : Array(T) forall T
     {% if !T.union? && (T < ::Array || T < ::Hash) %}
-      {% raise "JSON cannot read #{T} inside an Array: a round's collection is freed with the round (SPEC 1.9). Read JSON.parse(text) and walk it with as_a, or declare the outer arrays and copy_to(owner)" %}
+      {% raise "JSON cannot read " + T.stringify + " inside an Array: a round's collection is freed with the round (SPEC 1.9). Read JSON.parse(text) and walk it with as_a, or declare the outer arrays and copy_to(owner)" %}
     {% end %}
     doc.expect_kind(at, Document::Kind::Array)
     ary = Array(T).new(doc.size(at))
@@ -3965,12 +3965,38 @@ pub struct JSON
 
   # A type that reads itself: the `initialize(doc, at)` a `derive
   # serializable` wrote. A type that admits nil reads `null` as the nil and
-  # anything else as the other type. Any other union is `read_union`'s.
+  # anything else as the other type. A union's Array or Hash member is read
+  # here, by a tail call, so its strings stay views of the document; the
+  # rest of a union is `read_union`'s.
   def self.read_value(doc : Document, at : Int32, type : T.class) : T forall T
-    {% if T.nilable? %}
-      doc.null?(at) ? nil : read_value(doc, at, typeof(nil.as(T) || raise("")))
+    {% if T.nilable? && T.union_types.reject { |m| m == ::Nil }.size == 1 %}
+      return nil if doc.null?(at)
+      read_value(doc, at, typeof(nil.as(T) || raise("")))
     {% elsif T.union? %}
-      read_union(doc, at, T)
+      {% if T.nilable? %}
+        return nil if doc.null?(at)
+      {% end %}
+      {% if T.union_types.any? { |m| m < ::Array } %}
+        if doc.kind(at) == Document::Kind::Array
+          return read_value(doc, at, typeof(begin
+            member = uninitialized T
+            member.is_a?(::Array) ? member : raise("")
+          end))
+        end
+      {% end %}
+      {% if T.union_types.any? { |m| m < ::Hash } %}
+        if doc.kind(at) == Document::Kind::Object
+          return read_value(doc, at, typeof(begin
+            member = uninitialized T
+            member.is_a?(::Hash) ? member : raise("")
+          end))
+        end
+      {% end %}
+      {% if T.nilable? %}
+        read_union(doc, at, typeof(nil.as(T) || raise("")))
+      {% else %}
+        read_union(doc, at, T)
+      {% end %}
     {% elsif T < ::Enum %}
       read_enum(doc, at, T)
     {% else %}
@@ -4041,6 +4067,9 @@ pub struct JSON
           {% if has_u8 %}
             return int.to_u8 if int >= 0_i64 && int <= 255_i64
           {% end %}
+          {% if !has_f64 && others.empty? %}
+            raise "integer #{int} out of #{T} range"
+          {% end %}
         end
       {% end %}
       {% if has_u64 %}
@@ -4051,22 +4080,6 @@ pub struct JSON
       {% end %}
       {% if has_string %}
         return doc.string(at) if kind == Document::Kind::String
-      {% end %}
-      {% if arrays.size == 1 %}
-        if kind == Document::Kind::Array
-          return read_value(doc, at, typeof(begin
-            member = uninitialized T
-            member.is_a?(::Array) ? member : raise("")
-          end))
-        end
-      {% end %}
-      {% if hashes.size == 1 %}
-        if kind == Document::Kind::Object
-          return read_value(doc, at, typeof(begin
-            member = uninitialized T
-            member.is_a?(::Hash) ? member : raise("")
-          end))
-        end
       {% end %}
       {% if others.size == 1 %}
         read_value(doc, at, typeof(begin
