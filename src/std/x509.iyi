@@ -1489,7 +1489,8 @@ struct X509Pem
   end
 
   def initialize(text : String, label : String)
-    @blocks = Array(Array::View(UInt8)).new(4)
+    blocks = Array(Array::View(UInt8)).new(4)
+    notes = String::Builder.new(128)
     bytes = Array(UInt8).new(text.bytesize)
     body = String::Builder.new(text.bytesize)
     opening = "-----BEGIN #{label}-----"
@@ -1507,13 +1508,13 @@ struct X509Pem
         decoded = X509Pem.decode(body.finish[body_start, body.bytesize - body_start], label)
         if decoded.is_a?(X509Error)
           message = decoded.message
-          @notes << message[6, message.bytesize - 6]
-          @why = @notes.finish
+          notes << message[6, message.bytesize - 6]
+          @why = notes.finish
           break
         end
         start = bytes.size
         bytes.concat(decoded)
-        @blocks << bytes[start, decoded.size]
+        blocks << bytes[start, decoded.size]
         inside = false
       else
         body << line
@@ -1521,9 +1522,11 @@ struct X509Pem
       nil
     end
     if inside && @why.empty?
-      @notes << "a #{label} block with no END line"
-      @why = @notes.finish
+      notes << "a #{label} block with no END line"
+      @why = notes.finish
     end
+    @blocks = blocks
+    @notes = notes
   end
 
   def self.decode(text : String, label : String) : Array(UInt8) | X509Error

@@ -1339,13 +1339,11 @@ pub struct ResolvConf
   # names are views of *text*, the lists refilled rather than made anew
   # in a line's block.
   def initialize(text : String)
-    @nameservers = [] of String
-    @search = [] of String
+    nameservers = [] of String
+    search = [] of String
     @ndots = 1
     @timeout_ms = 5000
     @attempts = 2
-    nameservers = @nameservers
-    search = @search
     text.split('\n').each do |line|
       words = DnsText.words(line)
       next if words.empty?
@@ -1376,6 +1374,8 @@ pub struct ResolvConf
         end
       end
     end
+    @nameservers = nameservers
+    @search = search
   end
 end
 

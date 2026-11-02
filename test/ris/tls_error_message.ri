@@ -1,0 +1,4 @@
+import std/tls::{TlsError, TlsAlert}
+
+puts TlsError.new("plain").message
+puts TlsError.new("alert", TlsAlert::DECODE_ERROR).message

@@ -23,27 +23,30 @@ pub struct Query
     count = 0
     Query.each_part(query, from) { |_, _| count += 1 }
     none = query[0, 0]
-    @pairs = Array(QueryPair).new(count) { QueryPair.new(none, none) }
-    @text = String::Builder.new(query.bytesize + 1)
+    pairs = Array(QueryPair).new(count) { QueryPair.new(none, none) }
+    text = String::Builder.new(query.bytesize + 1)
     at = 0
     Query.each_part(query, from) do |start, stop|
       eq = start
       while eq < stop && query[eq] != 61_u8
         eq += 1
       end
-      key = decoded(query, start, eq)
-      value = eq < stop ? decoded(query, eq + 1, stop) : none
-      @pairs[at] = QueryPair.new(key, value)
+      key = Query.decoded(query, start, eq, text)
+      value = eq < stop ? Query.decoded(query, eq + 1, stop, text) : none
+      pairs[at] = QueryPair.new(key, value)
       at += 1
     end
+    @pairs = pairs
+    @text = text
   end
 
   # The bytes from *start* to *stop* decoded into the query's text (plain
   # ones copied as they are): a view of it.
-  private def decoded(query : String, start : Int32, stop : Int32) : String
-    at = @text.bytesize
-    Query.decode_onto(query, start, stop, @text)
-    @text.finish[at, @text.bytesize - at]
+  protected def self.decoded(query : String, start : Int32, stop : Int32,
+                             text : String::Builder) : String
+    at = text.bytesize
+    Query.decode_onto(query, start, stop, text)
+    text.finish[at, text.bytesize - at]
   end
 
   # The start and end of each part between `&` and `;` that is not empty.

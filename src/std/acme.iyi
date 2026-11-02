@@ -136,13 +136,13 @@ pub struct AcmeError
   getter status : Int32
   # The identifier a subproblem is about (section 6.7.1), "" otherwise.
   getter identifier : String
-  getter subproblems : Array::View(AcmeError)
+  getter subproblems : Array::View(AcmeError)?
 
   BAD_NONCE = "urn:ietf:params:acme:error:badNonce"
 
   def initialize(@detail : String, @problem_type : String = "", @status : Int32 = 0, @identifier : String = "",
-                 subproblems : Array(AcmeError) = [] of AcmeError)
-    @subproblems = subproblems.view
+                 subproblems : Array(AcmeError)? = nil)
+    @subproblems = subproblems ? subproblems.view : nil
   end
 
   # Whether this came from a problem document.
@@ -157,9 +157,13 @@ end
 
 impl Error for AcmeError
   def message : String
-    text = problem? ? "acme: #{@problem_type}: #{@detail}" : "acme: #{@detail}"
-    @subproblems.each do |sub|
-      text = text + "; #{sub.identifier}: #{sub.problem_type}: #{sub.detail}"
+    text = ""
+    text << (problem? ? "acme: #{@problem_type}: #{@detail}" : "acme: #{@detail}")
+    if subproblems = @subproblems
+      subproblems.each do |sub|
+        text << "; #{sub.identifier}: #{sub.problem_type}: #{sub.detail}"
+        nil
+      end
     end
     text
   end
@@ -742,12 +746,12 @@ struct AcmeJson
   # so no growing list lives across a recursive call.
   def self.problem(object : Hash(String, Any), status : Int32) : AcmeError
     subproblems = [] of AcmeError
-    each_object(object, "subproblems") { |sub| subproblems << problem_leaf(sub, status, [] of AcmeError) }
+    each_object(object, "subproblems") { |sub| subproblems << problem_leaf(sub, status, nil) }
     problem_leaf(object, status, subproblems)
   end
 
   private def self.problem_leaf(object : Hash(String, Any), status : Int32,
-                                subproblems : Array(AcmeError)) : AcmeError
+                                subproblems : Array(AcmeError)?) : AcmeError
     kind = text(object, "type") || "about:blank"
     detail = text(object, "detail") || "(no detail)"
     identifier = ""

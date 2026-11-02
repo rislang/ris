@@ -1534,21 +1534,30 @@ class FseEncoder
   @delta_find : Array(Int32)
 
   def initialize(norm : Array(Int32), nsym : Int32, log : Int32)
-    @states = Array(Int32).new(512)
-    @delta_bits = Array(Int32).new(64)
-    @delta_find = Array(Int32).new(64)
+    states = Array(Int32).new(512)
+    delta_bits = Array(Int32).new(64)
+    delta_find = Array(Int32).new(64)
+    FseEncoder.fill(states, delta_bits, delta_find, norm, nsym, log)
+    @states = states
+    @delta_bits = delta_bits
+    @delta_find = delta_find
     @log = log
-    build(norm, nsym, log)
   end
 
   def build(norm : Array(Int32), nsym : Int32, log : Int32) : Nil
     @log = log
+    FseEncoder.fill(@states, @delta_bits, @delta_find, norm, nsym, log)
+  end
+
+  def self.fill(states : Array(Int32), delta_bits : Array(Int32),
+                delta_find : Array(Int32), norm : Array(Int32),
+                nsym : Int32, log : Int32) : Nil
     size = 1 << log
-    @states.clear
-    @delta_bits.clear
-    @delta_find.clear
-    size.times { @states << 0; nil }
-    nsym.times { @delta_bits << 0; @delta_find << 0; nil }
+    states.clear
+    delta_bits.clear
+    delta_find.clear
+    size.times { states << 0; nil }
+    nsym.times { delta_bits << 0; delta_find << 0; nil }
     symbol = Array(Int32).new(size, 0)
     cumul = Array(Int32).new((nsym + 1), 0)
     high = size - 1
@@ -1582,7 +1591,7 @@ class FseEncoder
     u = 0
     while u < size
       sym = symbol[u]
-      @states[cumul[sym]] = size + u
+      states[cumul[sym]] = size + u
       cumul[sym] = cumul[sym] + 1
       u = u + 1
     end
@@ -1591,13 +1600,13 @@ class FseEncoder
     while s < nsym
       p = norm[s]
       if p == -1 || p == 1
-        @delta_bits[s] = (log << 16) - size
-        @delta_find[s] = total - 1
+        delta_bits[s] = (log << 16) - size
+        delta_find[s] = total - 1
         total = total + 1
       elsif p > 1
         shed = log - Codes.highbit(p - 1)
-        @delta_bits[s] = (shed << 16) - (p << shed)
-        @delta_find[s] = total - p
+        delta_bits[s] = (shed << 16) - (p << shed)
+        delta_find[s] = total - p
         total = total + p
       end
       s = s + 1

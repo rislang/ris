@@ -1,9 +1,9 @@
-# initialize fills its own fields in place.
+# initialize publishes a field built in place.
 class Filled
-  getter items = Array(Int32).new
+  getter items : Array(Int32)
 
   def initialize
-    @items << 5
+    @items = [5]
   end
 end
 

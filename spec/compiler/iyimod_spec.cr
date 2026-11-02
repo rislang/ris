@@ -368,12 +368,12 @@ describe Iyi::IyiMod do
 
   it "round-trips checked tape parameter effects in an artifact" do
     checked = signature("borrow", ["bytes : Str"], "Str").copy_with(
-      tape_contract: "2;0;1;8,28")
+      tape_contract: "3;0;1;8,28")
     unknown = signature("opaque", ["bytes : Str"], "Nil")
     with_temporary_file do |path|
       Iyi::IyiMod.write sample_artifact(exports: [checked, unknown]), path
       read = Iyi::IyiMod.read(path).exports.functions
-      read[0].tape_contract.should eq "2;0;1;8,28"
+      read[0].tape_contract.should eq "3;0;1;8,28"
       effect = Iyi::TapeCallGraph::Contract.decode(read[0].tape_contract)
       effect.parameters.should eq [8, 28]
       effect.suspension.should be_true

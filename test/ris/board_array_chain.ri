@@ -7,11 +7,16 @@ struct BoardChained
 
   def initialize(@name : String)
     @kinds = Array(String).new
+  end
+
+  def fill : Nil
     @kinds << "tls-alpn-01" << "http-01"
+    nil
   end
 end
 
 sent = BoardChained.new("chain")
+sent.fill
 puts RisBoard.post(sent)
 got = RisBoard.take(BoardChained)
 if got.is_a?(BoardChained)
@@ -27,7 +32,11 @@ struct BoardGrown
 
   def initialize
     @note = ""
+  end
+
+  def fill : Nil
     @note << "grown" << "!"
+    nil
   end
 
   def add(text : String) : Nil
@@ -35,7 +44,9 @@ struct BoardGrown
   end
 end
 
-puts RisBoard.post(BoardGrown.new)
+note = BoardGrown.new
+note.fill
+puts RisBoard.post(note)
 grown = RisBoard.take(BoardGrown)
 if grown.is_a?(BoardGrown)
   grown.add("?")

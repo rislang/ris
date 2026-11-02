@@ -532,7 +532,7 @@ pub class TarReader
     @bzip2 = nil
     @xz = nil
     @pending = ""
-    @first = String::Builder.new(TarBytes::BLOCK)
+    head = String::Builder.new(TarBytes::BLOCK)
     @gzip = false
     @offset = 0_i64
     @left = 0_i64
@@ -551,13 +551,12 @@ pub class TarReader
     @pax = {} of String => String
     @entry = nil
     @error_text = String::Builder.new(128)
-    @entry = TarEntry.new(self, @pax)
     # The first block says whether the stream is gzip (1f 8b), bzip2
     # ("BZh" and a block-size digit) or xz (FD 37 7A 58 5A 00).
-    while @first.bytesize < TarBytes::BLOCK
-      break if @io.read_str(TarBytes::BLOCK - @first.bytesize, @first) == 0
+    while head.bytesize < TarBytes::BLOCK
+      break if @io.read_str(TarBytes::BLOCK - head.bytesize, head) == 0
     end
-    first = @first.finish
+    first = head.finish
     p = first
     if first.bytesize >= 2 && p[0] == 0x1f_u8 && p[1] == 0x8b_u8
       @gzip = true
@@ -569,6 +568,8 @@ pub class TarReader
     else
       @pending = first
     end
+    @first = head
+    @entry = TarEntry.new(self, @pax)
   end
 
   # Whether the stream is gzip; known once the first entry is asked for.

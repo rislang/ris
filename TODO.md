@@ -23,24 +23,6 @@ refusal of a file at once, fix by message, rerun only that cluster's
 files; one full check.sh on minitest per finished step, not per fix.
 Fix a checker hole below only when a cluster hits it.
 
-4. Samples and tests, group by group, then one full check.sh.
-   `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
-   refusal. check.sh (2026-11-02): 4 FAILED. Patterns that work: read into
-   one flat String (tagged where an error may come back) and wrap it in
-   a one-call def, a choice of two calls, or a `new` (a constructor builds
-   in the caller's scope: dns, SvcbRecord, json's document); keep a round's
-   texts in a builder made before the loop (`DnsLookup`, `kept`);
-   refill a field instead of a new value (TLS records, key updates); a
-   struct or Tuple of texts and plain values moves down whole.
-   Left, by cluster:
-   * TLS server (http_prefork's TLS half): `client_hello` returns
-     reader views and lists made in the def; the offers need
-     caller-owned storage.
-   * autocert lifecycle: `held_of` makes and returns its TlsIdentity and
-     store (declare them at the caller, pass them in).
-   * http_coding compiles but returns empty decoded bodies, including
-     the invalid gzip response that must report an error.
-   * secure_dns exceeds the 300-second gate timeout in the scope checker.
 5. Benches: build each, group the refusals by message, fix per group.
 
 Trial programs (samples/ris/trial/blocked/ has the repros), most blocking
@@ -65,9 +47,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 
 * SPEC 3.3: `v = w.rows`, `w.rows.clear`, `puts v.size` passes: a view
   taken through a getter stays live over the clear. Refuse it.
-* SPEC 2.2: `initialize` may pass `self` to a helper that grows a field
-  mid-construction, unrefused. Refuse it, as 2.2 already says; the error
-  names the safe form: grow after `new`. No SPEC change.
 * `IyiSocket.listen_result` answered a socket made after other work
   inside a union (`IyiSocket | SocketError`), unrefused; the socket was
   freed with the def and every worker accepted on fd 0. Refuse a class
@@ -75,6 +54,15 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 * A store into `self`'s field inside a method is not checked against
   the method's scope; the same store is refused at a caller that holds
   the receiver in a local. Check it where it is made.
+
+* A multi-expression def answering RisBoard.take's non-flat message
+  can lose its decoded payloads when its scratch ends, unrefused
+  (autocert's reader_settings). Attribute decoded data to its receiving
+  scope; the one-call constructor form now keeps that gate safe.
+* HTTPClient's ordinary open/request pooling still needs transport
+  storage supplied by its caller. DoH now retains an explicit exchange
+  owner and uses HTTP.open_at_into; a request-local Conn cannot be kept
+  in a longer-lived client's idle list.
 
 * A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
   is refused: the block frees its scratch before the task copy takes
@@ -176,8 +164,9 @@ change. Gates stay structural. No item below changes SPEC.
   server's) or `IyiGroup.new` keeps each task's slot until it ends;
   parallel task fibers are not pooled; a spawned block's captured
   closure data takes program storage per spawn.
-* std's long-lived state (HPACK tables, autocert cache, log sinks) into
-  typed Pool/SlicePool with explicit free and index links (Goose
+* std's long-lived state (HPACK tables, autocert cache, HTTPClient ticket
+  origins, log sinks) into typed Pool/SlicePool with explicit free and
+  index links (Goose
   doc/reference/goose/docs/design/owning_dynamic_data.md).
 * Stats: RIS_TAPE_STATS owner paths and pool waste (SPEC 6.6).
 * A tape hash map laid out as Ruby's Hash (st_table): entries in an

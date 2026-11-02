@@ -307,7 +307,7 @@ struct AutocertFiles
   def self.delete(path : String) : AutocertError?
     image = RisTaskConfig.new(path.as_tape)
     defer image.close
-    error = nil.as(AutocertError?)
+    why = ""
     group do |g|
       task = g.spawn do
         input = image.read(String)
@@ -315,25 +315,24 @@ struct AutocertFiles
         0
       end
       got = task.value
-      error = AutocertError.new("deleting #{path}: #{got.message}") if got.is_a?(Panicked)
+      why << "deleting #{path}: #{got.message}" if got.is_a?(Panicked)
+      nil
     end
-    error
+    why.empty? ? nil : AutocertError.new(why)
   end
 end
 
-# A certificate a manager holds for a name: the identity handshakes are
-# shown, its dates, and when renewal is next tried.
-pub class AutocertHeld
-  getter identity : TlsIdentity
+# The dates a manager retains for a name and its next renewal. Parsed
+# identities belong to the handshake that uses them.
+pub struct RisAutocertHeld
   getter not_before_ms : Int64
   getter not_after_ms : Int64
   # When renewal is next tried: its due time, later after failures.
   property renew_at_ms : Int64
   property failures : Int32 = 0
 
-  def initialize(@identity : TlsIdentity, @renew_at_ms : Int64)
-    @not_before_ms = @identity.leaf.not_before.to_unix_ms
-    @not_after_ms = @identity.leaf.not_after.to_unix_ms
+  def initialize(@not_before_ms : Int64, @not_after_ms : Int64,
+                 @renew_at_ms : Int64)
   end
 
   # Whether a handshake at *now_ms* may be shown it.
@@ -358,8 +357,7 @@ pub struct AutocertConfig
   property ca_roots_pem : String = "".as_tape
 
   def initialize(@directory_url : String, @cache_dir : String, @hosts : Array(String))
-    @challenges = Array(String).new
-    @challenges << "tls-alpn-01".as_tape << "http-01".as_tape
+    @challenges = ["tls-alpn-01".as_tape, "http-01".as_tape]
   end
 
   def allows?(name : String) : Bool
@@ -385,14 +383,100 @@ pub struct AutocertOrder
   end
 end
 
-# A view and its parsed identities belong to exactly one serving task.
+@[OnTape]
+struct RisAutocertFlight
+  getter config : AutocertConfig
+  getter name : String
+  getter delay : Int64
+
+  def initialize(@config : AutocertConfig, @name : String, @delay : Int64)
+  end
+end
+
+@[OnTape]
+struct RisAutocertAnswer
+  getter value : Response? = nil
+
+  def initialize(view : V, request : Request) forall V
+    path = request.path
+    return unless path.starts_with?(AcmeHttp01::PATH)
+    unless request.method == "GET" || request.method == "HEAD"
+      @value = Response.new(405, "", {"Allow" => "GET, HEAD"})
+      return
+    end
+    token = path[AcmeHttp01::PATH.bytesize,
+      path.bytesize - AcmeHttp01::PATH.bytesize]
+    text = view.cache.get("challenge-http-#{token}")
+    @value = text.is_a?(String) ?
+      Response.new(200, text, {"Content-Type" => "application/octet-stream"}) :
+      Response.new(404, "")
+  end
+
+  def self.result(parsed : RisAutocertAnswer) : Response?
+    parsed.value
+  end
+end
+
+@[OnTape]
+struct RisAutocertRead
+  getter value : RisAutocertHeld? = nil
+
+  def initialize(view : V, name : String, now_ms : Int64) forall V
+    text = view.cache.get(name)
+    return unless text.is_a?(String)
+    identity = TlsIdentity.new(text, text)
+    chain_store = RisCertificateStore.new
+    got = view.held_of(name, text, identity, chain_store)
+    return if got.is_a?(AutocertError) || !got.current?(now_ms)
+    @value = got
+  end
+
+  def self.result(parsed : RisAutocertRead) : RisAutocertHeld?
+    parsed.value
+  end
+end
+
+# A handshake's identity is constructed on its caller's tape. Verification
+# fills these local owners before the result is published.
+@[OnTape]
+struct RisAutocertIdentity
+  getter value : TlsIdentity | TlsError
+
+  def initialize(view : V, server_name : String?,
+                 alpn : Array(String) | Nil, left_ms : Int32?) forall V
+    text = view.identity_text(server_name, alpn, left_ms)
+    if text.is_a?(TlsError)
+      @value = text
+      return
+    end
+    identity = TlsIdentity.new(text, text)
+    chain_store = RisCertificateStore.new
+    if error = identity.error
+      @value = error
+      return
+    end
+    unless alpn && alpn.size == 1 && alpn[0] == AcmeTlsAlpn01::PROTOCOL
+      name = server_name || ""
+      checked = view.held_of(name, text, identity, chain_store)
+      if checked.is_a?(AutocertError)
+        @value = TlsError.new(checked.message, TlsAlert::INTERNAL_ERROR)
+        return
+      end
+    end
+    @value = identity
+  end
+
+  def self.result(parsed : RisAutocertIdentity) : TlsIdentity | TlsError
+    parsed.value
+  end
+end
+
+# A view and its cache operations belong to exactly one serving task.
 module RisAutocertViewState
   ACCOUNT_KEY = "acme_account+key"
   MAX_RETRY_MS = 3600000_i64
   getter config : AutocertConfig
   getter cache : AutocertDirCache
-  @held : Hash(String, AutocertHeld) = {} of String => AutocertHeld
-  @versions : Hash(String, String) = {} of String => String
   @placeholder : TlsIdentity? = nil
 
   def initialize(@config : AutocertConfig)
@@ -417,27 +501,31 @@ module RisAutocertViewState
   # `identity` is a self-signed certificate for `autocert.invalid` that
   # no handshake is shown: the manager answers each one itself.
   @[TaskClosureUnsafe("TLS callbacks run on the view owner task before its tape ends")]
-  def tls_config(alpn : Array(String) = ["http/1.1"]) : TlsServerConfig
-    config = TlsServerConfig.new(placeholder)
-    protocols = alpn.dup
-    protocols << AcmeTlsAlpn01::PROTOCOL unless protocols.includes?(AcmeTlsAlpn01::PROTOCOL)
-    config.alpn = protocols
+  def tls_config(config : TlsServerConfig, alpn : Array(String) = ["http/1.1"]) : Nil
+    config.alpn.clear
+    config.alpn.concat(alpn)
+    config.alpn << AcmeTlsAlpn01::PROTOCOL unless config.alpn.includes?(AcmeTlsAlpn01::PROTOCOL)
     config.identity_source = self
-    config
+    nil
   end
 
-  private def placeholder : TlsIdentity
+  def placeholder : TlsIdentity
     @placeholder.as(TlsIdentity)
   end
 
   def identity_for(server_name : String?, alpn : Array(String) | Array(String) | Nil, left_ms : Int32? = nil) : TlsIdentity | TlsError
+    RisAutocertIdentity.result(RisAutocertIdentity.new(self,
+      server_name, alpn, left_ms))
+  end
+
+  def identity_text(server_name : String?, alpn : Array(String) | Nil,
+                    left_ms : Int32?) : String | TlsError
     return TlsError.new("autocert: the client names no host (server_name)", TlsAlert::UNRECOGNIZED_NAME) unless server_name
     name = server_name.downcase
     if alpn && alpn.size == 1 && alpn[0] == AcmeTlsAlpn01::PROTOCOL
       text = @cache.get("challenge-tls-#{name}")
       if text.is_a?(String)
-        challenge = TlsIdentity.new(text, text)
-        return challenge unless challenge.error
+        return text
       end
       return TlsError.new("autocert: no tls-alpn-01 challenge is up for #{name}", TlsAlert::UNRECOGNIZED_NAME)
     end
@@ -445,12 +533,13 @@ module RisAutocertViewState
     if held.is_a?(AutocertError)
       return TlsError.new(held.message, @config.allows?(name) ? TlsAlert::INTERNAL_ERROR : TlsAlert::UNRECOGNIZED_NAME)
     end
-    held.identity
+    text = @cache.get(name)
+    return TlsError.new("autocert: the certificate disappeared", TlsAlert::INTERNAL_ERROR) unless text.is_a?(String)
+    text
   end
 
-  # A cached identity is local; compare whole PEM to detect every rewrite,
-  # including renewals in the same filesystem timestamp tick.
-  def certificate(name : String, left_ms : Int32? = nil) : AutocertHeld | AutocertError
+  # Read the current PEM anew, including rewrites in the same clock tick.
+  def certificate(name : String, left_ms : Int32? = nil) : RisAutocertHeld | AutocertError
     return AutocertError.new("#{name.inspect} is not a name this manager answers for") unless @config.allows?(name)
     limit = @config.wait_ms
     cut = left_ms ? left_ms < limit : false
@@ -496,35 +585,21 @@ module RisAutocertViewState
     @cache.put("#{name}.error", "#{until_ms}\n#{error.detail}")
   end
 
-  def load(name : String, now_ms : Int64) : AutocertHeld?
-    text = @cache.get(name)
-    return nil unless text.is_a?(String)
-    held = @held[name]?
-    return held if held && held.current?(now_ms) && @versions[name]? == text
-    read = held_of(name, text)
-    return nil if read.is_a?(AutocertError) || !read.current?(now_ms)
-    @held[name] = read
-    @versions[name] = text
-    read
+  def load(name : String, now_ms : Int64) : RisAutocertHeld?
+    read(name, now_ms)
   end
 
-  # The cached certificate for *name* if current at *now_ms*, read anew
-  # and not kept in this view: the manager keeps its own.
-  def read(name : String, now_ms : Int64) : AutocertHeld?
-    text = @cache.get(name)
-    return nil unless text.is_a?(String)
-    got = held_of(name, text)
-    return nil if got.is_a?(AutocertError) || !got.current?(now_ms)
-    got
+  # The manager retains dates; parsing owners are local to its caller.
+  def read(name : String, now_ms : Int64) : RisAutocertHeld?
+    RisAutocertRead.result(RisAutocertRead.new(self, name, now_ms))
   end
 
-  def held_of(name : String, text : String) : AutocertHeld | AutocertError
-    identity = TlsIdentity.new(text, text)
+  def held_of(name : String, text : String, identity : TlsIdentity,
+              chain_store : RisCertificateStore) : RisAutocertHeld | AutocertError
     if problem = identity.error
       return AutocertError.new("the certificate for #{name}: #{problem.message}")
     end
     return AutocertError.new("the certificate issued for #{name} does not name it") unless identity.leaf.matches_host?(name)
-    chain_store = RisCertificateStore.new
     if problem = chain_store.read_pem(text)
       return AutocertError.new("the certificate for #{name}: #{problem.message}")
     end
@@ -535,7 +610,10 @@ module RisAutocertViewState
     end
     verified = X509.verify(identity.leaf, chain[1, chain.size - 1], roots.certificates, name)
     return AutocertError.new("the certificate for #{name} is not trusted: #{verified.message}") if verified.is_a?(X509Error)
-    AutocertHeld.new(identity, renew_time(identity.leaf.not_before.to_unix_ms, identity.leaf.not_after.to_unix_ms))
+    RisAutocertHeld.new(identity.leaf.not_before.to_unix_ms,
+      identity.leaf.not_after.to_unix_ms,
+      renew_time(identity.leaf.not_before.to_unix_ms,
+        identity.leaf.not_after.to_unix_ms))
   end
 
   # `roots`, or the system's, read into the caller's *store*.
@@ -586,13 +664,7 @@ module RisAutocertViewState
   end
 
   def answer(request : Request) : Response?
-    path = request.path
-    return nil unless path.starts_with?(AcmeHttp01::PATH)
-    return Response.new(405, "", {"Allow" => "GET, HEAD"}) unless request.method == "GET" || request.method == "HEAD"
-    token = path[AcmeHttp01::PATH.bytesize, path.bytesize - AcmeHttp01::PATH.bytesize]
-    text = @cache.get("challenge-http-#{token}")
-    return Response.new(404, "") unless text.is_a?(String)
-    Response.new(200, text, {"Content-Type" => "application/octet-stream"})
+    RisAutocertAnswer.result(RisAutocertAnswer.new(self, request))
   end
 
   def add_challenge(name : String, token : String, authorization : String) : AutocertError?
@@ -688,7 +760,7 @@ pub class AutocertIssuer
   # cache: an order proved by each of `challenges` in turn - a fresh order
   # for the next only when the last one's authorization failed - and
   # finalized.
-  private def order(name : String, failures : Array(String)) : AutocertHeld | AutocertError
+  private def order(name : String, failures : Array(String)) : RisAutocertHeld | AutocertError
     acme = client
     return acme if acme.is_a?(AutocertError)
     @config.challenges.each do |kind|
@@ -713,14 +785,16 @@ pub class AutocertIssuer
 
   # *placed*, proved, finalized under a new key; the chain read, checked
   # to be for *name* and the key, and put in the cache with the key.
-  private def finish_order(acme : AcmeClient, placed : AcmeOrder, name : String) : AutocertHeld | AutocertError
+  private def finish_order(acme : AcmeClient, placed : AcmeOrder, name : String) : RisAutocertHeld | AutocertError
     key = AutocertPem.new_key
     done = acme.finalize_order(placed, SigningKey.new(key.key))
     return AutocertError.new("the order for #{name}: #{done.message}") if done.is_a?(AcmeError)
     chain = acme.certificate(done)
     return AutocertError.new("the certificate for #{name}: #{chain.message}") if chain.is_a?(AcmeError)
     text = AutocertPem.key(key) + chain
-    held = held_of(name, text)
+    identity = TlsIdentity.new(text, text)
+    chain_store = RisCertificateStore.new
+    held = held_of(name, text, identity, chain_store)
     return held if held.is_a?(AutocertError)
     stored = @cache.put(name, text)
     return stored if stored
@@ -776,19 +850,17 @@ pub struct Autocert
       return error
     end
     texts = String::Builder.new(4096)
-    held = {} of String => AutocertHeld
+    held = {} of String => RisAutocertHeld
     flights = {} of String => IyiTask(Int32)
     failures = {} of String => Int32
     orders = 0
     renewals = 0
-    images = {} of String => RisTaskConfig
     config.hosts.each do |host|
       name = Autocert.keep(AutocertView.normalize(host), texts)
       if certificate = view.read(name, AutocertPem.now_ms)
         held[name] = certificate
       end
     end
-    defer images.each_value { |image| image.close }
     group do |g|
       loop do
         now = AutocertPem.now_ms
@@ -805,9 +877,6 @@ pub struct Autocert
           break unless name = finished
           got = flights[name].value
           flights.delete(name)
-          if completed_image = images.delete(name)
-            completed_image.close
-          end
           if got == 0
             if certificate = view.read(name, now)
               if held.has_key?(name)
@@ -834,6 +903,7 @@ pub struct Autocert
             end
             if kept = held[name]?
               kept.renew_at_ms = until_ms
+              held[name] = kept
             end
           end
         end
@@ -879,40 +949,43 @@ pub struct Autocert
         flight_name = name.as_tape
         count = (failures[name]? || 0) + 1
         retry_delay = view.backoff(count)
-        task, image = start_flight(g, config, flight_name, retry_delay, factory)
-        flights[name] = task
-        images[name] = image
+        flights[name] = start_flight(g, config, flight_name, retry_delay, factory)
       end
     end
     nil
   end
 
-  @[TaskClosureUnsafe("run joins flights before closing their packed inputs")]
   private def self.start_flight(g : IyiGroup, config : AutocertConfig,
                                name : String, retry_delay : Int64,
                                factory : F.class) forall F
-    image = RisTaskConfig.new({config, name, retry_delay})
-    task = g.spawn do
-      # A flight panic belongs to this inner group, never its siblings.
-      # The failure is written inside the group: a flight's error or
-      # panic message lives on its tape, which ends with the group.
-      outcome = group do |own|
-        flight = own.spawn do
-          settings, flight_name, delay = image.read(Tuple(AutocertConfig, String, Int64))
-          F.new(settings).issue(flight_name)
-        end
-        got = flight.value
-        if got.is_a?(Panicked)
-          record_failure(image, got.message)
-        elsif got.is_a?(AutocertError)
-          record_failure(image, got.detail)
-        else
-          0
-        end
+    RisBoard.post(RisAutocertFlight.new(config, name, retry_delay))
+    g.spawn { run_flight(F) }
+  end
+
+  @[TaskClosureUnsafe("joins the inner flight before releasing its image descriptor")]
+  private def self.run_flight(factory : F.class) : Int32 forall F
+    input = RisBoard.take(RisAutocertFlight)
+    return 0 unless input.is_a?(RisAutocertFlight)
+    image = RisTaskConfig.new({input.config, input.name, input.delay})
+    defer image.close
+    # A flight panic belongs to this inner group, never its siblings.
+    # The failure is written inside the group: a flight's error or
+    # panic message lives on its tape, which ends with the group.
+    outcome = group do |own|
+      flight = own.spawn do
+        settings, flight_name, delay = image.read(Tuple(AutocertConfig, String, Int64))
+        F.new(settings).issue(flight_name)
       end
-      outcome.is_a?(Panicked) ? record_failure(image, "the flight panicked") : outcome
+      got = flight.value
+      if got.is_a?(Panicked)
+        record_failure(image, got.message)
+      elsif got.is_a?(AutocertError)
+        record_failure(image, got.detail)
+      else
+        0
+      end
     end
-    {task, image}
+    outcome.is_a?(Panicked) ? record_failure(image, "the flight panicked") : outcome
   end
 
   # Writes *detail* as the flight's failure, kept until its retry time.

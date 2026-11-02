@@ -254,29 +254,35 @@ struct RisHpkeEncapsulation
   def initialize(kem : HpkeKem, recipient : HpkePublicKey,
                  randomness : String | Array::View(UInt8),
                  sender_key : HpkePrivateKey?)
-    @enc = Array(UInt8).new
-    @secret = Array(UInt8).new
+    enc = Array(UInt8).new
+    secret = Array(UInt8).new
     @error = nil
     HpkeKeys.same_kem(kem, recipient.kem, "the recipient's public key")
     ephemeral = HpkePrivateKey.derive(kem, randomness)
     dh = ephemeral.agree(recipient.bytes)
     if dh.is_a?(HpkeError)
       @error = dh
+      @enc = enc
+      @secret = secret
       return
     end
-    @enc.concat(ephemeral.public_key.bytes)
-    kem_context = @enc + recipient.bytes
+    enc.concat(ephemeral.public_key.bytes)
+    kem_context = enc + recipient.bytes
     if sender = sender_key
       HpkeKeys.same_kem(kem, sender.kem, "the sender's key")
       dh2 = sender.agree(recipient.bytes)
       if dh2.is_a?(HpkeError)
         @error = dh2
+        @enc = enc
+        @secret = secret
         return
       end
       dh.concat(dh2)
       kem_context.concat(sender.public_key.bytes)
     end
-    @secret.concat(kem.extract_and_expand(dh, kem_context))
+    secret.concat(kem.extract_and_expand(dh, kem_context))
+    @enc = enc
+    @secret = secret
   end
 
   def self.result(value : RisHpkeEncapsulation) : {Array(UInt8), Array(UInt8)} | HpkeError

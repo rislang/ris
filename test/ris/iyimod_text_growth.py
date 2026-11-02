@@ -71,6 +71,26 @@ end
     assert source == artifact == EXPECTED, (source, artifact)
     print("runs     iyimod_text_growth (source and artifact match)")
 
+    # An imported method's growth still refuses an unfinished target.
+    main.write_text("""module main
+import app/text
+class Holder
+  @collector : App::Text::Collector
+  def initialize
+    collector = App::Text::Collector.new
+    @collector = collector
+    @collector.add("bad")
+  end
+end
+holder = Holder.new
+""")
+    refused = subprocess.run([str(RIS), "build", "--use-iyimod", "mods",
+                              "--no-codegen", str(main)], cwd=work,
+                             capture_output=True, text=True)
+    assert refused.returncode != 0 and "grow after new" in refused.stderr, (
+        refused.stdout, refused.stderr)
+    print("refused  iyimod construction growth through a method")
+
     # An Array field appended in an iyi module: the artifact's lowered
     # `__temp_N << item` met the consumer's own `__temp_N`.
     (work / "app/stack.iyi").write_text('''module app/stack
@@ -101,7 +121,7 @@ end
     # Three artifact contracts (2026-10-30): std/int's `self << n` stays
     # Int's shift (it was lowered as text growth, "can't change the value
     # of self"); an impl method carries its checked contract, not the
-    # opaque default; an imported constructor that fills its Array fields
+    # opaque default; an imported constructor that publishes its Array fields
     # does not count as shrinking a value someone views.
     (work / "app/kit.iyi").write_text('''module app/kit
 
@@ -126,8 +146,9 @@ pub struct Bag
   @items : Array(Int32)
 
   def initialize(from : Array(Int32))
-    @items = [0]
-    from.each { |n| @items << n }
+    items = [0]
+    from.each { |n| items << n; nil }
+    @items = items
   end
 
   def size : Int32

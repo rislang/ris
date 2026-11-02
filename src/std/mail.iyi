@@ -1089,23 +1089,31 @@ struct RisMailParameters
   getter params : RisMailMap(String, String)
 
   def initialize(value : String, media : Bool)
-    @params = RisMailMap(String, String).new
+    params = RisMailMap(String, String).new
     texts = String::Builder.new(value.bytesize)
+    @kind = RisMailParameters.parse_into(value, media, params, texts)
+    @params = params
+  end
+
+  def self.parse_into(value : String, media : Bool,
+                      params : RisMailMap(String, String),
+                      texts : String::Builder) : String?
     scan = TapeMailScan.new(value)
-    return if scan.skip_cfws
+    return nil if scan.skip_cfws
     first = scan.token
-    return if first.empty?
+    return nil if first.empty?
     if media
-      return if scan.skip_cfws || scan.peek != 47_u8
+      return nil if scan.skip_cfws || scan.peek != 47_u8
       scan.advance
-      return if scan.skip_cfws
+      return nil if scan.skip_cfws
       second = scan.token
-      return if second.empty?
-      @kind = MailText.keep("#{MailText.lower(first)}/#{MailText.lower(second)}", texts)
+      return nil if second.empty?
+      kind = MailText.keep("#{MailText.lower(first)}/#{MailText.lower(second)}", texts)
     else
-      @kind = MailText.keep(MailText.lower(first), texts)
+      kind = MailText.keep(MailText.lower(first), texts)
     end
-    MailText.params(scan, texts, @params)
+    MailText.params(scan, texts, params)
+    kind
   end
 
   def self.read(parsed : RisMailParameters) : {String, RisMailMap(String, String)}?
@@ -1540,8 +1548,9 @@ class MailFolder
   @col : Int32
   @content : Bool
 
-  def initialize(name : String, @io : String::Builder)
-    @io << name << ":"
+  def initialize(name : String, io : String::Builder)
+    io << name << ":"
+    @io = io
     @col = name.bytesize + 1
     @content = false
   end

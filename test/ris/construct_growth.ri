@@ -1,0 +1,32 @@
+class Growing
+  getter rows : Array(Int32)
+
+  def initialize
+    @rows = Array(Int32).new
+  end
+end
+
+def fill(target : Growing) : Nil
+  alias_target = target
+  alias_target.rows << 1
+  nil
+end
+
+value = Growing.new
+fill(value)
+alias_value = value
+alias_value.rows << 2
+puts value.rows.size
+
+# Borrowing an existing array does not construct that array in this target.
+class Borrowed
+  getter rows : Array(Int32)
+
+  def initialize(@rows : Array(Int32))
+    @rows << 3
+  end
+end
+
+rows = Array(Int32).new
+borrowed = Borrowed.new(rows)
+puts borrowed.rows.size

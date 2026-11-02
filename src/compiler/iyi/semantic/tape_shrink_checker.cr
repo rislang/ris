@@ -648,9 +648,38 @@ class Iyi::TapeShrinkChecker
     View.new(root, @uses.size, @guards.dup)
   end
 
+  @construction_roots = [] of UInt64
+
+  # A borrowed field refers to its caller's value, not to storage being
+  # constructed. Retain the target identity for its newly built fields.
+  private def construction_target?(root : UInt64, env : Env) : Bool
+    return false unless contains_root?(@construction_roots, root)
+    current = root
+    loop do
+      if contents = env.slots[current]?
+        sources = contents.roots
+        if !sources.empty? && sources.all? { |source|
+             !contains_root?(@construction_roots, source) &&
+               (parameter_root?(source) || @global_ids.includes?(source))
+           }
+          return false
+        end
+      end
+      parent = @parents[current]?
+      break unless parent
+      current = parent[0]
+    end
+    true
+  end
+
   private def shrink(roots : Array(UInt64), node : Call, chain : String,
-                     growth = false)
+                     env : Env, growth = false)
     return if @text_only && !chain.includes?("text reset")
+    if @checking && !@text_only && roots.any? { |r| construction_target?(r, env) }
+      refuse(node, "cannot grow or shrink the target during in-place " \
+                   "construction (SPEC 2.2): grow after new, in a " \
+                   "separate call on the named value (via #{chain})")
+    end
     @shrinks << Shrink.new(roots, @uses.size, node, chain, @guards.dup,
       growth)
     # What is made after it - a callee's refill of what it cleared - is
@@ -671,7 +700,7 @@ class Iyi::TapeShrinkChecker
 
   private def text_reset(roots : Array(UInt64), node : Call, env : Env,
                          cause : String)
-    shrink(roots, node, cause)
+    shrink(roots, node, cause, env)
     env.vars.each do |name, v|
       next if name == "self" || name.starts_with?("__temp_") ||
               name.starts_with?("#") || name.starts_with?("@")
@@ -846,7 +875,12 @@ class Iyi::TapeShrinkChecker
       seeds.each_with_index do |seed, i|
         next unless type = @root_types[seed]?
         next unless TapeOwnerChecker.owner?(@program, type)
-        roots = seeds.select { |other| @root_types[other]? == type }
+        # A constructor's newly allocated self cannot alias its inputs.
+        constructing = TapeScopeChecker.constructor?(target)
+        next if constructing && i == 0
+        roots = seeds.select do |other|
+          @root_types[other]? == type && (!constructing || other != seeds[0])
+        end
         name = i == 0 ? "self" : target.args[i - 1].name
         env[name] = Value.new(roots, [] of View)
       end
@@ -1152,7 +1186,13 @@ class Iyi::TapeShrinkChecker
       effect = @graph.effects[target.object_id]
       flags = summary.seeds.map do |seed|
         bits = 0
-        bits |= TapeCallGraph::Contract::SHRINK if (summary.shrinks.keys + summary.grows.keys).any? { |r| relative_path(r, seed) }
+        # Text append is stable growth, not invalidation. Keep the
+        # existing conservative shrink projection for other growth.
+        invalidates = summary.shrinks.keys + summary.grows.keys.reject do |r|
+          text_root?(r) || text_growth?(r)
+        end
+        bits |= TapeCallGraph::Contract::SHRINK if invalidates.any? { |r| relative_path(r, seed) }
+        bits |= TapeCallGraph::Contract::GROW if summary.grows.keys.any? { |r| relative_path(r, seed) }
         result_roots = summary.result.roots + summary.result.views.map(&.root)
         # A returned holder may carry the dependency in a nested slot.
         summary.stores.each do |root, contents|
@@ -1267,6 +1307,8 @@ class Iyi::TapeShrinkChecker
     @returns = EMPTY
     @kept_returns = EMPTY
     @checking = true
+    @construction_roots = owner && TapeScopeChecker.constructor?(owner) ?
+      (env["self"]? || EMPTY).roots : [] of UInt64
     @unproved.clear
     @scopes.clear
     # Constructors build their locals and fields in the caller's scope.
@@ -2173,6 +2215,7 @@ class Iyi::TapeShrinkChecker
         # Growing text appends a copy of its argument's bytes: the result
         # views the text grown (its first argument), never the argument.
         if !@text_only && node.name == "append"
+          shrink(receiver.roots, node, chain("append"), env, true)
           args.each { |arg| use(arg, node) }
           return args.first? || EMPTY
         end
@@ -2195,7 +2238,7 @@ class Iyi::TapeShrinkChecker
       storage_receiver = node.obj.try { |obj| storage?(obj) } ||
                          @graph.targets(node).try &.any? { |target| storage_type?(target.owner) }
       if storage_receiver && {"<<", "push", "concat", "append", "write_bytes", "unshift"}.includes?(node.name)
-        shrink(receiver.roots, node, chain(node.name), true)
+        shrink(receiver.roots, node, chain(node.name), env, true)
       end
       if storage_receiver && {"[]=", "__loop_store", "unchecked_store"}.includes?(node.name) &&
          node.obj.try do |obj|
@@ -2203,10 +2246,10 @@ class Iyi::TapeShrinkChecker
            name.starts_with?("Array(Array(") || name == "Array(String)" ||
              name.starts_with?("Hash(")
          end
-        shrink(receiver.roots, node, chain(node.name))
+        shrink(receiver.roots, node, chain(node.name), env)
       end
       if storage_receiver && SHRINK.includes?(node.name)
-        shrink(receiver.roots, node, chain(node.name))
+        shrink(receiver.roots, node, chain(node.name), env)
         if node.name == "clear" && receiver.roots.size == 1 &&
            !@folded_roots.includes?(receiver.roots.first)
           env.slots.reject! do |key, _|
@@ -2301,7 +2344,13 @@ class Iyi::TapeShrinkChecker
                 if bits & TapeCallGraph::Contract::SHRINK != 0 && !constructing
                   if found = handed ? handed_effect(handed, false) : WHOLE
                     shrunk = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
-                    shrink(shrunk, node, chain("#{node.name} (opaque contract)"))
+                    shrink(shrunk, node, chain("#{node.name} (opaque contract)"), env)
+                  end
+                end
+                if bits & TapeCallGraph::Contract::GROW != 0 && !constructing
+                  if found = handed ? handed_effect(handed, false) : WHOLE
+                    grown = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
+                    shrink(grown, node, chain("#{node.name} (opaque growth)"), env, true)
                   end
                 end
                 if bits & TapeCallGraph::Contract::RETAIN != 0 && !roots.empty?
@@ -2338,7 +2387,7 @@ class Iyi::TapeShrinkChecker
                 text_reset(roots, node, env,
                   chain("#{node.name} -> #{chain}"))
               else
-                shrink(roots, node, chain("#{node.name} -> #{chain}"))
+                shrink(roots, node, chain("#{node.name} -> #{chain}"), env)
                 # A callee that clears a field empties it: what the caller
                 # knew it held is gone, as after a direct `clear`.
                 if !@text_only && chain.ends_with?("clear") && roots.size == 1 &&
@@ -2351,7 +2400,7 @@ class Iyi::TapeShrinkChecker
               roots = translate(root, summary, actuals).flat_map do |r|
                 aliases(r, env)
               end.uniq
-              shrink(roots, node, chain("#{node.name} -> #{cause}"), true)
+              shrink(roots, node, chain("#{node.name} -> #{cause}"), env, true)
             end
             retained = summary.retains.flat_map { |r| translate(r, summary, actuals) }
             @retains.concat(retained)
@@ -2437,7 +2486,7 @@ class Iyi::TapeShrinkChecker
           else
             incomplete_result = true
             unless TapeRules.runtime?(@program, target.location)
-              inputs.each { |v| shrink((v.roots + v.views.map(&.root)).uniq, node, chain("#{node.name} (opaque)")) }
+              inputs.each { |v| shrink((v.roots + v.views.map(&.root)).uniq, node, chain("#{node.name} (opaque)"), env) }
             end
           end
           after_calls = after_calls.try { |previous| join_env(previous, call_env) } || call_env
@@ -2448,7 +2497,7 @@ class Iyi::TapeShrinkChecker
       elsif !TapeRules.runtime?(@program, node.location)
         inputs.each do |v|
           roots = source_roots(v)
-          shrink(roots.uniq, node, chain("#{node.name} (unknown)"))
+          shrink(roots.uniq, node, chain("#{node.name} (unknown)"), env)
           @retains.concat(roots)
           STDERR.puts "DBG unproved #{node.name} #{roots.map { |r| root_name(r) }.join(",")} at #{node.location}" if ENV["RIS_DBG"]? && @checking && !roots.empty?
           @unproved << node if @checking && !roots.empty?
@@ -2527,7 +2576,7 @@ class Iyi::TapeShrinkChecker
         input.procs.each do |literal|
           unless @active_procs.add?(literal.object_id)
             shrink(derived.roots, node,
-              chain("#{node.name} (recursive callback)"))
+              chain("#{node.name} (recursive callback)"), env)
             next
           end
           captured = env.dup

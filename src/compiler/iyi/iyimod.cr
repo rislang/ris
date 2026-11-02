@@ -75,7 +75,8 @@ module Iyi::IyiMod
   # v59: signatures carry checked tape effects for bodyless calls.
   # v60: remove the obsolete library selector byte from the header.
   # v61: tape contracts distinguish receiver stores from opaque escapes.
-  FORMAT_VERSION = 61_u32
+  # v62: tape contracts preserve stable text growth separately from shrink.
+  FORMAT_VERSION = 62_u32
 
   FORMAT = IO::ByteFormat::LittleEndian
 

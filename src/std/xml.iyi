@@ -261,13 +261,11 @@ pub class XmlTree
 
   def initialize
     @texts = String::Builder.new(256)
-    @nodes = Array(XmlNodeData).new
     @attributes = Array(XmlLink(TapeAttribute)).new
     @namespaces = Array(XmlLink(TapeNamespace)).new
-    @declaration = Array(XmlDeclaration).new
-    @declaration << XmlDeclaration.new
-    @nodes << XmlNodeData.new(NodeType::Document, "#document".as_tape,
-      "".as_tape)
+    @declaration = [XmlDeclaration.new]
+    @nodes = [XmlNodeData.new(NodeType::Document, "#document".as_tape,
+      "".as_tape)]
   end
 
   def document : TapeNode

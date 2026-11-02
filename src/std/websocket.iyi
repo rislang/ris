@@ -242,11 +242,14 @@ class RisWebSocketExtensions
   @texts : String::Builder
   @error : String::Builder
 
-  def initialize(value : String)
-    @list = Array(Extension).new(value.bytesize // 2)
-    @params = Array({String, String?}).new(value.bytesize // 2)
-    @texts = String::Builder.new(value.bytesize)
+  def initialize(size : Int32)
+    @list = Array(Extension).new(size // 2)
+    @params = Array({String, String?}).new(size // 2)
+    @texts = String::Builder.new(size)
     @error = String::Builder.new(128)
+  end
+
+  def parse(value : String) : Nil
     n = value.bytesize
     k = 0
     while k < n
@@ -347,7 +350,8 @@ struct RisWebSocketHandshake
     agreed = false
     answer = ""
     if deflate && (extensions = req.header("Sec-WebSocket-Extensions"))
-      parsed = RisWebSocketExtensions.new(extensions)
+      parsed = RisWebSocketExtensions.new(extensions.bytesize)
+      parsed.parse(extensions)
       unless parsed.error.empty?
         @response = Response.new(400, "Sec-WebSocket-Extensions is not a list of extensions: #{parsed.error}\n")
         return
@@ -519,7 +523,8 @@ pub class WebSocket
     raise "WebSocket: a deflate level is 0 to 9, not #{deflate_level}" if deflate_level < 0 || deflate_level > 9
     agreed = nil.as(PerMessageDeflate?)
     if said = response.header("Sec-WebSocket-Extensions")
-      parsed = RisWebSocketExtensions.new(said)
+      parsed = RisWebSocketExtensions.new(said.bytesize)
+      parsed.parse(said)
       if parsed.error.empty?
         parsed.list.each do |offer|
           next unless agreed.nil? && HTTP.same_name?(offer.name, "permessage-deflate")
@@ -755,7 +760,8 @@ pub class WebSocket
   protected def self.answered(value : String?, offered : Bool, level : Int32) : PerMessageDeflate | Nil | WebSocketError
     return nil unless value
     return WebSocketError.new("the server agreed to extensions #{value.inspect}, and none were offered") unless offered
-    parsed = RisWebSocketExtensions.new(value)
+    parsed = RisWebSocketExtensions.new(value.bytesize)
+    parsed.parse(value)
     return WebSocketError.new("the server's Sec-WebSocket-Extensions #{value.inspect} is not a list of extensions: #{parsed.error}") unless parsed.error.empty?
     found = nil.as(PerMessageDeflate?)
     parsed.list.each do |extension|

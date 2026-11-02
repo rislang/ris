@@ -198,9 +198,10 @@ pub struct MIME
     getter values : Array(String)
 
     def initialize(media_type : String)
-      @values = Array(String).new(TABLE.size)
+      values = Array(String).new(TABLE.size)
       texts = String::Builder.new(TABLE.size * 16)
-      MIME.extensions_into(media_type, @values, texts)
+      MIME.extensions_into(media_type, values, texts)
+      @values = values
     end
   end
 

@@ -787,6 +787,7 @@ struct TapeParser
   @pool : SlicePool(TapeValue)
   @sequence_scratch : Array(TapeValue)
   @sequence_used : Int32
+  @prepared : Bool = false
 
   def initialize(text : String)
     @bytes = text
@@ -812,7 +813,6 @@ struct TapeParser
     @pool = SlicePool(TapeValue).new
     @sequence_scratch = Array(TapeValue).new
     @sequence_used = 0
-    split_lines
   end
 
   def error : String?
@@ -821,6 +821,10 @@ struct TapeParser
 
   # Every document in the stream, or nil with `error` set.
   def parse_all : Array(TapeValue)?
+    unless @prepared
+      split_lines
+      @prepared = true
+    end
     docs = Array(TapeValue).new
     implicit_allowed = true
     while true

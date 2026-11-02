@@ -1,0 +1,20 @@
+class TextOwner
+  getter text : String = ""
+
+  def initialize
+    fill(self)
+  end
+
+  def add(text : String) : Nil
+    @text << text
+    nil
+  end
+end
+
+def fill(target : TextOwner) : Nil
+  other = target
+  other.add("bad")
+end
+
+owner = TextOwner.new
+puts owner.text

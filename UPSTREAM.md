@@ -8,6 +8,10 @@ back.
 
 ## To take to iyi
 
+* std/tls: the Error implementation of TlsError.message recursed into
+  itself, shadowing its formatter. Call the named formatter instead;
+  check both a plain error and one carrying an alert.
+
 * ris removed iyi's Crystal program compatibility mode, shard binding
   commands and tree migration command, including their options, samples,
   fixtures, specs and documentation. There is no transition path. Resolve

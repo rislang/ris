@@ -6,7 +6,7 @@ import std/file::{File}
 import std/http::{Request}
 import std/text
 import std/indexable
-import std/tls::{TlsIdentity, TlsError}
+import std/tls::{TlsIdentity, TlsError, TlsServerConfig}
 import std/time::{Time}
 
 @[OnTape]
@@ -89,10 +89,19 @@ def start_manager(group : IyiGroup, config : AutocertConfig) : IyiTask(Bool)
   end
 end
 
+@[OnTape]
+struct RisReaderSettings
+  getter value : ReaderConfig
+
+  def initialize
+    got = RisBoard.take(ReaderConfig)
+    raise "reader config cancelled" unless got.is_a?(ReaderConfig)
+    @value = got
+  end
+end
+
 def reader_settings : ReaderConfig
-  got = RisBoard.take(ReaderConfig)
-  raise "reader config cancelled" unless got.is_a?(ReaderConfig)
-  got
+  RisReaderSettings.new.value
 end
 
 def count(config : AutocertConfig) : Int32
@@ -213,8 +222,8 @@ group do |service|
     12.times do
       RisBoard.post(ReaderConfig.new(failure_config))
       readers << waiters.spawn do
-        view = AutocertView.new(reader_settings.config)
-        result = view.identity_for("localhost", nil)
+        failure_view = AutocertView.new(reader_settings.config)
+        result = failure_view.identity_for("localhost", nil)
         result.is_a?(TlsError) && result.message.includes?("autocert: the local CA refused this order")
       end
     end
@@ -281,7 +290,8 @@ group do |readers|
   RisBoard.post(ReaderConfig.new(config))
   task = readers.spawn do
     worker = AutocertView.new(reader_settings.config)
-    tls = worker.tls_config
+    tls = TlsServerConfig.new(worker.placeholder)
+    worker.tls_config(tls)
     challenge = worker.identity_for("localhost", ["acme-tls/1"])
     request = Request.new("GET", "/.well-known/acme-challenge/token",
       nil, ::Hash(String, String).new, "")

@@ -995,10 +995,18 @@ class BodyFeed < Reader
   end
 
   def read_bytes(count : Int32) : String
-    @body.feed_piece || ""
+    @body.feed_piece(count) || ""
   end
 
-  # The decoders read with `read_bytes` only.
+  # Decoders write each source piece straight into their input buffer.
+  def read_str(count : Int32, into : String::Builder) : Int32
+    piece = @body.feed_piece(count)
+    return 0 unless piece
+    into << piece
+    piece.bytesize
+  end
+
+  # Byte-at-a-time reads are not used by the decoders.
   def read_byte : UInt8?
     nil
   end
@@ -1193,8 +1201,8 @@ pub class BodyReader
   # The decoder's next piece (`BodyFeed`): the framing's bytes, nil at
   # its end or when it fails - the failure is kept, and answered in place
   # of the decoder's "ends early".
-  def feed_piece : String?
-    got = raw(65536)
+  def feed_piece(max : Int32 = 65536) : String?
+    got = raw(max)
     unless got.is_a?(String)
       remember(got)
       return nil
@@ -1816,12 +1824,8 @@ pub class Response
   end
 
   @client_state : RisHttpClientExchange? = nil
-  getter request_error : Cancelled | SocketError | HTTPError | Nil = nil
 
-  def initialize(method : String, url : String,
-                 headers : Hash(String, String), body : String | IyiIO,
-                 redirects : Int32, jar : CookieStore?, decompress : Bool,
-                 client : HTTPClient?, timeout_ms : Int32, proxy : String?)
+  def initialize(client_request : Bool)
     @status = 0
     @reason = ""
     @body = ""
@@ -1834,12 +1838,17 @@ pub class Response
     @decoded = false
     state = RisHttpClientExchange.new(self)
     @client_state = state
-    @request_error = state.read_into(method, url, headers, body,
-      redirects, jar, decompress, client, timeout_ms, proxy)
   end
 
-  def self.request_result(response : Response) : Response | Cancelled | SocketError | HTTPError
-    response.request_error || response
+  def self.request_result(response : Response, method : String, url : String,
+                          headers : Hash(String, String), body : String | IyiIO,
+                          redirects : Int32, jar : CookieStore?,
+                          decompress : Bool, client : HTTPClient?,
+                          timeout_ms : Int32, proxy : String?) : Response | Cancelled | SocketError | HTTPError
+    result = response.@client_state.as(RisHttpClientExchange).read_into(
+      method, url, headers, body, redirects, jar, decompress, client,
+      timeout_ms, proxy)
+    result || response
   end
 
   def begin_client(status : Int32, reason : String) : Nil
@@ -2127,9 +2136,9 @@ struct RisHttpFields
 
   def initialize(lines : Array(String), unfold : Bool)
     held = RisHttpResponseBody.new(Hash(String, String).new)
+    held.begin_client
+    @why = HTTP.fields_into(held, lines, unfold)
     @held = held
-    @held.begin_client
-    @why = HTTP.fields_into(@held, lines, unfold)
   end
 
   def self.result(fields : RisHttpFields) : {Hash(String, String), Hash(String, Array::View(String))} | String
@@ -2146,11 +2155,12 @@ struct RisHttpHeaderCopy
   getter headers : Hash(String, String)
 
   def initialize(source : Hash(String, String), names : Array(String))
-    @headers = Hash(String, String).new
+    headers = Hash(String, String).new
     source.each do |name, value|
-      @headers[name] = value unless names.any? { |drop| HTTP.same_name?(name, drop) }
+      headers[name] = value unless names.any? { |drop| HTTP.same_name?(name, drop) }
       nil
     end
+    @headers = headers
   end
 
   def self.result(copy : RisHttpHeaderCopy) : Hash(String, String)
@@ -3342,8 +3352,7 @@ class Exchange
   # The HTTP/2 stream the answer came on, 0 over HTTP/1.1.
   property h2_id : Int32 = 0
 
-  def initialize(@conn : Conn, @response : Response, @client : HTTPClient? = nil, @key : String = "", @keep : Bool = false)
-    @reader = @response.body_io
+  def initialize(@conn : Conn, @response : Response, @reader : BodyReader, @client : HTTPClient? = nil, @key : String = "", @keep : Bool = false)
     @response.tls_resumed = @conn.resumed?
   end
 
@@ -3394,7 +3403,7 @@ class Exchange
 end
 
 # A client's response, decoders and unpooled transport share its scope.
-class RisHttpClientExchange
+pub class RisHttpClientExchange
   getter socket : IyiSocket
   getter response : Response
   getter conn : Conn
@@ -3439,9 +3448,7 @@ class RisHttpClientExchange
     reader = BodyReader.new(fault, nil, BodyReader::EMPTY, 0_i64,
       9223372036854775807_i64, client_decode: true)
     @reader = reader
-    @response.attach_reader(reader)
-    @response.client_response("", false)
-    exchange = Exchange.new(conn, @response)
+    exchange = Exchange.new(conn, @response, reader)
     @exchange = exchange
     @key = String::Builder.new(256)
   end
@@ -3495,6 +3502,7 @@ class RisHttpClientExchange
 
   def ready(conn : Conn, client : HTTPClient?, key : String,
             keep : Bool, h2_id : Int32 = 0) : Exchange
+    @response.attach_reader(@reader)
     start = @key.bytesize
     @key << key
     @exchange.configure(conn, @response, client, @key.finish[start, key.bytesize], keep)
@@ -3554,7 +3562,8 @@ end
 # kept an origin - 4 by default, so that as many connections as *idle*
 # keeps by default can resume at once, where std/tls's server and
 # OpenSSL's send 2 a handshake - and *tickets* in all, 256 by default: as
-# many origins as that leaves room for at *origin_tickets* each, the one
+# many origins as that leaves room for at *origin_tickets* each (at most
+# 64 origins per client), the one
 # longest unused dropped first. 0 for either keeps none, and nothing
 # resumes. `close`
 # leaves them. Nothing goes early (0-RTT), whatever a ticket allows: the
@@ -3621,6 +3630,7 @@ end
 # spare the next, and the records may move a connection to another host
 # and port, which is the program's to ask for.
 pub class HTTPClient
+  MAX_SESSION_ORIGINS = 64
   # The kept connections, a key's together: a few origins, scanned.
   @idle : Array({String, Conn})
   @idle_keys : String::Builder
@@ -3680,12 +3690,24 @@ pub class HTTPClient
     default_tls.alpn << "http/1.1"
     @default_tls = default_tls
     room = @origin_tickets > 0 ? @tickets // @origin_tickets : 0
-    @sessions = Array(HeldSession).new(room) do
-      HeldSession.new(default_tls, @origin_tickets)
+    if room > MAX_SESSION_ORIGINS
+      raise "HTTP: at most #{MAX_SESSION_ORIGINS} ticket origins per client; use another client for more origins"
     end
+    sessions = Array(HeldSession).new(MAX_SESSION_ORIGINS)
+    {% for i in 0...MAX_SESSION_ORIGINS %}
+      session{{i}} = HeldSession.new(default_tls, @origin_tickets)
+      sessions << session{{i}}
+    {% end %}
+    sessions.truncate(room)
+    @sessions = sessions
     system = Resolver.new
     @system = system
-    @bound = Array(HttpsBound).new(BOUND) { HttpsBound.new }
+    bound = Array(HttpsBound).new(BOUND)
+    {% for i in 0...BOUND %}
+      bound{{i}} = HttpsBound.new
+      bound << bound{{i}}
+    {% end %}
+    @bound = bound
   end
 
   # The machine's resolver, read afresh: what a connection by name uses
@@ -3723,8 +3745,8 @@ pub class HTTPClient
   end
 
   def request(method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", redirects : Int32 = 10, jar : CookieStore? = nil, decompress : Bool = true) : Response | Cancelled | SocketError | HTTPError
-    Response.request_result(Response.new(method, url, headers, body,
-      redirects, jar, decompress, self, @timeout_ms, @proxy))
+    Response.request_result(Response.new(true), method, url, headers, body,
+      redirects, jar, decompress, self, @timeout_ms, @proxy)
   end
 
   def open(method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", redirects : Int32 = 10, jar : CookieStore? = nil, decompress : Bool = true, &block : Response -> R) : R | Cancelled | SocketError | HTTPError forall R
@@ -4318,8 +4340,8 @@ pub struct HTTP
   # `Cancelled`; what the server does wrong answers `HTTPError`. `!`
   # passes any of them up, `.or_panic` refuses it.
   def self.request(method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", redirects : Int32 = 10, jar : CookieStore? = nil, decompress : Bool = true, timeout_ms : Int32 = 0, proxy : String? = nil) : Response | Cancelled | SocketError | HTTPError
-    Response.request_result(Response.new(method, url, headers, body,
-      redirects, jar, decompress, nil, timeout_ms, proxy))
+    Response.request_result(Response.new(true), method, url, headers, body,
+      redirects, jar, decompress, nil, timeout_ms, proxy)
   end
 
   # One request, and the block's answer to the response, its body still
@@ -4385,6 +4407,17 @@ pub struct HTTP
     read = bare.includes?(":") ? IyiSocket.read_ipv6(bare) : IyiSocket.read_ipv4(bare)
     raise "HTTP: #{address.inspect} is not an address: #{read}; open looks a name up" if read.is_a?(String)
     open_by(AtAddress.new(address), method, url, headers, body, 0, nil, decompress, client, timeout_ms, nil) { |response| yield response }
+  end
+
+  def self.open_at_into(state : RisHttpClientExchange, address : String, method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", decompress : Bool = true, client : HTTPClient? = nil, timeout_ms : Int32 = 0, &block : Response -> R) : R | Cancelled | SocketError | HTTPError forall R
+    raise "HTTP: a timeout of #{timeout_ms} ms" if timeout_ms < 0
+    bare = address
+    size = address.bytesize
+    bare = address[1, size - 2] if size >= 2 && address[0] == 91_u8 && address[size - 1] == 93_u8
+    read = bare.includes?(":") ? IyiSocket.read_ipv6(bare) : IyiSocket.read_ipv4(bare)
+    raise "HTTP: #{address.inspect} is not an address: #{read}; open looks a name up" if read.is_a?(String)
+    open_by_into(state, AtAddress.new(address), method, url, headers, body,
+      0, nil, decompress, client, timeout_ms, nil) { |response| yield response }
   end
 
   # `open`'s redirect loop over connections *dialer* makes: by name
@@ -6753,19 +6786,23 @@ class H2Connection
     @piece_pool = SlicePool(H2Piece?).new(64)
     @data_pool = SlicePool(UInt8).new(65536)
     @field_pool = SlicePool(Std::Hpack::HeaderField?).new(64)
-    @stream_states = Array(H2Stream::State).new(STREAMS)
-    @free_streams = Array(Int32).new(STREAMS)
-    @stream_pieces = Array(SlicePool::List(H2Piece)).new(STREAMS)
-    @stream_fields = Array(SlicePool::List(Std::Hpack::HeaderField)).new(STREAMS)
+    stream_states = Array(H2Stream::State).new(STREAMS)
+    free_streams = Array(Int32).new(STREAMS)
+    stream_pieces = Array(SlicePool::List(H2Piece)).new(STREAMS)
+    stream_fields = Array(SlicePool::List(Std::Hpack::HeaderField)).new(STREAMS)
     STREAMS.times do |i|
       pieces = SlicePool::List(H2Piece).new(@piece_pool)
       fields = SlicePool::List(Std::Hpack::HeaderField).new(@field_pool)
-      @stream_states << H2Stream::State.new(0, WINDOW, WINDOW)
-      @stream_pieces << pieces
-      @stream_fields << fields
-      @free_streams << i
+      stream_states << H2Stream::State.new(0, WINDOW, WINDOW)
+      stream_pieces << pieces
+      stream_fields << fields
+      free_streams << i
       nil
     end
+    @stream_states = stream_states
+    @free_streams = free_streams
+    @stream_pieces = stream_pieces
+    @stream_fields = stream_fields
     @head_text = String::Builder.new(16384)
     @pending_size = 0
     @ready = [] of Int32

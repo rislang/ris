@@ -474,7 +474,7 @@ pub struct TlsError
   def initialize(@text : String, @alert : UInt8? = nil, @timed_out : Bool = false, @cancelled : Bool = false, @retry_configs : String? = nil)
   end
 
-  def message : String
+  private def formatted_message : String
     (alert = @alert) ? "tls: #{@text} (#{TlsBytes.alert_word(alert)})" : "tls: #{@text}"
   end
 
@@ -495,7 +495,7 @@ end
 
 impl Error for TlsError
   def message : String
-    message
+    formatted_message
   end
 end
 
@@ -2084,6 +2084,13 @@ module RisTlsConnectionState
     end
   end
 
+  private def handshake_message_into(into : Array(UInt8), plain : Bool) : TlsError?
+    got = handshake_message(plain)
+    return got if got.is_a?(TlsError)
+    into.concat(got)
+    nil
+  end
+
   # Handshake bytes read and not yet a whole message.
   private def handshake_left : Int32
     @handshake.size - @handshake_at
@@ -2451,8 +2458,9 @@ pub class TlsClient < TlsConnection
     @peer = "the server"
     early_cipher = TlsRecordCipher.new
     @early_cipher = early_cipher
-    @host_text = String::Builder.new(host.bytesize)
-    @host_text << host
+    host_text = String::Builder.new(host.bytesize)
+    host_text << host
+    @host_text = host_text
     @name_text = String::Builder.new(256)
     reply = TlsServerHello.new
     @reply = reply
@@ -2475,8 +2483,9 @@ pub class TlsClient < TlsConnection
     @peer = "the server"
     early_cipher = TlsRecordCipher.new
     @early_cipher = early_cipher
-    @host_text = String::Builder.new(host.bytesize)
-    @host_text << host
+    host_text = String::Builder.new(host.bytesize)
+    host_text << host
+    @host_text = host_text
     @name_text = String::Builder.new(256)
     reply = TlsServerHello.new
     @reply = reply
@@ -3993,16 +4002,16 @@ pub class TlsMadeUnder
   @ech_storage : Array(UInt8)
 
   def initialize(@config : TlsConfig)
-    @ech_storage = Array(UInt8).new(4096)
-    @root_values = Array(UInt8).new(4096)
-    @root_offsets = Array(Int32).new
-    @root_offsets << 0
+    ech_storage = Array(UInt8).new(4096)
+    root_values = Array(UInt8).new(4096)
+    root_offsets = Array(Int32).new
+    root_offsets << 0
     @roots_generation = @config.system_roots_generation
     @roots = @config.roots
     roots = @roots || @config.kept_certificates
     roots.each do |root|
-        root.raw.each { |byte| @root_values << byte }
-        @root_offsets << @root_values.size
+        root.raw.each { |byte| root_values << byte }
+        root_offsets << root_values.size
         nil
     end
     @identity = @config.identity
@@ -4011,9 +4020,12 @@ pub class TlsMadeUnder
     @require_staple = @config.require_staple
     @has_ech = false
     if list = @config.ech_configs
-      @ech_storage.concat(list)
+      ech_storage.concat(list)
       @has_ech = true
     end
+    @ech_storage = ech_storage
+    @root_values = root_values
+    @root_offsets = root_offsets
   end
 
   def configure(config : TlsConfig) : Nil
@@ -4126,11 +4138,12 @@ pub class TlsSession
   # `MAX_TICKETS`: std/http's `HTTPClient` keeps fewer for each origin.
   def initialize(limit : Int32 = MAX_TICKETS)
     @limit = limit < 0 ? 0 : (limit > MAX_TICKETS ? MAX_TICKETS : limit)
-    @slots = Array(RisTlsSessionSlot).new(MAX_TICKETS)
+    slots = Array(RisTlsSessionSlot).new(MAX_TICKETS)
     {% for i in 0...MAX_TICKETS %}
       slot{{i}} = RisTlsSessionSlot.new
-      @slots << slot{{i}}
+      slots << slot{{i}}
     {% end %}
+    @slots = slots
   end
 
   def clear : Nil
@@ -4245,8 +4258,7 @@ class RisTlsSessionSlot
     @chain = Array(UInt8).new(4096)
     @offsets = Array(Int32).new(X509::MAX_CHAIN + 1)
     @root_values = Array(UInt8).new(4096)
-    @root_offsets = Array(Int32).new
-    @root_offsets << 0
+    @root_offsets = [0]
     @ech_configs = Array(UInt8).new
   end
 
@@ -4875,7 +4887,7 @@ pub class TlsServerConfig
   # in, too (`TlsTicketKeys`).
   property ticket_lifetime : Int32 = 7200
   # The keys this server's tickets are sealed under.
-  getter ticket_keys : TlsTicketKeys = TlsTicketKeys.new
+  getter ticket_keys : TlsTicketKeys
   # The most early data (0-RTT, RFC 8446 section 2.3) a ticket lets a
   # client send with its ClientHello, which `TlsServer#read_early` reads
   # apart from what `read` does: none when 0, as unless set, and at most
@@ -4939,6 +4951,8 @@ pub class TlsServerConfig
   end
 
   def initialize(@identity : TlsIdentity)
+    keys = TlsTicketKeys.new
+    @ticket_keys = keys
     replay_guard = TlsReplayGuard.new
     @replay_guard = replay_guard
   end
@@ -5034,12 +5048,19 @@ pub class TlsTicketKeys
   @name : Array(UInt8)
   @key : ChaCha20Poly1305
   @made_ms : Int64
+  @key_bytes : Array(UInt8)
+  @previous_name_storage : Array(UInt8)
+  @previous_key : ChaCha20Poly1305
   @previous_name : Array(UInt8)? = nil
   @previous : ChaCha20Poly1305? = nil
 
   def initialize(now_ms : Int64 = TlsTime.now_ms)
     @name = Random::Secure.random_bytes(8)
-    @key = ChaCha20Poly1305.new(Random::Secure.random_bytes(32))
+    key_bytes = Random::Secure.random_bytes(32)
+    @key = ChaCha20Poly1305.new(key_bytes)
+    @key_bytes = key_bytes
+    @previous_name_storage = Array(UInt8).new(8, 0_u8)
+    @previous_key = ChaCha20Poly1305.new(key_bytes)
     @made_ms = now_ms
   end
 
@@ -5072,10 +5093,13 @@ pub class TlsTicketKeys
   # A new key from *now_ms*: what the one before sealed still opens, and
   # what the one before that sealed no longer does.
   def rotate(now_ms : Int64 = TlsTime.now_ms) : Nil
-    @previous_name = @name
-    @previous = @key
-    @name = Random::Secure.random_bytes(8)
-    @key = ChaCha20Poly1305.new(Random::Secure.random_bytes(32))
+    8.times { |i| @previous_name_storage[i] = @name[i]; nil }
+    @previous_key.rekey(@key_bytes)
+    @previous_name = @previous_name_storage
+    @previous = @previous_key
+    Random::Secure.random_bytes(@name)
+    Random::Secure.random_bytes(@key_bytes)
+    @key.rekey(@key_bytes)
     @made_ms = now_ms
   end
 
@@ -5122,6 +5146,7 @@ pub class TlsReplayGuard
   @times : Array(Int64) = [] of Int64
   @head : Int32 = 0
   @held : Hash(String, Bool) = {} of String => Bool
+  @binder_text = String::Builder.new(4096)
 
   def initialize(@capacity : Int32 = 65536)
   end
@@ -5134,13 +5159,16 @@ pub class TlsReplayGuard
   # Whether early data may be taken, at *now_ms* (monotonic), for a
   # ClientHello whose PSK binder is *binder*: not one held already, and not
   # past `capacity`. It is recorded when it may.
-  def admit(binder : Array(UInt8), now_ms : Int64) : Bool
+  def admit(binder : Array::View(UInt8), now_ms : Int64) : Bool
     drop(now_ms)
     key = TlsBytes.hex(binder)
     return false if @held.has_key?(key)
     return false if size >= @capacity
-    @held[key] = true
-    @binders << key
+    start = @binder_text.bytesize
+    @binder_text << key
+    kept = @binder_text.finish[start, key.bytesize]
+    @held[kept] = true
+    @binders << kept
     @times << now_ms
     true
   end
@@ -5205,12 +5233,33 @@ pub class TlsTicket
     out = [VERSION] + TlsBytes.u16(@suite) + TlsBytes.u64(@issued_ms) + TlsBytes.u64(@authenticated_ms) + TlsBytes.u32(@lifetime) +
           TlsBytes.u32(@age_add) + TlsBytes.u32(@max_early_data) + [@psk.size.to_u8] + @psk + TlsBytes.u16(name.size) + name +
           [protocol.size.to_u8] + protocol + TlsBytes.u32(@identity.to_i64) + [@chain.size.to_u8]
-    @chain.each { |der| out = out + TlsBytes.u24(der.size) + der }
+    @chain.each do |der|
+      out.concat(TlsBytes.u24(der.size))
+      out.concat(der)
+      nil
+    end
     out
   end
 
   # The state *bytes* hold, or nil when they are not one this encodes.
   def self.decode(bytes : Array(UInt8)) : TlsTicket?
+    RisTlsTicketRead.result(RisTlsTicketRead.new(bytes))
+  end
+
+  def self.open(keys : TlsTicketKeys, ticket : Array::View(UInt8), now_ms : Int64, period_ms : Int64) : TlsTicket?
+    RisTlsTicketRead.result(RisTlsTicketRead.new(keys, ticket,
+      now_ms, period_ms))
+  end
+
+end
+
+# Ticket storage is constructed where its caller retains it. Chain entries
+# view the retained plaintext, rather than a decode loop's temporary bytes.
+@[OnTape]
+struct RisTlsTicketRead
+  getter value : TlsTicket? = nil
+
+  def initialize(bytes : Array(UInt8))
     reader = RisTlsReader.new(bytes)
     version = reader.u8
     suite = reader.u16
@@ -5223,24 +5272,27 @@ pub class TlsTicket
     name = reader.bytes(reader.u16)
     protocol = reader.bytes(reader.u8)
     identity = reader.u32
-    chain = [] of Array(UInt8)
-    reader.u8.times { chain << reader.bytes(reader.u24) }
-    return nil if reader.short? || !reader.done? || version != VERSION.to_i32 || identity > 0x7FFFFFFF_i64
-    TlsTicket.new(suite, issued, lifetime, age_add, psk, name.empty? ? nil : TlsBytes.text(name),
+    chain = [] of Array::View(UInt8)
+    reader.u8.times { chain << reader.view(reader.u24); nil }
+    return if reader.short? || !reader.done? || version != TlsTicket::VERSION.to_i32 || identity > 0x7FFFFFFF_i64
+    @value = TlsTicket.new(suite, issued, lifetime, age_add, psk, name.empty? ? nil : TlsBytes.text(name),
       protocol.empty? ? nil : TlsBytes.text(protocol), identity.to_i32, chain, authenticated, early)
   end
 
-  # The session *ticket* seals, opened by *keys* at *now_ms*: nil when no
-  # key held opens it, or when its lifetime is over by this server's own
-  # count from its issue.
-  def self.open(keys : TlsTicketKeys, ticket : Array::View(UInt8), now_ms : Int64, period_ms : Int64) : TlsTicket?
+  def initialize(keys : TlsTicketKeys, ticket : Array::View(UInt8),
+                 now_ms : Int64, period_ms : Int64)
     state = keys.open(ticket, now_ms, period_ms)
-    return nil unless state
-    opened = decode(state)
-    return nil unless opened
+    return unless state
+    parsed = RisTlsTicketRead.new(state)
+    opened = parsed.value
+    return unless opened
     age = now_ms - opened.issued_ms
-    return nil if age < 0 || age > opened.lifetime * 1000_i64
-    opened
+    return if age < 0 || age > opened.lifetime * 1000_i64
+    @value = opened
+  end
+
+  def self.result(parsed : RisTlsTicketRead) : TlsTicket?
+    parsed.value
   end
 end
 
@@ -5337,28 +5389,27 @@ end
 # What a client offered, read from its ClientHello: the parts a server
 # chooses by.
 class TlsOffer
-  getter session : Array(UInt8)
-  getter suites : Array(Int32)
+  property session : Array(UInt8)
+  property suites : Array(Int32)
   # The client's shares for the groups this server has: X25519MLKEM768's
   # (1,216 bytes), X25519's (32), secp256r1's (65, uncompressed) and
   # secp384r1's (97), when it sent them.
-  getter hybrid : Array(UInt8)?
-  getter x25519 : Array(UInt8)?
-  getter p256 : Array(UInt8)?
-  getter p384 : Array(UInt8)?
-  getter groups : Array(Int32)
-  getter alpn : Array(String)?
-  getter server_name : String?
-  getter early_data : Bool
+  property hybrid : Array(UInt8)?
+  property x25519 : Array(UInt8)?
+  property p256 : Array(UInt8)?
+  property p384 : Array(UInt8)?
+  property groups : Array(Int32)
+  property alpn : Array(String)?
+  property server_name : String?
+  property early_data : Bool
   # pre_shared_key's identities - each a ticket and its obfuscated age -
   # and their binders, and the bytes the binders take at the ClientHello's
   # end; psk_key_exchange_modes; and why no identity of this server's can
   # be shown, when a ticket may still be taken instead.
   property identities : Array({Array::View(UInt8), Int64}) = [] of {Array::View(UInt8), Int64}
-  property binders : Array(Array(UInt8)) = [] of Array(UInt8)
+  property binders : Array(Array::View(UInt8)) = [] of Array::View(UInt8)
   property binders_size : Int32 = 0
   property psk_modes : Array(UInt8) = [] of UInt8
-  property unshown : TlsError? = nil
   # Whether the client asked for an OCSP staple (status_request, ocsp).
   property status_request : Bool = false
 
@@ -5401,15 +5452,15 @@ end
 # the extensions it judges (extended_master_secret, renegotiation_info,
 # ec_point_formats) as sent, nil when absent.
 class TlsOffer12
-  getter random : Array(UInt8)
-  getter suites : Array(Int32)
-  getter schemes : Array(Int32)?
-  getter groups : Array(Int32)?
-  getter alpn : Array(String)?
-  getter server_name : String?
-  getter extended_master_secret : Array(UInt8)?
-  getter renegotiation_info : Array(UInt8)?
-  getter point_formats : Array(UInt8)?
+  property random : Array(UInt8)
+  property suites : Array(Int32)
+  property schemes : Array(Int32)?
+  property groups : Array(Int32)?
+  property alpn : Array(String)?
+  property server_name : String?
+  property extended_master_secret : Array(UInt8)?
+  property renegotiation_info : Array(UInt8)?
+  property point_formats : Array(UInt8)?
 
   def initialize(@random : Array(UInt8), @suites : Array(Int32), @schemes : Array(Int32)?, @groups : Array(Int32)?, @alpn : Array(String)?,
                  @server_name : String?, @extended_master_secret : Array(UInt8)?, @renegotiation_info : Array(UInt8)?, @point_formats : Array(UInt8)?)
@@ -5417,6 +5468,85 @@ class TlsOffer12
 
   # Whether the client asked for an OCSP staple (status_request, ocsp).
   property status_request : Bool = false
+end
+
+# Lists and copied bytes retained by an offer live on the handshake's
+# tape, outside the parser's def and its extension loop rounds.
+class RisTlsOfferStorage
+  getter offer : TlsOffer
+  getter offer12 : TlsOffer12
+  @texts : String::Builder
+  getter random : Array(UInt8)
+  getter session : Array(UInt8)
+  getter hybrid : Array(UInt8)
+  getter x25519 : Array(UInt8)
+  getter p256 : Array(UInt8)
+  getter p384 : Array(UInt8)
+  getter modes : Array(UInt8)
+  getter formats : Array(UInt8)
+  getter extended : Array(UInt8)
+  getter renegotiation : Array(UInt8)
+  getter suites : Array(Int32)
+  getter groups : Array(Int32)
+  getter schemes : Array(Int32)
+  getter versions : Array(Int32)
+  getter protocols : Array(String)
+
+  def initialize(size : Int32)
+    random = Array(UInt8).new(size)
+    session = Array(UInt8).new(size)
+    hybrid = Array(UInt8).new(size)
+    x25519 = Array(UInt8).new(size)
+    p256 = Array(UInt8).new(size)
+    p384 = Array(UInt8).new(size)
+    modes = Array(UInt8).new(size)
+    formats = Array(UInt8).new(size)
+    extended = Array(UInt8).new(size)
+    renegotiation = Array(UInt8).new(size)
+    suites = Array(Int32).new(size)
+    groups = Array(Int32).new(size)
+    schemes = Array(Int32).new(size)
+    versions = Array(Int32).new(size)
+    protocols = Array(String).new(size)
+    offer = TlsOffer.new(session, suites, nil, nil, nil, nil,
+      groups, nil, nil, false)
+    offer12 = TlsOffer12.new(random, suites, nil, nil, nil, nil,
+      nil, nil, nil)
+    @offer = offer
+    @offer12 = offer12
+    @texts = String::Builder.new(size)
+    @random = random
+    @session = session
+    @hybrid = hybrid
+    @x25519 = x25519
+    @p256 = p256
+    @p384 = p384
+    @modes = modes
+    @formats = formats
+    @extended = extended
+    @renegotiation = renegotiation
+    @suites = suites
+    @groups = groups
+    @schemes = schemes
+    @versions = versions
+    @protocols = protocols
+  end
+
+  def text(bytes : Array::View(UInt8)) : String
+    start = @texts.bytesize
+    bytes.each { |byte| @texts.write_byte(byte); nil }
+    @texts.finish[start, bytes.size]
+  end
+
+  def u16_list(bytes : Array::View(UInt8), into : Array(Int32)) : Array(Int32)?
+    return nil if bytes.size.odd?
+    i = 0
+    while i < bytes.size
+      into << ((bytes[i].to_i32 << 8) | bytes[i + 1].to_i32)
+      i += 2
+    end
+    into
+  end
 end
 
 # A connection from a client, its handshake done: TLS 1.3 as a server -
@@ -5427,6 +5557,7 @@ pub class TlsServer < TlsConnection
   include RisTlsConnectionState
   # The host the client named (server_name, RFC 6066), if it named one.
   getter server_name : String? = nil
+  @server_name_text = String::Builder.new(256)
   # The certificate and key this connection was shown under: the config's
   # `identity`, or one of its `others` the client asked for by name.
   getter identity : TlsIdentity
@@ -5436,6 +5567,7 @@ pub class TlsServer < TlsConnection
   # The scheme this side's CertificateVerify is signed under: the first of
   # the client's signature_algorithms the identity's key makes.
   @scheme : Int32 = 0
+  @unshown_identity : TlsError? = nil
 
   SUITES = StaticArray[TlsSuites::AES_128_GCM, TlsSuites::AES_256_GCM, TlsSuites::CHACHA20_POLY1305]
   # The early data passed over when a client sends it unasked for: the
@@ -5657,11 +5789,16 @@ pub class TlsServer < TlsConnection
     opened = ech_open(hello)
     return opened if opened.is_a?(TlsError)
     hello = opened if opened
-    offer = client_hello(hello)
-    return offer if offer.is_a?(TlsError)
+    offers = RisTlsOfferStorage.new(hello.size)
+    retry_offers = RisTlsOfferStorage.new(hello.size)
+    next_hello = Array(UInt8).new(hello.size)
+    inner_hello = Array(UInt8).new(hello.size)
+    parsed = client_hello(hello, offers)
+    return parsed if parsed.is_a?(TlsError)
     # A client that offers TLS 1.2 and not 1.3, to a server told to speak
     # 1.2: that handshake from here.
-    return handshake12(hello, offer) if offer.is_a?(TlsOffer12)
+    return handshake12(hello, offers.offer12) if parsed
+    offer = offers.offer
     @early_left = EARLY_ALLOWANCE if offer.early_data
     @suite = offer.suites.find { |s| SUITES.includes?(s) } || 0
     keep_cipher_suite(TlsSuites.name(@suite))
@@ -5699,20 +5836,23 @@ pub class TlsServer < TlsConnection
       first = @schedule.hash(hello)
       @transcript_start = @transcript_data.size
       @transcript_data.concat([254_u8, 0_u8, 0_u8, first.size.to_u8] + first + retry)
-      hello = handshake_message(plain: true)
-      return hello if hello.is_a?(TlsError)
+      problem = handshake_message_into(next_hello, plain: true)
+      return problem if problem
+      hello = next_hello
       return tls_error("#{TlsBytes.handshake_name(hello[0])} where the second ClientHello belongs", TlsAlert::UNEXPECTED_MESSAGE) unless hello[0] == 1_u8
       if @ech_accepted
-        opened = ech_reopen(hello)
-        return opened if opened.is_a?(TlsError)
-        hello = opened
+        reopened = ech_reopen(hello)
+        return reopened if reopened.is_a?(TlsError)
+        inner_hello.concat(reopened)
+        hello = inner_hello
       end
-      again = client_hello(hello)
+      parsed_again = client_hello(hello, retry_offers)
       # Early data comes before the second ClientHello or not at all
       # (section 4.2.10): nothing after it is passed over.
       @early_left = 0
-      return again if again.is_a?(TlsError)
-      return tls_error("a second ClientHello that leaves TLS 1.3 out", TlsAlert::ILLEGAL_PARAMETER) if again.is_a?(TlsOffer12)
+      return parsed_again if parsed_again.is_a?(TlsError)
+      return tls_error("a second ClientHello that leaves TLS 1.3 out", TlsAlert::ILLEGAL_PARAMETER) if parsed_again
+      again = retry_offers.offer
       return tls_error("a second ClientHello with no #{group_name(group)} share", TlsAlert::ILLEGAL_PARAMETER) unless again.share(group)
       return tls_error("a second ClientHello with another session id", TlsAlert::ILLEGAL_PARAMETER) unless again.session == offer.session
       return tls_error("a second ClientHello that leaves out the suite chosen", TlsAlert::ILLEGAL_PARAMETER) unless again.suites.includes?(@suite)
@@ -5725,22 +5865,24 @@ pub class TlsServer < TlsConnection
     return tls_error("handshake bytes after the ClientHello in its record", TlsAlert::UNEXPECTED_MESSAGE) unless handshake_left == 0
     peer = offer.share(group)
     return tls_error("no #{group_name(group)} share", TlsAlert::ILLEGAL_PARAMETER) unless peer
-    @server_name = offer.server_name
+    keep_server_name(offer.server_name)
     @status_requested = offer.status_request
     problem = agree_alpn(offer.alpn)
     return problem if problem
-    taken = accept_psk(offer, hello)
+    ticket_bytes = String::Builder.new(TlsServerConfig::MAX_TICKET)
+    taken = accept_psk(offer, hello, ticket_bytes)
+    decoded_ticket = TlsTicket.decode(TlsBytes.of(ticket_bytes.finish))
     return taken if taken.is_a?(TlsError)
     psk = nil.as(Array(UInt8)?)
     psk_identity = -1
     early_secret = nil.as(Array(UInt8)?)
     if taken
-      ticket, psk_identity, chain = taken
+      ticket = decoded_ticket.as(TlsTicket)
+      psk_identity = taken
       psk = ticket.psk
       @resumed = true
       @authenticated_ms = ticket.authenticated_ms
       @identity = @config.identity_at(ticket.identity) || @identity
-      @peer_certificates = chain
       if offer.early_data && !retried && take_early?(ticket, psk_identity, offer)
         # Taken: read under the client's early traffic keys, over this
         # ClientHello alone, until EndOfEarlyData - none passed over - and
@@ -5751,7 +5893,7 @@ pub class TlsServer < TlsConnection
         @early_left = 0
         early_secret = @schedule.early_traffic(ticket.psk, hello)
       end
-    elsif (unshown = offer.unshown)
+    elsif (unshown = @unshown_identity)
       return unshown
     end
 
@@ -5932,7 +6074,8 @@ pub class TlsServer < TlsConnection
   # name the client asks for now, and offered for psk_dhe_ke. Its binder
   # is checked: one that does not match refuses the handshake. Nil when
   # none is taken, for a full handshake.
-  private def accept_psk(offer : TlsOffer, hello : Array(UInt8)) : {TlsTicket, Int32, Array(Certificate)} | TlsError | Nil
+  private def accept_psk(offer : TlsOffer, hello : Array(UInt8),
+                         kept : String::Builder) : Int32 | TlsError | Nil
     return nil if offer.identities.empty?
     # psk_ke alone - every key from the PSK, none from a key exchange, so
     # whoever learns the ticket key reads the session - is declined.
@@ -5947,10 +6090,12 @@ pub class TlsServer < TlsConnection
       next unless ticket.server_name == offer.server_name
       next if ((entry[1] - ticket.age_add) & 0xFFFFFFFF_i64) > ticket.lifetime * 1000_i64
       next unless @config.identity_at(ticket.identity)
-      chain = [] of Certificate
+      clear_certificates
+      chain = kept_certificates
       ticket.chain.each do |der|
-        certificate = Certificate.parse(der)
-        chain << certificate if certificate.is_a?(Certificate)
+        problem = append_certificate(der)
+        break if problem
+        nil
       end
       next unless chain.size == ticket.chain.size
       # The binder is over the messages before this ClientHello and the
@@ -5959,7 +6104,10 @@ pub class TlsServer < TlsConnection
       unless Subtle.constant_time_compare(offer.binders[index], @schedule.binder(ticket.psk, binder_transcript))
         return tls_error("the client's PSK binder does not match its ClientHello", TlsAlert::DECRYPT_ERROR)
       end
-      return {ticket, index, chain}
+      ticket.encode.each { |byte| kept.write_byte(byte); nil }
+      @peer_certificates.clear
+      @peer_certificates.concat(chain)
+      return index
     end
     nil
   end
@@ -6075,6 +6223,17 @@ pub class TlsServer < TlsConnection
     TlsEch.decode_inner(TlsBytes.of(opened), parts)
   end
 
+  private def keep_server_name(name : String?) : Nil
+    if name
+      start = @server_name_text.bytesize
+      @server_name_text << name
+      @server_name = @server_name_text.finish[start, name.bytesize]
+    else
+      @server_name = nil
+    end
+    nil
+  end
+
   # The first of this server's protocols the client offers, by ALPN.
   private def choose_alpn(wanted : Array(String)?) : String?
     return nil unless wanted
@@ -6095,18 +6254,22 @@ pub class TlsServer < TlsConnection
   # key's scheme and a group this server has, or why not - or, from a
   # client that offers TLS 1.2 and not 1.3 to a server told to speak 1.2,
   # that offer as read, which `judge12` judges.
-  private def client_hello(message : Array(UInt8)) : TlsOffer | TlsOffer12 | TlsError
+  private def client_hello(message : Array(UInt8), storage : RisTlsOfferStorage) : Bool | TlsError
+    offer = storage.offer
+    offer12 = storage.offer12
     reader = RisTlsReader.new(message[4, message.size - 4])
     legacy = reader.u16
-    random = reader.bytes(32)
-    session = reader.bytes(reader.u8)
-    suite_bytes = reader.bytes(reader.u16)
-    compression = reader.bytes(reader.u8)
-    extensions = reader.done? ? [] of UInt8 : reader.bytes(reader.u16)
+    random = storage.random
+    random.concat(reader.view(32))
+    session = storage.session
+    session.concat(reader.view(reader.u8))
+    suite_bytes = reader.view(reader.u16)
+    compression = reader.view(reader.u8)
+    extensions = reader.done? ? [] of UInt8 : reader.view(reader.u16)
     return tls_error("a ClientHello cut short", TlsAlert::DECODE_ERROR) if reader.short? || !reader.done?
     return tls_error("a ClientHello with a session id of #{session.size} bytes", TlsAlert::ILLEGAL_PARAMETER) if session.size > 32
     return tls_error("a ClientHello whose cipher suites are #{suite_bytes.size} bytes", TlsAlert::DECODE_ERROR) if suite_bytes.empty? || suite_bytes.size.odd?
-    suites = [] of Int32
+    suites = storage.suites
     i = 0
     while i < suite_bytes.size
       suites << ((suite_bytes[i].to_i32 << 8) | suite_bytes[i + 1].to_i32)
@@ -6123,8 +6286,8 @@ pub class TlsServer < TlsConnection
     formats = nil
     extended = nil
     renegotiation = nil
-    identities = [] of {Array::View(UInt8), Int64}
-    binders = [] of Array(UInt8)
+    identities = offer.identities
+    binders = offer.binders
     binders_size = 0
     psk_modes = nil
     status_request = false
@@ -6134,7 +6297,7 @@ pub class TlsServer < TlsConnection
     list = RisTlsReader.new(extensions)
     until list.done?
       type = list.u16
-      data = list.bytes(list.u16)
+      data = list.view(list.u16)
       return tls_error("ClientHello extensions cut short", TlsAlert::DECODE_ERROR) if list.short?
       return tls_error("extension #{type} twice in a ClientHello", TlsAlert::ILLEGAL_PARAMETER) if seen.has_key?(type)
       return tls_error("pre_shared_key not last in a ClientHello", TlsAlert::ILLEGAL_PARAMETER) if seen.has_key?(41)
@@ -6142,11 +6305,11 @@ pub class TlsServer < TlsConnection
       field = RisTlsReader.new(data)
       case type
       when 0
-        names = RisTlsReader.new(field.bytes(field.u16))
+        names = RisTlsReader.new(field.view(field.u16))
         return tls_error("a server_name cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done?
         until names.done?
           kind = names.u8
-          name = names.bytes(names.u16)
+          name = names.view(names.u16)
           return tls_error("a server_name cut short", TlsAlert::DECODE_ERROR) if names.short? || name.empty?
           next unless kind == 0
           # RFC 6066 section 3: one host_name, ASCII - a byte past 0x7E or
@@ -6164,40 +6327,40 @@ pub class TlsServer < TlsConnection
           if name.size > MAX_HOST_NAME
             return tls_error("a server_name of #{name.size} bytes, past the #{MAX_HOST_NAME} a host name has", TlsAlert::DECODE_ERROR)
           end
-          server_name = TlsBytes.text(name)
+          server_name = storage.text(name)
         end
       when 10
-        groups = TlsBytes.u16_list(field.bytes(field.u16))
+        groups = storage.u16_list(field.view(field.u16), storage.groups)
         return tls_error("supported_groups cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done? || groups.nil?
       when 13
-        schemes = TlsBytes.u16_list(field.bytes(field.u16))
+        schemes = storage.u16_list(field.view(field.u16), storage.schemes)
         return tls_error("signature_algorithms cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done? || schemes.nil?
       when 16
-        protocols = [] of String
-        names = RisTlsReader.new(field.bytes(field.u16))
+        protocols = storage.protocols
+        names = RisTlsReader.new(field.view(field.u16))
         return tls_error("an ALPN offer cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done? || names.done?
         until names.done?
-          protocol = names.bytes(names.u8)
+          protocol = names.view(names.u8)
           return tls_error("an ALPN offer with an empty or cut protocol", TlsAlert::DECODE_ERROR) if names.short? || protocol.empty?
-          protocols << TlsBytes.text(protocol)
+          protocols << storage.text(protocol)
         end
         alpn = protocols
       when 41
         # pre_shared_key (section 4.2.11): each identity a ticket and its
         # obfuscated age, then a binder for each; last, so its binders are
         # the ClientHello's last bytes.
-        named = RisTlsReader.new(field.bytes(field.u16))
-        bound = field.bytes(field.u16)
+        named = RisTlsReader.new(field.view(field.u16))
+        bound = field.view(field.u16)
         return tls_error("a pre_shared_key cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done?
         until named.done?
-          ticket = named.bytes(named.u16)
+          ticket = named.view(named.u16)
           age = named.u32
           return tls_error("a pre_shared_key's identities cut short", TlsAlert::DECODE_ERROR) if named.short? || ticket.empty?
           identities << {ticket[0, ticket.size], age}
         end
         each = RisTlsReader.new(bound)
         until each.done?
-          binder = each.bytes(each.u8)
+          binder = each.view(each.u8)
           return tls_error("a pre_shared_key's binders cut short", TlsAlert::DECODE_ERROR) if each.short? || binder.size < 32
           binders << binder
         end
@@ -6210,31 +6373,35 @@ pub class TlsServer < TlsConnection
         return tls_error("an early_data extension with a body", TlsAlert::DECODE_ERROR) unless data.empty?
         early = true
       when 45
-        modes = field.bytes(field.u8)
+        modes = field.view(field.u8)
         return tls_error("psk_key_exchange_modes cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done? || modes.empty?
-        psk_modes = modes
+        storage.modes.concat(modes)
+        psk_modes = storage.modes
       when 43
-        offered = field.bytes(field.u8)
+        offered = field.view(field.u8)
         return tls_error("supported_versions cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done? || offered.empty? || offered.size.odd?
-        versions = TlsBytes.u16_list(offered)
+        versions = storage.u16_list(offered, storage.versions)
       when 51
-        entries = RisTlsReader.new(field.bytes(field.u16))
+        entries = RisTlsReader.new(field.view(field.u16))
         return tls_error("key_share cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done?
-        found = {} of Int32 => Array(UInt8)
+        found = {} of Int32 => Array::View(UInt8)
         until entries.done?
           group = entries.u16
-          key = entries.bytes(entries.u16)
+          key = entries.view(entries.u16)
           return tls_error("key_share cut short", TlsAlert::DECODE_ERROR) if entries.short?
           return tls_error("two key shares for group #{group}", TlsAlert::ILLEGAL_PARAMETER) if found.has_key?(group)
           found[group] = key
         end
         shares = found
       when 11
-        formats = data
+        storage.formats.concat(data)
+        formats = storage.formats
       when 23
-        extended = data
+        storage.extended.concat(data)
+        extended = storage.extended
       when 0xff01
-        renegotiation = data
+        storage.renegotiation.concat(data)
+        renegotiation = storage.renegotiation
       when 5
         # status_request (RFC 6066 section 8): its type, and for ocsp (1)
         # the responders and request extensions, which a staple fetched
@@ -6242,8 +6409,8 @@ pub class TlsServer < TlsConnection
         # type is passed over too, as one this server does not know.
         kind = field.u8
         if kind == 1
-          field.bytes(field.u16)
-          field.bytes(field.u16)
+          field.view(field.u16)
+          field.view(field.u16)
           return tls_error("a status_request cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done?
           status_request = true
         end
@@ -6268,9 +6435,15 @@ pub class TlsServer < TlsConnection
     end
     return tls_error("a ClientHello whose compression methods are not null alone", TlsAlert::ILLEGAL_PARAMETER) unless compression == [0_u8]
     if tls12
-      offer12 = TlsOffer12.new(random, suites, schemes, groups, alpn, server_name, extended, renegotiation, formats)
+      offer12.schemes = schemes
+      offer12.groups = groups
+      offer12.alpn = alpn
+      offer12.server_name = server_name
+      offer12.extended_master_secret = extended
+      offer12.renegotiation_info = renegotiation
+      offer12.point_formats = formats
       offer12.status_request = status_request
-      return offer12
+      return true
     end
     return tls_error("the client offers no cipher suite this server has", TlsAlert::HANDSHAKE_FAILURE) unless suites.any? { |s| SUITES.includes?(s) }
     # Section 4.2.9: a PSK offered with no modes to use it in is refused.
@@ -6318,24 +6491,32 @@ pub class TlsServer < TlsConnection
       return tls_error("a key share for group #{group}, which the client does not support", TlsAlert::ILLEGAL_PARAMETER) unless offered.has_key?(group)
       if group == GROUP_X25519MLKEM768
         return tls_error("an X25519MLKEM768 share of #{key.size} bytes, not #{HYBRID_CLIENT_SHARE}", TlsAlert::ILLEGAL_PARAMETER) unless key.size == HYBRID_CLIENT_SHARE
-        hybrid = key
+        storage.hybrid.concat(key)
+        hybrid = storage.hybrid
       elsif group == GROUP_X25519
         return tls_error("an X25519 share of #{key.size} bytes", TlsAlert::ILLEGAL_PARAMETER) unless key.size == 32
-        x25519 = key
+        storage.x25519.concat(key)
+        x25519 = storage.x25519
       elsif group == GROUP_SECP256R1
-        p256 = key
+        storage.p256.concat(key)
+        p256 = storage.p256
       elsif group == GROUP_SECP384R1
-        p384 = key
+        storage.p384.concat(key)
+        p384 = storage.p384
       end
     end
-    offer = TlsOffer.new(session, suites, hybrid, x25519, p256, p384, groups, alpn, server_name, early)
+    offer.hybrid = hybrid
+    offer.x25519 = x25519
+    offer.p256 = p256
+    offer.p384 = p384
+    offer.alpn = alpn
+    offer.server_name = server_name
+    offer.early_data = early
     offer.status_request = status_request
-    offer.identities = identities
-    offer.binders = binders
     offer.binders_size = binders_size
-    offer.psk_modes = psk_modes || [] of UInt8
-    offer.unshown = unshown
-    offer
+    offer.psk_modes = psk_modes || storage.modes
+    @unshown_identity = unshown
+    false
   end
 
   # A ServerHello with the server's share in *group*, and the identity it
@@ -6360,7 +6541,10 @@ pub class TlsServer < TlsConnection
   # this side checks a CertificateVerify under, as signature_algorithms.
   private def certificate_request : Array(UInt8)
     schemes = [] of UInt8
-    TlsClient::SIGNATURE_SCHEMES.each { |scheme| schemes = schemes + TlsBytes.u16(scheme) }
+    TlsClient::SIGNATURE_SCHEMES.each do |scheme|
+      schemes.concat(TlsBytes.u16(scheme))
+      nil
+    end
     extensions = TlsBytes.extension(13, TlsBytes.u16(schemes.size) + schemes)
     TlsBytes.message(13, [0_u8] + TlsBytes.u16(extensions.size) + extensions)
   end
@@ -6373,21 +6557,21 @@ pub class TlsServer < TlsConnection
   private def client_certificate(message : Array(UInt8), roots : Array(Certificate)) : TlsError?
     return tls_error("#{TlsBytes.handshake_name(message[0])} where the client's Certificate belongs", TlsAlert::UNEXPECTED_MESSAGE) unless message[0] == 11_u8
     reader = RisTlsReader.new(message[4, message.size - 4])
-    context = @tls12 ? [] of UInt8 : reader.bytes(reader.u8)
-    list = RisTlsReader.new(reader.bytes(reader.u24))
+    context = @tls12 ? message[0, 0] : reader.view(reader.u8)
+    list = RisTlsReader.new(reader.view(reader.u24))
     return tls_error("a client Certificate cut short", TlsAlert::DECODE_ERROR) if reader.short? || !reader.done?
     return tls_error("a client Certificate whose request context is not the server's", TlsAlert::ILLEGAL_PARAMETER) unless context.empty?
-    chain = [] of Certificate
+    clear_certificates
+    chain = kept_certificates
     until list.done?
       return tls_error("a client Certificate of more than #{X509::MAX_CHAIN} certificates", TlsAlert::BAD_CERTIFICATE) if chain.size == X509::MAX_CHAIN
-      der = list.bytes(list.u24)
-      entry_extensions = @tls12 ? [] of UInt8 : list.bytes(list.u16)
+      der = list.view(list.u24)
+      entry_extensions = @tls12 ? message[0, 0] : list.view(list.u16)
       return tls_error("a client Certificate cut short", TlsAlert::DECODE_ERROR) if list.short?
       # Section 4.4.2: the CertificateRequest asked for no entry extensions.
       return tls_error("a client certificate entry with extensions nobody asked for", TlsAlert::UNSUPPORTED_EXTENSION) unless entry_extensions.empty?
-      certificate = Certificate.parse(der)
-      return tls_error("the client's certificate #{chain.size}: #{certificate.message}", TlsAlert::BAD_CERTIFICATE) if certificate.is_a?(X509Error)
-      chain << certificate
+      problem = append_certificate(der)
+      return tls_error("the client's certificate #{chain.size}: #{problem.message}", TlsAlert::BAD_CERTIFICATE) if problem
     end
     @transcript_data.concat(message)
     if chain.empty?
@@ -6399,7 +6583,8 @@ pub class TlsServer < TlsConnection
     verified = X509.verify(chain[0], chain[1, chain.size - 1], roots, nil, @config.now || Time.utc, X509Purpose::Client)
     return tls_error("the client's certificate is not trusted: #{verified.message}", TlsAlert::BAD_CERTIFICATE) if verified.is_a?(X509Error)
     if @tls12
-      @chain12 = verified
+      @chain12.clear
+      @chain12.concat(verified)
       return nil
     end
     verify = handshake_message(plain: false)
@@ -6408,7 +6593,8 @@ pub class TlsServer < TlsConnection
     problem = certificate_verify(verify, chain[0], "client")
     return problem if problem
     @transcript_data.concat(verify)
-    @peer_certificates = verified
+    @peer_certificates.clear
+    @peer_certificates.concat(verified)
     nil
   end
 
@@ -6443,7 +6629,11 @@ pub class TlsServer < TlsConnection
     staple = current_staple
     @identity.chain.each_with_index do |der, i|
       status = i == 0 && staple ? TlsBytes.extension(5, [1_u8] + TlsBytes.u24(staple.size) + staple) : [] of UInt8
-      entries = entries + TlsBytes.u24(der.size) + der + TlsBytes.u16(status.size) + status
+      entries.concat(TlsBytes.u24(der.size))
+      entries.concat(der)
+      entries.concat(TlsBytes.u16(status.size))
+      entries.concat(status)
+      nil
     end
     TlsBytes.message(11, [0_u8] + TlsBytes.u24(entries.size) + entries)
   end
@@ -6494,7 +6684,7 @@ pub class TlsServer < TlsConnection
     keep_named_group(group_name(group))
     keep_cipher_suite(TlsSuites.name(@suite))
     @schedule.configure(TlsSuites.sha384?(@suite))
-    @server_name = offer.server_name
+    keep_server_name(offer.server_name)
     @status_requested = offer.status_request
     problem = agree_alpn(offer.alpn)
     return problem if problem
@@ -6522,7 +6712,11 @@ pub class TlsServer < TlsConnection
     answers = answers + TlsBytes.extension(5, [] of UInt8) if staple
     server_hello = TlsBytes.message(2, [3_u8, 3_u8] + random + [0_u8] + TlsBytes.u16(@suite) + [0_u8] + TlsBytes.u16(answers.size) + answers)
     entries = [] of UInt8
-    @identity.chain.each { |der| entries = entries + TlsBytes.u24(der.size) + der }
+    @identity.chain.each do |der|
+      entries.concat(TlsBytes.u24(der.size))
+      entries.concat(der)
+      nil
+    end
     certificate = TlsBytes.message(11, TlsBytes.u24(entries.size) + entries)
     certificate = certificate + TlsBytes.message(22, [1_u8] + TlsBytes.u24(staple.size) + staple) if staple
     # RFC 8422 section 5.4: a named curve, the point, and the identity's
@@ -6570,7 +6764,8 @@ pub class TlsServer < TlsConnection
       problem = certificate_verify12(verify, @chain12[0])
       return problem if problem
       @transcript_data.concat(verify)
-      @peer_certificates = @chain12
+      @peer_certificates.clear
+      @peer_certificates.concat(@chain12)
     end
 
     # The client's ChangeCipherSpec and Finished; then this side's.
@@ -6695,7 +6890,10 @@ pub class TlsServer < TlsConnection
   # authorities named.
   private def request12 : Array(UInt8)
     schemes = [] of UInt8
-    TlsClient::SIGNATURE_SCHEMES.each { |scheme| schemes = schemes + TlsBytes.u16(scheme) }
+    TlsClient::SIGNATURE_SCHEMES.each do |scheme|
+      schemes.concat(TlsBytes.u16(scheme))
+      nil
+    end
     TlsBytes.message(13, [2_u8, 64_u8, 1_u8] + TlsBytes.u16(schemes.size) + schemes + [0_u8, 0_u8])
   end
 
@@ -6885,7 +7083,7 @@ struct RisTlsEchConfigList
   getter why : String
 
   def initialize(bytes : Array(UInt8))
-    @configs = Array(TlsEchConfig).new(4)
+    configs = Array(TlsEchConfig).new(4)
     @why = ""
     suites = Array({Int32, Int32}).new(8)
     extensions = Array({Int32, Array::View(UInt8)}).new(4)
@@ -6894,10 +7092,12 @@ struct RisTlsEchConfigList
     body = reader.view(reader.u16)
     if reader.short? || !reader.done?
       @why = "cut short, or bytes after its end"
+      @configs = configs
       return
     end
     if body.size < 4
       @why = "#{body.size} bytes, where one ECHConfig takes 4 at least"
+      @configs = configs
       return
     end
     entries = RisTlsReader.new(body)
@@ -6907,6 +7107,7 @@ struct RisTlsEchConfigList
       contents = entries.view(entries.u16)
       if entries.short?
         @why = "an ECHConfig cut short"
+        @configs = configs
         return
       end
       if version == TlsEchConfig::VERSION
@@ -6914,12 +7115,14 @@ struct RisTlsEchConfigList
           suites, extensions, text)
         unless config.why.empty?
           @why = config.why
+          @configs = configs
           return
         end
-        @configs << config
+        configs << config
       end
       offset += contents.size + 4
     end
+    @configs = configs
   end
 
   def self.read(list : RisTlsEchConfigList) : Array(TlsEchConfig) | String
@@ -6974,7 +7177,11 @@ pub class TlsEchKey
     key = HpkePrivateKey.derive(kem, Random::Secure.random_bytes(kem.private_key_size))
     public = key.public_key.bytes
     pairs = [] of UInt8
-    suites.each { |s| pairs = pairs + TlsBytes.u16(s[0].value) + TlsBytes.u16(s[1].value) }
+    suites.each do |s|
+      pairs.concat(TlsBytes.u16(s[0].value))
+      pairs.concat(TlsBytes.u16(s[1].value))
+      nil
+    end
     name = TlsBytes.of(public_name)
     contents = [id.to_u8] + TlsBytes.u16(kem.value) + TlsBytes.u16(public.size) + public + TlsBytes.u16(pairs.size) + pairs +
                [maximum_name_length.to_u8, name.size.to_u8] + name + TlsBytes.u16(0)

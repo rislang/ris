@@ -2944,11 +2944,12 @@ pub struct DocumentParser
   @error : String?
 
   def initialize(@input : String)
-    @lexer = Lexer.new(true)
+    lexer = Lexer.new(true)
+    lexer.next_token(@input)
+    @lexer = lexer
     @tree = RisTree(Node).new(@input.bytesize // 16 + 8)
     @nesting = 0
     @error = nil
-    @lexer.next_token(@input)
   end
 
   def error : String?

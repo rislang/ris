@@ -1,0 +1,104 @@
+class State
+  @@names = Array(String).new
+  def self.names
+    @@names
+  end
+end
+@[OnTape]
+struct Held
+  getter names : Array(String)
+  def initialize(@names)
+  end
+end
+def level0(names : Array(String)) : Held
+  Held.new(names)
+end
+def level1(names : Array(String)) : Held
+  level0(names)
+  level0(names)
+end
+def level2(names : Array(String)) : Held
+  level1(names)
+  level1(names)
+end
+def level3(names : Array(String)) : Held
+  level2(names)
+  level2(names)
+end
+def level4(names : Array(String)) : Held
+  level3(names)
+  level3(names)
+end
+def level5(names : Array(String)) : Held
+  level4(names)
+  level4(names)
+end
+def level6(names : Array(String)) : Held
+  level5(names)
+  level5(names)
+end
+def level7(names : Array(String)) : Held
+  level6(names)
+  level6(names)
+end
+def level8(names : Array(String)) : Held
+  level7(names)
+  level7(names)
+end
+def level9(names : Array(String)) : Held
+  level8(names)
+  level8(names)
+end
+def level10(names : Array(String)) : Held
+  level9(names)
+  level9(names)
+end
+def level11(names : Array(String)) : Held
+  level10(names)
+  level10(names)
+end
+def level12(names : Array(String)) : Held
+  level11(names)
+  level11(names)
+end
+def level13(names : Array(String)) : Held
+  level12(names)
+  level12(names)
+end
+def level14(names : Array(String)) : Held
+  level13(names)
+  level13(names)
+end
+def level15(names : Array(String)) : Held
+  level14(names)
+  level14(names)
+end
+def level16(names : Array(String)) : Held
+  level15(names)
+  level15(names)
+end
+def level17(names : Array(String)) : Held
+  level16(names)
+  level16(names)
+end
+def level18(names : Array(String)) : Held
+  level17(names)
+  level17(names)
+end
+def level19(names : Array(String)) : Held
+  level18(names)
+  level18(names)
+end
+def level20(names : Array(String)) : Held
+  level19(names)
+  level19(names)
+end
+def level21(names : Array(String)) : Held
+  level20(names)
+  level20(names)
+end
+def level22(names : Array(String)) : Held
+  level21(names)
+  level21(names)
+end
+puts level22(State.names).names.size

@@ -1,0 +1,23 @@
+class State
+  @@held : Holder? = nil
+  def self.keep(value : Holder)
+    @@held = value
+  end
+end
+
+class Holder
+  getter text : String
+  def initialize(@text : String)
+  end
+
+  def keep
+    helper(self)
+  end
+end
+
+def helper(value : Holder)
+  State.keep(value)
+end
+
+holder = Holder.new(String.new("request"))
+holder.keep

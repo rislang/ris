@@ -85,19 +85,21 @@ class RxRuns
 
   getter valid : Bool = false
 
-  def initialize(pattern : String)
-    @starts = [] of Int32
-    @lengths = [] of Int32
-    @masks = [] of UInt64
+  def initialize(size : Int32)
+    @starts = Array(Int32).new(size)
+    @lengths = Array(Int32).new(size)
+    @masks = Array(UInt64).new(256)
     @heads = 0_u64
     @tails = 0_u64
     @width = 0
+    @tables = Array(UInt8).new(size * 256, 0_u8)
+    @first = Array(UInt8).new(256, 0_u8)
+  end
+
+  def compile(pattern : String) : Nil
     n = pattern.bytesize
     p = pattern
-    # An atom takes at least one byte of the pattern.
-    @tables = Array(UInt8).new(n * 256, 0_u8)
     tables = @tables
-    @first = Array(UInt8).new(256, 0_u8)
     first = @first
     starts = @starts
     lengths = @lengths
@@ -528,7 +530,8 @@ pub struct Regex
     @nfa = compiler.compile
     plain = options.value == 0 && !pattern.includes?("\u{FFFD}")
     @literal = plain ? Regex.literal_of(pattern) : nil
-    runs = RxRuns.new(pattern)
+    runs = RxRuns.new(pattern.bytesize)
+    runs.compile(pattern)
     @runs = plain && @literal.nil? && runs.valid ? runs : nil
     @source = pattern
     @options = options

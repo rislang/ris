@@ -3,8 +3,9 @@ class Holder
   property view : String
 
   def initialize(@view : String)
-    @bytes = String::Builder.new(16)
-    @bytes << "abc"
+    bytes = String::Builder.new(16)
+    bytes << "abc"
+    @bytes = bytes
   end
 
   def head : String

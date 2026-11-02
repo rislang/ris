@@ -25,7 +25,7 @@
 #       with the count of orders and renewals it has made.
 
 import std/autocert::{Autocert, AutocertConfig, AutocertView,
-  AutocertDirCache, AutocertError, AutocertHeld}
+  AutocertDirCache, AutocertError, RisAutocertHeld}
 import std/x509::{Certificate, SigningKey, X509Error}
 import std/ecdsa::{EcdsaPublicKey, EcdsaCurve}
 import std/http::{HTTP, Request, Response, Server}
@@ -78,7 +78,9 @@ class AutocertBenchHandler
   def initialize(settings : Tuple(AutocertConfig, Bool, String))
     config, tls, @ready = settings
     @view = AutocertView.new(config)
-    @tls_config = tls ? @view.tls_config : nil
+    server = TlsServerConfig.new(@view.placeholder)
+    @view.tls_config(server)
+    @tls_config = tls ? server : nil
     if server = @tls_config
       server.min_version = TlsVersion::TLS12
     end
@@ -239,7 +241,8 @@ def local_checks(dir : String) : Nil
   check alpn.answer(Request.new("GET", "/", nil, none, "")).nil?, "another path on port 80 is the program's own"
   alpn.remove_challenge(name, "tok-1")
   check alpn.identity_for(name, ["acme-tls/1"]).is_a?(TlsError), "a challenge taken down is no longer shown"
-  config = alpn.tls_config(["h2", "http/1.1"])
+  config = TlsServerConfig.new(alpn.placeholder)
+  alpn.tls_config(config, ["h2", "http/1.1"])
   check config.alpn == ["h2", "http/1.1", "acme-tls/1"], "tls_config speaks acme-tls/1 after the program's protocols"
   puts "  the challenge certificate under acme-tls/1 alone, refused beside other protocols, http-01's answer, both taken down"
 end
@@ -303,7 +306,8 @@ end
 def handshake_ms(manager : AutocertView, name : String) : Int64
   listener = IyiSocket.listen("127.0.0.1", 0)
   defer listener.close
-  config = manager.tls_config
+  config = TlsServerConfig.new(manager.placeholder)
+  manager.tls_config(config)
   took = -1_i64
   group do |g|
     RisBoard.post(AutocertBenchClient.new(name.as_tape, listener.local_port))

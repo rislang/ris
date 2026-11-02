@@ -1,0 +1,17 @@
+class Growing
+  getter rows : Array(Int32)
+
+  def initialize
+    @rows = Array(Int32).new
+    fill(self)
+  end
+end
+
+def fill(target : Growing) : Nil
+  alias_target = target
+  alias_target.rows << 1
+  nil
+end
+
+value = Growing.new
+puts value.rows.size

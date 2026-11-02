@@ -977,7 +977,10 @@ def scripted(script : RisAcmeView, certificate_pem : String) : Nil
   check refused.is_a?(AcmeError) && refused.problem_type == "urn:ietf:params:acme:error:rejectedIdentifier" && refused.detail == "bad.example is refused here",
     "a problem document is an error naming its type and detail, not a success: #{refused}"
   if refused.is_a?(AcmeError)
-    check refused.status == 400 && refused.subproblems.size == 1 && refused.subproblems[0].identifier == "bad.example", "a problem's subproblem names its identifier"
+    subs = refused.subproblems
+    check refused.status == 400 && !subs.nil? && subs.size == 1 &&
+      subs[0].identifier == "bad.example",
+      "a problem's subproblem names its identifier"
     check refused.message.includes?("rejectedIdentifier: bad.example is refused here"), "the error's sentence names the type and the detail"
   end
 

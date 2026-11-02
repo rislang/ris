@@ -51,6 +51,37 @@ expect() {
   fi
 }
 
+# SPEC 2.2: helpers and aliases cannot grow the unfinished receiver.
+expect construct_helper_growth 'grow after new'
+expect construct_alias_growth 'grow after new'
+expect construct_field_alias 'grow after new'
+expect construct_helper_shrink 'grow after new'
+expect construct_text_growth 'grow after new'
+
+out=$("$RIS" run test/ris/construct_growth.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'2\n1' ]; then
+  echo 'runs     construct_growth (grow after new)'
+else
+  echo "FAILED   construct_growth: $out"; status=1
+fi
+
+# Repeated structured results keep input aliases without expanding paths.
+out=$(timeout 20 "$RIS" run test/ris/program_result_diamond.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '0' ]; then
+  echo 'runs     program_result_diamond'
+else
+  echo "FAILED   program_result_diamond: $out"; status=1
+fi
+expect program_result_alias 'cannot store request tape data'
+expect program_self_alias 'cannot store request tape data'
+
+out=$("$RIS" run test/ris/tls_error_message.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = $'tls: plain\ntls: alert (decode_error)' ]; then
+  echo 'runs     tls_error_message'
+else
+  echo "FAILED   tls_error_message: $out"; status=1
+fi
+
 # The first parallel spawn, made in a block iteration's tape scope, lists
 # the workers in program storage, not in that scope.
 out=$("$RIS" run test/ris/parallel_first_spawn_scope.ri 2>&1)

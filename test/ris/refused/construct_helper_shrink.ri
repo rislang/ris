@@ -1,0 +1,15 @@
+class Growing
+  getter rows : Array(Int32)
+
+  def initialize
+    @rows = [1, 2]
+    empty(self)
+  end
+end
+
+def empty(target : Growing) : Nil
+  target.rows.clear
+end
+
+value = Growing.new
+puts value.rows.size

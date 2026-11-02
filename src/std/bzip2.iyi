@@ -327,14 +327,21 @@ class Bzip2Decode
     @limit = 0
     @tt = Array(UInt32).new
     @tt_size = 0
-    @tables = Array(Bzip2Table).new(6)
-    # Each table made here, in the decoder's own scratch, not a block's.
-    @tables << Bzip2Table.new
-    @tables << Bzip2Table.new
-    @tables << Bzip2Table.new
-    @tables << Bzip2Table.new
-    @tables << Bzip2Table.new
-    @tables << Bzip2Table.new
+    tables = Array(Bzip2Table).new(6)
+    # Each table lives in the constructor's caller, outside any block.
+    table0 = Bzip2Table.new
+    tables << table0
+    table1 = Bzip2Table.new
+    tables << table1
+    table2 = Bzip2Table.new
+    tables << table2
+    table3 = Bzip2Table.new
+    tables << table3
+    table4 = Bzip2Table.new
+    tables << table4
+    table5 = Bzip2Table.new
+    tables << table5
+    @tables = tables
     @lengths = Array(Int32).new(6 * Bzip2Table::MAX_SYMS, 0)
     @selectors = Array(UInt8).new(MAX_SELECTORS, 0_u8)
     @seq_to_unseq = Array(UInt8).new(256, 0_u8)

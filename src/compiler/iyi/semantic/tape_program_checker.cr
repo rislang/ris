@@ -46,6 +46,14 @@ class Iyi::TapeProgramChecker
   @joining = Set({UInt64, UInt64}).new
   @globals = {} of UInt64 => Bool
   @settled = {} of Tuple(UInt64, String, Bool) => Symbol
+  # A completed walk with unchanged inputs can also answer a structured
+  # value. Save its graph, numbering input aliases in signature order;
+  # replay creates fresh local nodes and keeps every link to the inputs.
+  record SavedOrigin, kind : Symbol, fields : Hash(String, Int32),
+    element : Int32?, shared : Bool
+  record SavedResult, inputs : Int32, nodes : Array(SavedOrigin), result : Int32
+  @settled_values = {} of Tuple(UInt64, String, Bool) => SavedResult
+
   @program_context = false
   @self_safe : Origin = Origin::Unknown
   @self_tape = false
@@ -195,9 +203,13 @@ class Iyi::TapeProgramChecker
              when InstanceVar
                growing_text = growing_text_rebind?(node, target)
                result = viewed(@self_safe) if growing_text
-               @self_safe.fields[target.name] = @self_safe.fields[target.name]?.try do |old|
-                 join(old, result)
-               end || result
+               # Shared lattice values are not object identities. Recording
+               # a field on Unknown would lend it to every unknown receiver.
+               unless shared?(@self_safe)
+                 @self_safe.fields[target.name] = @self_safe.fields[target.name]?.try do |old|
+                   join(old, result)
+                 end || result
+               end
                if @self_tape && program_target?(@self_safe, node)
                  refuse(node) if tape?(node.value) && !result.program? && !growing_text
                  mutation(node)
@@ -298,9 +310,11 @@ class Iyi::TapeProgramChecker
       if node.name == "[]=" || node.name == "unsafe_put"
         stored = args.last
         refuse(node) if receiver.program? && !stored.program?
-        receiver.element = receiver.element.try do |old|
-          join(old, stored)
-        end || stored
+        unless shared?(receiver)
+          receiver.element = receiver.element.try do |old|
+            join(old, stored)
+          end || stored
+        end
         return stored
       elsif node.name == "[]" || node.name == "unsafe_fetch"
         return receiver.element || viewed(receiver)
@@ -343,7 +357,9 @@ class Iyi::TapeProgramChecker
         writes = WRITES.includes?(node.name) || node.name.starts_with?("append_")
         if tape_receiver && {"push", "<<", "[]=", "__loop_store", "unchecked_store", "leaf", "open", "put"}.includes?(node.name)
           if stored = args.last?
-            receiver.element = receiver.element.try { |old| join(old, stored) } || stored
+            unless shared?(receiver)
+              receiver.element = receiver.element.try { |old| join(old, stored) } || stored
+            end
           end
         end
         if tape_receiver && program_target?(receiver, node) && writes
@@ -483,15 +499,22 @@ class Iyi::TapeProgramChecker
     # inputs' structure: kinds, fields, elements and which of them are one
     # origin (`signature`). A later call whose inputs have the same
     # structure would make the same stores and find the same refusals,
-    # raised on the first walk. Its result is reused only when it is a
-    # shared origin or a fresh empty one, and only when the walk left the
-    # inputs as they were, so nothing it stored is lost.
+    # raised on the first walk. Reuse requires unchanged inputs, so no
+    # store is lost. Shared origins and fresh empty results need only a
+    # kind; structured results replay their graph with links to this
+    # call's inputs.
     inputs = [receiver] + args
     key = {target.object_id, binding ? "" : signature(inputs), @program_context}
-    if !binding && (kind = @settled[key]?)
-      return reused(kind)
+    if !binding
+      if kind = @settled[key]?
+        return reused(kind)
+      end
+      if saved = @settled_values[key]?
+        return replay(saved, inputs)
+      end
     end
     return Origin::Unknown unless @active.add?(target.object_id)
+    Prof.count("program checker body walks")
     walked = binding ? nil : input_shape(inputs)
     before = isolated ? input_shape([receiver] + args) : nil
     previous_self, previous_return, previous_binding = @self_safe, @returned, @binding
@@ -499,6 +522,7 @@ class Iyi::TapeProgramChecker
     @self_tape = target.owner?.try { |owner| TapeChecker.tape?(@program, owner) } || false
     @self_safe, @returned, @binding = receiver, nil, binding
     env = Env.new
+    env["self"] = receiver
     target.args.each_with_index { |arg, i| env[arg.name] = args[i]? || Origin::Unknown }
     result = value(target.body, env)
     if returned = @returned
@@ -529,9 +553,56 @@ class Iyi::TapeProgramChecker
         @settled[key] = result.kind
       elsif fresh?(result, walked)
         @settled[key] = result.kind == :request ? :fresh_request : :fresh_local
+      else
+        @settled_values[key] = save_result(inputs, result)
       end
     end
     result
+  end
+
+  private def number_origins(origin : Origin, origins : Array(Origin),
+                             numbers : Hash(UInt64, Int32)) : Int32
+    if number = numbers[origin.object_id]?
+      return number
+    end
+    number = origins.size
+    numbers[origin.object_id] = number
+    origins << origin
+    origin.fields.keys.sort.each do |name|
+      number_origins(origin.fields[name], origins, numbers)
+    end
+    origin.element.try { |child| number_origins(child, origins, numbers) }
+    number
+  end
+
+  private def save_result(inputs : Array(Origin), result : Origin) : SavedResult
+    origins = [] of Origin
+    numbers = {} of UInt64 => Int32
+    inputs.each { |origin| number_origins(origin, origins, numbers) }
+    count = origins.size
+    answer = number_origins(result, origins, numbers)
+    nodes = origins.map do |origin|
+      SavedOrigin.new(origin.kind,
+        origin.fields.transform_values { |child| numbers[child.object_id] },
+        origin.element.try { |child| numbers[child.object_id] }, shared?(origin))
+    end
+    SavedResult.new(count, nodes, answer)
+  end
+
+  private def replay(saved : SavedResult, inputs : Array(Origin)) : Origin
+    origins = [] of Origin
+    numbers = {} of UInt64 => Int32
+    inputs.each { |origin| number_origins(origin, origins, numbers) }
+    saved.nodes.skip(saved.inputs).each do |node|
+      origins << (node.shared ? reused(node.kind) : Origin.new(node.kind))
+    end
+    saved.nodes.each_with_index do |node, i|
+      next if i < saved.inputs || node.shared
+      origin = origins[i]
+      node.fields.each { |name, child| origin.fields[name] = origins[child] }
+      origin.element = node.element.try { |child| origins[child] }
+    end
+    origins[saved.result]
   end
 
   private def shared?(origin : Origin) : Bool

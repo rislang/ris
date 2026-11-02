@@ -1,0 +1,21 @@
+@[OnTape]
+struct Held
+  getter text : String
+  def initialize(@text)
+  end
+end
+
+class State
+  @@held : Held? = nil
+  def self.keep(held : Held)
+    @@held = held
+  end
+end
+
+def wrap(text : String) : Held
+  Held.new(text)
+end
+
+first = wrap(String.new("first"))
+second = wrap(String.new("second"))
+State.keep(second)
