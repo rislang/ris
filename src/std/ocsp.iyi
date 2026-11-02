@@ -134,7 +134,7 @@ pub enum OcspHash
     self == OcspHash::SHA384 ? 48 : 64
   end
 
-  def digest(data : Array(UInt8)) : Array(UInt8)
+  def digest(data : Array::View(UInt8)) : Array(UInt8)
     OcspDigest.of(self, data)
   end
 
@@ -571,7 +571,7 @@ struct OcspAsn1
     nonce
   end
 
-  def self.hex(bytes : Array(UInt8)) : String
+  def self.hex(bytes : Array::View(UInt8)) : String
     io = ""
     bytes.each do |b|
       io << "0123456789abcdef"[b.to_i32 >> 4]
@@ -604,7 +604,7 @@ end
 # The digest a CertID's hash names: apart from `OcspHash`, whose members
 # would otherwise be read for std/digest's classes of the same names.
 struct OcspDigest
-  def self.of(hash : OcspHash, data : Array(UInt8)) : Array(UInt8)
+  def self.of(hash : OcspHash, data : Array::View(UInt8)) : Array(UInt8)
     return SHA1.hash_bytes(data) if hash == OcspHash::SHA1
     return SHA256.hash_bytes(data) if hash == OcspHash::SHA256
     hash == OcspHash::SHA384 ? SHA384.hash_bytes(data) : SHA512.hash_bytes(data)

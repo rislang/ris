@@ -111,7 +111,7 @@
 
 module std/acme
 
-import std/x509::{X509, X509Error, X509Extension, Certificate, SigningKey}
+import std/x509::{X509, X509Error, X509Extension, Certificate, SigningKey, RisCertificateStore}
 import std/rsa::{RsaPublicKey}
 import std/ecdsa::{EcdsaPublicKey, EcdsaCurve}
 import std/curve25519::{Ed25519PublicKey}
@@ -547,9 +547,11 @@ pub class AcmeClient
     url = order.certificate_url
     return AcmeError.new("the order #{order.url} is #{order.status}, with no certificate") unless url
     response = post(url, nil, "application/pem-certificate-chain")!
-    chain = Certificate.from_pem(response.body)
-    return AcmeError.new("the certificate at #{url}: #{chain.message}") if chain.is_a?(X509Error)
-    return AcmeError.new("the certificate at #{url} holds no certificate") if chain.empty?
+    chain = RisCertificateStore.new
+    if problem = chain.read_pem(response.body)
+      return AcmeError.new("the certificate at #{url}: #{problem.message}")
+    end
+    return AcmeError.new("the certificate at #{url} holds no certificate") if chain.kept_certificates.empty?
     response.body
   end
 

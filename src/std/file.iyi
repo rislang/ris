@@ -2038,10 +2038,15 @@ class ::File
     if tmpdir.bytesize > 1 && (last == '/' || last == File::SEPARATOR)
       tmpdir = tmpdir[0, tmpdir.bytesize - 1]
     end
+    # One path refilled per attempt: a round's String would end with it.
+    path = String::Builder.new(tmpdir.bytesize + prefix.bytesize + suffix.bytesize + 18)
     attempt = 0
     while attempt < 100
-      path = tmpdir + File::SEPARATOR_STRING + prefix + "_" + temp_token + suffix
-      return path if create_new(path)
+      path.clear
+      path << tmpdir << File::SEPARATOR_STRING << prefix << "_"
+      temp_token(path)
+      path << suffix
+      return path.finish if create_new(path.finish)
       attempt = attempt + 1
     end
     raise "Cannot create tempfile in #{tmpdir}: a hundred fresh names were all taken"
@@ -2050,7 +2055,7 @@ class ::File
   # Sixteen hex digits nobody could have guessed: the kernel's randomness
   # where a call reaches it without another library, the clock and a
   # counter where the create alone is the guarantee.
-  private def self.temp_token : String
+  private def self.temp_token(io : String::Builder) : Nil
     word = 0_u64
     {% if flag?(:linux) %}
       got = Std::File::LibC.sys(Std::File::LibC::SYS_GETRANDOM, pointerof(word).address.to_i64, 8_i64, 0_i64)
@@ -2067,14 +2072,12 @@ class ::File
       word = @@temp_counter &* 0x9E3779B97F4A7C15_u64
     {% end %}
     digits = "0123456789abcdef"
-    String.new(16) do |buffer|
-      index = 15
-      while index >= 0
-        buffer[index] = digits[(word & 15_u64).to_i32]
-        word = word.unsafe_shr(4_u64)
-        index = index - 1
-      end
+    shift = 60
+    while shift >= 0
+      io << digits[(word.unsafe_shr(shift.to_u64) & 15_u64).to_i32]
+      shift = shift - 4
     end
+    nil
   end
 
   # True when the file was made here and now; false when something was

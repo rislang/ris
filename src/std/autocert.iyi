@@ -153,7 +153,8 @@ import std/indexable
 import std/text
 
 import std/acme::{AcmeClient, AcmeError, AcmeHttp01, AcmeTlsAlpn01, AcmeOrder}
-import std/x509::{X509, X509Error, SigningKey, Certificate}
+import std/x509::{X509, X509Error, SigningKey, Certificate, RisCertificateStore}
+import std/system_roots::{SystemRoots}
 import std/p256::{P256PrivateKey}
 import std/ecdsa::{EcdsaError}
 import std/file::{File}
@@ -509,23 +510,32 @@ module RisAutocertViewState
       return AutocertError.new("the certificate for #{name}: #{problem.message}")
     end
     return AutocertError.new("the certificate issued for #{name} does not name it") unless identity.leaf.matches_host?(name)
-    chain = Certificate.from_pem(text)
-    return AutocertError.new("the certificate for #{name}: #{chain.message}") if chain.is_a?(X509Error)
-    verified = X509.verify(identity.leaf, chain[1, chain.size - 1], trust!, name)
+    chain_store = RisCertificateStore.new
+    if problem = chain_store.read_pem(text)
+      return AutocertError.new("the certificate for #{name}: #{problem.message}")
+    end
+    chain = chain_store.kept_certificates
+    roots = SystemRoots.new
+    if problem = trust(roots)
+      return problem
+    end
+    verified = X509.verify(identity.leaf, chain[1, chain.size - 1], roots.certificates, name)
     return AutocertError.new("the certificate for #{name} is not trusted: #{verified.message}") if verified.is_a?(X509Error)
     AutocertHeld.new(identity, renew_time(identity.leaf.not_before.to_unix_ms, identity.leaf.not_after.to_unix_ms))
   end
 
-  # `roots`, or the system's.
-  private def trust : Array(Certificate) | AutocertError
+  # `roots`, or the system's, read into the caller's *store*.
+  private def trust(store : SystemRoots) : AutocertError?
     unless @config.roots_pem.empty?
-      given = Certificate.from_pem(@config.roots_pem)
-      return AutocertError.new(given.message) if given.is_a?(X509Error)
-      return given
+      if given = store.read_pem(@config.roots_pem)
+        return AutocertError.new(given.message)
+      end
+      return nil
     end
-    system = TlsConfig.new.trusted_roots
-    return AutocertError.new("the system's roots, which a chain is checked to: #{system.message}") if system.is_a?(TlsError)
-    system
+    if system = store.read_system
+      return AutocertError.new("the system's roots, which a chain is checked to: #{system.message}")
+    end
+    nil
   end
 
   def renew_time(not_before_ms : Int64, not_after_ms : Int64) : Int64
@@ -643,10 +653,10 @@ pub class AutocertIssuer
     trust = TlsConfig.new
     trust.alpn = ["http/1.1"]
     unless @config.ca_roots_pem.empty?
-      roots = Certificate.from_pem(@config.ca_roots_pem)
-      return AutocertError.new(roots.message) if roots.is_a?(X509Error)
-      trust.roots = roots
-
+      if problem = trust.read_pem(@config.ca_roots_pem)
+        return AutocertError.new(problem.message)
+      end
+      trust.roots = trust.kept_certificates
     end
     transport = HTTPClient.new(idle: 0, tls: trust)
     @transport = transport

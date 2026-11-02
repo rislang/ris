@@ -158,6 +158,32 @@ def main():
         check(change_extensions(data, empty_usage),
               "x509: an empty extKeyUsage")
         check(b"\x30\x00", "x509: a Certificate of 0 values, not 3")
+        # Keep parsed payloads on a declared, refillable root owner.
+        first = certificate(ec.generate_private_key(ec.SECP256R1()))
+        second = certificate(ed25519.Ed25519PrivateKey.generate())
+        pem = x509.load_der_x509_certificate(first).public_bytes(
+            serialization.Encoding.PEM)
+        other = x509.load_der_x509_certificate(second).public_bytes(
+            serialization.Encoding.PEM)
+        (work / "bundle.pem").write_bytes(
+            pem + pem + b"-----BEGIN CERTIFICATE-----\nAAAA\n"
+            b"-----END CERTIFICATE-----\n")
+        (work / "empty.pem").write_text("no certificates\n")
+        roots_dir = work / "roots"
+        roots_dir.mkdir()
+        (roots_dir / "one.pem").write_bytes(pem)
+        (roots_dir / "two.pem").write_bytes(other)
+        roots_check = work / "roots-check"
+        subprocess.run([RIS, "build", "-o", str(roots_check),
+                        str(ROOT / "test/ris/system_roots_owner.ri")],
+                       check=True)
+        result = subprocess.run([str(roots_check), str(work)], text=True,
+                                capture_output=True, timeout=60,
+                                env=dict(os.environ, RIS_HEAP_STATS="1"))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.strip() == (
+            "PASS: caller-owned system roots, refill and errors")
+        assert "ris heap: 0 allocations, 0 bytes" in result.stderr
         print(f"PASS: x509 parse, {count} key, field and refusal cases")
 
 

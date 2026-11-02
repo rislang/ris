@@ -1895,6 +1895,11 @@ struct Array::View(T)
   @offset : Int32
   @count : Int32
 
+  def any?(& : T -> Bool) : Bool
+    each { |value| return true if yield value }
+    false
+  end
+
   def initialize(@target : Array(T), indexes : Array(Int32))
     count = target.size
     @at = Array(Int32).new(indexes.size) do |k|
@@ -3757,6 +3762,18 @@ struct SlicePool::List(T)
     end
     state.run[state.size] = value
     state.size += 1
+    @state.value = state
+  end
+
+  # Keep the run and metadata for reuse, dropping outgoing references.
+  def clear : Nil
+    state = @state.value
+    i = 0
+    while i < state.size
+      state.run[i] = nil
+      i += 1
+    end
+    state.size = 0
     @state.value = state
   end
 

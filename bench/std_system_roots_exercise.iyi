@@ -22,8 +22,8 @@ end
 def hex(bytes : Array(UInt8)) : String
   begin; io = "";
     bytes.each do |b|
-      io << "0123456789abcdef"[b.to_i32 >> 4]
-      io << "0123456789abcdef"[b.to_i32 & 15]
+      io << "0123456789abcdef"[b.to_i32 >> 4, 1]
+      io << "0123456789abcdef"[b.to_i32 & 15, 1]
     end
   io
   end
@@ -36,14 +36,20 @@ ENV.delete("SSL_CERT_FILE")
 ENV.delete("SSL_CERT_DIR")
 
 if Program.args.size > 0 && Program.args[0] == "fingerprints"
-  store = SystemRoots.load.or_panic
-  store.certificates.map { |c| hex(SHA256.hash_bytes(c.raw)) }.sorted.each { |f| puts f }
-  puts "unreadable #{store.unreadable}"
+  listed = SystemRoots.new
+  if error = listed.read_system
+    raise error.message
+  end
+  listed.certificates.map { |c| hex(SHA256.hash_bytes(c.raw)) }.sorted.each { |f| puts f }
+  puts "unreadable #{listed.unreadable}"
   exit 0
 end
 
 puts "== the platform's own store"
-store = SystemRoots.load.or_panic
+store = SystemRoots.new
+if error = store.read_system
+  raise error.message
+end
 check store.certificates.size > 0, "no roots from #{store.source}"
 fingerprints = store.certificates.map { |c| hex(SHA256.hash_bytes(c.raw)) }
 check fingerprints.uniq.size == fingerprints.size, "a root twice in #{store.source}"
@@ -57,7 +63,10 @@ Dir.mkdir_p(work + "/dir")
 bundle = work + "/bundle.pem"
 File.write(bundle, "a comment\n" + ROOT_ONE + ROOT_ONE + "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n")
 ENV["SSL_CERT_FILE"] = bundle
-named = SystemRoots.load.or_panic
+named = SystemRoots.new
+if error = named.read_system
+  raise error.message
+end
 check named.certificates.size == 1, "a root written twice read #{named.certificates.size} times"
 check named.unreadable == 1, "a broken block counted #{named.unreadable} times, not once"
 check named.certificates[0].subject_name == "CN=Fixture Root One", "the bundle's root: #{named.certificates[0].subject_name}"
@@ -66,11 +75,15 @@ File.write(work + "/dir/a.pem", ROOT_ONE)
 File.write(work + "/dir/b.crt", ROOT_TWO)
 File.write(work + "/dir/notes.txt", "not a certificate\n")
 ENV["SSL_CERT_DIR"] = work + "/dir"
-both = SystemRoots.load.or_panic
+both = SystemRoots.new
+if error = both.read_system
+  raise error.message
+end
 check both.certificates.map(&.subject_name).sorted == ["CN=Fixture Root One", "CN=Fixture Root Two"], "a file and a directory: #{both.certificates.map(&.subject_name)}"
 ENV.delete("SSL_CERT_DIR")
 File.write(bundle, "no certificates here\n")
-none = SystemRoots.load
+empty_store = SystemRoots.new
+none = empty_store.read_system
 check none.is_a?(X509Error) && none.message.includes?("no root certificates in"), "a bundle with no root refused"
 ENV.delete("SSL_CERT_FILE")
 ["/dir/a.pem", "/dir/b.crt", "/dir/notes.txt", "/bundle.pem"].each { |f| File.delete(work + f) }

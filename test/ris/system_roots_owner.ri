@@ -1,0 +1,36 @@
+import std/env::{ENV}
+import std/system_roots::{SystemRoots}
+
+path = Program.arguments[0]
+ENV["SSL_CERT_FILE"] = path + "/bundle.pem"
+ENV["SSL_CERT_DIR"] = ""
+store = SystemRoots.new
+first_error = store.read_system
+raise first_error.message if first_error
+raise "duplicate roots" unless store.certificates.size == 1
+raise "unreadable count" unless store.unreadable == 1
+raise "source path" unless store.source.includes?("bundle.pem")
+raise "retained name" unless store.certificates[0].subject_name == "CN=tape.test"
+
+ENV["SSL_CERT_DIR"] = path + "/roots"
+directory_error = store.read_system
+raise directory_error.message if directory_error
+raise "file and directory roots" unless store.certificates.size == 2
+raise "directory unreadable count" unless store.unreadable == 1
+
+ENV["SSL_CERT_FILE"] = path + "/empty.pem"
+ENV["SSL_CERT_DIR"] = ""
+empty_error = store.read_system
+raise "empty roots accepted" unless empty_error
+raise "partial roots retained" unless store.certificates.empty?
+raise "failed load cached" if store.system_roots_loaded
+
+ENV["SSL_CERT_FILE"] = path + "/bundle.pem"
+100.times do
+  round_error = store.read_system
+  raise round_error.message if round_error
+  raise "refill duplicated roots" unless store.certificates.size == 1
+  raise "refill lost names" unless store.certificates[0].dns_names[0] == "tape.test"
+end
+raise "refresh generation" unless store.system_roots_generation == 103_u64
+puts "PASS: caller-owned system roots, refill and errors"

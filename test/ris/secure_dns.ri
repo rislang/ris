@@ -4,7 +4,7 @@ import std/secure_dns::{DnsOverHttps, DnsOverTls}
 import std/dns::{DnsError}
 import std/socket::{DnsUpstream, IPAddress, Resolver}
 import std/tls::{TlsConfig}
-import std/x509::{Certificate}
+import std/x509::{RisCertificateStore, Certificate}
 
 # std/secure_dns on the caller's tape against bench/std_secure_dns_server.py
 # on loopback (its directory the first argument): a resolver asking DNS
@@ -13,7 +13,10 @@ import std/x509::{Certificate}
 # resolver that asks it (SPEC 3.5).
 
 dir = Program.arguments[0]
-roots = Certificate.from_pem(File.read("#{dir}/ca.pem").as_tape)
+roots_store = RisCertificateStore.new
+root_error = roots_store.read_pem(File.read("#{dir}/ca.pem"))
+raise root_error.message if root_error
+roots = roots_store.kept_certificates
 raise "ca.pem" unless roots.is_a?(Array(Certificate))
 dot_port = File.read("#{dir}/dot.port").as_tape.strip.to_i
 doh_port = File.read("#{dir}/doh.port").as_tape.strip.to_i

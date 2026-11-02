@@ -582,6 +582,8 @@ done
 for name in branch_escape store_join return_owner; do
   expect "root_$name" 'cannot store a view beyond its owner scope'
 done
+expect certificate_store_shrink 'cannot shrink tape storage with a live view'
+
 out=$("$RIS" run test/ris/roots_holders.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: roots and holders' ]; then
   echo "runs     roots_holders"

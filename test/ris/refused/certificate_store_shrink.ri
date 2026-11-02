@@ -1,0 +1,7 @@
+import std/x509::{RisCertificateStore}
+
+store = RisCertificateStore.new
+store.append_certificate([0_u8])
+certificate = store.kept_certificates[0]
+store.clear_certificates
+puts certificate.raw[0]

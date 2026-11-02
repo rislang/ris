@@ -1,5 +1,6 @@
 # Fixed session slots must not retain a connection's ticket scratch.
 import std/int
+import std/env::{ENV}
 import std/time::{Time}
 import std/tls::{TlsConfig, TlsHeldTicket, TlsMadeUnder, TlsSession}
 import std/x509::{Certificate, X509Error}
@@ -165,11 +166,46 @@ config.roots = [] of Certificate
 raise "changed roots accepted" if session.take("certificate.test", 443, config, 1_i64)
 config.roots = roots
 raise "unchanged roots refused" unless session.take("certificate.test", 443, config, 1_i64)
+# A mutation of the same Array must compare the old encoded roots.
+keep_certificate(session, config)
+changed_der = certificate_der
+changed_der[changed_der.size - 1] ^= 1_u8
+changed = Certificate.parse(changed_der)
+raise "changed root fixture" if changed.is_a?(X509Error)
+roots[0] = changed
+raise "mutated roots accepted" if session.take("certificate.test", 443,
+                                        config, 1_i64)
+roots[0] = certificate
+raise "restored roots refused" unless session.take("certificate.test", 443,
+                                            config, 1_i64)
 config.roots = nil
 
 config.now = Time.from_unix(1_924_992_000_i64)
 keep_certificate(session, config)
 raise "expired leaf accepted" if session.take("certificate.test", 443, config, 1_i64)
 config.now = nil
+
+# Even a failed explicit refresh invalidates cached default trust.
+refresh_config = TlsConfig.new
+refresh_session = TlsSession.new(1)
+fill(refresh_session, refresh_config, 1)
+old_file = ENV["SSL_CERT_FILE"]?
+old_dirs = ENV["SSL_CERT_DIR"]?
+ENV["SSL_CERT_FILE"] = "/dev/null"
+ENV["SSL_CERT_DIR"] = "/nonexistent/ris-roots"
+refresh_error = refresh_config.read_system
+raise "empty trust accepted" unless refresh_error
+raise "old trust resumed" if refresh_session.take("local0.test", 443,
+                                            refresh_config, 100_i64)
+if old_file
+  ENV["SSL_CERT_FILE"] = old_file
+else
+  ENV.delete("SSL_CERT_FILE")
+end
+if old_dirs
+  ENV["SSL_CERT_DIR"] = old_dirs
+else
+  ENV.delete("SSL_CERT_DIR")
+end
 
 puts "PASS: certificate DER rebuilt on caller tape and session limits"

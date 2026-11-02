@@ -394,7 +394,7 @@ import std/static_array::{StaticArray}
 import std/int
 
 import std/socket::{IyiSocket, SocketError}
-import std/x509::{Certificate, X509, X509Error, X509Purpose}
+import std/x509::{RisCertificateStore, Certificate, X509, X509Error, X509Purpose}
 import std/system_roots::{SystemRoots}
 import std/rsa::{RsaPublicKey, RsaPrivateKey, RsaHash, RsaError}
 import std/ecdsa::{EcdsaPublicKey, EcdsaCurve, EcdsaHash, EcdsaError}
@@ -529,6 +529,7 @@ end
 
 # What a connection is checked against and offers.
 pub class TlsConfig
+  include SystemRoots::Storage
   # The roots a server's chain must reach; the system's when nil, read
   # at each handshake (`trusted_roots`), which is most of its cost: set
   # them once to skip that.
@@ -640,15 +641,16 @@ pub class TlsConfig
       "then copy.refill(config)." %}
   end
 
-  # The system's roots are read on the caller's tape at each call: a
-  # Certificate cannot yet be copied to the program tape, and one kept
-  # there from a task's tape would outlive it. Set `roots` to read once.
+  # System roots live with this config. Explicit read_system refreshes
+  # them; a failed read is retried by the next handshake.
   def trusted_roots : Array(Certificate) | TlsError
     held = @roots
     return held if held
-    store = SystemRoots.load
-    return TlsError.new(store.message) if store.is_a?(X509Error)
-    store.certificates
+    unless system_roots_loaded
+      problem = read_system
+      return TlsError.new(problem.message) if problem
+    end
+    kept_certificates
   end
 end
 
@@ -1054,6 +1056,7 @@ end
 # written under them, alerts, KeyUpdate, close_notify. `TlsClient` and
 # `TlsServer` are its two ends; each runs its own half of the handshake.
 module RisTlsConnectionState
+  include RisCertificateStore::Storage
   def place : String
     @place
   end
@@ -1068,6 +1071,7 @@ module RisTlsConnectionState
     @named_group_size = 0
     @named_group_text.clear
     @peer_certificates.clear
+    clear_certificates
     @ocsp_response = nil
     @ocsp_status = nil
     @error_text.clear
@@ -3546,7 +3550,7 @@ pub class TlsClient < TlsConnection
     list = TlsReader.new(reader.bytes(reader.u24))
     return tls_error("a Certificate message cut short", TlsAlert::DECODE_ERROR) if reader.short? || !reader.done?
     return tls_error("a Certificate with a request context nobody asked for", TlsAlert::ILLEGAL_PARAMETER) unless context.empty?
-    chain = [] of Certificate
+    chain = kept_certificates
     until list.done?
       # More than a chain may be long is no chain to search, and each one
       # more is work for std/x509 before anything is proven.
@@ -3556,9 +3560,8 @@ pub class TlsClient < TlsConnection
       return tls_error("a Certificate message cut short", TlsAlert::DECODE_ERROR) if list.short?
       problem = entry_status(entry_extensions, chain.empty?)
       return problem if problem
-      certificate = Certificate.parse(der)
-      return tls_error("the server's certificate #{chain.size}: #{certificate.message}", TlsAlert::BAD_CERTIFICATE) if certificate.is_a?(X509Error)
-      chain << certificate
+      problem = append_certificate(der)
+      return tls_error("the server's certificate #{chain.size}: #{problem.message}", TlsAlert::BAD_CERTIFICATE) if problem
     end
     # RFC 8446 section 4.4.2.4: an empty Certificate from a server is a
     # decode_error.
@@ -3949,11 +3952,24 @@ pub class TlsMadeUnder
     @has_ech ? @ech_storage.view : nil
   end
 
+  getter root_values : Array(UInt8)
+  getter root_offsets : Array(Int32)
+  getter roots_generation : UInt64
   @ech_storage : Array(UInt8)
 
   def initialize(@config : TlsConfig)
     @ech_storage = Array(UInt8).new(4096)
+    @root_values = Array(UInt8).new(4096)
+    @root_offsets = Array(Int32).new
+    @root_offsets << 0
+    @roots_generation = @config.system_roots_generation
     @roots = @config.roots
+    roots = @roots || @config.kept_certificates
+    roots.each do |root|
+        root.raw.each { |byte| @root_values << byte }
+        @root_offsets << @root_values.size
+        nil
+    end
     @identity = @config.identity
     @now = @config.now
     @min_version = @config.min_version
@@ -3969,7 +3985,17 @@ pub class TlsMadeUnder
     source = config.ech_configs
     copied = source ? Array(UInt8).new(source.size) { |i| source[i] } : nil
     @config = config
+    @roots_generation = config.system_roots_generation
     @roots = config.roots
+    @root_values.clear
+    @root_offsets.clear
+    @root_offsets << 0
+    roots = @roots || config.kept_certificates
+    roots.each do |root|
+        root.raw.each { |byte| @root_values << byte }
+        @root_offsets << @root_values.size
+        nil
+    end
     @identity = config.identity
     @now = config.now
     @min_version = config.min_version
@@ -3984,9 +4010,11 @@ pub class TlsMadeUnder
 
   def same?(config : TlsConfig) : Bool
     return false unless @config.object_id == config.object_id
+    return false unless @roots_generation == config.system_roots_generation
     roots = config.roots
     held = @roots
-    return false unless held.nil? ? roots.nil? : (!roots.nil? && TlsMadeUnder.same_roots?(held, roots))
+    return false unless held.nil? == roots.nil?
+    return false unless same_root_values?(roots || config.kept_certificates)
     identity = config.identity
     mine = @identity
     return false unless mine.nil? ? identity.nil? : (!identity.nil? && mine.object_id == identity.object_id)
@@ -3994,16 +4022,24 @@ pub class TlsMadeUnder
     @now == config.now && @min_version == config.min_version && @require_staple == config.require_staple
   end
 
-  # The same certificates in the same order, each the same object. A
-  # field's Array is a copy on the tape (SPEC), so the arrays' own
-  # storage told a configuration's roots apart from themselves, and no
-  # connection or ticket was ever used again.
+  private def same_root_values?(roots : Array(Certificate)) : Bool
+    return false unless @root_offsets.size == roots.size + 1
+    at = 0
+    while at < roots.size
+      first = @root_offsets[at]
+      return false unless @root_values[first, @root_offsets[at + 1] - first] == roots[at].raw
+      at += 1
+    end
+    true
+  end
+
+  # Certificates are immutable values; encoded bytes define trust.
   def self.same_roots?(held : Array(Certificate), roots : Array(Certificate)) : Bool
     return false unless held.size == roots.size
     at = 0
     while at < held.size
-      return false unless held[at].object_id == roots[at].object_id
-      at = at + 1
+      return false unless held[at] == roots[at]
+      at += 1
     end
     true
   end
@@ -4150,7 +4186,9 @@ class RisTlsSessionSlot
   getter max_early_data : Int64 = 0_i64
   getter leaf_expires : Int64? = nil
   @config_id : UInt64 = 0_u64
-  @root_ids : Array(UInt64)
+  @root_values : Array(UInt8)
+  @root_offsets : Array(Int32)
+  @roots_generation : UInt64 = 0_u64
   @has_roots : Bool = false
   @identity_id : UInt64? = nil
   @now_seconds : Int64? = nil
@@ -4167,7 +4205,9 @@ class RisTlsSessionSlot
     @alpn = Array(UInt8).new(256)
     @chain = Array(UInt8).new(4096)
     @offsets = Array(Int32).new(X509::MAX_CHAIN + 1)
-    @root_ids = Array(UInt64).new
+    @root_values = Array(UInt8).new(4096)
+    @root_offsets = Array(Int32).new
+    @root_offsets << 0
     @ech_configs = Array(UInt8).new
   end
 
@@ -4205,10 +4245,15 @@ class RisTlsSessionSlot
     @max_early_data = held.max_early_data
     under = held.under
     @config_id = under.config.object_id
-    @root_ids.clear
+    @root_values.clear
+    @root_offsets.clear
+    @root_offsets << 0
+    @roots_generation = under.roots_generation
     roots = under.roots
     @has_roots = !roots.nil?
-    roots.each { |root| @root_ids << root.object_id } if roots
+    under.root_values.each { |byte| @root_values << byte }
+    @root_offsets.clear
+    under.root_offsets.each { |offset| @root_offsets << offset }
     identity = under.identity
     @identity_id = identity ? identity.object_id : nil
     now = under.now
@@ -4223,10 +4268,11 @@ class RisTlsSessionSlot
   end
 
   private def same_roots?(roots : Array(Certificate)) : Bool
-    return false unless roots.size == @root_ids.size
+    return false unless roots.size + 1 == @root_offsets.size
     at = 0
     while at < roots.size
-      return false unless roots[at].object_id == @root_ids[at]
+      first = @root_offsets[at]
+      return false unless roots[at].raw == @root_values[first, @root_offsets[at + 1] - first]
       at += 1
     end
     true
@@ -4235,8 +4281,10 @@ class RisTlsSessionSlot
   def matches?(host : String, port : Int32, config : TlsConfig) : Bool
     return false unless @host.bytes == host && @port == port
     return false unless @config_id == config.object_id
+    return false unless @roots_generation == config.system_roots_generation
     roots = config.roots
-    return false unless @has_roots ? (!roots.nil? && same_roots?(roots)) : roots.nil?
+    return false unless @has_roots == !roots.nil?
+    return false unless same_roots?(roots || config.kept_certificates)
     identity = config.identity
     held = @identity_id
     return false unless held.nil? ? identity.nil? : (!identity.nil? && held == identity.object_id)

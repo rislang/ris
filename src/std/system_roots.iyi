@@ -4,7 +4,9 @@
 #     import std/system_roots::{SystemRoots}
 #     import std/x509::{X509}
 #
-#     store = SystemRoots.load.or_panic        # certificates, unreadable, source
+#     store = SystemRoots.new
+#     error = store.read_system
+#     raise error.message if error
 #     X509.verify(leaf, intermediates, store.certificates, "example.com")
 #
 # Each platform's own store, as Go's crypto/x509 reads it:
@@ -44,7 +46,7 @@ module std/system_roots
 import std/static_array::{StaticArray}
 
 import std/int
-import std/x509::{Certificate, X509Error}
+import std/x509::{Certificate, X509Error, RisCertificateStore}
 import std/env::{ENV}
 import std/dir::{Dir}
 import std/file::{File}
@@ -87,14 +89,23 @@ import std/file::{File}
   end
 {% end %}
 
-@[OnTape]
-pub struct SystemRoots
-  # The certificates, each once, in the order the store gave them.
-  getter certificates : Array(Certificate)
-  # How many entries std/x509 could not read.
-  getter unreadable : Int32
-  # Where they came from: files, or the platform's store by name.
-  getter source : String
+pub class SystemRoots
+  module Storage
+    include RisCertificateStore::Storage
+
+    getter unreadable : Int32 = 0
+    getter system_roots_loaded : Bool = false
+    getter system_roots_generation : UInt64 = 0_u64
+    @roots_source = String::Builder.new(512)
+    @denied_roots = Array(Array::View(UInt8)).new
+
+    def certificates : Array(Certificate)
+      kept_certificates
+    end
+
+    def source : String
+      @roots_source.finish
+    end
 
   # The Linux bundles, in the order Go's crypto/x509 tries them.
   BUNDLES = StaticArray["/etc/ssl/certs/ca-certificates.crt",
@@ -105,117 +116,116 @@ pub struct SystemRoots
              "/etc/ssl/cert.pem"]
   DIRECTORIES = StaticArray["/etc/ssl/certs", "/etc/pki/tls/certs"]
 
-  def initialize(@certificates : Array(Certificate), @unreadable : Int32, @source : String)
-  end
-
-  # The operating system's trusted roots, or why there are none.
-  def self.load : SystemRoots | X509Error
-    collected = SystemRootsCollector.new
+    # Refill this owner's roots. A failed load leaves no trusted roots.
+    def read_system : X509Error?
+      @system_roots_generation += 1_u64
+      @system_roots_loaded = false
+      @denied_roots.clear
+      clear_certificates
+      @unreadable = 0
+      @roots_source.clear
     file = ENV["SSL_CERT_FILE"]?
     dirs = ENV["SSL_CERT_DIR"]?
     if (file && !file.empty?) || (dirs && !dirs.empty?)
-      collected.read_file(file) if file && !file.empty?
+      read_file(file) if file && !file.empty?
       separator = {% if flag?(:win32) %} ';' {% else %} ':' {% end %}
-      dirs.split(separator).each { |dir| collected.read_directory(dir) unless dir.empty? } if dirs && !dirs.empty?
-      return collected.answer("$SSL_CERT_FILE and $SSL_CERT_DIR (#{[file, dirs].compact.join(", ")})")
+      dirs.split(separator).each { |dir| read_directory(dir) unless dir.empty? } if dirs && !dirs.empty?
+      return answer("$SSL_CERT_FILE and $SSL_CERT_DIR (#{[file, dirs].compact.join(", ")})")
     end
     {% if flag?(:darwin) %}
-      SystemRootsDarwin.read(collected)
-      collected.answer("Security.framework's anchors and trust settings")
+      SystemRootsDarwin.read(self)
+      answer("Security.framework's anchors and trust settings")
     {% elsif flag?(:win32) %}
-      SystemRootsWindows.read(collected)
-      collected.answer("the Windows ROOT store, less the Disallowed store")
+      SystemRootsWindows.read(self)
+      answer("the Windows ROOT store, less the Disallowed store")
     {% else %}
       BUNDLES.each do |bundle|
         next unless File.file?(bundle) && File.readable?(bundle)
-        collected.read_file(bundle)
-        return collected.answer(bundle) unless collected.empty?
+        read_file(bundle)
+        return answer(bundle) unless kept_certificates.empty?
       end
-      DIRECTORIES.each { |dir| collected.read_directory(dir) }
-      where = ""
+      DIRECTORIES.each { |dir| read_directory(dir) }
       BUNDLES.each_with_index do |bundle, i|
-        where << ", " if i > 0
-        where << bundle
+        @roots_source << ", " if i > 0
+        @roots_source << bundle
       end
-      where << ", "
+      @roots_source << ", "
       DIRECTORIES.each_with_index do |directory, i|
-        where << " and " if i > 0
-        where << directory
+        @roots_source << " and " if i > 0
+        @roots_source << directory
       end
-      collected.answer(where)
+      answer("")
     {% end %}
   end
-end
 
-# Certificates gathered once each, by their DER.
-class SystemRootsCollector
-  getter certificates : Array(Certificate) = [] of Certificate
-  getter unreadable : Int32 = 0
-  @seen : Hash(String, Int32) = {} of String => Int32
-  @denied : Hash(String, Bool) = {} of String => Bool
+    def read_file(path : String) : Nil
+      return unless File.file?(path) && File.readable?(path)
+      blocks = Certificate.pem_blocks(File.read(path))
+      if blocks.is_a?(X509Error)
+        @unreadable += 1
+        return
+      end
+      blocks.each do |der|
+        add(der)
+        nil
+      end
+      nil
+    end
+
+    # One certificate's DER: kept, unless it was kept or denied before.
+    def add(der : Array::View(UInt8)) : Nil
+      return if kept_certificates.any? { |cert| cert.raw == der }
+      return if @denied_roots.any? { |denied| denied == der }
+      @unreadable += 1 if append_certificate(der)
+      nil
+    end
+
+    # A certificate the platform says not to trust: never kept after.
+    # It does not drop one kept already: Windows reads Disallowed first.
+    def deny(der : Array::View(UInt8)) : Nil
+      @denied_roots << certificate_bytes(der)
+      nil
+    end
+
+    def read_directory(path : String) : Nil
+      return unless File.directory?(path)
+      texts = String::Builder.new(512)
+      names = Array(String).new
+      directory_names(path, texts, names)
+      names.sorted.each do |name|
+        read_file(path + "/" + name)
+        nil
+      end
+      nil
+    end
+
+    private def directory_names(path : String, texts : String::Builder,
+                                names : Array(String)) : Nil
+      Dir.each_child(path) do |name|
+        at = texts.bytesize
+        texts << name
+        names << texts.finish[at, name.bytesize]
+        nil
+      end
+      nil
+    end
+
+    def answer(where : String) : X509Error?
+      @roots_source << where
+      return X509Error.new("no root certificates in #{source}") if kept_certificates.empty?
+      @system_roots_loaded = true
+      nil
+    end
+  end
+
+  include Storage
 
   def initialize
   end
 
-  def empty? : Bool
-    @certificates.empty?
-  end
-
-  # One certificate's DER: kept, unless it was seen or denied.
-  def add(der : Array::View(UInt8)) : Nil
-    key = SystemRootsCollector.key(der)
-    return if @seen.has_key?(key) || @denied.has_key?(key)
-    certificate = Certificate.parse(der)
-    if certificate.is_a?(X509Error)
-      @unreadable = @unreadable + 1
-    else
-      @seen[key] = @certificates.size
-      @certificates << certificate
-    end
-  end
-
-  # A certificate the platform says not to trust: dropped if kept, and
-  # never kept after.
-  def deny(der : Array(UInt8)) : Nil
-    key = SystemRootsCollector.key(der)
-    @denied[key] = true
-    at = @seen[key]?
-    return unless at
-    @certificates = @certificates.reject { |c| SystemRootsCollector.key(c.raw) == key }
-    @seen = {} of String => Int32
-    @certificates.each_with_index { |c, i| @seen[SystemRootsCollector.key(c.raw)] = i }
-  end
-
-  # Every CERTIFICATE block of a PEM file; a file that cannot be read, or
-  # whose PEM is broken, adds nothing.
-  def read_file(path : String) : Nil
-    return unless File.file?(path) && File.readable?(path)
-    blocks = Certificate.pem_blocks(File.read(path))
-    if blocks.is_a?(X509Error)
-      @unreadable = @unreadable + 1
-      return
-    end
-    blocks.each { |der| add(der) }
-  end
-
-  def read_directory(path : String) : Nil
-    return unless File.directory?(path)
-    Dir.children(path).sorted.each { |name| read_file(path + "/" + name) }
-  end
-
-  def answer(where : String) : SystemRoots | X509Error
-    return X509Error.new("no root certificates in #{where}") if @certificates.empty?
-    SystemRoots.new(@certificates, @unreadable, where)
-  end
-
-  # A certificate's identity: its DER, as text a Hash can key.
-  def self.key(der : Array::View(UInt8)) : String
-    io = ""
-    der.each do |b|
-      io << "0123456789abcdef"[b.to_i32 >> 4]
-      io << "0123456789abcdef"[b.to_i32 & 15]
-    end
-    io
+  def self.load
+    {% raise "SystemRoots.load returns no owner. Declare roots = " +
+      "SystemRoots.new, then call roots.read_system and check its error." %}
   end
 end
 
@@ -229,7 +239,7 @@ end
     RESULT_TRUST_AS_ROOT =              2
     RESULT_DENY          =              3
 
-    def self.read(collected : SystemRootsCollector) : Nil
+    def self.read(collected : SystemRoots) : Nil
       anchors = Pointer(Void).new(0_u64)
       if LibSecurity.SecTrustCopyAnchorCertificates(pointerof(anchors)) == 0 && anchors.address != 0
         each_certificate(anchors) { |certificate| collected.add(bytes(certificate)) }
@@ -307,9 +317,9 @@ end
   end
 {% elsif flag?(:win32) %}
   struct SystemRootsWindows
-    def self.read(collected : SystemRootsCollector) : Nil
-      each_der("ROOT") { |der| collected.add(der) }
+    def self.read(collected : SystemRoots) : Nil
       each_der("Disallowed") { |der| collected.deny(der) }
+      each_der("ROOT") { |der| collected.add(der) }
     end
 
     # Every certificate's DER in the system store *name*. A CERT_CONTEXT

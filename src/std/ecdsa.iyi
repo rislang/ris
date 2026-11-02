@@ -236,6 +236,17 @@ pub struct EcdsaPublicKey
   def initialize(@curve : EcdsaCurve, @x : BigInt, @y : BigInt, @group : EcdsaGroup)
   end
 
+  # Copy the finite key shape into a certificate owner's limb runs.
+  def copy_into_certificate(store) : EcdsaPublicKey
+    EcdsaPublicKey.new(@curve, store.certificate_number(@x),
+      store.certificate_number(@y),
+      EcdsaGroup.new(store.certificate_number(@group.p),
+        store.certificate_number(@group.n),
+        store.certificate_number(@group.b),
+        store.certificate_number(@group.gx),
+        store.certificate_number(@group.gy), @group.size))
+  end
+
   # The key from a point in SEC 1's uncompressed encoding (section 2.3.3):
   # 0x04, then x and y big-endian at the curve's width.
   def self.from_point(curve : EcdsaCurve, point : Array(UInt8)) : EcdsaPublicKey | EcdsaError
@@ -262,7 +273,7 @@ pub struct EcdsaPublicKey
 
   # Whether *signature*, the DER of an Ecdsa-Sig-Value, is this key's
   # signature of *message* under *hash*.
-  def verify(hash : EcdsaHash, message : Array::View(UInt8) | String, signature : Array(UInt8)) : Bool
+  def verify(hash : EcdsaHash, message : Array::View(UInt8) | String, signature : Array::View(UInt8)) : Bool
     parsed = Der.parse(signature)
     return false if parsed.is_a?(Asn1Error)
     fields = parsed.sequence

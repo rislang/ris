@@ -149,7 +149,10 @@ import std/system_roots::{SystemRoots}
 import std/env::{ENV}
 
 ENV["SSL_CERT_FILE"] = ENV["REFUSE_EMPTY"]
-SystemRoots.load.or_panic
+roots = SystemRoots.new
+if error = roots.read_system
+  raise error.message
+end
 puts "accepted"
 IYI
 printf 'no certificates\n' >"$WORK/empty.pem"
@@ -199,18 +202,18 @@ PY
   fi
 }
 prove_broken "a root kept as often as it is written" "a root written twice read 2 times" \
-  '    return if @seen.has_key?(key) || @denied.has_key?(key)' '    return if @denied.has_key?(key)'
+  '      return if kept_certificates.any? { |cert| cert.raw == der }' ''
 prove_broken "an unreadable block not counted" "a broken block counted 0 times" \
-  '    if certificate.is_a?(X509Error)
-      @unreadable = @unreadable + 1' '    if certificate.is_a?(X509Error)'
+  '      @unreadable += 1 if append_certificate(der)' '      append_certificate(der)'
 prove_broken "\$SSL_CERT_DIR passed over" "a file and a directory" \
-  '      dirs.split(separator).each { |dir| collected.read_directory(dir) unless dir.empty? } if dirs && !dirs.empty?' ''
+  '      dirs.split(separator).each { |dir| read_directory(dir) unless dir.empty? } if dirs && !dirs.empty?' ''
 prove_broken "an empty store answered as a store" "a bundle with no root refused" \
-  '    return X509Error.new("no root certificates in #{where}") if @certificates.empty?' ''
+  '      return X509Error.new("no root certificates in #{source}") if kept_certificates.empty?' ''
 # A bundle's certificates dropped: the platform's own store is the first
 # to come back empty.
 prove_broken "a bundle's certificates dropped" "no root certificates in" \
-  '    blocks.each { |der| add(der) }' '    return'
+  '        add(der)
+        nil' '        nil'
 
 echo
 if [ "$status" -eq 0 ]; then

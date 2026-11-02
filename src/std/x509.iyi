@@ -5,7 +5,10 @@
 #
 #     import std/x509::{Certificate, X509, X509Error}
 #
-#     roots = Certificate.from_pem(File.read("/etc/ssl/certs/ca-certificates.crt")).or_panic
+#     store = RisCertificateStore.new
+#     error = store.read_pem(File.read("roots.pem"))
+#     raise error.message if error
+#     roots = store.kept_certificates
 #     leaf = Certificate.parse(der).or_panic
 #     chain = X509.verify(leaf, intermediates, roots, "example.com").or_panic
 #     # the chain from leaf to root, or an X509Error saying why there is none
@@ -118,39 +121,154 @@ impl Error for X509Error
   end
 end
 
-# A class, not a struct, for the stack's sake. Thirty-odd fields make 472
-# bytes, and a struct is copied whole into every array slot, block
-# argument and union it passes through. In a debug build each copy is a
-# stack slot of its own, and a TLS handshake inside a task ran out of
-# its 256 KiB (issue #130). Measured on Linux x86_64, a struct made
-# `Certificate.parse`'s frame 31,832 bytes (each `!` and early return
-# makes a `Certificate | X509Error`), `X509.grow`'s 13,640 and
-# `issuer_error`'s 6,184; a class makes them 5,224, 296 and 368. With
-# `EcdsaP256.check` split as well (std/ecdsa), `X509.verify` of a
-# two-certificate P-256 chain in a task went from 35,608 bytes of stack
-# to 11,768. Nothing in a certificate is written after `parse`, so
-# sharing one is not observable, and two are equal when they are the
-# same DER, as two structs were when every field was.
-pub class Certificate
+# Retained certificate payloads belong to the including owner. Lists use
+# flat slots; byte and limb slices use the owner's stable buffers.
+pub class RisCertificateStore
+  module Storage
+  getter kept_certificates : Array(Certificate) = Array(Certificate).new
+  @certificate_bytes = Array(UInt8).new(4096)
+  @certificate_words = Array(UInt64).new(1024)
+  @certificate_texts = String::Builder.new(4096)
+  @certificate_names = Array(String).new
+  @certificate_addresses = Array(Array::View(UInt8)).new
+  @certificate_numbers = Array(Int32).new
+
+  def clear_certificates : Nil
+    @kept_certificates.clear
+    @certificate_names.clear
+    @certificate_addresses.clear
+    @certificate_numbers.clear
+    @certificate_texts.clear
+    @certificate_bytes.clear
+    @certificate_words.clear
+    nil
+  end
+
+  def append_certificate(der : Array::View(UInt8)) : X509Error?
+    parsed = Certificate.parse(der)
+    return parsed if parsed.is_a?(X509Error)
+    @kept_certificates << Certificate.new(parsed, self)
+    nil
+  end
+
+  def read_pem(text : String) : X509Error?
+    clear_certificates
+    blocks = Certificate.pem_blocks(text)
+    return blocks if blocks.is_a?(X509Error)
+    blocks.each do |der|
+      if problem = append_certificate(der)
+        clear_certificates
+        return problem
+      end
+      nil
+    end
+    nil
+  end
+
+  def certificate_bytes(value : Array::View(UInt8)) : Array::View(UInt8)
+    at = @certificate_bytes.size
+    value.each { |byte| @certificate_bytes << byte }
+    @certificate_bytes[at, value.size]
+  end
+
+  def certificate_number(value : BigInt) : BigInt
+    BigInt.new(value.sign, certificate_words(value.limbs))
+  end
+
+  def certificate_words(value : Array::View(UInt64)) : Array::View(UInt64)
+    at = @certificate_words.size
+    value.each { |word| @certificate_words << word }
+    @certificate_words[at, value.size]
+  end
+
+  def certificate_text(value : String) : String
+    at = @certificate_texts.bytesize
+    @certificate_texts << value
+    @certificate_texts.finish[at, value.bytesize]
+  end
+
+  def certificate_names(values : Array::View(String)) : Array::View(String)
+    at = @certificate_names.size
+    values.each do |value|
+      @certificate_names << certificate_text(value)
+      nil
+    end
+    @certificate_names[at, values.size]
+  end
+
+  def certificate_addresses(values : Array::View(Array::View(UInt8))) : Array::View(Array::View(UInt8))
+    at = @certificate_addresses.size
+    values.each do |value|
+      @certificate_addresses << certificate_bytes(value)
+      nil
+    end
+    @certificate_addresses[at, values.size]
+  end
+
+  def certificate_numbers(values : Array::View(Int32)) : Array::View(Int32)
+    at = @certificate_numbers.size
+    values.each { |number| @certificate_numbers << number }
+    @certificate_numbers[at, values.size]
+  end
+
+  def certificate_der(value : DerValue) : DerValue
+    DerValue.new(certificate_bytes(value.data), value.tag_class,
+      value.constructed?, value.tag, value.offset, value.header_size,
+      value.content_size)
+  end
+
+  def certificate_key(value : RsaPublicKey) : RsaPublicKey
+    RsaPublicKey.new(certificate_number(value.modulus),
+      certificate_number(value.exponent), value.bits)
+  end
+
+  def certificate_key(value : EcdsaPublicKey) : EcdsaPublicKey
+    value.copy_into_certificate(self)
+  end
+  end
+
+  include Storage
+
+  def initialize
+  end
+end
+
+# An immutable certificate views payloads on its caller's tape or in a
+# declared certificate store. Equality compares the encoded certificate.
+@[OnTape]
+pub struct Certificate
   # The whole certificate as it was read, and its signed part.
-  getter raw : Array(UInt8)
-  getter tbs : Array(UInt8)
+  getter raw : Array::View(UInt8)
+  getter tbs : Array::View(UInt8)
   getter version : Int32
   # The serial number's two's-complement bytes, as written.
-  getter serial : Array(UInt8)
+  getter serial : Array::View(UInt8)
   # Issuer and subject as their DER: two names are the same name when
   # these are the same bytes.
-  getter issuer : Array(UInt8)
-  getter subject : Array(UInt8)
+  getter issuer : Array::View(UInt8)
+  getter subject : Array::View(UInt8)
   # The subject and issuer written out for a person, `CN=..., O=...`.
   getter subject_name : String
   getter issuer_name : String
   getter not_before : Time
   getter not_after : Time
-  getter public_key : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey
+  @retained_key : RsaPublicKey | EcdsaPublicKey | Nil
+  @ed25519_bytes : Array::View(UInt8)
+
+  def public_key : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey
+    if @ed25519_bytes.empty?
+      Certificate.retained_key(@retained_key)
+    else
+      Ed25519PublicKey.new(@ed25519_bytes.to_a)
+    end
+  end
+
+  def self.retained_key(key : RsaPublicKey | EcdsaPublicKey | Nil) : RsaPublicKey | EcdsaPublicKey
+    key.as(RsaPublicKey | EcdsaPublicKey)
+  end
   # The signature algorithm's OID, and the signature.
   getter signature_algorithm : String
-  getter signature : Array(UInt8)
+  getter signature : Array::View(UInt8)
   # basicConstraints: whether it was present, cA, and pathLenConstraint.
   getter basic_constraints : Bool
   getter ca : Bool
@@ -159,59 +277,109 @@ pub class Certificate
   # when the extension is absent.
   getter key_usage : Int32?
   # extKeyUsage's OIDs; nil when the extension is absent.
-  getter extended_key_usage : Array(String)?
+  getter extended_key_usage : Array::View(String)?
   # subjectAltName's dNSName and iPAddress entries.
-  getter dns_names : Array(String)
-  getter ip_addresses : Array(Array::View(UInt8))
+  getter dns_names : Array::View(String)
+  getter ip_addresses : Array::View(Array::View(UInt8))
   # nameConstraints: DNS names and IP ranges (address and mask), and
   # whether a constraint of any other kind is there.
-  getter permitted_dns : Array(String)
-  getter excluded_dns : Array(String)
-  getter permitted_ips : Array(Array::View(UInt8))
-  getter excluded_ips : Array(Array::View(UInt8))
+  getter permitted_dns : Array::View(String)
+  getter excluded_dns : Array::View(String)
+  getter permitted_ips : Array::View(Array::View(UInt8))
+  getter excluded_ips : Array::View(Array::View(UInt8))
   getter other_constraints : Bool
-  getter subject_key_id : Array(UInt8)?
-  getter authority_key_id : Array(UInt8)?
+  getter subject_key_id : Array::View(UInt8)?
+  getter authority_key_id : Array::View(UInt8)?
   # The subjectPublicKey BIT STRING's bytes, as written: what an OCSP
   # CertID's issuerKeyHash and a responder's byKey are hashes of (RFC
   # 6960 section 4.1.1).
-  getter public_key_bits : Array(UInt8)
+  getter public_key_bits : Array::View(UInt8)
   # The TLS Feature extension's features (RFC 7633), nil when absent:
   # 5, status_request, is "must staple".
-  getter tls_features : Array(Int32)?
+  getter tls_features : Array::View(Int32)?
   # Whether id-pkix-ocsp-nocheck is here (RFC 6960 section 4.2.2.2.1): an
   # OCSP responder's certificate saying its own status is not asked.
   getter ocsp_nocheck : Bool
   # Critical extensions this does not understand, by OID.
-  getter unhandled_critical : Array(String)
+  getter unhandled_critical : Array::View(String)
   @signature_parameters : DerValue?
 
   # keyUsage bits (RFC 5280 section 4.2.1.3), counted from the first.
   KEY_DIGITAL_SIGNATURE = 0
   KEY_CERT_SIGN         = 5
 
-  def initialize(@raw : Array(UInt8), @tbs : Array(UInt8), @version : Int32, @serial : Array(UInt8),
-                 @issuer : Array(UInt8), @subject : Array(UInt8), @subject_name : String, @issuer_name : String,
-                 @not_before : Time, @not_after : Time, @public_key : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey,
-                 @signature_algorithm : String, @signature_parameters : DerValue?, @signature : Array(UInt8),
-                 @public_key_bits : Array(UInt8), extensions : X509Extensions)
+  def initialize(raw : Array(UInt8), tbs : Array(UInt8), @version : Int32, serial : Array(UInt8),
+                 issuer : Array(UInt8), subject : Array(UInt8), @subject_name : String, @issuer_name : String,
+                 @not_before : Time, @not_after : Time, public_key : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey,
+                 @signature_algorithm : String, @signature_parameters : DerValue?, signature : Array(UInt8),
+                 public_key_bits : Array(UInt8), extensions : X509Extensions)
+    @raw = raw.view
+    @tbs = tbs.view
+    @serial = serial.view
+    @issuer = issuer.view
+    @subject = subject.view
+    @signature = signature.view
+    @public_key_bits = public_key_bits.view
+    if public_key.is_a?(Ed25519PublicKey)
+      @retained_key = nil
+      @ed25519_bytes = public_key.bytes.view
+    else
+      @retained_key = public_key
+      @ed25519_bytes = raw[0, 0]
+    end
     @basic_constraints = extensions.basic_constraints
     @ca = extensions.ca
     @path_length = extensions.path_length
     @key_usage = extensions.key_usage
-    @extended_key_usage = extensions.extended_key_usage
-    @dns_names = extensions.dns_names
-    @ip_addresses = extensions.ip_addresses
-    @permitted_dns = extensions.permitted_dns
-    @excluded_dns = extensions.excluded_dns
-    @permitted_ips = extensions.permitted_ips
-    @excluded_ips = extensions.excluded_ips
+    @extended_key_usage = (if value = extensions.extended_key_usage; value.view; else; nil; end)
+    @dns_names = extensions.dns_names.view
+    @ip_addresses = extensions.ip_addresses.view
+    @permitted_dns = extensions.permitted_dns.view
+    @excluded_dns = extensions.excluded_dns.view
+    @permitted_ips = extensions.permitted_ips.view
+    @excluded_ips = extensions.excluded_ips.view
     @other_constraints = extensions.other_constraints
-    @subject_key_id = extensions.subject_key_id
-    @authority_key_id = extensions.authority_key_id
-    @unhandled_critical = extensions.unhandled_critical
-    @tls_features = extensions.tls_features
+    @subject_key_id = (if value = extensions.subject_key_id; value.view; else; nil; end)
+    @authority_key_id = (if value = extensions.authority_key_id; value.view; else; nil; end)
+    @unhandled_critical = extensions.unhandled_critical.view
+    @tls_features = (if value = extensions.tls_features; value.view; else; nil; end)
     @ocsp_nocheck = extensions.ocsp_nocheck
+  end
+
+  def initialize(source : Certificate, store)
+    @version = source.@version
+    @not_before = source.@not_before
+    @not_after = source.@not_after
+    @basic_constraints = source.@basic_constraints
+    @ca = source.@ca
+    @path_length = source.@path_length
+    @key_usage = source.@key_usage
+    @other_constraints = source.@other_constraints
+    @ocsp_nocheck = source.@ocsp_nocheck
+    @raw = store.certificate_bytes(source.@raw)
+    @tbs = store.certificate_bytes(source.@tbs)
+    @serial = store.certificate_bytes(source.@serial)
+    @issuer = store.certificate_bytes(source.@issuer)
+    @subject = store.certificate_bytes(source.@subject)
+    @signature = store.certificate_bytes(source.@signature)
+    @public_key_bits = store.certificate_bytes(source.@public_key_bits)
+    @subject_name = store.certificate_text(source.@subject_name)
+    @issuer_name = store.certificate_text(source.@issuer_name)
+    @signature_algorithm = store.certificate_text(source.@signature_algorithm)
+    @dns_names = store.certificate_names(source.@dns_names)
+    @permitted_dns = store.certificate_names(source.@permitted_dns)
+    @excluded_dns = store.certificate_names(source.@excluded_dns)
+    @unhandled_critical = store.certificate_names(source.@unhandled_critical)
+    @ip_addresses = store.certificate_addresses(source.@ip_addresses)
+    @permitted_ips = store.certificate_addresses(source.@permitted_ips)
+    @excluded_ips = store.certificate_addresses(source.@excluded_ips)
+    @subject_key_id = (if value = source.@subject_key_id; store.certificate_bytes(value); else; nil; end)
+    @authority_key_id = (if value = source.@authority_key_id; store.certificate_bytes(value); else; nil; end)
+    @extended_key_usage = (if value = source.@extended_key_usage; store.certificate_names(value); else; nil; end)
+    @tls_features = (if value = source.@tls_features; store.certificate_numbers(value); else; nil; end)
+    @signature_parameters = (if value = source.@signature_parameters; store.certificate_der(value); else; nil; end)
+    @retained_key = (if value = source.@retained_key; store.certificate_key(value); else; nil; end)
+    @ed25519_bytes = store.certificate_bytes(source.@ed25519_bytes)
   end
 
   # The same certificate: the same DER, from which every field is read.
@@ -379,12 +547,10 @@ pub class Certificate
 
   # Every CERTIFICATE block in a PEM text, read; the first one that is not
   # a certificate is the answer.
-  def self.from_pem(text : String) : Array(Certificate) | X509Error
-    found = [] of Certificate
-    X509Pem.blocks(text)!.each do |der|
-      found << Certificate.parse(der)!
-    end
-    found
+  def self.from_pem(text : String)
+    {% raise "Certificate.from_pem returns no owner. Declare store = " +
+      "RisCertificateStore.new, check store.read_pem(text), then use " +
+      "store.kept_certificates." %}
   end
 
   # The DER of every CERTIFICATE block in a PEM text, unread: a store
@@ -456,7 +622,7 @@ pub struct X509
   # was signed, for the sentence. A certificate's signature is checked
   # here, and an OCSP response's (std/ocsp).
   def self.signature_error(key : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey, algorithm : String, parameters : DerValue?,
-                           signed : Array(UInt8), signature : Array(UInt8), what : String, signer : String) : String?
+                           signed : Array::View(UInt8), signature : Array::View(UInt8), what : String, signer : String) : String?
     case algorithm
     when X509Oids::SHA256_RSA, X509Oids::SHA384_RSA, X509Oids::SHA512_RSA
       return "#{algorithm} with parameters that are not NULL" unless X509Keys.null_or_absent?(parameters)
@@ -608,7 +774,7 @@ pub struct X509
     return "#{leaf.subject_name} is not allowed #{purpose.usage}" unless allowed?(leaf, purpose)
     return "#{leaf.subject_name} is a CA certificate, not a #{purpose.holder}'s" if leaf.ca
     if host && !leaf.matches_host?(host)
-      return "#{leaf.subject_name} is not valid for #{host}: it names #{(leaf.dns_names + leaf.ip_addresses.map { |a| X509Names.ip_text(a) }).join(", ")}"
+      return "#{leaf.subject_name} is not valid for #{host}: it names #{(leaf.dns_names.to_a + leaf.ip_addresses.map { |a| X509Names.ip_text(a) }).join(", ")}"
     end
     nil
   end

@@ -1,6 +1,6 @@
 # Keep a parsed certificate after its validator's scratch is gone.
 import std/asn1::{Der, Asn1Error}
-import std/x509::{Certificate, X509Error}
+import std/x509::{Certificate, X509Error, RisCertificateStore}
 
 def der_error(bytes : Array(UInt8), kind : Int32) : String
   value = Der.parse(bytes)
@@ -30,10 +30,15 @@ raise "sequence sentence" unless der_error([2_u8, 1_u8, 1_u8], 4) ==
 
 text = File.read(Program.arguments[0])
 der = Array(UInt8).new(text.bytesize) { |at| text[at] }
-certificate = Certificate.parse(der)
-if certificate.is_a?(X509Error)
-  puts certificate.message
+parsed = Certificate.parse(der)
+if parsed.is_a?(X509Error)
+  puts parsed.message
 else
+  store = RisCertificateStore.new
+  problem = store.append_certificate(der)
+  raise problem.message if problem
+  certificate = store.kept_certificates[0]
+  raise "retained key changed" unless certificate.public_key == parsed.public_key
   raise "wrong subject" unless certificate.subject_name == "CN=tape.test"
   raise "wrong issuer" unless certificate.issuer_name == "CN=tape.test"
   raise "wrong DER" unless certificate.raw == der
