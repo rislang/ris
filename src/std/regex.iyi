@@ -718,14 +718,17 @@ pub struct Regex
   # *pos* counts from the end. `^` and `\A` still mean the start of the
   # text, not *pos*.
   def match(text : String, pos : Int32 = 0) : MatchData?
+    Regex.captured(self, text, match_slots(text, pos))
+  end
+
+  private def match_slots(text : String, pos : Int32) : Array(Int32)?
     pos = text.bytesize + pos if pos < 0
     return nil if pos < 0 || pos > text.bytesize
     if @names.size == 1
       span = search(text, pos)
-      return span ? MatchData.new(self, text, [span[0], span[1]]) : nil
+      return span ? [span[0], span[1]] : nil
     end
-    slots = @nfa.capture(text, pos, -1, @names.size * 2)
-    slots ? MatchData.new(self, text, slots) : nil
+    @nfa.capture(text, pos, -1, @names.size * 2)
   end
 
   # Where the first match at or after byte *offset* begins, in bytes, as

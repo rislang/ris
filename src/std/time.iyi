@@ -1980,7 +1980,19 @@ pub struct Time
   # constructor's sentence, and a span the Int64 seconds do not hold with
   # `Span`'s.
   def shift(*, years : Int32 = 0, months : Int32 = 0, weeks : Int64 = 0_i64, days : Int64 = 0_i64, hours : Int64 = 0_i64, minutes : Int64 = 0_i64, seconds : Int64 = 0_i64, nanoseconds : Int64 = 0_i64) : Time
-    moved = self
+    shifted(shift_date(years, months, weeks, days),
+      Span.new(hours: hours, minutes: minutes, seconds: seconds,
+        nanoseconds: nanoseconds))
+  end
+
+  private def shifted(seconds : Int64, span : Span) : Time
+    Time.new(Span.add_seconds(seconds, span.total_seconds_i64),
+      @nanoseconds + span.nanoseconds, @location)
+  end
+
+  private def shift_date(years : Int32, months : Int32,
+                         weeks : Int64, days : Int64) : Int64
+    moved = @seconds
     if years != 0 || months != 0 || weeks != 0_i64 || days != 0_i64
       date = wall
       if years != 0 || months != 0
@@ -1996,9 +2008,9 @@ pub struct Time
         date = Time.days_from_civil(new_year, new_month, new_day) * 86400_i64 + Time.floor_mod(wall, 86400_i64)
       end
       date = Span.add_seconds(date, Span.add_seconds(Span.mul_seconds(weeks, 604800_i64), Span.mul_seconds(days, 86400_i64)))
-      moved = Time.new(@location.resolve(date), @nanoseconds, @location)
+      moved = @location.resolve(date)
     end
-    moved + Span.new(hours: hours, minutes: minutes, seconds: seconds, nanoseconds: nanoseconds)
+    moved
   end
 
   # ---------------------------------------------------------------------------

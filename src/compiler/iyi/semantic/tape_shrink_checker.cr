@@ -1280,7 +1280,7 @@ class Iyi::TapeShrinkChecker
     @leaving = nil
     # A marked def frees its scratch when it ends (SPEC 1.1).
     marked = owner && !TapeScopeChecker.constructor?(owner) &&
-             !TapeScopeChecker.parts(owner.body).nil?
+             summary_marked?(owner)
     if owner && marked
       @tape_blocks << owner.object_id
       @tape_kinds[owner.object_id] = "def"

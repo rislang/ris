@@ -1,0 +1,29 @@
+# SPEC 3.7: a class default is made in the cycle def, as at the call.
+class C
+  def initialize(@n : Int32 = 0)
+  end
+end
+
+@[OnTape]
+struct P
+  def initialize
+    @nodes = Array(C).new(8)
+  end
+
+  def node(a = -1, v = C.new) : Int32
+    @nodes << v
+    @nodes.size - 1
+  end
+
+  def pipe(d : Int32) : Int32
+    return 0 if d > 3
+    b = other(d + 1)
+    node(b)
+  end
+
+  def other(d : Int32) : Int32
+    pipe(d)
+  end
+end
+p = P.new
+puts p.pipe(0)

@@ -1,0 +1,14 @@
+# A default expansion frees its body's scratch (SPEC 1.1, 3.2).
+@[OnTape]
+struct Nodes
+  def initialize
+    @names = Array(String).new(8)
+  end
+
+  def node(a : Int32 = -1, text : String = "")
+    @names << "a#{a}"
+  end
+end
+
+nodes = Nodes.new
+nodes.node(1)

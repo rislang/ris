@@ -135,6 +135,7 @@ pub struct Eiy
     # The sentence is written into a field made with the lexer, so it
     # outlives the def that finds the fault (SPEC 1.1).
     @error_text : String::Builder
+    @token_text : String::Builder
 
     def initialize(@string : String)
       @bytes = @string.to_unsafe
@@ -145,6 +146,7 @@ pub struct Eiy
       @token = Token.new
       @error = ""
       @error_text = String::Builder.new(64)
+      @token_text = String::Builder.new(@len)
     end
 
     # Why the last `next_token?` answered nil, or nil while it has not.
@@ -364,6 +366,7 @@ pub struct Eiy
     # The sentence is written into a field made with the lexer, so it
     # outlives the def that finds the fault (SPEC 1.1).
     @error_text : String::Builder
+    @token_text : String::Builder
 
     def initialize(@string : String)
       @len = @string.bytesize
@@ -373,6 +376,7 @@ pub struct Eiy
       @token = Token.new
       @error = ""
       @error_text = String::Builder.new(64)
+      @token_text = String::Builder.new(@len)
     end
 
     # Why the last `next_token?` answered nil, or nil while it has not.
@@ -495,9 +499,9 @@ pub struct Eiy
         tail = @string[start_pos, end_pos - start_pos]
         close_tag = suppress_trailing ? "-%>" : "%>"
         @token.type = Token::Type::String
-        w = ""
-        w << head << tail << close_tag
-        @token.value = w
+        at = @token_text.bytesize
+        @token_text << head << tail << close_tag
+        @token.value = @token_text.finish[at, @token_text.bytesize - at]
       elsif is_output
         @token.type = Token::Type::Output
         @token.value = @string[start_pos, end_pos - start_pos]

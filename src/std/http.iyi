@@ -3920,8 +3920,10 @@ class HttpsBound
   @used : Bool = false
 
   def initialize
-    @own = TlsConfig.new
-    @under = TlsMadeUnder.new(@own)
+    own = TlsConfig.new
+    @own = own
+    under = TlsMadeUnder.new(own)
+    @under = under
     @origin = String::Builder.new(128)
   end
 
@@ -4449,8 +4451,17 @@ pub struct HTTP
   end
 
   private def self.remove_headers(headers : Hash(String, String), names : Array(String)) : Nil
+    keys = Array(String).new(headers.size)
+    texts = String::Builder.new(headers.size * 32)
     headers.keys.each do |key|
+      at = texts.bytesize
+      texts << key
+      keys << texts.finish[at, texts.bytesize - at]
+      nil
+    end
+    keys.each do |key|
       headers.delete(key) if names.any? { |name| same_name?(key, name) }
+      nil
     end
   end
 

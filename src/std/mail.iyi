@@ -1979,6 +1979,7 @@ pub struct Mail
     getter bcc : Array(Address) = Array(Address).new(4)
     getter reply_to : Array(Address) = Array(Address).new(4)
     @id_text = String::Builder.new(128)
+    @attachment_text = String::Builder.new(128)
     @subject : String? = nil
     @date : String? = nil
     @message_id : String? = nil
@@ -2061,7 +2062,7 @@ pub struct Mail
       raise "mail: an attachment's file name holds a line break" if MailText.line_break?(filename)
       raise "mail: an attachment's file name is not UTF-8" unless MailText.utf8?(filename)
       raise "mail: an attachment's file name is empty" if filename.empty?
-      kind = content_type || MIME.from_extension(filename)
+      kind = MailText.keep(content_type || MIME.from_extension(filename), @attachment_text)
       raise "mail: #{kind.inspect} is not a media type" if MailText.line_break?(kind) || MailText.content_type(kind).nil? || !MailText.ascii?(kind)
       @attachments << {filename, kind, data}
       self

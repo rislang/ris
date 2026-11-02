@@ -243,15 +243,19 @@ pub struct ParsedURI
   # RFC 3986 section 5.2. Fields continue to view their source texts;
   # only a merged path needs new bytes on the caller's tape.
   def resolve(ref : ParsedURI | String) : ParsedURI
+    resolve(ref, String::Builder.new(@path.bytesize + 128))
+  end
+
+  def resolve(ref : ParsedURI | String, texts : String::Builder) : ParsedURI
     r = ref.is_a?(ParsedURI) ? ref : URI.parse(ref)
     t = r
     if r.scheme
-      t.path = URI.remove_dot_segments(r.path)
+      t.path = URI.resolved_path(r.path, texts)
       return t
     end
     t.scheme = @scheme
     if r.host || r.user || r.port
-      t.path = URI.remove_dot_segments(r.path)
+      t.path = URI.resolved_path(r.path, texts)
       return t
     end
     t.host = @host
@@ -261,7 +265,7 @@ pub struct ParsedURI
       t.path = @path
       t.query = @query unless r.query
     elsif r.path.starts_with?("/")
-      t.path = URI.remove_dot_segments(r.path)
+      t.path = URI.resolved_path(r.path, texts)
     else
       authority = !@host.nil? || !@user.nil? || !@port.nil?
       merged = if authority && @path.empty?
@@ -271,7 +275,7 @@ pub struct ParsedURI
                else
                  r.path
                end
-      t.path = URI.remove_dot_segments(merged)
+      t.path = URI.resolved_path(merged, texts)
     end
     t
   end
@@ -1115,6 +1119,12 @@ pub class URI
   # rest of the path into a new string, so removing the dot segments took
   # time in the square of the path's length: 132 KB of `/a/./b/../c` took
   # 12.8 s in a release build, where splitting it at its slashes took 3 ms.
+
+  def self.resolved_path(path : String, texts : String::Builder) : String
+    at = texts.bytesize
+    texts << remove_dot_segments(path)
+    texts.finish[at, texts.bytesize - at]
+  end
 
   def self.remove_dot_segments(path : String) : String
     raw = path

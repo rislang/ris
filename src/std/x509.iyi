@@ -679,13 +679,25 @@ pub struct X509
   # else is checked.
   def self.verify(leaf : Certificate, intermediates : Array::View(Certificate), roots : Array::View(Certificate),
                   host : String? = nil, now : Time = Time.utc, purpose : X509Purpose = X509Purpose::Server) : Array(Certificate) | X509Error
+    verify_chain(leaf, intermediates, roots, host, now, purpose,
+      Array(Certificate).new(MAX_CHAIN, leaf))
+  end
+
+  private def self.verify_chain(leaf : Certificate,
+      intermediates : Array::View(Certificate),
+      roots : Array::View(Certificate), host : String?, now : Time,
+      purpose : X509Purpose, chain : Array(Certificate)) : Array(Certificate) | X509Error
     problem = leaf_error(leaf, host, now, purpose)
     return X509Error.new(problem) if problem
     failures = [] of String
     checks = [0]
-    chain = Array(Certificate).new(MAX_CHAIN, leaf)
     count = grow(chain, intermediates, roots, now, failures, purpose, checks, 1)
-    return chain[0, count].to_a if count > 0
+    if count > 0
+      while chain.size > count
+        chain.pop
+      end
+      return chain
+    end
     if checks[0] > MAX_SIGNATURE_CHECKS
       return X509Error.new("no chain from #{leaf.subject_name} within #{MAX_SIGNATURE_CHECKS} signature checks")
     end
@@ -1697,16 +1709,15 @@ pub struct SigningKey
   end
 
   def public_key : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey
-    if key = @p256
-      return key.public_key
+    if @p256
+      @p256.as(P256PrivateKey).public_key
+    elsif @p384
+      @p384.as(P384PrivateKey).public_key
+    elsif @rsa
+      @rsa.as(RsaPrivateKey).public_key
+    else
+      ed25519_public_key
     end
-    if key = @p384
-      return key.public_key
-    end
-    if key = @rsa
-      return key.public_key
-    end
-    ed25519_public_key
   end
 
   private def ed25519_public_key : Ed25519PublicKey

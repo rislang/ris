@@ -100,6 +100,8 @@ else
   echo "FAILED   cycle_defaults: $out"; status=1
 fi
 expect cycle_default_class 'cannot store data made in this def'
+expect cycle_default_untyped 'cannot store data made in this def'
+expect default_scratch 'cannot store data made in this def'
 expect cycle_store_scratch 'cannot store data made in this def'
 expect cycle_other_storage 'cannot pass other growing storage'
 expect cycle_swap_storage 'cannot pass other growing storage'

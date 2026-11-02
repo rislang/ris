@@ -1892,6 +1892,7 @@ struct TapeParser
     # prefixes bound to the same uri - are a duplicate as much as one
     # spelling twice.
     expanded = TapeMap(String, String).new
+    expanded_text = String::Builder.new(@len)
     i = 0
     while i < raw_names.size
       if raw_names[i] == "xmlns" || raw_names[i].starts_with?("xmlns:")
@@ -1908,8 +1909,9 @@ struct TapeParser
           return elem
         end
         attr = TapeAttribute.new(raw_names[i], raw_values[i], ns.uri)
-        key = ""
-        key << ns.uri << "\n" << attr.local_name
+        key_start = expanded_text.bytesize
+        expanded_text << ns.uri << "\n" << attr.local_name
+        key = expanded_text.finish[key_start, expanded_text.bytesize - key_start]
         first = expanded[key]?
         if !first.nil?
           fail_at(raw_lines[i], raw_cols[i], "attribute " \

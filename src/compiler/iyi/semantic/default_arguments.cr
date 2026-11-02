@@ -35,6 +35,9 @@ class Iyi::Def
     end
 
     retain_body = block_arity || splat_index || double_splat || assigns_special_var? || macro_def? || args.any? { |arg| arg.default_value && arg.restriction }
+    # Keep the marked body in the specialization, including untyped
+    # defaults. Forwarding hides its default roots from cycle stores.
+    retain_body ||= !TapeScopeChecker.parts(body).nil?
 
     # iyi: a def read from a `.iyimod` has no body to retain (iyi SPEC IV.1).
     #

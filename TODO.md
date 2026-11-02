@@ -23,41 +23,32 @@ refusal of a file at once, fix by message, rerun only that cluster's
 files; one full check.sh on minitest per finished step, not per fix.
 Fix a checker hole below only when a cluster hits it.
 
-1. A def called through its defaults does not free-check its scratch.
-   The expansion runs the defaults, then the marked body, so
-   TapeShrinkChecker#check does not read it as marked: `node(1)` on
-   `def node(a : Int32 = -1, t : String = "")` that does `@n << "a#{a}"`
-   compiles; `node(1, "")` is refused. Reading it as marked
-   (`summary_marked?` in `check`) exposes std sites to move first:
-   regex match, x509 verify and public_key, mime, xml []=, mail attach.
-   All-untyped defaults forward instead: `def node(a = -1, v = C.new)`
-   stored in a cycle compiles, while `v : C = C.new` is refused.
-
 4. Samples and tests, group by group, then one full check.sh.
    `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` lists every scope
-   refusal. check.sh: 8 FAILED. Patterns that work: read into one flat
-   String (tagged where an error may come back) and wrap it in a one-call
-   def, a choice of two calls, or a `new` (a constructor builds in the
-   caller's scope: dns, SvcbRecord, json's document); keep a round's
+   refusal. check.sh (2026-11-02): 4 FAILED. Patterns that work: read into
+   one flat String (tagged where an error may come back) and wrap it in
+   a one-call def, a choice of two calls, or a `new` (a constructor builds
+   in the caller's scope: dns, SvcbRecord, json's document); keep a round's
    texts in a builder made before the loop (`DnsLookup`, `kept`);
    refill a field instead of a new value (TLS records, key updates); a
    struct or Tuple of texts and plain values moves down whole.
    Left, by cluster:
-   * TLS server (http_prefork's TLS half): `client_hello` and
-     `read_outer` return reader views and lists made in the def; the
-     offers and ECH outer parts need caller-owned storage.
+   * TLS server (http_prefork's TLS half): `client_hello` returns
+     reader views and lists made in the def; the offers need
+     caller-owned storage.
    * autocert lifecycle: `held_of` makes and returns its TlsIdentity and
-     store (declare them at the caller, pass them in);
-     SigningKey.public_key (x509) returns key bytes made in a def.
-   * Real dangling text the growing-local check now refuses: mime:200
-     and yaml/xml `TapeMap#[]=` (xml:150, a key from a round), URI's
-     `path=` (uri:219, from http_coding) and eiy:333 `value=`. Build
-     them in a builder made before the loop, or copy them to the owner.
-   * secure_dns:360: `@client = HTTPClient.new` is refused as an owner
-     built in a field: take the client from a named declaration.
+     store (declare them at the caller, pass them in).
+   * http_coding compiles but returns empty decoded bodies, including
+     the invalid gzip response that must report an error.
+   * secure_dns exceeds the 300-second gate timeout in the scope checker.
 5. Benches: build each, group the refusals by message, fix per group.
 
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
+
+* An unmarked one-call def with an untyped class default still loses
+  that default's roots at a cycle store. A body containing only
+  `@nodes << v` in `def node(a = -1, v = C.new)` passes; the marked
+  two-expression body is now refused. Track the default at the call.
 
 * SPEC 3.3: `v = w.rows`, `w.rows.clear`, `puts v.size` passes: a view
   taken through a getter stays live over the clear. Refuse it.

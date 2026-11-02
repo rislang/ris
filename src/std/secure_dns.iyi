@@ -357,7 +357,8 @@ pub class DnsOverHttps
       tls.alpn = ["h2", "http/1.1"]
     end
     @at = DnsOverHttps.bootstrap(@url, host, address)
-    @client = HTTPClient.new(idle: 1, tls: tls)
+    client = HTTPClient.new(idle: 1, tls: tls)
+    @client = client
   end
 
   # *address* when given, *host* when it is one, and otherwise *host*'s

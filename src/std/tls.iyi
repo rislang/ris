@@ -7285,6 +7285,10 @@ struct TlsEch
   # takes from the network (section 7), or of no type there is
   # (illegal_parameter).
   def self.read_outer(parts : TlsHelloParts, index : Int32) : {Int32, Int32, Int32, Array(UInt8), Int32, Int32} | TlsError
+    read_outer(parts, index, Array(UInt8).new(256))
+  end
+
+  def self.read_outer(parts : TlsHelloParts, index : Int32, enc : Array(UInt8)) : {Int32, Int32, Int32, Array(UInt8), Int32, Int32} | TlsError
     field = RisTlsReader.new(parts.data(index))
     type = field.u8
     return TlsError.new("an empty encrypted_client_hello", TlsAlert::DECODE_ERROR) if field.short?
@@ -7296,7 +7300,7 @@ struct TlsEch
     kdf = field.u16
     aead = field.u16
     id = field.u8
-    enc = field.bytes(field.u16)
+    enc.concat(field.bytes(field.u16))
     size = field.u16
     field.bytes(size)
     return TlsError.new("an encrypted_client_hello cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done? || size == 0

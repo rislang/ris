@@ -190,18 +190,33 @@ pub struct MIME
   # does not matter; empty when the type is unknown. The array is a fresh
   # copy the caller may change.
   def self.extensions(media_type : String) : Array(String)
-    result = Array(String).new
+    RisExtensions.new(media_type).values
+  end
+
+  @[OnTape]
+  struct RisExtensions
+    getter values : Array(String)
+
+    def initialize(media_type : String)
+      @values = Array(String).new(TABLE.size)
+      texts = String::Builder.new(TABLE.size * 16)
+      MIME.extensions_into(media_type, @values, texts)
+    end
+  end
+
+  def self.extensions_into(media_type : String, result : Array(String),
+                           texts : String::Builder) : Nil
     essence = essence_of(media_type)
-    return result unless essence
+    return unless essence
     TABLE.each do |entry|
       if essence == entry[1]
-        extension = ""
-        extension << "." << entry[0]
-        result << extension
+        at = texts.bytesize
+        texts << "." << entry[0]
+        result << texts.finish[at, texts.bytesize - at]
       end
     end
     result.sort_in_place { |a, b| compare(a, b) }
-    result
+    nil
   end
 
   # Whether a body of this type shrinks under gzip or deflate: text,
