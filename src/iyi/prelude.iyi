@@ -86,7 +86,7 @@ class IyiRuntimeLock
     spins = 0_i64
     since = 0_u64
     until ((seen = word.value.get) & 1_u64) == 0_u64 && ((seen & 0xFFFE_u64) == 0_u64 || spins != 0) && (spins < 0 ? word.value.compare_and_set(seen, seen &- 1_u64)[1] : (IyiAtomic.rmw(:or, pointerof(@@word), 1_u64, :sequentially_consistent, false) & 1_u64) == 0_u64)
-      {% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (!flag?(:gc_none) && ((flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))))) %}
+      {% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (!flag?(:gc_none) && ((flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))))) %}
         IyiThread.park_if_requested
         spins, since = IyiThread.lock_turn(word, seen, spins, since)
       {% end %}
@@ -1322,7 +1322,7 @@ require "./file"
 
 # Runtime storage is program-owned; collections allocate on their tapes.
 # There is no collector or alternate allocator in the ris prelude.
-{% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) %}
+{% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) %}
 # Runtime ABI storage has an explicit program lifetime. User containers
 # allocate on the caller's tape instead of entering this internal path.
 class IyiHeap
@@ -1349,6 +1349,7 @@ class IyiHeap
   end
 end
 
+{% if flag?(:linux) %}
 fun __iyi_mmap(length : UInt64) : Pointer(Void)
   result = uninitialized Int64
   {% if flag?(:x86_64) %}
@@ -1372,6 +1373,7 @@ fun __iyi_mmap(length : UInt64) : Pointer(Void)
   end
   Pointer(Void).new(result.to_u64)
 end
+{% end %}
 
 # Codegen emits calls to these by name for every allocation under the
 # __iyi_* ABI.
@@ -1434,7 +1436,7 @@ end
 # overlapping ones a byte at a time through `asm`, from the low end when the
 # destination is below the source and from the high end when it is above.
 # An overlap is only reachable through a pointer cast of the program's own.
-{% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (!flag?(:gc_none) && (flag?(:darwin) || flag?(:win32)))) %}
+{% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (!flag?(:gc_none) && (flag?(:darwin) || flag?(:win32)))) %}
   fun memcpy(destination : Void*, source : Void*, count : UInt64) : Void*
     to = destination.address
     from = source.address
@@ -2046,7 +2048,7 @@ class IyiOnce
   @@depth : Int32 = 0
 
   def self.run(flag : Pointer(UInt8), initializer : Void*) : Nil
-    {% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (!flag?(:gc_none) && ((flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))))) %}
+    {% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (!flag?(:gc_none) && ((flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))))) %}
       me = IyiScheduler.current.as(Void*).address
       if IyiAtomic.load(pointerof(@@holder), :acquire, false) != me
         until IyiAtomic.cmpxchg(pointerof(@@holder), 0_u64, me, :acquire, :monotonic)[1]
@@ -2062,7 +2064,7 @@ class IyiOnce
       pointerof(cell).as(Pointer(Proc(Nil))).value.call
       IyiAtomic.store(flag, 1_u8, :release, false)
     end
-    {% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (!flag?(:gc_none) && ((flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))))) %}
+    {% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (!flag?(:gc_none) && ((flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))))) %}
       @@depth = @@depth - 1
       IyiAtomic.store(pointerof(@@holder), 0_u64, :release, false) if @@depth == 0
     {% end %}
@@ -2107,7 +2109,7 @@ end
 # the registry is one global stack and a panic is a clean exit.
 
 # User defers and native runtime guards share one LIFO cleanup registry.
-{% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+{% if (!flag?(:gc_none) || flag?(:linux) || flag?(:darwin)) && !flag?(:gc_boehm) &&
       ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
       flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
   alias IyiDefer = IyiDeferNode | Pointer(RisPendingGuard)
@@ -2778,7 +2780,7 @@ class Program
         end
       end
       result
-    {% elsif (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+    {% elsif (!flag?(:gc_none) || flag?(:linux) || flag?(:darwin)) && !flag?(:gc_boehm) &&
              ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
               flag?(:darwin) || flag?(:wasm32)) %}
       arguments
@@ -3024,7 +3026,7 @@ fun main(argc : Int32, argv : UInt8**) : Int32
   {% if flag?(:win32) %}
     __iyi_win_install_fault_handler
   {% end %}
-  {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+  {% if (!flag?(:gc_none) || flag?(:linux) || flag?(:darwin)) && !flag?(:gc_boehm) &&
           ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
           flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
     # Own the main fiber's tape; the guard also runs on panic and exit.
@@ -3039,7 +3041,7 @@ fun main(argc : Int32, argv : UInt8**) : Int32
   status = IyiTestCases.verdict
   # Standard stream objects belong to program storage; flush before release.
   __iyi_flush_std
-  {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+  {% if (!flag?(:gc_none) || flag?(:linux) || flag?(:darwin)) && !flag?(:gc_boehm) &&
           ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
           flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
     RisRegion.release_program

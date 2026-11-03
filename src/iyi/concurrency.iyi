@@ -1033,7 +1033,7 @@ class IyiSchedulerState
       raise "io descriptor table is full" if capacity >= 1073741824_u64
       capacity *= 2_u64
     end
-    {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) &&
+    {% if (!flag?(:gc_none) || flag?(:linux) || flag?(:darwin)) && !flag?(:gc_boehm) &&
           ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
            flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
       bytes = RisRegion.size_mul(capacity, sizeof(IyiFiber?).to_u64)
@@ -1922,7 +1922,7 @@ class IyiScheduler
       maker.call(fiber) unless maker.is_a?(Nil)
     end
     state.current = fiber
-    {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) %}
+    {% if (!flag?(:gc_none) || flag?(:linux) || flag?(:darwin)) && !flag?(:gc_boehm) %}
       previous.tape = RisRegion.tape
       RisRegion.tape = fiber.tape
     {% end %}
@@ -1948,7 +1948,7 @@ class IyiScheduler
     reap_dying
     body = fiber.proc
     task = fiber.task_run
-    {% if (!flag?(:gc_none) || flag?(:linux)) && !flag?(:gc_boehm) %}
+    {% if (!flag?(:gc_none) || flag?(:linux) || flag?(:darwin)) && !flag?(:gc_boehm) %}
       # Each spawned body owns a tape, including its panic/exit cleanup.
       RisRegion.tape_scope(Tape::CAPACITY) do
         if task.is_a?(RisTaskSlot)

@@ -791,6 +791,13 @@ pub struct IyiSocket
       end
     {% end %}
 
+    {% if flag?(:darwin) %}
+      # No epoll: each attempt is a task of its own.
+      private def self.race(host : String, port : Int32, addresses : Array(IPAddress), timeout_ms : Int32) : IyiSocket | Cancelled | SocketError
+        race_tasks(host, port, addresses, timeout_ms)
+      end
+    {% end %}
+
     # Whether *addresses* is one, so there is no race; a port that is not
     # one is refused.
     def self.one_address?(port : Int32, addresses : Array(IPAddress)) : ::Bool

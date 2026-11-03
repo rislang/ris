@@ -543,7 +543,7 @@ module Iyi
     # wasm32's tape is heap blocks, as it has no mmap.
     def tape_platform? : Bool
       return false if has_flag?("gc_boehm")
-      return false if has_flag?("gc_none") && !has_flag?("linux")
+      return false if has_flag?("gc_none") && !has_flag?("linux") && !has_flag?("darwin")
       (has_flag?("linux") && (has_flag?("x86_64") || has_flag?("aarch64"))) ||
         has_flag?("darwin") || has_flag?("win32") || has_flag?("wasm32")
     end

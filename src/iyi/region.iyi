@@ -340,7 +340,7 @@ class RisRegion
   # reservation, returned to the side spares at the owning scope's end.
   def self.growing_state(bytes : UInt64, width : UInt64,
                          words : UInt64 = 5_u64) : Pointer(UInt64)
-    {% if flag?(:linux) %}
+    {% if flag?(:linux) || flag?(:darwin) %}
       capacity = side_capacity(width)
       payload = bytes &- 40_u64
       capacity = payload if payload > capacity
@@ -460,7 +460,7 @@ class RisRegion
       IyiHeap.write64(home &+ OFF_CURSOR, fresh)
       return start
     end
-    {% if flag?(:linux) %}
+    {% if flag?(:linux) || flag?(:darwin) %}
       if own != 0
         size_error("iyi: tape side reservation exhausted: ", bytes)
       end
@@ -478,7 +478,7 @@ class RisRegion
       @@moved = @@moved &+ 1_u64
       @@moved_bytes = @@moved_bytes &+ used
     {% end %}
-    {% unless flag?(:linux) %}
+    {% unless flag?(:linux) || flag?(:darwin) %}
       @@sides = @@sides &+ 1_u64
       @@side_bytes = @@side_bytes &+ used
     {% end %}
@@ -489,7 +489,7 @@ class RisRegion
     moved = own &+ DATA
     IyiHeap.write64(own &+ OFF_CURSOR,
       (moved &+ bytes &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64)
-    {% unless flag?(:linux) %}
+    {% unless flag?(:linux) || flag?(:darwin) %}
       LibTapeCopy.memcpy(Pointer(UInt8).new(moved),
         Pointer(UInt8).new(start), used, false)
     {% end %}
@@ -509,6 +509,18 @@ class RisRegion
     maximum = size_mul(MAX_COUNT, width)
     maximum < SIDE_RESERVE ? maximum : SIDE_RESERVE
   end
+
+  {% if flag?(:darwin) %}
+    # libSystem, as the prelude's darwin arm: raw syscalls are no stable ABI.
+    # MAP_NORESERVE has no effect there; pages still commit on touch.
+    def self.sys_mmap(length : UInt64, flags : Int64) : UInt64
+      LibRisMap.mmap(Pointer(Void).new(0_u64), length, 3, 0x1002, -1, 0_i64).address
+    end
+
+    def self.sys_mprotect(address : UInt64, length : UInt64, prot : Int64) : Int32
+      LibRisMap.mprotect(Pointer(Void).new(address), length, prot.to_i32)
+    end
+  {% end %}
 
   {% if flag?(:linux) %}
     # Raw syscalls, as the prelude's `__iyi_mmap`: a Linux program names
@@ -549,6 +561,9 @@ class RisRegion
       result < 0 ? -1 : 0
     end
 
+  {% end %}
+
+  {% if flag?(:linux) || flag?(:darwin) %}
     def self.acquire_side(capacity : UInt64) : UInt64
       usable = mapping_length(capacity)
       length = size_add(usable, GRAIN)
@@ -585,7 +600,7 @@ class RisRegion
     end
   {% end %}
 
-  {% if flag?(:linux) %}
+  {% if flag?(:linux) || flag?(:darwin) %}
     # A standard side reservation is carved from a shared arena instead
     # of its own mmap, and is never unmapped: release keeps every one on
     # the side spares. A scope that makes thousands of small arrays then
@@ -660,7 +675,7 @@ class RisRegion
     used = IyiHeap.read64(region &+ OFF_CURSOR) &- region
     IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
     length = IyiHeap.read64(region &+ OFF_MAP)
-    {% if flag?(:linux) %}
+    {% if flag?(:linux) || flag?(:darwin) %}
       # Reserved side mappings have a guard beyond OFF_LIMIT. Keep a
       # separate spare list so normal tape allocation cannot use it.
       if IyiHeap.read64(region &+ OFF_LIMIT) < region &+ length &&

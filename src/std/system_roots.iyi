@@ -239,7 +239,7 @@ end
     RESULT_TRUST_AS_ROOT =              2
     RESULT_DENY          =              3
 
-    def self.read(collected : SystemRoots) : Nil
+    def self.read(collected) : Nil
       anchors = Pointer(Void).new(0_u64)
       if LibSecurity.SecTrustCopyAnchorCertificates(pointerof(anchors)) == 0 && anchors.address != 0
         each_certificate(anchors) { |certificate| collected.add(bytes(certificate)) }
