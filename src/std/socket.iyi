@@ -783,18 +783,11 @@ pub struct IyiSocket
     # took 19.3 us through `localhost`, raced, and 16.2 us to 127.0.0.1,
     # not (best of eight rounds of 1,000, release). A name with one
     # address is not raced, and pays nothing.
-    {% if flag?(:linux) %}
+    {% if flag?(:linux) || flag?(:darwin) %}
       # A choice of two calls: the socket or the failure is made in the
       # caller's scope.
       private def self.race(host : String, port : Int32, addresses : Array(IPAddress), timeout_ms : Int32) : IyiSocket | Cancelled | SocketError
         IyiSocket.one_address?(port, addresses) ? attempt(host, port, addresses[0], timeout_ms) : race_polled(host, port, addresses, timeout_ms)
-      end
-    {% end %}
-
-    {% if flag?(:darwin) %}
-      # No epoll: each attempt is a task of its own.
-      private def self.race(host : String, port : Int32, addresses : Array(IPAddress), timeout_ms : Int32) : IyiSocket | Cancelled | SocketError
-        race_tasks(host, port, addresses, timeout_ms)
       end
     {% end %}
 
@@ -880,8 +873,8 @@ pub struct IyiSocket
       every_address_failed(host, port, addresses, outcomes, started, out_of_time ? timeout_ms : -1)
     end
 
-    {% if flag?(:linux) %}
-      # Linux's race: the caller alone, with every attempt's connect in
+    {% if flag?(:linux) || flag?(:darwin) %}
+      # The race on Linux, on darwin with kqueue: the caller alone, with every attempt's connect in
       # flight at once on a nonblocking socket of its own. The sockets are
       # the interests of an epoll instance of the race's, and the caller
       # parks on that instance's descriptor, readable when any handshake
@@ -895,7 +888,12 @@ pub struct IyiSocket
         count = addresses.size
         outcomes = Array(IyiSocket | Cancelled | SocketError | Nil).new(count, nil)
         flying = Array(Int32).new(count, -1)
-        poll = __iyi_conc_syscall6(IYI_SYS_EPOLL_CREATE1, 0x80000_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64).to_i32
+        {% if flag?(:darwin) %}
+          poll = LibC.kqueue
+          LibC.fcntl(poll, 2, 1) if poll >= 0 # F_SETFD, FD_CLOEXEC
+        {% else %}
+          poll = __iyi_conc_syscall6(IYI_SYS_EPOLL_CREATE1, 0x80000_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64).to_i32
+        {% end %}
         return SocketError.new("create a connect race's epoll", __sys_code(poll.to_i64)) if poll < 0
         winner = -1
         deadline = timeout_ms < 0 ? -1_i64 : Resolver.now_ms + timeout_ms.to_i64
@@ -983,13 +981,24 @@ pub struct IyiSocket
           __sys_close(fd)
           return SocketError.new("connect", code)
         end
-        # EPOLLOUT (4); EPOLLERR and EPOLLHUP come unasked. The data is
-        # the attempt's index.
-        storage = uninitialized UInt64[2]
-        event = pointerof(storage).as(Pointer(UInt8))
-        event.as(Pointer(UInt32)).value = 4_u32
-        Pointer(UInt64).new(event.address + IYI_POLL_DATA_OFFSET).value = index.to_u64
-        added = __iyi_conc_syscall6(IYI_SYS_EPOLL_CTL, poll.to_i64, 1_i64, fd.to_i64, event.address.to_i64, 0_i64, 0_i64)
+        {% if flag?(:darwin) %}
+          # EVFILT_WRITE (-2) with EV_ADD | EV_ONESHOT: one kevent, off the
+          # queue once told. udata, its last word, is the attempt's index.
+          storage = uninitialized UInt64[4]
+          storage[0] = fd.to_u64
+          storage[1] = 0x0011FFFE_u64
+          storage[2] = 0_u64
+          storage[3] = index.to_u64
+          added = LibC.kevent(poll, pointerof(storage).as(Void*), 1, Pointer(Void).new(0_u64), 0, Pointer(Void).new(0_u64)).to_i64
+        {% else %}
+          # EPOLLOUT (4); EPOLLERR and EPOLLHUP come unasked. The data is
+          # the attempt's index.
+          storage = uninitialized UInt64[2]
+          event = pointerof(storage).as(Pointer(UInt8))
+          event.as(Pointer(UInt32)).value = 4_u32
+          Pointer(UInt64).new(event.address + IYI_POLL_DATA_OFFSET).value = index.to_u64
+          added = __iyi_conc_syscall6(IYI_SYS_EPOLL_CTL, poll.to_i64, 1_i64, fd.to_i64, event.address.to_i64, 0_i64, 0_i64)
+        {% end %}
         if added < 0
           __sys_close(fd)
           return SocketError.new("watch the connect", __sys_code(added))
@@ -1001,24 +1010,41 @@ pub struct IyiSocket
       # outcome in *outcomes*: a connected socket, or the failure SO_ERROR
       # names, its socket closed. How many ended.
       private def self.handshakes_ended(host : String, port : Int32, addresses : Array(IPAddress), poll : Int32, flying : Array(Int32), outcomes : Array(IyiSocket | Cancelled | SocketError | Nil)) : Int32
-        # Sixteen events of at most 16 bytes (12, packed, on x86_64).
-        storage = uninitialized UInt64[32]
-        events = pointerof(storage).as(Pointer(UInt8))
-        stride = IYI_POLL_DATA_OFFSET == 4_u64 ? 12 : 16
-        got = __iyi_conc_syscall6(IYI_SYS_EPOLL_PWAIT, poll.to_i64, events.address.to_i64, 16_i64, 0_i64, 0_i64, 8_i64)
+        {% if flag?(:darwin) %}
+          # Sixteen kevents of 32 bytes; a zero timespec, so no wait.
+          storage = uninitialized UInt64[64]
+          events = pointerof(storage).as(Pointer(UInt8))
+          stride = 32
+          nothing = uninitialized UInt64[2]
+          nothing[0] = 0_u64
+          nothing[1] = 0_u64
+          got = LibC.kevent(poll, Pointer(Void).new(0_u64), 0, events.as(Void*), 16, pointerof(nothing).as(Void*)).to_i64
+        {% else %}
+          # Sixteen events of at most 16 bytes (12, packed, on x86_64).
+          storage = uninitialized UInt64[32]
+          events = pointerof(storage).as(Pointer(UInt8))
+          stride = IYI_POLL_DATA_OFFSET == 4_u64 ? 12 : 16
+          got = __iyi_conc_syscall6(IYI_SYS_EPOLL_PWAIT, poll.to_i64, events.address.to_i64, 16_i64, 0_i64, 0_i64, 8_i64)
+        {% end %}
         return 0 if got <= 0
         ended = 0
         at = 0
         while at < got
           entry = events + at * stride
-          index = Pointer(UInt64).new(entry.address + IYI_POLL_DATA_OFFSET).value.to_i32
+          {% if flag?(:darwin) %}
+            index = Pointer(UInt64).new(entry.address + 24_u64).value.to_i32
+          {% else %}
+            index = Pointer(UInt64).new(entry.address + IYI_POLL_DATA_OFFSET).value.to_i32
+          {% end %}
           at = at + 1
           next if index < 0 || index >= flying.size
           fd = flying[index]
           next if fd < 0
           flying[index] = -1
           ended = ended + 1
-          __iyi_conc_syscall6(IYI_SYS_EPOLL_CTL, poll.to_i64, 2_i64, fd.to_i64, 0_i64, 0_i64, 0_i64)
+          {% unless flag?(:darwin) %}
+            __iyi_conc_syscall6(IYI_SYS_EPOLL_CTL, poll.to_i64, 2_i64, fd.to_i64, 0_i64, 0_i64, 0_i64)
+          {% end %}
           address = addresses[index]
           family = address.is_a?(IPv4Address) ? AF_INET : AF_INET6
           if (code = __sys_sock_error(fd)) == 0
@@ -2133,6 +2159,8 @@ pub struct IyiSocket
       fun getsockopt(fd : Int32, level : Int32, optname : Int32, optval : Void*, optlen : UInt32*) : Int32
       fun fcntl(fd : Int32, cmd : Int32, ...) : Int32
       fun poll(fds : Void*, nfds : UInt32, timeout : Int32) : Int32
+      fun kqueue : Int32
+      fun kevent(kq : Int32, changelist : Void*, nchanges : Int32, eventlist : Void*, nevents : Int32, timeout : Void*) : Int32
       fun shutdown(fd : Int32, how : Int32) : Int32
       fun error_location = __error : Int32*
     end

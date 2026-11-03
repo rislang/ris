@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
       - name: Crystal, coreutils and LLVM 23
         run: |
-          brew install crystal coreutils pkgconf
+          brew install bash crystal coreutils pkgconf
           echo "$(brew --prefix)/opt/coreutils/libexec/gnubin" >> "$GITHUB_PATH"
           echo "LLVM_CONFIG=$(brew --prefix llvm)/bin/llvm-config" >> "$GITHUB_ENV"
       - name: Build ris
@@ -49,6 +49,7 @@ jobs:
       - name: test/ris/check.sh
         if: matrix.shard != 'smoke'
         run: |
+          export PATH="$(brew --prefix)/bin:$PATH"
           ulimit -n 10240
           ulimit -s 65520
           bash test/ris/check.sh 2>&1 | tee check.log | grep -E '^(FAILED|FAIL|PASS)|checks' || true
@@ -57,6 +58,8 @@ jobs:
         env:
           RIS_CHECK_SHARD: ${{ matrix.shard }}
           RIS_CHECK_TIMEOUT: "300"
+          # These read /proc or call taskset: Linux's, not the behavior.
+          RIS_CHECK_SKIP: 'scope_frees\.ri|file_copy_to\.ri|fibers/spares\.ri|test/ris/system\.ri|tls_session_tickets\.ri'
       - uses: actions/upload-artifact@v5
         if: always() && matrix.shard != 'smoke'
         with:

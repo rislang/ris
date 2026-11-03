@@ -4,16 +4,13 @@
   # 16 KiB. MADV_FREE lets the kernel take them back; they read as zero or
   # as they were, and a tape only reads what it has written since.
   lib LibRisMap
-    fun mmap(addr : Void*, length : UInt64, prot : Int32, flags : Int32,
-             fd : Int32, offset : Int64) : Void*
     fun munmap(addr : Void*, length : UInt64) : Int32
-    fun mprotect(addr : Void*, length : UInt64, prot : Int32) : Int32
     fun madvise(addr : Void*, length : UInt64, advice : Int32) : Int32
   end
 
   fun __iyi_mmap(length : UInt64) : Pointer(Void)
     # PROT_READ|PROT_WRITE = 3, MAP_PRIVATE|MAP_ANON = 0x1002.
-    result = LibRisMap.mmap(Pointer(Void).new(0_u64), length, 3, 0x1002, -1, 0_i64)
+    result = LibC.mmap(Pointer(Void).new(0_u64), length, 3, 0x1002, -1, 0_i64)
     RisHeap.mapping_failure(length) if result.address == 0xFFFFFFFFFFFFFFFF_u64
     result
   end

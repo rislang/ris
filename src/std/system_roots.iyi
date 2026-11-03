@@ -311,6 +311,7 @@ end
       copied
     end
 
+    @[TapeUnsafe("CFStringCreateWithCString copies the bytes during the call")]
     private def self.string(text : String) : Void*
       LibCoreFoundation.CFStringCreateWithCString(Pointer(Void).new(0_u64), text.to_unsafe, UTF8)
     end

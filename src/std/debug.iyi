@@ -1793,6 +1793,7 @@ struct DwarfResolver
     end
   {% end %}
 
+  @[TapeUnsafe("open(2) reads the DWARF path during the call")]
   def self.resolve_frames(frames : Pointer(Void*), count : Int32) : Nil
     {% if flag?(:darwin) %}
       slide = LibC._dyld_get_image_vmaddr_slide(0).to_u64

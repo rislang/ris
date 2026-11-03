@@ -514,11 +514,11 @@ class RisRegion
     # libSystem, as the prelude's darwin arm: raw syscalls are no stable ABI.
     # MAP_NORESERVE has no effect there; pages still commit on touch.
     def self.sys_mmap(length : UInt64, flags : Int64) : UInt64
-      LibRisMap.mmap(Pointer(Void).new(0_u64), length, 3, 0x1002, -1, 0_i64).address
+      LibC.mmap(Pointer(Void).new(0_u64), length, 3, 0x1002, -1, 0_i64).address
     end
 
     def self.sys_mprotect(address : UInt64, length : UInt64, prot : Int64) : Int32
-      LibRisMap.mprotect(Pointer(Void).new(address), length, prot.to_i32)
+      LibC.mprotect(Pointer(Void).new(address), length, prot.to_i32)
     end
   {% end %}
 

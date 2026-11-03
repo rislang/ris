@@ -334,6 +334,7 @@
       fun pthread_create(thread : UInt64*, attributes : Void*, start : Void*, argument : Void*) : Int32
       fun pthread_join(thread : Void*, value : Void*) : Int32
       fun pthread_kill(thread : Void*, signal : Int32) : Int32
+      fun pthread_self : Void*
       fun sigaction(signal : Int32, action : Void*, previous : Void*) : Int32
       fun pipe(fds : Int32*) : Int32
       fun read(fd : Int32, buffer : Void*, count : UInt64) : Int64
