@@ -1,8 +1,9 @@
 # ris: the release tarballs, built with a static LLVM so they need no
 # Crystal and no LLVM where they land. ris.yml holds the gates.
 #
-# Every run builds and proves the tarballs; a `ris-v*` tag also publishes
-# them, with SHA256SUMS, as the release `install_ris.sh` installs from.
+# Every run builds and proves the tarballs for the two targets ris programs
+# have (SPEC 7.1); a `ris-v*` tag also publishes them, with SHA256SUMS, as the
+# release `install_ris.sh` installs from.
 name: ris release
 
 on:
@@ -10,23 +11,47 @@ on:
     tags: ["ris-v*"]
   workflow_dispatch:
 
+# git refuses a workspace another user owns; a container job's is one.
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: safe.directory
+  GIT_CONFIG_VALUE_0: "*"
+
 permissions: {}
 
 jobs:
   linux:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.target.runner }}
+    timeout-minutes: 240
     container:
       image: crystallang/crystal:1.21.0-build
-    name: "The ris tarball, linux x86-64"
+    name: "The ris tarball, linux ${{ matrix.target.arch }}"
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
+      # install_ris.sh asks for ris-<tag's version>-<target>.tar.gz.
+      - name: A tag names the version the compiler carries
+        if: startsWith(github.ref, 'refs/tags/ris-v')
+        run: |
+          version=$(sed -n 's/^ *RIS_VERSION = "\(.*\)"/\1/p' src/compiler/iyi/config.cr)
+          if [ "${GITHUB_REF_NAME#ris-v}" != "$version" ]; then
+            echo "the tag is $GITHUB_REF_NAME, the compiler's RIS_VERSION is $version" >&2
+            exit 1
+          fi
+
       - name: Restore the static LLVM
         id: llvm-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: /tmp/llvm-static
           key: llvm-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-static-llvm.sh') }}
@@ -35,6 +60,13 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y -qq cmake curl xz-utils > /dev/null
           bash scripts/build-static-llvm.sh /tmp/llvm-static
+      # Saved here, not at the job's end: a later failure keeps this hour.
+      - name: Save the static LLVM
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/llvm-static
+          key: ${{ steps.llvm-cache.outputs.cache-primary-key }}
 
       - name: Build ris and package it
         run: make ris-tarball LLVM_CONFIG=/tmp/llvm-static/bin/llvm-config
@@ -44,23 +76,31 @@ jobs:
 
       - uses: actions/upload-artifact@v5
         with:
-          name: ris-linux-x86_64
+          name: ris-linux-${{ matrix.target.arch }}
           path: dist/
           if-no-files-found: error
           retention-days: 7
 
   clean-room:
     needs: linux
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.target.runner }}
     timeout-minutes: 20
-    name: "install_ris.sh, on a machine with only gcc"
+    name: "install_ris.sh, on ${{ matrix.target.arch }} with only gcc"
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/download-artifact@v5
         with:
-          name: ris-linux-x86_64
+          name: ris-linux-${{ matrix.target.arch }}
           path: dist/
 
       - name: The tarball names nothing it does not carry
@@ -84,54 +124,9 @@ jobs:
             ris run "$HOME/.local/lib/ris/share/ris/samples/hello.ri"
           '
 
-  darwin:
-    runs-on: macos-14
-    timeout-minutes: 180
-    name: "The ris tarball, darwin arm64"
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Install the bootstrap toolchain
-        run: |
-          brew install crystal coreutils pkgconf
-          echo "$(brew --prefix)/opt/coreutils/libexec/gnubin" >> "$GITHUB_PATH"
-
-      - name: Restore the static LLVM
-        id: llvm-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/llvm-static
-          key: llvm-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-static-llvm.sh') }}
-      - name: Build the static LLVM (cache miss)
-        if: steps.llvm-cache.outputs.cache-hit != 'true'
-        run: bash scripts/build-static-llvm.sh "$HOME/llvm-static"
-
-      - name: Build ris and package it
-        run: make ris-tarball LLVM_CONFIG="$HOME/llvm-static/bin/llvm-config"
-
-      - name: install_ris.sh, then hello world
-        run: |
-          mkdir -p dist && cp .build/ris-*-darwin-*.tar.gz dist/
-          (cd dist && shasum -a 256 *.tar.gz > SHA256SUMS)
-          RIS_RELEASE_URL="file://$PWD/dist" RIS_PREFIX="$RUNNER_TEMP/r" \
-            sh install_ris.sh
-          cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/r/bin/ris" init hello "$RUNNER_TEMP/hello"
-          cd "$RUNNER_TEMP/hello" && "$RUNNER_TEMP/r/bin/ris" run hello.ri
-          rm "$GITHUB_WORKSPACE/dist/SHA256SUMS"
-
-      - uses: actions/upload-artifact@v5
-        with:
-          name: ris-darwin-arm64
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
-
   release:
     if: startsWith(github.ref, 'refs/tags/ris-v')
-    needs: [clean-room, darwin]
+    needs: clean-room
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -140,11 +135,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v5
         with:
-          name: ris-linux-x86_64
-          path: dist/
-      - uses: actions/download-artifact@v5
-        with:
-          name: ris-darwin-arm64
+          pattern: ris-linux-*
+          merge-multiple: true
           path: dist/
       - name: Create the release from the proven tarballs
         env:

@@ -27,9 +27,9 @@ done
 
 case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) target=linux-x86_64 ;;
-  Darwin-arm64) target=darwin-arm64 ;;
-  *) die "no release for $(uname -s) $(uname -m), only linux-x86_64 and" \
-       "darwin-arm64; $from_source" ;;
+  Linux-aarch64) target=linux-aarch64 ;;
+  *) die "ris runs only on Linux x86_64 and aarch64," \
+       "not $(uname -s) $(uname -m) (SPEC 7.1)" ;;
 esac
 
 # The latest release, by GitHub's redirect: no token, no rate limit.

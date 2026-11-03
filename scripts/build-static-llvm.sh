@@ -31,7 +31,8 @@
 set -euo pipefail
 
 prefix=${1:?usage: build-static-llvm.sh <install-prefix>}
-version=20.1.2
+# The LLVM CI tests with: 21 and 22 miscompile (LLVM.md).
+version=23.1.3
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/llvm-build.XXXXXX")
 trap 'rm -rf "$work"' EXIT
