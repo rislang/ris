@@ -1,0 +1,17 @@
+# Each `until` round frees what it made: 200000 rounds of `split` reuse
+# one mapping, as `while` rounds do (SPEC 1.1). check.sh reads the
+# RIS_TAPE_STATS line; the leaking form made a mapping a round.
+module test/ris/until_round
+
+def rounds(n : Int32) : Int32
+  total = 0
+  i = 0
+  until i == n
+    words = "a b c d e f g h".split(" ")
+    total += words.size
+    i += 1
+  end
+  total
+end
+
+tape { puts rounds(200000) }

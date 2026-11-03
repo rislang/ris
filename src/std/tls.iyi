@@ -3145,7 +3145,9 @@ pub class TlsClient < TlsConnection
     # Section 4.3.2: the context is for authentication after the handshake,
     # which this client does not offer; in the handshake it is empty.
     return tls_error("a CertificateRequest with a request context in the handshake", TlsAlert::ILLEGAL_PARAMETER) unless context.empty?
-    schemes = nil
+    # The schemes are read in a round: they go into their field there, as
+    # the round's own Array ends with it (SPEC 1.1, 3.6).
+    found = false
     seen = [] of Int32
     until list.done?
       type = list.u16
@@ -3157,14 +3159,15 @@ pub class TlsClient < TlsConnection
         field = RisTlsReader.new(data)
         schemes = TlsBytes.u16_list(field.bytes(field.u16))
         return tls_error("a CertificateRequest's signature_algorithms cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done? || schemes.nil?
+        @requested_schemes.clear
+        @requested_schemes.concat(schemes)
+        found = true
       end
     end
-    return tls_error("a CertificateRequest with no signature_algorithms", TlsAlert::MISSING_EXTENSION) unless schemes
+    return tls_error("a CertificateRequest with no signature_algorithms", TlsAlert::MISSING_EXTENSION) unless found
     @certificate_request_bytes.clear
     @certificate_request_bytes.concat(context)
     @certificate_request = @certificate_request_bytes
-    @requested_schemes.clear
-    @requested_schemes.concat(schemes)
     nil
   end
 
@@ -5494,6 +5497,9 @@ class RisTlsOfferStorage
   getter schemes : Array(Int32)
   getter versions : Array(Int32)
   getter protocols : Array(String)
+  # key_share's groups, read in an extension round: each share's bytes
+  # go into its group's Array there.
+  getter shares : Hash(Int32, Bool)
 
   def initialize(size : Int32)
     random = Array(UInt8).new(size)
@@ -5533,6 +5539,7 @@ class RisTlsOfferStorage
     @schemes = schemes
     @versions = versions
     @protocols = protocols
+    @shares = {} of Int32 => Bool
   end
 
   def text(bytes : Array::View(UInt8)) : String
@@ -6391,13 +6398,20 @@ pub class TlsServer < TlsConnection
       when 51
         entries = RisTlsReader.new(field.view(field.u16))
         return tls_error("key_share cut short", TlsAlert::DECODE_ERROR) if field.short? || !field.done?
-        found = {} of Int32 => Array::View(UInt8)
+        found = storage.shares
+        found.clear
         until entries.done?
           group = entries.u16
           key = entries.view(entries.u16)
           return tls_error("key_share cut short", TlsAlert::DECODE_ERROR) if entries.short?
           return tls_error("two key shares for group #{group}", TlsAlert::ILLEGAL_PARAMETER) if found.has_key?(group)
-          found[group] = key
+          found[group] = true
+          case group
+          when GROUP_X25519MLKEM768 then storage.hybrid.concat(key)
+          when GROUP_X25519         then storage.x25519.concat(key)
+          when GROUP_SECP256R1      then storage.p256.concat(key)
+          when GROUP_SECP384R1      then storage.p384.concat(key)
+          end
         end
         shares = found
       when 11
@@ -6494,21 +6508,19 @@ pub class TlsServer < TlsConnection
     p384 = nil
     offered = {} of Int32 => Bool
     groups.each { |g| offered[g] = true }
-    shares.each do |group, key|
+    shares.each_key do |group|
       return tls_error("a key share for group #{group}, which the client does not support", TlsAlert::ILLEGAL_PARAMETER) unless offered.has_key?(group)
       if group == GROUP_X25519MLKEM768
-        return tls_error("an X25519MLKEM768 share of #{key.size} bytes, not #{HYBRID_CLIENT_SHARE}", TlsAlert::ILLEGAL_PARAMETER) unless key.size == HYBRID_CLIENT_SHARE
-        storage.hybrid.concat(key)
+        size = storage.hybrid.size
+        return tls_error("an X25519MLKEM768 share of #{size} bytes, not #{HYBRID_CLIENT_SHARE}", TlsAlert::ILLEGAL_PARAMETER) unless size == HYBRID_CLIENT_SHARE
         hybrid = storage.hybrid
       elsif group == GROUP_X25519
-        return tls_error("an X25519 share of #{key.size} bytes", TlsAlert::ILLEGAL_PARAMETER) unless key.size == 32
-        storage.x25519.concat(key)
+        size = storage.x25519.size
+        return tls_error("an X25519 share of #{size} bytes", TlsAlert::ILLEGAL_PARAMETER) unless size == 32
         x25519 = storage.x25519
       elsif group == GROUP_SECP256R1
-        storage.p256.concat(key)
         p256 = storage.p256
       elsif group == GROUP_SECP384R1
-        storage.p384.concat(key)
         p384 = storage.p384
       end
     end

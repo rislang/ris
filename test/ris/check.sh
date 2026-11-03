@@ -180,6 +180,8 @@ expect yield_element_store 'cannot store data made in this block'
 # split's Array is made in the round that calls it (SPEC 1.1, 3.6).
 expect split_round_kept 'Copy it with .copy_to(owner)'
 expect split_yield_kept 'Copy it with .copy_to(owner)'
+# An `until` round is checked as a `while` round (SPEC 1.1, 3.6).
+expect until_round_kept 'cannot store data made in this loop round'
 expect while_union_class_store 'cannot store data made in this loop round'
 expect while_union_struct_store 'cannot store data made in this loop round'
 expect union_class_return 'cannot return a value made in this def'
@@ -1085,6 +1087,15 @@ else
 fi
 out=$("$RIS" run test/ris/ffi_marked.ri 2>&1)
 if [ "$out" = $'4\n111' ]; then echo "runs     ffi_marked"; else echo "FAILED   ffi_marked: $out"; status=1; fi
+
+# An `until` round frees its scratch: its rounds reuse one mapping.
+out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/until_round.ri 2>&1)
+mappings=$(sed -n 's/^ris tape: .* \([0-9]*\) mappings made.*/\1/p' <<<"$out")
+if grep -qx 1600000 <<<"$out" && [ -n "$mappings" ] && [ "$mappings" -lt 100 ]; then
+  echo "runs     until_round ($mappings mappings)"
+else
+  echo "FAILED   until_round: $out"; status=1
+fi
 
 # The safe form: a round copies what split made onto the kept owner.
 out=$("$RIS" run test/ris/split_kept.ri 2>&1)

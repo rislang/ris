@@ -1444,10 +1444,11 @@ module Iyi
       node
     end
 
+    # An `until` is a `while` of the negated condition, lowered and marked
+    # as one: its rounds free their scratch and are checked (SPEC 1.1).
     def transform(node : Until)
-      node = super
       not_exp = Not.new(node.cond).at(node.cond)
-      While.new(not_exp, node.body).at(node)
+      transform(While.new(not_exp, node.body).at(node))
     end
 
     # Constants retain static literals after parentheses are normalized.

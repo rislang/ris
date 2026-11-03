@@ -78,6 +78,21 @@ private struct RisMulFrame
   property offset : Int32
 
   def initialize(a : Array::View(UInt64), b : Array::View(UInt64))
+    @a = a
+    @b = b
+    @z0 = a
+    @z2 = a
+    @res = a
+    @stage = 0
+    @k = 0
+    @offset = 0
+    reset(a, b)
+  end
+
+  # Refills this frame for the factors *a* and *b*, trimmed of their high
+  # zero limbs: mul_karatsuba's loop reuses its stack's frames, since one
+  # made in a round would end with the round (SPEC 1.1, 3.6).
+  def reset(a : Array::View(UInt64), b : Array::View(UInt64)) : Nil
     na = a.size
     nb = b.size
     while na > 0 && a[na - 1] == 0_u64
@@ -793,20 +808,26 @@ pub struct BigInt
           frame.stage = 10
           frames[depth - 1] = frame
           count = frame.a.size < frame.b.size ? frame.a.size : frame.b.size
-          frames[depth] = RisMulFrame.new(frame.a, frame.b[0, count])
+          pushed = frames[depth]
+          pushed.reset(frame.a, frame.b[0, count])
+          frames[depth] = pushed
           depth += 1
         else
           frame.stage = 1
           frames[depth - 1] = frame
-          frames[depth] = RisMulFrame.new(x[0, frame.k], y[0, frame.k])
+          pushed = frames[depth]
+          pushed.reset(x[0, frame.k], y[0, frame.k])
+          frames[depth] = pushed
           depth += 1
         end
       elsif frame.stage == 1
         frame.z0 = result
         frame.stage = 2
         frames[depth - 1] = frame
-        frames[depth] = RisMulFrame.new(x[frame.k, x.size - frame.k],
+        pushed = frames[depth]
+        pushed.reset(x[frame.k, x.size - frame.k],
           y[frame.k, y.size - frame.k])
+        frames[depth] = pushed
         depth += 1
       elsif frame.stage == 2
         frame.z2 = result
@@ -814,7 +835,9 @@ pub struct BigInt
         frames[depth - 1] = frame
         xsum = scratch.keep_limbs(add_abs_limbs(x[0, frame.k], x[frame.k, x.size - frame.k]))
         ysum = scratch.keep_limbs(add_abs_limbs(y[0, frame.k], y[frame.k, y.size - frame.k]))
-        frames[depth] = RisMulFrame.new(xsum.view, ysum.view)
+        pushed = frames[depth]
+        pushed.reset(xsum.view, ysum.view)
+        frames[depth] = pushed
         depth += 1
       elsif frame.stage == 3
         middle = sub_abs_limbs(sub_abs_limbs(result, frame.z0), frame.z2)
@@ -850,7 +873,9 @@ pub struct BigInt
           frames[depth - 1] = frame
           left = y.size - frame.offset
           count = left < x.size ? left : x.size
-          frames[depth] = RisMulFrame.new(x, y[frame.offset, count])
+          pushed = frames[depth]
+          pushed.reset(x, y[frame.offset, count])
+          frames[depth] = pushed
           depth += 1
         end
       end

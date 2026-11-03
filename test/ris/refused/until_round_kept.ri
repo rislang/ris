@@ -1,0 +1,16 @@
+# An `until` round frees its scratch as a `while` round does (SPEC 1.1,
+# 3.6): an Array made in it and kept past it is refused.
+module test/ris/refused/until_round_kept
+
+def keep_rows(n : Int32) : Int32
+  kept = [] of Array(Int32)
+  i = 0
+  until i == n
+    row = [i, i + 1]
+    kept << row
+    i += 1
+  end
+  kept.size
+end
+
+tape { puts keep_rows(3) }
