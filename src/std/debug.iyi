@@ -1793,7 +1793,13 @@ struct DwarfResolver
     end
   {% end %}
 
-  @[TapeUnsafe("open(2) reads the DWARF path during the call")]
+  {% if flag?(:darwin) %}
+    @[TapeUnsafe("open(2) reads the DWARF path during the call")]
+    def self.open_dwarf(path : String) : Int32
+      LibC.open(path.to_unsafe, 0)
+    end
+  {% end %}
+
   def self.resolve_frames(frames : Pointer(Void*), count : Int32) : Nil
     {% if flag?(:darwin) %}
       slide = LibC._dyld_get_image_vmaddr_slide(0).to_u64
@@ -1810,7 +1816,7 @@ struct DwarfResolver
 
       # Companion DWARF file paths
       dwarf_path = exe_path + ".dwarf"
-      fd = LibC.open(dwarf_path.to_unsafe, 0)
+      fd = open_dwarf(dwarf_path)
       if fd < 0
         last_slash = -1
         si = 0
@@ -1820,7 +1826,7 @@ struct DwarfResolver
         end
         base_name = last_slash >= 0 ? exe_path[last_slash + 1, len - (last_slash + 1)] : exe_path
         dwarf_path = exe_path + ".dSYM/Contents/Resources/DWARF/" + base_name
-        fd = LibC.open(dwarf_path.to_unsafe, 0)
+        fd = open_dwarf(dwarf_path)
       end
 
       debug_line_ptr = Pointer(UInt8).new(0_u64)
