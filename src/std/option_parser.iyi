@@ -169,6 +169,7 @@ pub class OptionParser
     RisFlag.new(index)
   end
 
+  # Refused at compile time: a ris program reads its flags after parse.
   def on(flag : String, description : String, &block : String -> Nil) : Nil
     {% raise "a ris program reads its flags after parse:
   flag = parser.on(\"-e EXT\", \"ending\")
@@ -177,6 +178,7 @@ pub class OptionParser
   found[flag]?" %}
   end
 
+  # Refused at compile time: a ris program reads its flags after parse.
   def on(short : String, long : String, description : String, &block : String -> Nil) : Nil
     {% raise "a ris program reads its flags after parse:
   flag = parser.on(\"-e EXT\", \"ending\")
@@ -185,10 +187,14 @@ pub class OptionParser
   found[flag]?" %}
   end
 
+  # Refused at compile time: call `record_errors`, then read
+  # `found.invalid` and `found.missing` after parse.
   def invalid_option(&block : String -> Nil) : Nil
     {% raise "a ris program records bad flags: parser.record_errors, then read found.invalid and found.missing after parse" %}
   end
 
+  # Refused at compile time: call `record_errors`, then read
+  # `found.invalid` and `found.missing` after parse.
   def missing_option(&block : String -> Nil) : Nil
     {% raise "a ris program records bad flags: parser.record_errors, then read found.invalid and found.missing after parse" %}
   end

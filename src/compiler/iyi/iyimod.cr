@@ -2767,7 +2767,8 @@ module Iyi::IyiMod
       surface_type io, nested, inner, "#{path}::#{nested.name}", constants, docs
     end
     declaration.methods.each do |method|
-      next if method.visibility == "private"
+      # ris: a caller reaches neither; `protected` was listed as its API.
+      next if method.visibility == "private" || method.visibility == "protected"
       write_doc io, method.doc, inner if docs
       io << inner << render_signature(method) << '\n'
     end

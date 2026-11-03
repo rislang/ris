@@ -8,6 +8,10 @@ back.
 
 ## To take to iyi
 
+* `iyi doc MODULE` skips `protected` defs, as the prelude listing does
+  (`IyiMod.surface_type`): a caller cannot call them. Gate: check.sh's
+  option_parser doc.
+
 * Explain a bare `out` in an argument as FFI syntax and suggest `output`
   for a local name; point at `out`, not the following token. Gate:
   compiler parser specs for iyi and ris source.

@@ -2708,6 +2708,9 @@ accent é true invalid -ö
 optional color [] v true rest 0
 optional color [always] z [9]
 optional color [] z []
+optional l [] v true color []
+optional l [x] rest 0
+pair value ada [bo]
 dashes v true rest -v,--color
 row -v true []
 row -e x true [x]
@@ -2746,6 +2749,14 @@ else
   echo "FAILED   option_parser_panics: $out"; status=1
 fi
 rm -f "$exe"
+# ris doc lists the readers, not RisOptions' protected accessor.
+out=$("$RIS" doc std/option_parser 2>&1)
+if grep -qF 'def has?(flag : RisFlag) : Bool' <<<"$out" &&
+    ! grep -qF 'def given' <<<"$out"; then
+  echo "runs     option_parser doc (no protected def)"
+else
+  echo "FAILED   option_parser doc: $out"; status=1
+fi
 # The removed block forms: refused at the caller's line, naming the form.
 for pair in 'block|reads its flags after parse|7' \
     'pair_block|reads its flags after parse|7' \

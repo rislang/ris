@@ -139,7 +139,8 @@ storing through a `RisOptions` def taking the value is refused (p13a).
 a type rather than a caller's Array so that one argument carries the
 values and the error lists, and reads are `found[flag]?`, not
 `parser.value(found, flag)`. `parse` reaches its fields through a
-`protected` accessor, so `ris doc` lists only the readers.
+`protected` accessor, so `ris doc` lists only the readers
+(`IyiMod.surface_type` skips protected defs; check.sh checks it).
 
 Without `record_errors`, `parse` panics on a bad command line with one
 of today's library messages: `unknown flag: --x`, `flag --x takes no
@@ -274,6 +275,7 @@ parser), what goes is the callbacks; an agent writing Crystal's
                  # a separator is {text, "", ""} with no dash
          @banner : String?
          @record : Bool
+         @count : Int32    # the next index; a separator takes none
          def on(flag, description) : RisFlag
          def on(short, long, description) : RisFlag
          def record_errors : Nil
@@ -289,16 +291,16 @@ parser), what goes is the callbacks; an agent writing Crystal's
    `protected` reaches `given` from `OptionParser` and hides it from a
    program (p17a, p17b). The help text stays byte-identical to today's:
    banner default `options:`, lines `  FLAG  DESC` and
-   `  SHORT, LONG  DESC`. The run-time messages stay as today, prefixed
-   `option:`: `not a flag: -`, `-v and --verbose differ on the value:
-   …`, and the three parse panics; a dashless name gets
+   `  SHORT, LONG  DESC`. The run-time messages stay as today: at `on`,
+   prefixed `option:`, `not a flag: -` and `-v and --verbose differ on
+   the value: …`; the three parse panics unprefixed; a dashless name gets
    `option: not a flag: deploy; list commands with separator and
    dispatch on rest[0]`. Rewrite the header comment (lines 1-33): the
    example in Change; pass `Program.args`; `found` must not outlive
    `args`; `parse` drops what `found` held; `invalid` / `missing` are
    read-only; a `RisFlag` belongs to the parser that made it.
 2. Stubs, exact text, one per block-taking def (both `on` forms share
-   it):
+   it), each with a doc comment saying it is refused, for `ris doc`:
    * `on`: `a ris program reads its flags after parse: flag =
      parser.on("-e EXT", "ending"); found = RisOptions.new;
      parser.parse(Program.args, found); found[flag]?` (the four
@@ -306,7 +308,8 @@ parser), what goes is the callbacks; an agent writing Crystal's
    * `invalid_option`, `missing_option`: `a ris program records bad
      flags: parser.record_errors, then read found.invalid and
      found.missing after parse`.
-3. `test/ris/option_parser.ri` (module `test/option_parser`), with its
+3. `test/ris/option_parser.ri` (module `test/option_parser_check`: a
+   module named `option_parser` would make `OptionParser` the module), its
    `args` a literal Array declared beside `found` (p14d). Cases, all
    from the bench or the table: `-v`/`--verbose` pairs; `--name VALUE`,
    `--name=VALUE`, `--out=FILE` and `-oFILE` registrations; `-nVALUE`;
@@ -321,7 +324,7 @@ parser), what goes is the callbacks; an agent writing Crystal's
    `0 growth moves off the tape's end (0 bytes copied)` and
    `0 side regions (0 transfer bytes copied)`.
 4. `test/ris/option_parser_panics.ri CASE`: one panic per case name,
-   run by a check.sh loop with `-- CASE`, each needing a nonzero exit
+   built once and run by a check.sh loop per CASE, each needing a nonzero exit
    and its message on stderr: `dash` (`not a flag: -`), `dashless`,
    `pair` (differ on the value), `unknown` (`unknown flag: --x`),
    `novalue` (`flag --verbose takes no value`), `missing`

@@ -63,6 +63,25 @@ args8 = ["--color=never", "-z", "--color"]
 optional.parse(args8, found)
 puts "optional color #{shown(found, color)} z #{shown(found, size)}"
 
+# A short optional value with a space, and an empty value.
+level = optional.on("-l [LEVEL]", "level")
+args18 = ["-l3", "-l", "-v", "--color="]
+optional.parse(args18, found)
+puts "optional l #{shown(found, level)} v #{found.has?(ov)} color #{shown(found, color)}"
+args19 = ["-l", "x"]
+rest = optional.parse(args19, found)
+puts "optional l #{shown(found, level)} rest #{rest.size}"
+
+# A pair takes the value either spelling states.
+named = OptionParser.new
+nick = named.on("-n NAME", "--name=NAME", "who")
+args20 = ["-n", "ada"]
+named.parse(args20, found)
+short_name = found[nick]? || ""
+args21 = ["--name", "bo"]
+named.parse(args21, found)
+puts "pair value #{short_name} #{shown(found, nick)}"
+
 # `--` ends the flags.
 args9 = ["-v", "--", "-v", "--color"]
 rest = optional.parse(args9, found)
