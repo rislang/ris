@@ -1,0 +1,119 @@
+module test/option_parser_check
+
+import std/option_parser::{OptionParser, RisOptions, RisFlag}
+
+# std/option_parser: flags registered, parsed, then read through RisFlag
+# handles. Each case prints one line; check.sh compares them whole.
+
+def shown(found : RisOptions, flag : RisFlag) : String
+  value = found[flag]?
+  return "-" unless value
+  "[#{value}]"
+end
+
+found = RisOptions.new
+
+# A pair is one flag; values in all four spellings.
+tool = OptionParser.new
+verbose = tool.on("-v", "--verbose", "say more")
+name = tool.on("--name VALUE", "the name")
+output = tool.on("--out=FILE", "output")
+glued = tool.on("-oFILE", "output, short")
+port = tool.on("-n PORT", "port")
+args1 = ["--verbose", "--name", "ada", "--out=b", "-oc", "-n8080", "x"]
+rest = tool.parse(args1, found)
+puts "pair #{found.has?(verbose)} name #{shown(found, name)} out #{shown(found, output)} o #{shown(found, glued)} n #{shown(found, port)} rest #{rest.join(",")}"
+args2 = ["-v", "--out", "a", "-o", "d", "--name=bo"]
+rest = tool.parse(args2, found)
+puts "short #{found.has?(verbose)} name #{shown(found, name)} out #{shown(found, output)} o #{shown(found, glued)} rest #{rest.size}"
+
+# Bundles: every character up to the first flag that takes a value.
+bundles = OptionParser.new
+v = bundles.on("-v", "verbose")
+q = bundles.on("-q", "quiet")
+p = bundles.on("-p PORT", "port")
+args3 = ["-vq", "-qvp8080"]
+bundles.parse(args3, found)
+puts "bundle v #{found.has?(v)} q #{found.has?(q)} p #{shown(found, p)}"
+bundles.record_errors
+args4 = ["-vx", "-q=1"]
+bundles.parse(args4, found)
+puts "bundle invalid #{found.invalid.join(",")} v #{found.has?(v)} q #{found.has?(q)}"
+
+# A short flag is one character.
+accent = OptionParser.new
+e = accent.on("-é", "accent")
+accent.record_errors
+args5 = ["-é", "-ö"]
+accent.parse(args5, found)
+puts "accent é #{found.has?(e)} invalid #{found.invalid.join(",")}"
+
+# An optional value is taken unless missing or a known flag.
+optional = OptionParser.new
+color = optional.on("--color [WHEN]", "colour")
+size = optional.on("-z[N]", "size")
+ov = optional.on("-v", "verbose")
+args6 = ["--color", "-v"]
+rest = optional.parse(args6, found)
+puts "optional color #{shown(found, color)} v #{found.has?(ov)} rest #{rest.size}"
+args7 = ["--color", "always", "-z9"]
+optional.parse(args7, found)
+puts "optional color #{shown(found, color)} z #{shown(found, size)}"
+args8 = ["--color=never", "-z", "--color"]
+optional.parse(args8, found)
+puts "optional color #{shown(found, color)} z #{shown(found, size)}"
+
+# `--` ends the flags.
+args9 = ["-v", "--", "-v", "--color"]
+rest = optional.parse(args9, found)
+puts "dashes v #{found.has?(ov)} rest #{rest.join(",")}"
+
+# Each row of the record_errors table.
+table = OptionParser.new
+switch = table.on("-v", "--verbose", "switch")
+ending = table.on("-e EXT", "ending")
+tcolor = table.on("--color [WHEN]", "colour")
+table.record_errors
+args10 = ["-v"]
+table.parse(args10, found)
+puts "row -v #{found.has?(switch)} #{shown(found, switch)}"
+args11 = ["-e", "x"]
+table.parse(args11, found)
+puts "row -e x #{found.has?(ending)} #{shown(found, ending)}"
+args12 = ["--color"]
+table.parse(args12, found)
+puts "row --color #{found.has?(tcolor)} #{shown(found, tcolor)}"
+args13 = ["-e"]
+table.parse(args13, found)
+puts "row -e #{found.has?(ending)} #{shown(found, ending)} missing #{found.missing.join(",")}"
+args14 = ["--verbose=x"]
+table.parse(args14, found)
+puts "row --verbose=x #{found.has?(switch)} #{shown(found, switch)} invalid #{found.invalid.join(",")}"
+args15 = ["--nope", "keep", "-e", "y"]
+rest = table.parse(args15, found)
+puts "row --nope invalid #{found.invalid.join(",")} e #{shown(found, ending)} rest #{rest.join(",")}"
+
+# A second parse drops what the first found; the first's value stays.
+args16 = ["-e", "first"]
+table.parse(args16, found)
+first = found[ending]? || ""
+args17 = ["-v"]
+table.parse(args17, found)
+puts "second #{first} #{shown(found, ending)} #{found.has?(switch)} invalid #{found.invalid.size}"
+
+# The help, banner and separator included.
+helped = OptionParser.new
+helped.banner = "usage: tool [options] COMMAND"
+helped.on("-v", "--verbose", "say more")
+helped.on("-n NAME", "--name=NAME", "who")
+helped.on("-c", "--color [WHEN]", "colour")
+helped.separator("commands: deploy, status")
+helped.on("-h", "this help")
+want = "usage: tool [options] COMMAND\n  -v, --verbose  say more\n  -n NAME, --name=NAME  who\n  -c, --color [WHEN]  colour\ncommands: deploy, status\n  -h  this help"
+raise "help: #{helped.help.inspect}" unless helped.help == want
+raise "to_s" unless helped.to_s == want
+plain = OptionParser.new
+plain.on("-q", "quiet")
+raise "default banner" unless plain.help == "options:\n  -q  quiet"
+puts "help ok"
+puts "PASS: option_parser"

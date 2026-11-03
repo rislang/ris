@@ -1,39 +1,92 @@
-# Flag parsing, written in iyi.
+# Flag parsing, written in iyi; ris reads the flags after parse.
 #
-# `on("--name VALUE", "help") { |v| ... }` and `on("-h", "help") { }`
-# register flags, and `on("--color [WHEN]", "help")` one whose value may
-# be left out. `parse` walks `Program.args` (or the array given),
-# calls the blocks, and answers the leftover operands.
+# `on` registers a flag and answers a `RisFlag`, a handle to it. `parse`
+# walks the command line and fills a `RisOptions`, which is read through
+# the handles: a misspelled flag is an undefined local at compile time.
 #
-#     op = OptionParser.new
-#     op.banner = "usage: tool [options] COMMAND"
-#     op.on("-v", "--verbose", "say more") { verbose = true }
-#     op.on("-n NAME", "--name=NAME", "who") { |v| name = v }
-#     op.separator("commands:")
-#     op.on("deploy", "ship it") do
-#       op.on("-f", "--force", "even if dirty") { force = true }
+#     parser = OptionParser.new
+#     verbose = parser.on("-v", "--verbose", "say more")
+#     ending = parser.on("-e EXT", "ending")
+#     help = parser.on("-h", "--help", "this help")
+#     found = RisOptions.new
+#     rest = parser.parse(Program.args, found)
+#     if found.has?(help)
+#       puts parser   # the banner, then a line for each flag
+#       exit
 #     end
-#     puts op   # the banner, then a line for each flag and command
+#     ext = found[ending]? || ".txt"
 #
 # A pair, `-v` and `--verbose`, is one flag spelled two ways; a value
-# either spelling states, `-n NAME` or `--name=NAME`, both take.
+# either spelling states, `-e EXT` or `--ending=EXT`, both take.
+# `on("--color [WHEN]", …)` registers a flag whose value may be left out.
 #
-# A command is a name with no dash, and is one only as the first operand:
-# `tool deploy -f` runs `deploy`'s block, which registers what follows it
-# - its flags, and the commands below it, which replace the ones beside
-# it. Flags registered before the command still apply after it, where the
-# other library forgets them; a name after an operand is an operand.
+# The parser keeps views of the texts given to `on`, `banner=` and
+# `separator`, and `found` views of `args`: pass `Program.args`, and do
+# not let `found` outlive `args`. `parse` drops what `found` held; a value
+# read from an earlier parse stays valid. A `RisFlag` belongs to the
+# parser that made it.
 #
-# What the person typed wrong is the program's to answer, the way
-# Crystal's `OptionParser` has it: `invalid_option { |flag| ... }` is
-# handed an unknown flag and a value given to a flag that takes none,
-# `missing_option { |flag| ... }` a flag that takes a value and is last,
-# and parsing goes on after either. With no handler set they panic -
-# `unknown flag: --x`, `flag --x takes no value`, `flag --name needs a
-# value` - which is a bug report where a usage line was wanted, so a
-# program reading its own command line sets both.
+# A bad command line panics: `unknown flag: --x`, `flag --x takes no
+# value`, `flag --name needs a value`. After `parser.record_errors`,
+# `parse` records them in `found.invalid` (unknown flags and values given
+# to a flag that takes none) and `found.missing` (a flag that needs a
+# value and is last), and goes on. Both lists are read-only.
+#
+# There are no commands: list them with `separator` and dispatch on
+# `rest[0]`.
 
 module std/option_parser
+
+# A flag registered with `OptionParser#on`, read from `RisOptions`.
+pub struct RisFlag
+  getter index : Int32
+
+  def initialize(@index : Int32)
+  end
+end
+
+# What one `OptionParser#parse` found: each flag given, with its value (a
+# view of the parsed args, `""` when it has none), and the flags it could
+# not take after `record_errors`.
+pub class RisOptions
+  @given : Array({Int32, String})
+  @invalid : Array(String)
+  @missing : Array(String)
+
+  def initialize
+    @given = [] of {Int32, String}
+    @invalid = [] of String
+    @missing = [] of String
+  end
+
+  # Whether the command line gave *flag*.
+  def has?(flag : RisFlag) : Bool
+    @given.each { |entry| return true if entry[0] == flag.index }
+    false
+  end
+
+  # The value *flag* was last given, `""` for a flag without one; nil when
+  # it was not given.
+  def []?(flag : RisFlag) : String?
+    answer = nil
+    @given.each { |entry| answer = entry[1] if entry[0] == flag.index }
+    answer
+  end
+
+  # Unknown flags, and flags given a value they take none of, as typed.
+  def invalid : Array(String)
+    @invalid
+  end
+
+  # Flags that need a value and were last, as typed.
+  def missing : Array(String)
+    @missing
+  end
+
+  protected def given : Array({Int32, String})
+    @given
+  end
+end
 
 pub class OptionParser
   # What a flag does with the argument after it: `--name VALUE` needs one,
@@ -45,24 +98,24 @@ pub class OptionParser
     Optional
   end
 
-  @long : Hash(String, {Value, (String -> Nil)})
-  @short : Hash(String, {Value, (String -> Nil)})
-  # The help's lines, each marked when it is a command's, which a command
-  # matched takes away with the commands beside it.
-  @help : Array({String, Bool})
-  @commands : Hash(String, (String -> Nil))
+  # Each name, a view of the text given to `on`, with what it takes and
+  # its registration's index.
+  @long : Hash(String, {Value, Int32})
+  @short : Hash(String, {Value, Int32})
+  # The help's lines: flag, second spelling or "", description. A
+  # separator is {text, "", ""}, its text with no dash.
+  @help : Array({String, String, String})
   @banner : String?
-  @invalid : (String -> Nil)?
-  @missing : (String -> Nil)?
+  @record : Bool
+  @count : Int32
 
   def initialize
-    @long = {} of String => {Value, (String -> Nil)}
-    @short = {} of String => {Value, (String -> Nil)}
-    @help = [] of {String, Bool}
-    @commands = {} of String => (String -> Nil)
+    @long = {} of String => {Value, Int32}
+    @short = {} of String => {Value, Int32}
+    @help = [] of {String, String, String}
     @banner = nil
-    @invalid = nil
-    @missing = nil
+    @record = false
+    @count = 0
   end
 
   # The help's first line, "options:" until it is set.
@@ -74,80 +127,89 @@ pub class OptionParser
     @banner
   end
 
-  # A line of its own in the help, between the flags and commands
-  # registered before it and after it.
+  # A line of its own in the help, between the flags registered before it
+  # and after it.
   def separator(text : String) : Nil
-    @help << {text, false}
+    @help << {text, "", ""}
   end
 
-  def invalid_option(&block : String -> Nil) : Nil
-    @invalid = block
-  end
-
-  def missing_option(&block : String -> Nil) : Nil
-    @missing = block
-  end
-
-  private def invalid(flag : String, sentence : String) : Nil
-    handler = @invalid
-    raise sentence unless handler
-    handler.call(flag)
-  end
-
-  private def missing(flag : String) : Nil
-    handler = @missing
-    raise "flag #{flag} needs a value" unless handler
-    handler.call(flag)
+  # Bad flags are recorded in `found.invalid` and `found.missing` instead
+  # of panicking.
+  def record_errors : Nil
+    @record = true
   end
 
   # A value is taken by `--name VALUE`, `--name=VALUE`, `-n VALUE` and
-  # `-nVALUE`, the four spellings the other library reads. Only the space
-  # form was: `--name=VALUE` was stored under the key `--name=VALUE`, which
-  # no argument ever looks up, and `-nVALUE` refused itself as not a flag.
-  # A short flag is one character, not one byte: `-é` was refused too.
-  #
+  # `-nVALUE`. A short flag is one character, not one byte: `-é` is one.
   # A bracketed value, `--color [WHEN]`, `-c [WHEN]` or `-c[WHEN]`, may be
-  # left out, as the other library reads the brackets. It was a required
-  # value: `--color` last panicked "flag --color needs a value", and
-  # `--color -v` handed `-v` to `--color` instead of running it.
-  def on(flag : String, description : String, &block : String -> Nil) : Nil
-    unless flag.starts_with?("-")
-      raise "option: not a flag or a command: #{flag}" if flag.empty? || flag.includes?(" ")
-      @commands[flag] = block
-      @help << {"  #{flag}  #{description}", true}
-      return
-    end
+  # left out.
+  def on(flag : String, description : String) : RisFlag
     name, takes = spelled(flag)
-    @help << {"  #{flag}  #{description}", false}
-    store(name, takes, block)
+    index = @count
+    @count = @count + 1
+    @help << {flag, "", description}
+    store(name, takes, index)
+    RisFlag.new(index)
   end
 
   # One flag spelled two ways, `-v` and `--verbose`: the value either
   # states, both take.
-  def on(short : String, long : String, description : String, &block : String -> Nil) : Nil
+  def on(short : String, long : String, description : String) : RisFlag
     first, first_takes = spelled(short)
     second, second_takes = spelled(long)
     if !first_takes.none? && !second_takes.none? && first_takes != second_takes
       raise "option: #{short} and #{long} differ on the value: one needs it, the other may leave it out"
     end
     takes = first_takes.none? ? second_takes : first_takes
-    @help << {"  #{short}, #{long}  #{description}", false}
-    store(first, takes, block)
-    store(second, takes, block)
+    index = @count
+    @count = @count + 1
+    @help << {short, long, description}
+    store(first, takes, index)
+    store(second, takes, index)
+    RisFlag.new(index)
   end
 
-  # The name *flag* is looked up by, and what it does with a value.
+  def on(flag : String, description : String, &block : String -> Nil) : Nil
+    {% raise "a ris program reads its flags after parse:
+  flag = parser.on(\"-e EXT\", \"ending\")
+  found = RisOptions.new
+  parser.parse(Program.args, found)
+  found[flag]?" %}
+  end
+
+  def on(short : String, long : String, description : String, &block : String -> Nil) : Nil
+    {% raise "a ris program reads its flags after parse:
+  flag = parser.on(\"-e EXT\", \"ending\")
+  found = RisOptions.new
+  parser.parse(Program.args, found)
+  found[flag]?" %}
+  end
+
+  def invalid_option(&block : String -> Nil) : Nil
+    {% raise "a ris program records bad flags: parser.record_errors, then read found.invalid and found.missing after parse" %}
+  end
+
+  def missing_option(&block : String -> Nil) : Nil
+    {% raise "a ris program records bad flags: parser.record_errors, then read found.invalid and found.missing after parse" %}
+  end
+
+  # The name *flag* is looked up by, a view of it, and what it does with
+  # a value.
   private def spelled(flag : String) : {String, Value}
-    name = flag.split(' ')[0]
-    takes = flag.includes?(" ") ? Value::Required : Value::None
-    takes = Value::Optional if bracketed?(flag[name.bytesize, flag.bytesize - name.bytesize].strip)
+    unless flag.starts_with?("-")
+      raise "option: not a flag: #{flag}; list commands with separator and dispatch on rest[0]"
+    end
+    space = flag.index(' ')
+    name = space ? flag[0, space] : flag
+    takes = space ? Value::Required : Value::None
+    takes = Value::Optional if space && bracketed?(flag[space, flag.bytesize - space].strip)
     if name.starts_with?("--")
       eq = name.index('=')
       if eq
         takes = Value::Required
         name = name[0, eq]
       end
-    elsif name.starts_with?("-") && name.bytesize >= 2
+    elsif name.bytesize >= 2
       at = char_end(name, 1)
       if at < name.bytesize
         takes = bracketed?(name[at, name.bytesize - at]) ? Value::Optional : Value::Required
@@ -159,11 +221,11 @@ pub class OptionParser
     {name, takes}
   end
 
-  private def store(name : String, takes : Value, block : String -> Nil) : Nil
+  private def store(name : String, takes : Value, index : Int32) : Nil
     if name.starts_with?("--")
-      @long[name] = {takes, block}
+      @long[name] = {takes, index}
     else
-      @short[name] = {takes, block}
+      @short[name] = {takes, index}
     end
   end
 
@@ -174,26 +236,26 @@ pub class OptionParser
   end
 
   # Whether *arg* is a flag this parser knows, which an optional value
-  # never takes as its own, as the other library leaves it to run.
+  # never takes as its own.
   private def known?(arg : String) : Bool
     @long.has_key?(arg) || @short.has_key?(arg)
   end
 
   # Where the character starting at byte *at* ends: a short flag is `-`
-  # and one character, and cutting it at two bytes handed `invalid_option`
-  # half of an `é`.
+  # and one character.
   private def char_end(s : String, at : Int32) : Int32
-    b = s.to_unsafe[at]
+    b = s[at]
     width = b < 0xC0_u8 ? 1 : (b < 0xE0_u8 ? 2 : (b < 0xF0_u8 ? 3 : 4))
     e = at + width
     e > s.bytesize ? s.bytesize : e
   end
 
-  def parse : Array(String)
-    parse(Program.args)
-  end
-
-  def parse(args : Array(String)) : Array(String)
+  # Reads *args* into *found*, dropping what it held, and answers the
+  # operands. `--` ends the flags.
+  def parse(args : Array(String), found : RisOptions) : Array(String)
+    found.given.clear
+    found.invalid.clear
+    found.missing.clear
     rest = [] of String
     i = 0
     n = args.size
@@ -210,65 +272,62 @@ pub class OptionParser
         eq = a.index('=')
         if eq
           name = a[0, eq]
-          val = a[eq + 1, a.bytesize - eq - 1]
           spec = @long[name]?
           if !spec
-            invalid(name, "unknown flag: #{name}")
+            raise "unknown flag: #{name}" unless @record
+            found.invalid << name
           elsif spec[0].none?
-            invalid(name, "flag #{name} takes no value")
+            raise "flag #{name} takes no value" unless @record
+            found.invalid << name
           else
-            spec[1].call(val)
+            found.given << {spec[1], a[eq + 1, a.bytesize - eq - 1]}
           end
         else
           spec = @long[a]?
           if !spec
-            invalid(a, "unknown flag: #{a}")
+            raise "unknown flag: #{a}" unless @record
+            found.invalid << a
           elsif spec[0].none?
-            spec[1].call("")
+            found.given << {spec[1], ""}
           elsif i + 1 < n && (spec[0].required? || !known?(args[i + 1]))
             i = i + 1
-            spec[1].call(args[i])
+            found.given << {spec[1], args[i]}
           elsif spec[0].required?
-            missing(a)
+            raise "flag #{a} needs a value" unless @record
+            found.missing << a
           else
-            spec[1].call("")
+            found.given << {spec[1], ""}
           end
         end
-      elsif a.starts_with?("-") && a.bytesize >= 2 && a != "-"
+      elsif a.starts_with?("-") && a.bytesize >= 2
         at = char_end(a, 1)
         name = a[0, at]
         spec = @short[name]?
         if !spec
-          invalid(name, "unknown flag: #{name}")
+          raise "unknown flag: #{name}" unless @record
+          found.invalid << name
         elsif !spec[0].none?
           if a.bytesize > at
-            spec[1].call(a[at, a.bytesize - at])
+            found.given << {spec[1], a[at, a.bytesize - at]}
           elsif i + 1 < n && (spec[0].required? || !known?(args[i + 1]))
             i = i + 1
-            spec[1].call(args[i])
+            found.given << {spec[1], args[i]}
           elsif spec[0].required?
-            missing(name)
+            raise "flag #{name} needs a value" unless @record
+            found.missing << name
           else
-            spec[1].call("")
+            found.given << {spec[1], ""}
           end
         elsif a.bytesize == at
-          spec[1].call("")
+          found.given << {spec[1], ""}
         elsif bundle?(a)
-          run_bundle(a)
+          run_bundle(a, found)
         else
-          invalid(name, "flag #{name} takes no value")
+          raise "flag #{name} takes no value" unless @record
+          found.invalid << name
         end
       else
-        command = rest.empty? ? @commands[a]? : nil
-        if command
-          # The level below is the block's to register: the commands beside
-          # this one, and their lines in the help, are gone.
-          @commands.clear
-          @help = @help.reject { |entry| entry[1] }
-          command.call(a)
-        else
-          rest << a
-        end
+        rest << a
       end
       i = i + 1
     end
@@ -277,10 +336,8 @@ pub class OptionParser
 
   # `-vq` is `-v -q`, and `-vp8080` is `-v -p 8080`: every character up to
   # the first flag that takes a value is a flag, and what follows that one
-  # is its value, the reading the other library gives. Only the first
-  # character was read and the rest dropped, so `-vq` never ran `-q` and
-  # `-vx`, with no `-x`, passed as `-v`. A bundle with a character that is
-  # no flag runs none of it: it is `-v` handed a value it does not take.
+  # is its value. A bundle with a character that is no flag takes none of
+  # it: it is `-v` handed a value it does not take.
   private def bundle?(a : String) : Bool
     pos = 1
     while pos < a.bytesize
@@ -293,29 +350,43 @@ pub class OptionParser
     true
   end
 
-  private def run_bundle(a : String) : Nil
+  private def run_bundle(a : String, found : RisOptions) : Nil
     pos = 1
     while pos < a.bytesize
       e = char_end(a, pos)
       spec = @short["-" + a[pos, e - pos]]?
       if spec
         unless spec[0].none?
-          spec[1].call(a[e, a.bytesize - e])
+          found.given << {spec[1], a[e, a.bytesize - e]}
           return
         end
-        spec[1].call("")
+        found.given << {spec[1], ""}
       end
       pos = e
     end
   end
 
+  # The banner, then `  FLAG  DESC` or `  SHORT, LONG  DESC` for each flag
+  # and each separator as given, one per line.
+  def help(io : String::Builder) : Nil
+    io << (@banner || "options:")
+    @help.each do |entry|
+      io << '\n'
+      if entry[0].starts_with?("-")
+        io << "  " << entry[0]
+        io << ", " << entry[1] unless entry[1].empty?
+        io << "  " << entry[2]
+      else
+        io << entry[0]
+      end
+    end
+  end
+
   def help : String
-    lines = [@banner || "options:"]
-    @help.each { |entry| lines << entry[0] }
-    lines.join("\n")
+    String.build { |io| help(io) }
   end
 
   def to_s : String
-    help
+    String.build { |io| help(io) }
   end
 end

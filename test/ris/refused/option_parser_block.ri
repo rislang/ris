@@ -1,0 +1,8 @@
+module option_parser_block
+
+import std/option_parser::{OptionParser}
+
+parser = OptionParser.new
+verbose = false
+parser.on("-v", "say more") { |v| verbose = true }
+puts verbose

@@ -1,0 +1,8 @@
+module option_parser_handler_block
+
+import std/option_parser::{OptionParser}
+
+parser = OptionParser.new
+bad = 0
+parser.invalid_option { |flag| bad += 1 }
+puts bad

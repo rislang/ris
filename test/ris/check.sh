@@ -2697,6 +2697,70 @@ else
   echo "FAILED   eiy: $out"; status=1
 fi
 
+# std/option_parser: flags read after parse through RisFlag handles.
+out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/option_parser.ri 2>&1)
+code=$?
+want='pair true name [ada] out [b] o [c] n [8080] rest x
+short true name [bo] out [a] o [d] rest 0
+bundle v true q true p [8080]
+bundle invalid -v,-q v false q false
+accent é true invalid -ö
+optional color [] v true rest 0
+optional color [always] z [9]
+optional color [] z []
+dashes v true rest -v,--color
+row -v true []
+row -e x true [x]
+row --color true []
+row -e false - missing -e
+row --verbose=x false - invalid --verbose
+row --nope invalid --nope e [y] rest keep
+second first - true invalid 0
+help ok
+PASS: option_parser'
+if [ "$code" -eq 0 ] &&
+    [ "$(grep -v '^ris ' <<<"$out")" = "$want" ] &&
+    grep -qF "0 growth moves off the tape's end (0 bytes copied)" <<<"$out" &&
+    grep -qF '0 side regions (0 transfer bytes copied)' <<<"$out"; then
+  echo "runs     option_parser (spellings, record_errors, help, zero moves)"
+else
+  echo "FAILED   option_parser: $out"; status=1
+fi
+exe=$(mktemp)
+if out=$("$RIS" build test/ris/option_parser_panics.ri -o "$exe" 2>&1); then
+  for pair in 'dash|option: not a flag: -' \
+      'dashless|option: not a flag: deploy; list commands with separator' \
+      'pair|differ on the value' \
+      'unknown|unknown flag: --x' \
+      'novalue|flag --verbose takes no value' \
+      'missing|flag --name needs a value'; do
+    case_name=${pair%%|*} needle=${pair#*|}
+    err=$("$exe" "$case_name" 2>&1 >/dev/null)
+    if [ "$?" -ne 0 ] && grep -qF -- "$needle" <<<"$err"; then
+      echo "runs     option_parser_panics $case_name"
+    else
+      echo "FAILED   option_parser_panics $case_name: $err"; status=1
+    fi
+  done
+else
+  echo "FAILED   option_parser_panics: $out"; status=1
+fi
+rm -f "$exe"
+# The removed block forms: refused at the caller's line, naming the form.
+for pair in 'block|reads its flags after parse|7' \
+    'pair_block|reads its flags after parse|7' \
+    'handler_block|records bad flags|7' \
+    'parse_one|Overloads are:|7'; do
+  file=option_parser_${pair%%|*}.ri rest_=${pair#*|}
+  needle=${rest_%|*} line=${rest_##*|}
+  out=$("$RIS" build --no-codegen "test/ris/refused/$file" 2>&1)
+  if grep -qF -- "$needle" <<<"$out" && grep -qF "$file:$line:" <<<"$out"; then
+    echo "refused  ${file%.ri}"
+  else
+    echo "FAILED   ${file%.ri}: $out"; status=1
+  fi
+done
+
 # std/log: loggers named in constants keep their text and identity.
 out=$("$RIS" run test/ris/log_for_constant.ri 2>&1)
 if [ "$out" = "log_for_constant ok" ]; then

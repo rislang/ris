@@ -1,0 +1,29 @@
+module test/option_parser_panics
+
+import std/option_parser::{OptionParser, RisOptions}
+
+# One panic per case name, given as the first argument; check.sh runs
+# each and checks the exit status and the message.
+
+parser = OptionParser.new
+parser.on("-v", "--verbose", "switch")
+parser.on("--name VALUE", "the name")
+found = RisOptions.new
+case Program.args[0]? || ""
+when "dash"
+  parser.on("-", "a dash")
+when "dashless"
+  parser.on("deploy", "ship it")
+when "pair"
+  parser.on("-n NAME", "--nick [NAME]", "who")
+when "unknown"
+  args = ["--x"]
+  parser.parse(args, found)
+when "novalue"
+  args = ["--verbose=1"]
+  parser.parse(args, found)
+when "missing"
+  args = ["--name"]
+  parser.parse(args, found)
+end
+puts "no panic"

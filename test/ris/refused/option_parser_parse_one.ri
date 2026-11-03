@@ -1,0 +1,8 @@
+module option_parser_parse_one
+
+import std/option_parser::{OptionParser}
+
+parser = OptionParser.new
+parser.on("-v", "say more")
+rest = parser.parse(Program.args)
+puts rest.size
