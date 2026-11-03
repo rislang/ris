@@ -985,10 +985,11 @@ pub struct IyiSocket
           # EVFILT_WRITE (-2) with EV_ADD | EV_ONESHOT: one kevent, off the
           # queue once told. udata, its last word, is the attempt's index.
           storage = uninitialized UInt64[4]
-          storage[0] = fd.to_u64
-          storage[1] = 0x0011FFFE_u64
-          storage[2] = 0_u64
-          storage[3] = index.to_u64
+          words = pointerof(storage).as(Pointer(UInt64))
+          words.value = fd.to_u64
+          (words + 1_i64).value = 0x0011FFFE_u64
+          (words + 2_i64).value = 0_u64
+          (words + 3_i64).value = index.to_u64
           added = LibC.kevent(poll, pointerof(storage).as(Void*), 1, Pointer(Void).new(0_u64), 0, Pointer(Void).new(0_u64)).to_i64
         {% else %}
           # EPOLLOUT (4); EPOLLERR and EPOLLHUP come unasked. The data is
@@ -1016,8 +1017,8 @@ pub struct IyiSocket
           events = pointerof(storage).as(Pointer(UInt8))
           stride = 32
           nothing = uninitialized UInt64[2]
-          nothing[0] = 0_u64
-          nothing[1] = 0_u64
+          pointerof(nothing).as(Pointer(UInt64)).value = 0_u64
+          (pointerof(nothing).as(Pointer(UInt64)) + 1_i64).value = 0_u64
           got = LibC.kevent(poll, Pointer(Void).new(0_u64), 0, events.as(Void*), 16, pointerof(nothing).as(Void*)).to_i64
         {% else %}
           # Sixteen events of at most 16 bytes (12, packed, on x86_64).
