@@ -3,31 +3,23 @@ module samples/trial/ls
 
 import std/dir::{Dir}
 import std/file
+import std/option_parser::{OptionParser, RisOptions}
 
-long = false
-ext = ""
-dir = ""
-args = Program.args
-i = 0
-while i < args.size
-  arg = args[i]
-  if arg == "-l"
-    long = true
-  elsif arg == "-e" && i + 1 < args.size
-    i += 1
-    ext = args[i]
-  else
-    dir = arg
-  end
-  i += 1
-end
-if dir.empty?
-  puts "usage: ls [-l] [-e EXT] DIR"
+parser = OptionParser.new
+parser.banner = "usage: ls [-l] [-e EXT] DIR"
+long = parser.on("-l", "sizes")
+ending = parser.on("-e EXT", "list only names with this ending")
+found = RisOptions.new
+rest = parser.parse(Program.args, found)
+if rest.empty?
+  puts parser
   exit 2
 end
+dir = rest[0]
+ext = found[ending]? || ""
 Dir.children(dir).sort.each do |name|
   next unless name.ends_with?(ext)
-  if long
+  if found.has?(long)
     puts "#{File.size(File.join(dir, name))} #{name}"
   else
     puts name

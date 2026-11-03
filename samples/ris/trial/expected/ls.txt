@@ -1,3 +1,1 @@
-70 config.json
-88 sales.csv
 63 words.txt

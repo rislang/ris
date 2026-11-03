@@ -18,22 +18,21 @@ Testing ris programs can start now: what a program hits comes first.
 The items are below; this is only their order.
 
 1. The user's own ris programs: each obstacle becomes an item here.
-2. Trial program obstacles: `OptionParser` String option.
-3. `text.split` not refused in a round or yield: find the cause first,
+2. `text.split` not refused in a round or yield: find the cause first,
    it can leave a program using freed memory. Then `until` rounds,
    TlsClient's ticket and SocketError in a socket union.
-4. Holes: `T.from_json` in a def, `Hash#update`'s block value,
+3. Holes: `T.from_json` in a def, `Hash#update`'s block value,
    RisBoard.take's result.
-5. Holes: SPEC 3.3 `clear`, a store into `self`'s field, a tape block
+4. Holes: SPEC 3.3 `clear`, a store into `self`'s field, a tape block
    in a constant, the one-call def's default, `flat_result?` callers.
-6. Wrong refusals and the literal String's run-time error: when a program
+5. Wrong refusals and the literal String's run-time error: when a program
    hits one.
-7. test/ris/sse.ri, then HTTPClient's pooling.
-8. Tighten heap_trap.
-9. The checker's `evaluate` uses a lot of stack: small changes must not
+6. test/ris/sse.ri, then HTTPClient's pooling.
+7. Tighten heap_trap.
+8. The checker's `evaluate` uses a lot of stack: small changes must not
    decide whether it fits.
-10. Step 5: benches. Then remove `to_heap` and `@[TapeToHeap]`.
-11. std additions, language and runtime, other known failures.
+9. Step 5: benches. Then remove `to_heap` and `@[TapeToHeap]`.
+10. std additions, language and runtime, other known failures.
 
 Speed work stays out of minitest. The jq check at jqg.ri:424 is the
 maintainer's.
@@ -51,17 +50,12 @@ Fix a checker hole below only when a cluster hits it.
 
 5. Benches: build each, group the refusals by message, fix per group.
 
-Trial programs (samples/ris/trial/blocked/ has the repros), most blocking
-first; samples/ris/trial/run.sh is their gate:
-
-* `OptionParser` cannot set a String option; in fact no ris program can
-  use it. The design passed EGM review and is ready to implement:
-  doc/drafts/option-parser/option-parser.md, its Implementation Plan
-  (two phases, each one commit with a minitest gate). Probes are in
-  doc/drafts/option-parser/probes/; the name stays `OptionParser`.
-
 Checker holes found on the way (unknown must be refused, SPEC 3.6):
 
+* OptionParser.parse given an `args` shorter-lived than `found` is
+  refused at the append inside std/option_parser, with a generic message:
+  the refusal belongs at the caller's `parse` line
+  (doc/drafts/option-parser/probes/p14d.ri).
 * `h.update(k) { |v| w.downcase }` builds: Hash keeps the block's value,
   made in a block round. Any other runtime def keeping a block's value too.
 * A yield is judged per def, not per argument: `each_field`'s name is a

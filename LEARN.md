@@ -19,7 +19,10 @@ Text parameters take `String` and borrow it; nothing copies it to accept it.
 * Command-line arguments are `Program.args : Array(String)`, without the
   program name. With `args = Program.args`, check `args.size` before
   indexing; `args[0]` is the first argument. For example,
-  `ris run app.ri -- input.txt` passes `input.txt`.
+  `ris run app.ri -- input.txt` passes `input.txt`. Flags are read
+  after parse (`std/option_parser`), never in an `on` block:
+  `flag = parser.on("-e EXT", "ending")`; `found = RisOptions.new`;
+  `rest = parser.parse(Program.args, found)`; `found[flag]?`.
 * `import std/int` gives integers `<=>`, bit counts and the rest of the
   integer tower's arithmetic and conversions. Add it before using those
   methods; the prelude carries only the small core (`ris doc std/int`).

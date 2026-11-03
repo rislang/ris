@@ -9,7 +9,7 @@ cd "$here" || exit 2
 
 args_wc="data/words.txt"
 args_json_edit="data/config.json $work/out.json"
-args_ls="-l data"
+args_ls="-l -e .txt data"
 args_csv_sum="data/sales.csv"
 args_http_trial=""
 args_tuple_order=""

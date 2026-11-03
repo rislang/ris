@@ -167,6 +167,9 @@ back.
 
 * Tape: std/http `parse_head` and `ParsedHead`, the tape list in
   `RisRegion`, `AGENTS.md`'s tape rules.
+* std/option_parser without blocks: `on` answers a `RisFlag`,
+  `parse(args, found)` fills a `RisOptions`, `record_errors` replaces
+  `invalid_option` and `missing_option`; commands are gone.
 
 * Generic macro reflection: preserve access to private types already bound
   as generic arguments when interpolation emits their canonical names.
