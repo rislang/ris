@@ -1,0 +1,16 @@
+# Program initialization finishes before threads read its storage.
+module thread_program_initializers
+
+import std/base64::{Base64}
+
+VALUES = ["value #{42}"].copy_to(Program.tape)
+
+thread = IyiThread.start do
+  tape do
+    raise "program value" unless VALUES[0] == "value 42"
+    raise "base64" unless Base64.encode("abc") == "YWJj"
+  end
+  nil
+end
+thread.join
+puts "PASS: program initializers before threads"

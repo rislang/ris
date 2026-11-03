@@ -402,13 +402,20 @@ pub struct Slice(T)
     # Inspected, not printed, which is what `Array#to_s` does: a slice of
     # strings read back as `Slice[a, b]` where the array beside it says
     # `["a", "b"]`, so the same data printed two ways.
-    items = [] of String
-    each { |value| items << value.inspect }
+    text = ""
     {% if T == UInt8 %}
-      "Bytes[" + items.join(", ") + "]"
+      text = "Bytes["
     {% else %}
-      "Slice[" + items.join(", ") + "]"
+      text = "Slice["
     {% end %}
+    index = 0
+    while index < @size
+      text << ", " if index > 0
+      text << self[index].inspect
+      index += 1
+    end
+    text << ']'
+    text
   end
 
   def inspect : String

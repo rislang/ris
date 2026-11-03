@@ -538,9 +538,9 @@ end
 @[OnTape]
 pub class Logger
   def self.on_program(source : String, level : Severity? = nil,
-                      backend : Backend? = nil) : Logger
+                      backend : Backend? = nil, parent : Logger? = nil) : Logger
     logger = RisRegion.program_object(Logger)
-    logger.initialize(RisRegion.program_text(source), level, backend)
+    logger.initialize(RisRegion.program_text(source), level, backend, parent)
     logger
   end
 
@@ -656,7 +656,7 @@ pub class Logger
       return child if child.source == child_source
       child = child.sibling
     end
-    made = Logger.new(child_source, nil, nil, self)
+    made = Logger.on_program(child_source, nil, nil, self)
     made.sibling = @first_child
     @first_child = made
     made

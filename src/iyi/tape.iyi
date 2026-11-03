@@ -3418,9 +3418,15 @@ fun __ris_program_object(size : UInt64, type_id : UInt64) : Void*
 end
 
 class RisRegion
-  # Copy retained text to the explicit program owner.
+  # Copy retained text to program storage, which never rewinds. Not
+  # Program.tape: a constant initializer runs on that tape, and its defs
+  # free their scratch there when they end, this copy with it.
   def self.program_text(text : String) : String
-    text.copy_to(Program.tape)
+    return text if text.empty?
+    address = program_bytes(text.bytesize.to_u64)
+    bytes = Pointer(UInt8).new(address)
+    bytes.copy_from(text.to_unsafe, text.bytesize)
+    String.new(bytes, text.bytesize)
   end
 end
 

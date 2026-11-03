@@ -2562,6 +2562,14 @@ done
 expect program_loop_alias 'cannot store data made in this block'
 expect program_local_init 'copy it with .copy_to(Program.tape)'
 expect program_copy_forged 'program initializer is private'
+out=$("$RIS" run test/ris/thread_program_initializers.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    [ "$out" = 'PASS: program initializers before threads' ]; then
+  echo 'runs     thread_program_initializers'
+else
+  echo "FAILED   thread_program_initializers: $out"
+  status=1
+fi
 expect program_threads 'program tape writes require a single kernel thread'
 expect program_field_thread \
   'program tape writes require a single kernel thread'
@@ -2687,6 +2695,14 @@ if [ "$out" = "$want" ]; then
   echo 'runs     eiy (templates on the tape, no heap)'
 else
   echo "FAILED   eiy: $out"; status=1
+fi
+
+# std/log: loggers named in constants keep their text and identity.
+out=$("$RIS" run test/ris/log_for_constant.ri 2>&1)
+if [ "$out" = "log_for_constant ok" ]; then
+  echo "runs     log_for_constant"
+else
+  echo "FAILED   log_for_constant: $out"; status=1
 fi
 
 # std/log: AsyncBackend posts lines to a writer task (RisBoard).

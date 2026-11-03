@@ -1,0 +1,24 @@
+module test/ris/log_for_constant
+
+import std/log::{Log, Logger, Severity, RisMemoryBackend}
+
+# Loggers named in constants: their text outlives the initializer that made
+# it, and a def run later does not overwrite it.
+DB = Log.for("db")
+POOL = Log.for("db.pool")
+ROOTED = Logger.on_program("rooted")
+
+def noise : String
+  "#{1}-noise-#{2}-noise-#{3}"
+end
+
+raise "noise" unless noise == "1-noise-2-noise-3"
+raise "db: #{DB.source}" unless DB.source == "db"
+raise "pool: #{POOL.source}" unless POOL.source == "db.pool"
+raise "rooted: #{ROOTED.source}" unless ROOTED.source == "rooted"
+raise "same" unless Log.for("db").object_id == DB.object_id
+raise "same child" unless Log.for("db.pool").object_id == POOL.object_id
+Log.setup(Severity::Info, RisMemoryBackend.on_program)
+DB.level = Severity::Error
+raise "child follows its parent" if POOL.level != Severity::Error
+puts "log_for_constant ok"

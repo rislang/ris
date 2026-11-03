@@ -55,6 +55,7 @@ class Iyi::TapeProgramChecker
   @settled_values = {} of Tuple(UInt64, String, Bool) => SavedResult
 
   @program_context = false
+  @initializing = false
   @self_safe : Origin = Origin::Unknown
   @self_tape = false
   @returned : Origin? = nil
@@ -104,7 +105,9 @@ class Iyi::TapeProgramChecker
   private def initializer(node : ASTNode)
     return if TapeRules.runtime?(@program, node.location)
     saved = @program_context
+    saved_initializing = @initializing
     @program_context = false
+    @initializing = true
     result = value(node, Env.new)
     type = node.type?
     fixed = type.is_a?(GenericClassInstanceType) &&
@@ -113,6 +116,7 @@ class Iyi::TapeProgramChecker
       result.element.try(&.program?)
     refuse(node) if tape?(node) && !result.program? && !static_elements
     @program_context = saved
+    @initializing = saved_initializing
   end
 
   private def refuse(node : ASTNode)
@@ -140,7 +144,7 @@ class Iyi::TapeProgramChecker
   end
 
   private def mutation(node : ASTNode)
-    @mutations << node unless @program_context
+    @mutations << node unless @program_context || @initializing
   end
 
   private def active_origin : Origin
