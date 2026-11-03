@@ -278,14 +278,16 @@ end
   # fields with. Bytes 8..15 hold filter (-1 = EVFILT_READ), flags and
   # fflags, which as one little-endian word are 0x1FFFF for EV_ADD and
   # 0x2FFFF for EV_DELETE; `data` and `udata` are zeroed explicitly so
-  # no byte of the struct rides on what malloc left behind.
-  def __iyi_kevent_change(fd : Int32, word : UInt64) : Pointer(UInt8)
-    change = Pointer(UInt8).malloc(32_u64)
-    change.as(Pointer(UInt64)).value = fd.to_u64
-    Pointer(UInt64).new(change.address + 8_u64).value = word
-    Pointer(UInt64).new(change.address + 16_u64).value = 0_u64
-    Pointer(UInt64).new(change.address + 24_u64).value = 0_u64
-    change
+  # no byte of the struct rides on the stack. kevent reads it during the
+  # call, so a wait or a doorbell takes no storage.
+  def __iyi_kevent_change(kq : Int32, fd : Int32, word : UInt64) : Int32
+    change = uninitialized UInt64[4]
+    words = pointerof(change).as(Pointer(UInt64))
+    words.value = fd.to_u64
+    (words + 1_i64).value = word
+    (words + 2_i64).value = 0_u64
+    (words + 3_i64).value = 0_u64
+    LibC.kevent(kq, words.as(Void*), 1, Pointer(Void).new(0_u64), 0, Pointer(Void).new(0_u64))
   end
 {% elsif flag?(:win32) %}
   # Windows uses kernel32 APIs directly via LibC
@@ -1672,9 +1674,7 @@ class IyiScheduler
     {% if flag?(:win32) %}
       LibC.PostQueuedCompletionStatus(Pointer(Void).new(target.pollfd.to_u64), 0_i32, 0_u64, target.wake_token.as(Void*))
     {% elsif flag?(:darwin) %}
-      change = __iyi_kevent_change(IYI_WAKE_IDENT, IYI_WAKE_TRIGGER)
-      LibC.kevent(target.pollfd.to_i32, change.as(Void*), 1,
-        Pointer(Void).new(0_u64), 0, Pointer(Void).new(0_u64))
+      __iyi_kevent_change(target.pollfd.to_i32, IYI_WAKE_IDENT, IYI_WAKE_TRIGGER)
     {% else %}
       one = 1_u64
       __iyi_write(target.wake_fd.to_i32, pointerof(one).as(Void*), 8_u64)
@@ -1694,9 +1694,7 @@ class IyiScheduler
       st.wake_token = Pointer(UInt8).malloc(32_u64)
     {% elsif flag?(:darwin) %}
       return if st.wake_fd != 0_i64
-      change = __iyi_kevent_change(IYI_WAKE_IDENT, IYI_WAKE_ADD)
-      added = LibC.kevent(pollfd.to_i32, change.as(Void*), 1,
-        Pointer(Void).new(0_u64), 0, Pointer(Void).new(0_u64))
+      added = __iyi_kevent_change(pollfd.to_i32, IYI_WAKE_IDENT, IYI_WAKE_ADD)
       raise "kevent could not add the scheduler's doorbell" if added < 0
       st.wake_fd = 1_i64
     {% else %}
@@ -2261,9 +2259,7 @@ class IyiScheduler
       # kqueue cannot watch is one whose call never parks. Same answer as
       # epoll's -EPERM below: ready now instead of dying, or a program
       # whose stdin is `< /dev/null` panics on its first wait.
-      change = __iyi_kevent_change(fd, direction == 1 ? 0x1FFFF_u64 : 0x1FFFE_u64)
-      added = LibC.kevent(pollfd.to_i32, change.as(Void*), 1,
-        Pointer(Void).new(0_u64), 0, Pointer(Void).new(0_u64)).to_i64
+      added = __iyi_kevent_change(pollfd.to_i32, fd, direction == 1 ? 0x1FFFF_u64 : 0x1FFFE_u64).to_i64
       return nil if added < 0 && LibC.error_location.value == 22
       raise "kevent add failed" if added < 0
     {% else %}
@@ -3035,9 +3031,7 @@ class IyiScheduler
     {% if flag?(:win32) %}
       fiber.next_io = nil
     {% elsif flag?(:darwin) %}
-      change = __iyi_kevent_change(fiber.wait_fd, fiber.wait_dir == 1 ? 0x2FFFF_u64 : 0x2FFFE_u64)
-      LibC.kevent(pollfd.to_i32, change.as(Void*), 1,
-        Pointer(Void).new(0_u64), 0, Pointer(Void).new(0_u64))
+      __iyi_kevent_change(pollfd.to_i32, fiber.wait_fd, fiber.wait_dir == 1 ? 0x2FFFF_u64 : 0x2FFFE_u64)
     {% else %}
       remaining = io_interest(fiber.wait_fd)
       if remaining == 0

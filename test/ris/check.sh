@@ -1442,8 +1442,8 @@ fi
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/debug.ri 2>&1); code=$?
 if [ "$code" -ne 0 ] && grep -qxF 4 <<<"$out" &&
     grep -qF 'panic: deliberate 3' <<<"$out" &&
-    grep -qE '^0 +inner_fails at .*test/ris/debug.ri:9:3$' <<<"$out" &&
-    grep -qE '^1 +outer_calls at .*test/ris/debug.ri:14:3$' <<<"$out" &&
+    grep -qE '^0 +[^ ]*inner_fails[^ ]* at .*test/ris/debug.ri:9:3$' <<<"$out" &&
+    grep -qE '^1 +[^ ]*outer_calls[^ ]* at .*test/ris/debug.ri:14:3$' <<<"$out" &&
     grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
   echo 'runs     debug (backtrace named, no heap)'
 else

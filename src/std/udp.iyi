@@ -589,7 +589,14 @@ pub class UdpSocket
     end
 
     def self.__sys_socket(domain : Int32 = 2) : Int32
-      LibC.socket(domain, 2, 0)
+      fd = LibC.socket(domain, 2, 0)
+      # macOS refuses a datagram over 9 KiB by default; a socket's send
+      # buffer raises the limit, so the size rule is IPv4's everywhere.
+      if fd >= 0
+        room = 65535
+        LibC.setsockopt(fd, 0xffff, 0x1001, pointerof(room).as(Void*), 4_u32)
+      end
+      fd
     end
 
     def self.__sys_bind(fd : Int32, addr : Pointer(UInt8), len : UInt32) : Int32
