@@ -1438,9 +1438,9 @@ else
 fi
 # std/debug under ris: a panic's frames walked and named from the binary.
 # macOS still shows a frame's mangled name around the def's (TODO.md).
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/debug.ri 2>&1); code=$?
 frame_edge=
 if [ "$(uname -s)" = Darwin ]; then frame_edge='[^ ]*'; fi
-out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/debug.ri 2>&1); code=$?
 if [ "$code" -ne 0 ] && grep -qxF 4 <<<"$out" &&
     grep -qF 'panic: deliberate 3' <<<"$out" &&
     grep -qE "^0 +${frame_edge}inner_fails${frame_edge} at .*test/ris/debug.ri:9:3\$" <<<"$out" &&

@@ -278,7 +278,9 @@ def main():
         generated = subprocess.run([
             "openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt",
             "ec_paramgen_curve:prime256v1", "-nodes", "-days", "1",
-            "-subj", "/CN=localhost", "-keyout", str(key), "-out", str(cert),
+            "-subj", "/CN=localhost", "-addext",
+            "subjectAltName=DNS:localhost", "-keyout", str(key),
+            "-out", str(cert),
         ], capture_output=True, text=True, timeout=15)
         assert generated.returncode == 0, generated.stderr
         exercise_tls(tls_binary, cert, key)

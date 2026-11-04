@@ -322,6 +322,7 @@ pub struct System
     end
   {% elsif flag?(:darwin) %}
     # A 32-bit integer sysctl by name, or 0 when the name is not there.
+    @[TapeUnsafe("sysctlbyname reads the name and fills value and size")]
     private def self.sysctl_int(name : String) : Int32
       value = 0_i32
       size = 4_u64
