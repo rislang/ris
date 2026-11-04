@@ -534,12 +534,9 @@ pub class SHA256 < Digest
     @h[7] = @h[7] &+ hh
   end
 
-  @@k = Array(UInt32).new.copy_to(Program.tape)
-
   # The 64 round constants, made once: the first 32 bits of the
   # fractional parts of the cube roots of the first 64 primes.
-  private def round_constants : Array(UInt32)
-    return @@k if @@k.empty? == false
+  private def self.build_round_constants : Array(UInt32)
     words = [
       0x428a2f98_u32, 0x71374491_u32, 0xb5c0fbcf_u32, 0xe9b5dba5_u32,
       0x3956c25b_u32, 0x59f111f1_u32, 0x923f82a4_u32, 0xab1c5ed5_u32,
@@ -560,9 +557,14 @@ pub class SHA256 < Digest
     ]
     table = Array(UInt32).new(64, 0_u32)
     64.times { |i| table[i] = words[i] }
-    kept = table.copy_to(Program.tape)
-    @@k = kept
-    kept
+    table
+  end
+
+  # Made before any thread starts; only read after.
+  @@k : Array(UInt32) = build_round_constants.copy_to(Program.tape)
+
+  private def round_constants : Array(UInt32)
+    @@k
   end
 end
 
@@ -674,12 +676,9 @@ pub class SHA512 < Digest
     @h[7] = @h[7] &+ hh
   end
 
-  @@k = Array(UInt64).new.copy_to(Program.tape)
-
   # The 80 round constants, made once: the first 64 bits of the
   # fractional parts of the cube roots of the first 80 primes.
-  private def round_constants : Array(UInt64)
-    return @@k if @@k.empty? == false
+  private def self.build_round_constants : Array(UInt64)
     words = [
       0x428a2f98d728ae22_u64, 0x7137449123ef65cd_u64, 0xb5c0fbcfec4d3b2f_u64, 0xe9b5dba58189dbbc_u64,
       0x3956c25bf348b538_u64, 0x59f111f1b605d019_u64, 0x923f82a4af194f9b_u64, 0xab1c5ed5da6d8118_u64,
@@ -704,9 +703,14 @@ pub class SHA512 < Digest
     ]
     table = Array(UInt64).new(80, 0_u64)
     80.times { |i| table[i] = words[i] }
-    kept = table.copy_to(Program.tape)
-    @@k = kept
-    kept
+    table
+  end
+
+  # Made before any thread starts; only read after.
+  @@k : Array(UInt64) = build_round_constants.copy_to(Program.tape)
+
+  private def round_constants : Array(UInt64)
+    @@k
   end
 end
 
@@ -736,13 +740,10 @@ end
 # (lane 1, then each lane pi sends it to), the compact form of the
 # Keccak team's reference, so the step needs one lane of temporary.
 struct Keccak
-  @@tables = Array(UInt64).new.copy_to(Program.tape)
-
   # The 24 iota round constants, then the 24 rho offsets of the lanes the
   # cycle visits, then the 24 lanes themselves, FIPS 202 sections 3.2.2
   # to 3.2.5.
-  private def self.tables : Array(UInt64)
-    return @@tables if @@tables.empty? == false
+  private def self.build_tables : Array(UInt64)
     words = [
       0x0000000000000001_u64, 0x0000000000008082_u64, 0x800000000000808a_u64, 0x8000000080008000_u64,
       0x000000000000808b_u64, 0x0000000080000001_u64, 0x8000000080008081_u64, 0x8000000000008009_u64,
@@ -757,9 +758,14 @@ struct Keccak
     ]
     table = Array(UInt64).new(72, 0_u64)
     72.times { |i| table[i] = words[i] }
-    kept = table.copy_to(Program.tape)
-    @@tables = kept
-    kept
+    table
+  end
+
+  # Made before any thread starts; only read after.
+  @@tables : Array(UInt64) = build_tables.copy_to(Program.tape)
+
+  private def self.tables : Array(UInt64)
+    @@tables
   end
 
   # Every rotation here is by 1 to 63, so no branch for a zero.
@@ -1115,12 +1121,9 @@ pub struct CRC32
     crc ^ 0xffffffff_u32
   end
 
-  @@tables = Array(UInt32).new.copy_to(Program.tape)
-
   # The eight tables, made once: the first is the byte-at-a-time table,
   # and each after it is one more byte of zeros through the one before.
-  private def self.tables : Array(UInt32)
-    return @@tables if @@tables.empty? == false
+  private def self.build_tables : Array(UInt32)
     t = Array(UInt32).new(2048, 0_u32)
     n = 0
     while n < 256
@@ -1143,9 +1146,14 @@ pub struct CRC32
       end
       slice = slice + 1
     end
-    kept = t.copy_to(Program.tape)
-    @@tables = kept
-    kept
+    t
+  end
+
+  # Made before any thread starts; only read after.
+  @@tables : Array(UInt32) = build_tables.copy_to(Program.tape)
+
+  private def self.tables : Array(UInt32)
+    @@tables
   end
 
   def self.hexdigest(data : String) : String
@@ -1234,11 +1242,8 @@ pub struct CRC64
     crc ^ 0xffffffffffffffff_u64
   end
 
-  @@tables = Array(UInt64).new.copy_to(Program.tape)
-
   # The eight tables, made once, as `CRC32` makes its own.
-  private def self.tables : Array(UInt64)
-    return @@tables if @@tables.empty? == false
+  private def self.build_tables : Array(UInt64)
     t = Array(UInt64).new(2048, 0_u64)
     n = 0
     while n < 256
@@ -1261,9 +1266,14 @@ pub struct CRC64
       end
       slice = slice + 1
     end
-    kept = t.copy_to(Program.tape)
-    @@tables = kept
-    kept
+    t
+  end
+
+  # Made before any thread starts; only read after.
+  @@tables : Array(UInt64) = build_tables.copy_to(Program.tape)
+
+  private def self.tables : Array(UInt64)
+    @@tables
   end
 
   def self.hexdigest(data : String) : String
