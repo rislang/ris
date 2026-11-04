@@ -216,7 +216,8 @@ section; a removed one leaves its number unused.
   or pipe end never crosses tasks: no owns:, task.take, resource move or
   exception. An HTTP server uses N tasks, each opening its own SO_REUSEPORT
   listener on the same port and accepting and serving one connection at a time;
-  N limits connections, with no permits or semaphore. Pipe and socket race IO
+  N limits connections, with no permits or semaphore. On macOS N is 1: it gives
+  a SO_REUSEPORT port's connections to one listener; more is refused. Pipe and socket race IO
   stay in one task using OS facilities on the poller; board IO copies data.
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
@@ -240,8 +241,8 @@ section; a removed one leaves its number unused.
 
 * 7.1 No heap, no collector, no fallback allocator, no heap type. Memory is
   static data, tapes, `Program.tape` and typed pools (Goose §1.2, §5.4).
-  Programs build only for Linux x86_64 and aarch64; other targets fail at
-  compile time. The compiler executable keeps its own GC.
+  Programs build only for Linux x86_64 and aarch64 and macOS arm64; other
+  targets fail at compile time. The compiler executable keeps its own GC.
 * 7.2 The data types are String, Array, Hash and RisTree, on the tape. String
   is a read-only view of bytes; a literal views static bytes; building
   text (`+`, interpolation, `to_s`, `String.build`) writes on the current

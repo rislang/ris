@@ -65,7 +65,7 @@ port = probe.local_port
 probe.close
 group do |g|
   g.spawn do
-    Server.serve("127.0.0.1", port, 0, Big, max_connections: 4)
+    Server.serve("127.0.0.1", port, 0, Big, max_connections: {% if flag?(:darwin) %}1{% else %}4{% end %})
     0
   end
   RisBoard.take(Listening).or_panic

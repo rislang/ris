@@ -1,5 +1,5 @@
-# Linux's connect race: one task with every attempt's connect in flight
-# on one epoll of its own (std/socket `race_polled`). A name's addresses
+# The connect race: one task with every attempt's connect in flight
+# on one epoll or kqueue of its own (std/socket `race_polled`). A name's addresses
 # from a hosts-file resolver; `hole` is a listener whose backlog is full,
 # so a connect to it waits until given up on. Staggered starts, an early
 # failure, the deadline, a cancel, and every losing socket closed.
@@ -10,7 +10,11 @@ import std/dir::{Dir}
 import std/udp::{UdpSocket}
 
 def descriptors : Int32
-  Dir.children("/proc/self/fd").size
+  {% if flag?(:darwin) %}
+    Dir.children("/dev/fd").size
+  {% else %}
+    Dir.children("/proc/self/fd").size
+  {% end %}
 end
 
 def check(ok : Bool, what : String) : Nil

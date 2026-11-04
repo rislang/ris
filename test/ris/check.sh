@@ -1354,16 +1354,14 @@ case "$out" in
   skipped) echo 'skipped  http2_conn_growth (no curl with HTTP/2)';;
   *) echo "FAILED   http2_conn_growth: $out"; status=1;;
 esac
-# Linux's connect race: one task, every attempt in flight on its own
-# epoll; staggered starts, refusals, deadline, cancel, losers closed.
-if [ "$(uname -s)" = Linux ]; then
-  out=$(RIS_HEAP_STATS=1 timeout 120 "$RIS" run test/ris/socket_race.ri 2>&1)
-  if grep -qxF 'PASS: socket race' <<<"$out" &&
-      grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
-    echo 'runs     socket_race (one task, epoll of attempts, losers closed)'
-  else
-    echo "FAILED   socket_race: $out"; status=1
-  fi
+# The connect race: one task, every attempt in flight on its own epoll or
+# kqueue; staggered starts, refusals, deadline, cancel, losers closed.
+out=$(RIS_HEAP_STATS=1 timeout 120 "$RIS" run test/ris/socket_race.ri 2>&1)
+if grep -qxF 'PASS: socket race' <<<"$out" &&
+    grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo 'runs     socket_race (one task, a poller of attempts, losers closed)'
+else
+  echo "FAILED   socket_race: $out"; status=1
 fi
 # std/udp on the caller tape: datagrams received into String room or an
 # Array, connected sends, a 60000-byte datagram; no heap.
@@ -1439,11 +1437,14 @@ else
   echo "FAILED   netip: $out"; status=1
 fi
 # std/debug under ris: a panic's frames walked and named from the binary.
+# macOS still shows a frame's mangled name around the def's (TODO.md).
+frame_edge=
+if [ "$(uname -s)" = Darwin ]; then frame_edge='[^ ]*'; fi
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/debug.ri 2>&1); code=$?
 if [ "$code" -ne 0 ] && grep -qxF 4 <<<"$out" &&
     grep -qF 'panic: deliberate 3' <<<"$out" &&
-    grep -qE '^0 +[^ ]*inner_fails[^ ]* at .*test/ris/debug.ri:9:3$' <<<"$out" &&
-    grep -qE '^1 +[^ ]*outer_calls[^ ]* at .*test/ris/debug.ri:14:3$' <<<"$out" &&
+    grep -qE "^0 +${frame_edge}inner_fails${frame_edge} at .*test/ris/debug.ri:9:3\$" <<<"$out" &&
+    grep -qE "^1 +${frame_edge}outer_calls${frame_edge} at .*test/ris/debug.ri:14:3\$" <<<"$out" &&
     grep -qxF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
   echo 'runs     debug (backtrace named, no heap)'
 else
@@ -2686,13 +2687,32 @@ else
   echo "FAILED   slice_dup: $out"; status=1
 fi
 
+# SPEC 7.1: a target outside the list is refused by name, before anything else.
+for triple in x86_64-apple-macosx aarch64-unknown-freebsd; do
+  out=$("$RIS" build --cross-compile --target "$triple" samples/ris/hello.ri \
+    -o /tmp/ris-refused-target 2>&1)
+  if grep -qF 'ris programs need Linux x86_64 or aarch64, or macOS arm64' <<<"$out"; then
+    echo "refuses  target $triple"
+  else
+    echo "FAILED   target $triple: $out"; status=1
+  fi
+done
+
 # std/system: the affinity mask read into a tape Array (three CPUs under
-# taskset), /proc/self/auxv and /sys read into a builder.
-out=$(RIS_HEAP_STATS=1 taskset -c 0-2 "$RIS" run test/ris/system.ri 2>&1)
-want='3
+# taskset), /proc/self/auxv and /sys read into a builder; libSystem on macOS.
+if [ "$(uname -s)" = Darwin ]; then
+  out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/system.ri 2>&1)
+  want="$(sysctl -n hw.logicalcpu)
+16384
+false
+ris heap: 0 allocations, 0 bytes"
+else
+  out=$(RIS_HEAP_STATS=1 taskset -c 0-2 "$RIS" run test/ris/system.ri 2>&1)
+  want='3
 4096
 false
 ris heap: 0 allocations, 0 bytes'
+fi
 if [ "$out" = "$want" ]; then
   echo 'runs     system (affinity and /proc on the tape, no heap)'
 else

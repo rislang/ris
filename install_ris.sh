@@ -28,7 +28,8 @@ done
 case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) target=linux-x86_64 ;;
   Linux-aarch64) target=linux-aarch64 ;;
-  *) die "ris runs only on Linux x86_64 and aarch64," \
+  Darwin-arm64) die "no prebuilt ris for macOS arm64 yet: $from_source" ;;
+  *) die "ris runs only on Linux x86_64 and aarch64 and macOS arm64," \
        "not $(uname -s) $(uname -m) (SPEC 7.1)" ;;
 esac
 

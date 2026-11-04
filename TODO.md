@@ -10,7 +10,7 @@ How to work (fewer tokens, faster to the goal):
   for callers. Few: move them and delete the String API in one commit.
 * TODO holds open work only, one item per task; completed work lives in
   git log. Remove an item when its guarantee passes its gate.
-* Linux x86_64 and aarch64 only (SPEC 7.1): no work for other targets.
+* Linux x86_64 and aarch64, macOS arm64 (SPEC 7.1): no other targets.
 
 ## Order of work
 
@@ -129,6 +129,19 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 * Call summaries model text a callee builds from its inputs
   (interpolation, inspect) as a view of them; tape_text now adds a
   fresh root for an allocating String call not known to answer a view.
+
+## macOS arm64
+
+SPEC 7.1 lists it; these are what Linux has and it lacks yet.
+
+* Measure pages returned to the OS: scope_frees.ri and fibers/spares.ri read
+  /proc, and `MADV_FREE` is lazy, so resident size may not fall. Decide
+  between `task_info` with `MADV_FREE_REUSABLE`, or `mmap` over the range.
+* Port the other checks in `ris-macos.yml`'s `RIS_CHECK_SKIP`: file_copy_to.ri
+  and tls_session_tickets.ri.
+* Short frame names in a backtrace, then drop check.sh's `frame_edge`.
+* A tarball, its release job and `install_ris.sh`: static LLVM fails there.
+* Run a reservation-heavy program on a small Mac: `MAP_NORESERVE` is a no-op.
 
 ## Speed
 

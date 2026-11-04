@@ -2510,7 +2510,12 @@ pub struct Server
   # and the fixed code cost more than they save under it.
   COMPRESS_FROM = 1024
   # The defaults of `serve`'s *max_connections* and *request_timeout_ms*.
-  MAX_CONNECTIONS =   1024
+  # macOS gives a SO_REUSEPORT port's connections to one listener (SPEC 5).
+  {% if flag?(:darwin) %}
+    MAX_CONNECTIONS = 1
+  {% else %}
+    MAX_CONNECTIONS = 1024
+  {% end %}
   REQUEST_TIMEOUT = 300000
   # Serve on N independent SO_REUSEPORT listeners. Each accepting task
   # serves its own connection through keep-alive and closes it before its
@@ -2546,7 +2551,8 @@ pub struct Server
   # raises it. 0 for none. A connection past it is closed, unanswered, as
   # one past *timeout_ms* is.
   #
-  # *max_connections*: the number N of serving tasks, 1024 by default,
+  # *max_connections*: the number N of serving tasks, 1024 by default
+  # (macOS: 1, the only value it takes; a larger N is refused),
   # and the maximum number of connections served simultaneously. It must
   # be positive; 0 no longer requests an unlimited number of tasks.
   # Each listener has a kernel queue. SO_REUSEPORT assigns connections to
@@ -2610,6 +2616,14 @@ pub struct Server
     {% end %}
     raise "HTTP: choose a port from 1 to 65535" unless port > 0 && port <= 65535
     raise "HTTP: max_connections must be a positive task count" if count <= 0
+    {% if flag?(:darwin) %}
+      if count > 1
+        raise "HTTP on macOS serves one connection at a time: its " \
+              "SO_REUSEPORT gives a port's connections to one listener, so " \
+              "more tasks would wait idle. Use max_connections: 1 or leave " \
+              "it out, and run on Linux to serve more."
+      end
+    {% end %}
     raise "HTTP: timeout_ms must be nonnegative" if timeout_ms < 0
     raise "HTTP: request_timeout_ms must be nonnegative" if request_timeout_ms < 0
     image = RisTaskConfig.new(

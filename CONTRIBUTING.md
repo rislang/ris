@@ -2,9 +2,9 @@
 
 ris is iyi plus Goose's tape memory. Read [AGENTS.md](AGENTS.md) first,
 then [LEARN.md](LEARN.md) and [SPEC.md](SPEC.md). Every ris program
-runs without a collector on Linux x86_64 or aarch64. Heap allocation
-traps; use tape values and copy_to for retained data. The compiler is
-still built with Crystal.
+runs without a collector on Linux x86_64 or aarch64, or macOS arm64. Heap
+allocation traps; use tape values and copy_to for retained data. The
+compiler is still built with Crystal.
 
 ## Build
 
@@ -52,7 +52,8 @@ broader suites. Check formatting of changed Crystal files with
 
 CI (`.github/workflows/ris.yml`) builds ris from a clean checkout with
 Crystal 1.21 and LLVM 23, then runs `test/ris/check.sh` on x86_64 and aarch64
-and `make std_spec`.
+and `make std_spec`. `.github/workflows/ris-macos.yml` runs check.sh on macOS
+arm64, without the checks in its `RIS_CHECK_SKIP`.
 
 ## Design and review
 

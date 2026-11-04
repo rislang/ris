@@ -3,6 +3,7 @@
 import concurrent.futures
 import os
 from pathlib import Path
+import platform
 import signal
 import socket
 import ssl
@@ -12,6 +13,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 RIS = os.environ.get("RIS", str(ROOT / "bin/ris"))
+# macOS serves one connection at a time and refuses more tasks (SPEC 5).
+DARWIN = platform.system() == "Darwin"
+COUNT = 1 if DARWIN else 3
 
 
 def unused_port():
@@ -44,7 +48,7 @@ def request(peer, path="/hold", close=True):
 
 
 def exercise(binary):
-    port, count = unused_port(), 3
+    port, count = unused_port(), COUNT
     env = dict(os.environ, RIS_HEAP_STATS="1")
     process = subprocess.Popen([str(binary), str(port), str(count)],
                                stdout=subprocess.PIPE,
@@ -177,7 +181,7 @@ def h2_request(peer, stream):
 
 def exercise_tls(binary, cert, key):
     port = unused_port()
-    process = subprocess.Popen([str(binary), str(port), "2", str(cert),
+    process = subprocess.Popen([str(binary), str(port), "1" if DARWIN else "2", str(cert),
                                 str(key)], stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True)
     peers = []
@@ -248,17 +252,23 @@ def main():
             occupied.bind(("127.0.0.1", 0))
             occupied.listen()
             port = occupied.getsockname()[1]
-            failed = subprocess.run([str(binary), str(port), "3"],
+            failed = subprocess.run([str(binary), str(port), str(COUNT)],
                                     capture_output=True, text=True, timeout=8)
             assert failed.returncode != 0
             assert "SO_REUSEPORT listeners" in failed.stderr, failed.stderr
-        failed = subprocess.run([str(binary), "0", "3"],
+        failed = subprocess.run([str(binary), "0", str(COUNT)],
                                 capture_output=True, text=True, timeout=8)
         assert failed.returncode != 0 and "choose a port" in failed.stderr
         failed = subprocess.run([str(binary), str(unused_port()), "0"],
                                 capture_output=True, text=True, timeout=8)
         assert failed.returncode != 0 and "positive task count" in failed.stderr
         print("PASS: setup failure closes pool; zero port/task count refused")
+        if DARWIN:
+            failed = subprocess.run([str(binary), str(unused_port()), "2"],
+                                    capture_output=True, text=True, timeout=8)
+            assert failed.returncode != 0
+            assert "max_connections: 1" in failed.stderr, failed.stderr
+            print("PASS: macOS refuses more than one serving task")
         tls_binary = Path(work) / "tls-server"
         build = subprocess.run([RIS, "build", "-o", str(tls_binary),
                                 str(ROOT / "test/ris/http_prefork_tls.ri")],

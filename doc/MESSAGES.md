@@ -164,6 +164,8 @@ Construct a task's handler from its independently copied configuration;
 keep its IdleConns and mutable handler state local. A configuration copy
 is not a copy of an open listener, TLS connection or manager. Unsupported
 SO_REUSEPORT targets need an explicit refusal, not shared-listener fallback.
+macOS has the option but gives a port's connections to one listener: it
+serves one connection at a time, its default N is 1 and a larger N is refused.
 
 The server entry points take an address and a factory type:
 

@@ -40,12 +40,15 @@ port = probe.local_port
 probe.close
 first = nil.as(IyiSocket?)
 second = nil.as(IyiSocket?)
+# macOS serves one connection at a time (SPEC 5).
+LISTENERS = {% if flag?(:darwin) %}1{% else %}2{% end %}
+
 group do |g|
   g.spawn do
-    Server.answer("127.0.0.1", port, 0, Handler, max_connections: 2)
+    Server.answer("127.0.0.1", port, 0, Handler, max_connections: LISTENERS)
     0
   end
-  2.times { RisBoard.take(Listening).or_panic }
+  LISTENERS.times { RisBoard.take(Listening).or_panic }
   first = IyiSocket.connect("127.0.0.1", port).or_panic
   second = IyiSocket.connect("127.0.0.1", port).or_panic
   first.write("GET / HTTP/1.1\r\n").or_panic

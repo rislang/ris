@@ -4,6 +4,21 @@ Every change to SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one. Entries before 2026-10-31 name the file by its old name, TAPE_SPEC.md.
 
+## 2026-11-04: macOS arm64 is a target; its HTTP serves one connection
+
+* Was: 7.1 allowed Linux x86_64 and aarch64 only.
+* Now: 7.1 adds macOS arm64. On macOS HTTP's N is 1, the default, and a
+  larger N is refused. No tape rule changes. macOS x86_64 stays refused.
+* Why: the owner asked for macOS on main. A trial on Apple Silicon passed
+  check.sh. EGM review (zoom out, comprehension, critic) ran on the existing
+  code, doc/drafts/macos/macos.md, not before it as the rule asks. It added the
+  HTTP limit: macOS gives a SO_REUSEPORT port's connections to one listener,
+  so with N tasks one held connection would stall new ones while N-1 idled,
+  which breaks "N limits connections". It also made CI read check.sh's status,
+  kept Linux's backtrace regex strict, ran socket_race and system on macOS
+  and moved the target refusal to the prelude's top with a gate.
+* Open: pages returned to the OS are unmeasured on macOS; TODO.md lists it.
+
 ## 2026-11-02: the header drops the heap sentence
 
 * Was: the opening paragraph said "A heap path (to_heap) needs a

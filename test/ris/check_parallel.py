@@ -11,7 +11,7 @@ its processes and reported FAILED, so one hung test cannot hold the
 suite.
 RIS_CHECK_SERIAL=1 bash test/ris/check.sh runs it in order.
 RIS_CHECK_MATCH selects blocks by regex and skips unrelated heap workloads.
-RIS_CHECK_SKIP drops blocks by regex: a trial target's Linux-only checks.
+RIS_CHECK_SKIP drops blocks by regex: macOS skips its Linux-only checks.
 RIS_CHECK_SHARD=k/n runs every n-th block from the k-th (1-based) and no
 heap gate; RIS_CHECK_SHARD=heap runs the heap gate alone. CI runs the n
 block shards and the heap shard as separate jobs.

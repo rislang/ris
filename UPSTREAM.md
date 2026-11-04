@@ -52,6 +52,10 @@ back.
   descriptors and lets servers distinguish setup failure from a panic.
   Task-owned socket state and copied HTTP configuration stay in ris.
 
+* macOS arm64: the connect race on kqueue, a kevent change on the stack (no
+  storage per wait), UDP's SO_SNDBUF for datagrams over 9 KiB, `pthread_self`
+  in thread's bindings. HTTP's one-listener limit there is ris's prefork.
+
 * `IyiTask#wait(ms : Int32)` observes completion without consuming the
   result or cancelling the task. Each reader has its own timer; answers
   are Nil for Done, TimedOut or Cancelled. `value` still reads the result.
@@ -149,7 +153,7 @@ back.
 * std/aead `seal_at`/`open_at` and std/tls records opened and sealed in
   place (`TlsRecordCipher#seal_at`, `#open_at`): no tape, nothing per record.
 * CI is ris's own: `.github/workflows/ris.yml` builds from a clean checkout
-  and runs ris's gates on Linux only. iyi's `iyi.yml` is not kept: when
+  and runs ris's gates on Linux; `ris-macos.yml` on macOS arm64. iyi's `iyi.yml` is not kept: when
   merging iyi, drop its workflow changes.
 * Fixed lookup tables in time, cookies, DNS, MIME, system roots,
   compression, HPACK, JSON and TLS use static storage; `StaticArray#find`

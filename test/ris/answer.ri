@@ -72,12 +72,15 @@ probe = IyiSocket.listen(0)
 port = probe.local_port
 probe.close
 received = String::Builder.new(4096)
+# macOS serves one connection at a time (SPEC 5).
+LISTENERS = {% if flag?(:darwin) %}1{% else %}2{% end %}
+
 group do |g|
   g.spawn do
-    Server.answer("127.0.0.1", port, 0, Handler, max_connections: 2)
+    Server.answer("127.0.0.1", port, 0, Handler, max_connections: LISTENERS)
     0
   end
-  2.times { RisBoard.take(Ready).or_panic }
+  LISTENERS.times { RisBoard.take(Ready).or_panic }
   client = IyiSocket.connect("127.0.0.1", port).or_panic
   client.write(REQUESTS).or_panic
   read_to_close(client, received)

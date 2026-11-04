@@ -1,12 +1,18 @@
-# ris on macOS arm64: a trial on its branch, not a target yet (SPEC 7.1).
+# ris's gates on macOS arm64 (SPEC 7.1): Homebrew's Crystal and LLVM, smoke
+# samples, then check.sh in parts without the checks RIS_CHECK_SKIP names.
 name: ris macos
 
 on:
   push:
-    branches: [macos-arm64]
+    branches: [main, macos-arm64]
+  pull_request:
   workflow_dispatch:
 
 permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   check:
@@ -23,7 +29,7 @@ jobs:
           persist-credentials: false
       - name: Crystal, coreutils and LLVM 23
         run: |
-          brew install bash crystal coreutils pkgconf
+          brew install bash crystal coreutils llvm pkgconf
           echo "$(brew --prefix)/opt/coreutils/libexec/gnubin" >> "$GITHUB_PATH"
           echo "LLVM_CONFIG=$(brew --prefix llvm)/bin/llvm-config" >> "$GITHUB_ENV"
       - name: Build ris
@@ -52,16 +58,16 @@ jobs:
           export PATH="$(brew --prefix)/bin:$PATH"
           ulimit -n 10240
           ulimit -s 65520
-          bash test/ris/check.sh 2>&1 | tee check.log | grep -E '^(FAILED|FAIL|PASS)|checks' || true
-          grep -c '^FAILED' check.log || true
-          ! grep -q '^FAIL' check.log
+          rc=0
+          bash test/ris/check.sh > check.log 2>&1 || rc=$?
+          grep -E '^(FAILED|FAIL|PASS)' check.log | cut -c1-400 || true
+          echo "check.sh rc=$rc"
+          exit $rc
         env:
           RIS_CHECK_SHARD: ${{ matrix.shard }}
           RIS_CHECK_TIMEOUT: "300"
-          # These read /proc or call taskset: Linux's, not the behavior.
-          # http_prefork asks the kernel to spread connections over workers;
-          # macOS gives a SO_REUSEPORT port's connections to one.
-          RIS_CHECK_SKIP: 'scope_frees\.ri|file_copy_to\.ri|fibers/spares\.ri|test/ris/system\.ri|tls_session_tickets\.ri|http_prefork\.py'
+          # These read /proc: Linux's, not the behavior (TODO.md, macOS arm64).
+          RIS_CHECK_SKIP: 'scope_frees\.ri|file_copy_to\.ri|fibers/spares\.ri|tls_session_tickets\.ri'
       - uses: actions/upload-artifact@v5
         if: always() && matrix.shard != 'smoke'
         with:

@@ -1,10 +1,3 @@
-{% if flag?(:ris_no_gc) && !((flag?(:linux) &&
-        (flag?(:x86_64) || flag?(:aarch64))) ||
-        (flag?(:darwin) && flag?(:aarch64))) %}
-  {% raise "ris programs need Linux x86_64 or aarch64, or macOS arm64; " \
-           "build for a supported target." %}
-{% end %}
-
 {% if flag?(:ris_no_gc) && flag?(:gc_boehm) %}
   {% raise "ris programs cannot link Boehm; drop -Dgc_boehm." %}
 {% end %}

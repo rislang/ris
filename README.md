@@ -1,6 +1,7 @@
 # ris: rubyist in stack memory with agents
 
-Programs always run without a collector on Linux x86_64 or aarch64.
+Programs always run without a collector on Linux x86_64 or aarch64, or macOS
+arm64 (built from source; an HTTP server there takes one connection at a time).
 Heap allocation traps; use tape values and copy_to for retained data.
 
 ris is a Ruby-like language whose data lives on tape memory, with no GC,
