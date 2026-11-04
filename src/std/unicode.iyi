@@ -2724,151 +2724,216 @@ pub struct Unicode
   # Tables: decoded once, searched by rows.
   # ---------------------------------------------------------------------
 
-  @@letter : Array(Int32)?
-  @@number : Array(Int32)?
-  @@mark : Array(Int32)?
-  @@whitespace : Array(Int32)?
-  @@control : Array(Int32)?
-  @@lowercase : Array(Int32)?
-  @@uppercase : Array(Int32)?
-  @@titlecase : Array(Int32)?
-  @@cased : Array(Int32)?
-  @@case_ignorable : Array(Int32)?
-  @@upcase : Array(Int32)?
-  @@downcase : Array(Int32)?
-  @@alternate : Array(Int32)?
-  @@casefold : Array(Int32)?
-  @@special_upcase : Array(Int32)?
-  @@special_downcase : Array(Int32)?
-  @@special_titlecase : Array(Int32)?
-  @@special_fold : Array(Int32)?
-  @@combining_class : Array(Int32)?
-  @@canonical_decomposition : Array(Int32)?
-  @@compatibility_decomposition : Array(Int32)?
-  @@compatibility_data : Array(Int32)?
-  @@composition : Array(Int32)?
-  @@general_category : Array(Int32)?
-  @@script : Array(Int32)?
-  @@category_names : Array(String)?
-  @@script_names : Array(String)?
-  @@orbits : Hash(Int32, Array(Int32))?
-  @@simple_fold : Array(Int32)?
-  @@grapheme : Array(Int32)?
+
+  # Made before any thread starts; only read after.
+  @@letter : Array(Int32) = decode(LETTER).copy_to(Program.tape)
 
   private def self.letter_table : Array(Int32)
-    @@letter ||= decode(LETTER).copy_to(Program.tape)
+    @@letter
   end
+
+  # Made before any thread starts; only read after.
+  @@number : Array(Int32) = decode(NUMBER).copy_to(Program.tape)
 
   private def self.number_table : Array(Int32)
-    @@number ||= decode(NUMBER).copy_to(Program.tape)
+    @@number
   end
+
+  # Made before any thread starts; only read after.
+  @@mark : Array(Int32) = decode(MARK).copy_to(Program.tape)
 
   private def self.mark_table : Array(Int32)
-    @@mark ||= decode(MARK).copy_to(Program.tape)
+    @@mark
   end
+
+  # Made before any thread starts; only read after.
+  @@whitespace : Array(Int32) = decode(WHITESPACE).copy_to(Program.tape)
 
   private def self.whitespace_table : Array(Int32)
-    @@whitespace ||= decode(WHITESPACE).copy_to(Program.tape)
+    @@whitespace
   end
+
+  # Made before any thread starts; only read after.
+  @@control : Array(Int32) = decode(CONTROL).copy_to(Program.tape)
 
   private def self.control_table : Array(Int32)
-    @@control ||= decode(CONTROL).copy_to(Program.tape)
+    @@control
   end
+
+  # Made before any thread starts; only read after.
+  @@lowercase : Array(Int32) = decode(LOWERCASE).copy_to(Program.tape)
 
   private def self.lowercase_table : Array(Int32)
-    @@lowercase ||= decode(LOWERCASE).copy_to(Program.tape)
+    @@lowercase
   end
+
+  # Made before any thread starts; only read after.
+  @@uppercase : Array(Int32) = decode(UPPERCASE).copy_to(Program.tape)
 
   private def self.uppercase_table : Array(Int32)
-    @@uppercase ||= decode(UPPERCASE).copy_to(Program.tape)
+    @@uppercase
   end
+
+  # Made before any thread starts; only read after.
+  @@titlecase : Array(Int32) = decode(TITLECASE).copy_to(Program.tape)
 
   private def self.titlecase_table : Array(Int32)
-    @@titlecase ||= decode(TITLECASE).copy_to(Program.tape)
+    @@titlecase
   end
+
+  # Made before any thread starts; only read after.
+  @@cased : Array(Int32) = decode(CASED).copy_to(Program.tape)
 
   private def self.cased_table : Array(Int32)
-    @@cased ||= decode(CASED).copy_to(Program.tape)
+    @@cased
   end
+
+  # Made before any thread starts; only read after.
+  @@case_ignorable : Array(Int32) = decode(CASE_IGNORABLE).copy_to(Program.tape)
 
   private def self.case_ignorable_table : Array(Int32)
-    @@case_ignorable ||= decode(CASE_IGNORABLE).copy_to(Program.tape)
+    @@case_ignorable
   end
+
+  # Made before any thread starts; only read after.
+  @@upcase : Array(Int32) = decode(UPCASE).copy_to(Program.tape)
 
   private def self.upcase_table : Array(Int32)
-    @@upcase ||= decode(UPCASE).copy_to(Program.tape)
+    @@upcase
   end
+
+  # Made before any thread starts; only read after.
+  @@downcase : Array(Int32) = decode(DOWNCASE).copy_to(Program.tape)
 
   private def self.downcase_table : Array(Int32)
-    @@downcase ||= decode(DOWNCASE).copy_to(Program.tape)
+    @@downcase
   end
+
+  # Made before any thread starts; only read after.
+  @@alternate : Array(Int32) = decode(ALTERNATE).copy_to(Program.tape)
 
   private def self.alternate_table : Array(Int32)
-    @@alternate ||= decode(ALTERNATE).copy_to(Program.tape)
+    @@alternate
   end
+
+  # Made before any thread starts; only read after.
+  @@casefold : Array(Int32) = decode(CASEFOLD).copy_to(Program.tape)
 
   private def self.casefold_table : Array(Int32)
-    @@casefold ||= decode(CASEFOLD).copy_to(Program.tape)
+    @@casefold
   end
+
+  # Made before any thread starts; only read after.
+  @@special_upcase : Array(Int32) = decode(SPECIAL_UPCASE).copy_to(Program.tape)
 
   private def self.special_upcase_table : Array(Int32)
-    @@special_upcase ||= decode(SPECIAL_UPCASE).copy_to(Program.tape)
+    @@special_upcase
   end
+
+  # Made before any thread starts; only read after.
+  @@special_downcase : Array(Int32) =
+    decode(SPECIAL_DOWNCASE).copy_to(Program.tape)
 
   private def self.special_downcase_table : Array(Int32)
-    @@special_downcase ||= decode(SPECIAL_DOWNCASE).copy_to(Program.tape)
+    @@special_downcase
   end
+
+  # Made before any thread starts; only read after.
+  @@special_titlecase : Array(Int32) =
+    decode(SPECIAL_TITLECASE).copy_to(Program.tape)
 
   private def self.special_titlecase_table : Array(Int32)
-    @@special_titlecase ||= decode(SPECIAL_TITLECASE).copy_to(Program.tape)
+    @@special_titlecase
   end
+
+  # Made before any thread starts; only read after.
+  @@special_fold : Array(Int32) = decode(SPECIAL_FOLD).copy_to(Program.tape)
 
   private def self.special_fold_table : Array(Int32)
-    @@special_fold ||= decode(SPECIAL_FOLD).copy_to(Program.tape)
+    @@special_fold
   end
+
+  # Made before any thread starts; only read after.
+  @@combining_class : Array(Int32) =
+    decode(COMBINING_CLASS).copy_to(Program.tape)
 
   private def self.combining_class_table : Array(Int32)
-    @@combining_class ||= decode(COMBINING_CLASS).copy_to(Program.tape)
+    @@combining_class
   end
+
+  # Made before any thread starts; only read after.
+  @@canonical_decomposition : Array(Int32) =
+    decode(CANONICAL_DECOMPOSITION).copy_to(Program.tape)
 
   private def self.canonical_decomposition_table : Array(Int32)
-    @@canonical_decomposition ||= decode(CANONICAL_DECOMPOSITION).copy_to(Program.tape)
+    @@canonical_decomposition
   end
+
+  # Made before any thread starts; only read after.
+  @@compatibility_decomposition : Array(Int32) =
+    decode(COMPATIBILITY_DECOMPOSITION).copy_to(Program.tape)
 
   private def self.compatibility_decomposition_table : Array(Int32)
-    @@compatibility_decomposition ||= decode(COMPATIBILITY_DECOMPOSITION).copy_to(Program.tape)
+    @@compatibility_decomposition
   end
+
+  # Made before any thread starts; only read after.
+  @@compatibility_data : Array(Int32) =
+    decode(COMPATIBILITY_DATA).copy_to(Program.tape)
 
   private def self.compatibility_data_table : Array(Int32)
-    @@compatibility_data ||= decode(COMPATIBILITY_DATA).copy_to(Program.tape)
+    @@compatibility_data
   end
+
+  # Made before any thread starts; only read after.
+  @@composition : Array(Int32) = decode(COMPOSITION).copy_to(Program.tape)
 
   private def self.composition_table : Array(Int32)
-    @@composition ||= decode(COMPOSITION).copy_to(Program.tape)
+    @@composition
   end
+
+  # Made before any thread starts; only read after.
+  @@general_category : Array(Int32) =
+    decode(GENERAL_CATEGORY).copy_to(Program.tape)
 
   private def self.general_category_table : Array(Int32)
-    @@general_category ||= decode(GENERAL_CATEGORY).copy_to(Program.tape)
+    @@general_category
   end
+
+  # Made before any thread starts; only read after.
+  @@script : Array(Int32) = decode(SCRIPT).copy_to(Program.tape)
 
   private def self.script_table : Array(Int32)
-    @@script ||= decode(SCRIPT).copy_to(Program.tape)
+    @@script
   end
+
+  # Made before any thread starts; only read after.
+  @@category_names : Array(String) =
+    CATEGORY_NAMES.split(',').copy_to(Program.tape)
 
   private def self.category_names : Array(String)
-    @@category_names ||= CATEGORY_NAMES.split(',').copy_to(Program.tape)
+    @@category_names
   end
+
+  # Made before any thread starts; only read after.
+  @@script_names : Array(String) = SCRIPT_NAMES.split(',').copy_to(Program.tape)
 
   private def self.script_names : Array(String)
-    @@script_names ||= SCRIPT_NAMES.split(',').copy_to(Program.tape)
+    @@script_names
   end
+
+  # Made before any thread starts; only read after.
+  @@simple_fold : Array(Int32) = decode(SIMPLE_FOLD).copy_to(Program.tape)
 
   private def self.simple_fold_table : Array(Int32)
-    @@simple_fold ||= decode(SIMPLE_FOLD).copy_to(Program.tape)
+    @@simple_fold
   end
 
+  # Made before any thread starts; only read after.
+  @@grapheme : Array(Int32) = decode(GRAPHEME).copy_to(Program.tape)
+
   private def self.grapheme_table : Array(Int32)
-    @@grapheme ||= decode(GRAPHEME).copy_to(Program.tape)
+    @@grapheme
   end
 
   # The integers a table string spells, in order: a sign, decimal digits,
@@ -3294,8 +3359,12 @@ pub struct Unicode
   # code point that folds to it, itself included, sorted. Built once from
   # the tables `simple_fold` reads, in the order it reads them, so a code
   # point one table folds is not folded again by a later one.
+  # Made before any thread starts; only read after.
+  @@orbits : Hash(Int32, Array(Int32)) =
+    RisOrbits.new(0).map.copy_to(Program.tape)
+
   private def self.orbits : Hash(Int32, Array(Int32))
-    @@orbits ||= RisOrbits.new(0).map.copy_to(Program.tape)
+    @@orbits
   end
 
   # Into *map*: see `orbits`.
