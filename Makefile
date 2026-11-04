@@ -159,7 +159,7 @@ LLVM_EXT_DIR = src/llvm/ext
 LLVM_EXT_OBJ = $(LLVM_EXT_DIR)/llvm_ext.o
 CXXFLAGS     += $(if $(debug),-g -O0)
 
-# MSYS2 support (native Windows should use `Makefile.win` instead)
+# MSYS2 support
 ifeq ($(OS),Windows_NT)
 EXE     := .exe
 WINDOWS := 1

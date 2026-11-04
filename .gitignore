@@ -1,6 +1,5 @@
 # Environment configuration
 /Makefile.local
-/Makefile.win.local
 .env
 .env.*
 .envrc

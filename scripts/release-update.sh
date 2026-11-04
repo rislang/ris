@@ -65,16 +65,3 @@ sed -i -E "s|crystallang/crystal:[0-9.]+|crystallang/crystal:$CRYSTAL_VERSION|g"
 # Edit .github/workflows/*.yml to update version for install-crystal action
 sed -i -E "s|crystal: \"[0-9.]+\"|crystal: \"$CRYSTAL_VERSION\"|g" .github/workflows/*.yml
 
-# Edit shell.nix latestCrystalBinary using nix-prefetch-url --unpack <url>
-update_shell_nix_release() {
-  target="$1"
-  release_url="https://github.com/crystal-lang/crystal/releases/download/$CRYSTAL_VERSION/crystal-$CRYSTAL_VERSION-1-$target.tar.gz"
-  release_sha=$(nix-prefetch-url --unpack "$release_url")
-
-  sed -i -E "s|https://github.com/crystal-lang/crystal/releases/download/[0-9.]+/crystal-[0-9.]+-[0-9]-$target.tar.gz|$release_url|" shell.nix
-  sed -i -E "/${target}\.tar\.gz/ {n;s|sha256:[^\"]+|sha256:$release_sha|}" shell.nix
-}
-
-update_shell_nix_release "darwin-universal"
-update_shell_nix_release "linux-x86_64"
-update_shell_nix_release "linux-aarch64"
