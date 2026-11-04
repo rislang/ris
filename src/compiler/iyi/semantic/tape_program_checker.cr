@@ -266,10 +266,16 @@ class Iyi::TapeProgramChecker
            when Primitive
              node.name == "allocate" ? active_origin : Origin::Unknown
            when ProcLiteral
-             previous = @program_context
-             @program_context = false
-             reach(node.def, Array(Origin).new, Origin::Unknown, nil)
-             @program_context = previous
+             # A `defer` lowers to a proc that runs in this frame on panic:
+             # its body sees these locals, not unknown ones.
+             if node.def.iyi_defer?
+               value(node.def.body, env)
+             else
+               previous = @program_context
+               @program_context = false
+               reach(node.def, Array(Origin).new, Origin::Unknown, nil)
+               @program_context = previous
+             end
              Origin::Program
            when Yield
              args = node.exps.map { |exp| value(exp, env) }

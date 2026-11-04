@@ -1,0 +1,38 @@
+# A defer's body runs in its frame: a store into a local owner is not a
+# store into program storage, though a program constant is in use.
+ROOT = "program"
+
+@[OnTape]
+struct Entry
+  getter bytes : SlicePool::Run(UInt8)
+
+  def initialize(@bytes : SlicePool::Run(UInt8))
+  end
+end
+
+class Store
+  getter table : Hash(Int32, Entry)
+
+  def initialize
+    @pool = SlicePool(UInt8).new
+    @table = {} of Int32 => Entry
+  end
+
+  def keep : Nil
+    bytes = @pool.alloc_slice(1)
+    @table[0] = Entry.new(bytes)
+    nil
+  end
+end
+
+def run(outer : Store) : Nil
+  store = Store.new
+  defer store.keep
+  defer outer.keep
+  raise "kept early" unless store.table.empty?
+end
+
+outer = Store.new
+run(outer)
+raise "defer did not run" unless outer.table.size == 1
+puts "PASS: #{ROOT} defer"

@@ -2585,6 +2585,14 @@ done
 expect program_loop_alias 'cannot store data made in this block'
 expect program_local_init 'copy it with .copy_to(Program.tape)'
 expect program_copy_forged 'program initializer is private'
+out=$("$RIS" run test/ris/program_defer.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: program defer' ]; then
+  echo 'runs     program_defer'
+else
+  echo "FAILED   program_defer: $out"
+  status=1
+fi
+expect program_defer_store 'cannot store data made in this def'
 out=$("$RIS" run test/ris/thread_program_initializers.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     [ "$out" = 'PASS: program initializers before threads' ]; then

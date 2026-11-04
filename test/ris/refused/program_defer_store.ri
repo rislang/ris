@@ -1,0 +1,15 @@
+# A defer that stores request text into program storage is still refused.
+class State
+  @@log = Array(String).new
+
+  def self.keep(text : String)
+    @@log << text
+  end
+end
+
+def run : Nil
+  text = String.new("request")
+  defer State.keep(text)
+end
+
+run
