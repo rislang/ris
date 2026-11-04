@@ -452,6 +452,10 @@ pub struct IyiSocket
     @state.value.fd
   end
 
+  def family : Int32
+    @state.value.family
+  end
+
   def object_id : UInt64
     @state.address
   end
@@ -1224,6 +1228,7 @@ pub struct IyiSocket
   # What `connect_fd` and `accept_fd` answer below 0: cancelled, timed
   # out, or a failed step (FAILED_CREATE or FAILED_STEP) plus its code.
   FD_CANCELLED  = -1_i64
+  FD_NOT_READY  = -3_i64
   FD_TIMED_OUT  = -2_i64
   FAILED_CREATE = -(1_i64 << 32)
   FAILED_STEP   = -(2_i64 << 32)
@@ -1275,8 +1280,19 @@ pub struct IyiSocket
     (fd = accept_fd) >= 0 ? IyiSocket.new(fd.to_i32, @state.value.family, task_owned: @state.value.task_owned) : IyiSocket.refusal(fd, "accept a connection")
   end
 
+  # `accept` that does not wait: nil when no connection is queued. Tasks
+  # sharing a listener all wake for one connection, and those that lose it
+  # go back to what they were watching.
+  def accept_ready : IyiSocket | Cancelled | SocketError | Nil
+    accepted_if_ready(accept_fd(false))
+  end
+
+  private def accepted_if_ready(fd : Int64) : IyiSocket | Cancelled | SocketError | Nil
+    fd == FD_NOT_READY ? nil : fd >= 0 ? IyiSocket.new(fd.to_i32, @state.value.family, task_owned: @state.value.task_owned) : IyiSocket.refusal(fd, "accept a connection")
+  end
+
   # The accepted descriptor, or what went wrong (see `refusal`).
-  private def accept_fd : Int64
+  private def accept_fd(wait : ::Bool = true) : Int64
     raise "socket is closed" if @state.value.fd < 0
     # A `sockaddr_storage`'s room: the peer's address in whichever family.
     storage = uninitialized UInt8[128]
@@ -1297,6 +1313,7 @@ pub struct IyiSocket
         next if SocketError.new("accept a connection", code).disconnected?
         return IyiSocket::FAILED_STEP - code
       end
+      return IyiSocket::FD_NOT_READY unless wait
       # Closed by another fiber, which is the same answer whether it
       # happened under the accept or under the wait: the wait is over and
       # nothing is coming, which is what `Cancelled` says. Asked before the
@@ -1699,6 +1716,26 @@ pub struct IyiSocket
     got = IyiSocket.__sys_shutdown_write(@state.value.fd)
     return SocketError.new("shut down sending", IyiSocket.__sys_code(got)) if got < 0_i64
     nil
+  end
+
+  # This listener under a second descriptor, a task's own: a fiber waits on
+  # a descriptor alone, so tasks sharing a listener each hold one.
+  def self.share_listener(fd : Int32, family : Int32) : IyiSocket
+    IyiSocket.new(checked_dup(fd), family, task_owned: true)
+  end
+
+  private def self.checked_dup(fd : Int32) : Int32
+    copy = __sys_dup(fd)
+    raise "cannot share a listener: #{SocketError.new("dup", __sys_code(copy.to_i64)).reason}" if copy < 0
+    __sys_set_nonblock(copy)
+    copy
+  end
+
+  # A listener stops taking connections with its descriptor still open:
+  # new ones are refused and everyone sharing it wakes, which closing one
+  # descriptor of several would not do.
+  def stop_listening : Nil
+    IyiSocket.__sys_shutdown_read(@state.value.fd) if @state.value.fd >= 0
   end
 
   # Move a fresh descriptor from *source* into this closed slot, so a
@@ -2163,6 +2200,7 @@ pub struct IyiSocket
       fun kqueue : Int32
       fun kevent(kq : Int32, changelist : Void*, nchanges : Int32, eventlist : Void*, nevents : Int32, timeout : Void*) : Int32
       fun shutdown(fd : Int32, how : Int32) : Int32
+      fun dup(fd : Int32) : Int32
       fun error_location = __error : Int32*
     end
 
@@ -2200,6 +2238,14 @@ pub struct IyiSocket
 
     def self.__sys_shutdown_write(fd : Int32) : Int64
       LibC.shutdown(fd, 1).to_i64
+    end
+
+    def self.__sys_shutdown_read(fd : Int32) : Int64
+      LibC.shutdown(fd, 0).to_i64
+    end
+
+    def self.__sys_dup(fd : Int32) : Int32
+      LibC.dup(fd)
     end
 
     def self.__sys_accept(fd : Int32, addr : Pointer(UInt8), addrlen : Pointer(UInt32), family : Int32) : Int32
@@ -2358,6 +2404,7 @@ pub struct IyiSocket
       SYS_RECVFROM    =  45_i64
       SYS_SENDMSG     =  46_i64
       SYS_SHUTDOWN    =  48_i64
+      SYS_DUP         =  32_i64
       SYS_BIND        =  49_i64
       SYS_LISTEN      =  50_i64
       SYS_GETSOCKNAME =  51_i64
@@ -2380,6 +2427,7 @@ pub struct IyiSocket
       SYS_SETSOCKOPT  = 208_i64
       SYS_GETSOCKOPT  = 209_i64
       SYS_SHUTDOWN    = 210_i64
+      SYS_DUP         =  23_i64
       SYS_FCNTL       =  25_i64
       SYS_PPOLL       =  73_i64
     {% end %}
@@ -2462,6 +2510,14 @@ pub struct IyiSocket
 
     def self.__sys_shutdown_write(fd : Int32) : Int64
       __sys3(SYS_SHUTDOWN, fd.to_i64, 1_i64, 0_i64)
+    end
+
+    def self.__sys_shutdown_read(fd : Int32) : Int64
+      __sys3(SYS_SHUTDOWN, fd.to_i64, 0_i64, 0_i64)
+    end
+
+    def self.__sys_dup(fd : Int32) : Int32
+      __sys3(SYS_DUP, fd.to_i64, 0_i64, 0_i64).to_i32
     end
 
     def self.__sys_accept(fd : Int32, addr : Pointer(UInt8), addrlen : Pointer(UInt32), family : Int32) : Int32
@@ -2848,6 +2904,15 @@ pub struct IyiSocket
     def self.__sys_shutdown_write(fd : Int32) : Int64
       return 0_i64 if LibWs2_32.shutdown(__sys_handle(fd), 1) == 0
       __sys_error
+    end
+
+    def self.__sys_shutdown_read(fd : Int32) : Int64
+      return 0_i64 if LibWs2_32.shutdown(__sys_handle(fd), 0) == 0
+      __sys_error
+    end
+
+    def self.__sys_dup(fd : Int32) : Int32
+      -1
     end
 
     # Winsock's address length is an `int*` where POSIX has a `socklen_t*`:
@@ -3431,6 +3496,14 @@ pub struct IyiSocket
 
     def self.__sys_shutdown_write(fd : Int32) : Int64
       -1_i64
+    end
+
+    def self.__sys_shutdown_read(fd : Int32) : Int64
+      -1_i64
+    end
+
+    def self.__sys_dup(fd : Int32) : Int32
+      -1
     end
 
     def self.__sys_accept(fd : Int32, addr : Pointer(UInt8), addrlen : Pointer(UInt32), family : Int32) : Int32
