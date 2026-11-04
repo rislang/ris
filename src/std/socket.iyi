@@ -81,6 +81,7 @@
 
 module std/socket
 
+import std/static_array::{StaticArray}
 import std/int
 
 import std/dns::{DnsError, DnsName, DnsTapeMessage, DnsTapeRecord, HostsFile, ResolvConf, SvcbAnswer, SvcbRecord, SvcbStore}
@@ -1722,6 +1723,29 @@ pub struct IyiSocket
   # a descriptor alone, so tasks sharing a listener each hold one.
   def self.share_listener(fd : Int32, family : Int32) : IyiSocket
     IyiSocket.new(checked_dup(fd), family, task_owned: true)
+  end
+
+  # Lets this process hold *count* descriptors, raising its soft limit (often
+  # 1024) as far as its hard limit allows; false when that is too low.
+  def self.ensure_descriptors(count : UInt64) : Bool
+    {% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) %}
+      limits = uninitialized StaticArray(UInt64, 2)
+      at = pointerof(limits).address.to_i64
+      {% if flag?(:x86_64) %}
+        number = 302_i64
+      {% else %}
+        number = 261_i64
+      {% end %}
+      # RLIMIT_NOFILE is 7. A limit that cannot be read is left to the
+      # socket call to report.
+      return true if __sys6(number, 0_i64, 7_i64, 0_i64, at, 0_i64, 0_i64) < 0
+      return true if limits[0] >= count
+      return false if limits[1] < count
+      limits[0] = count
+      __sys6(number, 0_i64, 7_i64, at, 0_i64, 0_i64, 0_i64) >= 0
+    {% else %}
+      true
+    {% end %}
   end
 
   private def self.checked_dup(fd : Int32) : Int32

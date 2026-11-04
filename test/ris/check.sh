@@ -1341,16 +1341,20 @@ rm -f "$exe"
 # answered in place and chunked ones read the slow way, alternating.
 exe=$(mktemp)
 if out=$("$RIS" build test/ris/http_answer_scope.ri -o "$exe" 2>&1); then
-  few=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 timeout 120 "$exe" 200 2>&1)
+  # The default pool serves under a stock soft limit, raising it itself;
+  # a hard limit too low for it is refused, naming the way out.
+  few=$(ulimit -Sn 1024; RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 timeout 120 "$exe" 200 2>&1)
   many=$(RIS_HEAP_STATS=1 RIS_TAPE_STATS=1 timeout 300 "$exe" 5000 2>&1)
+  low=$(ulimit -n 256; timeout 60 "$exe" 1 2>&1)
   maps() { printf '%s\n' "$1" | sed -n 's/^ris tape: .* \([0-9]*\) mappings made.*/\1/p'; }
-  if printf '%s\n' "$few" | grep -qx '200 true' &&
+  if printf '%s\n' "$low" | grep -qF 'Pass a lower max_connections' &&
+     printf '%s\n' "$few" | grep -qx '200 true' &&
      printf '%s\n' "$many" | grep -qx '5000 true' &&
      printf '%s\n' "$many" | grep -qx 'ris heap: 0 allocations, 0 bytes' &&
      [ -n "$(maps "$few")" ] && [ "$(maps "$few")" = "$(maps "$many")" ]; then
     echo "runs     http_answer_scope ($(maps "$many") mappings for 200 and 5000 requests)"
   else
-    echo "FAILED   http_answer_scope: $few / $many"; status=1
+    echo "FAILED   http_answer_scope: $low / $few / $many"; status=1
   fi
 else
   echo "FAILED   http_answer_scope: $out"; status=1
