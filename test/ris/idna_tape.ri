@@ -3,7 +3,7 @@ module test/ris/idna_tape
 import std/idna::{IDNA, IdnaError, Punycode, PunycodeError}
 import std/unicode::{Unicode}
 
-# The decoded tables must survive the first caller's scratch scope.
+# The tables are read in place: no first caller's scope owns them.
 tape do
   raise "letter table" unless Unicode.letter?('A')
   raise "category table" unless Unicode.general_category('A') == "Lu"

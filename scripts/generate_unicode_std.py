@@ -31,12 +31,13 @@ from unicode.org as `scripts/generate_unicode_data.cr` fetches the rest:
   from `DerivedCoreProperties.txt`, packed into one value per code point.
 
 What is written, between the `# tables-begin` and `# tables-end` lines of the
-module, is one string constant per table: decimal integers separated by
-commas, decoded once into an `Array(Int32)` the first time the table is
-asked for. A string is one static blob in the binary and costs the compiler
-nothing; an array literal of thirty thousand integers is thirty thousand
-stores for LLVM to chew on and made every program that imports the module
-several seconds slower to build.
+module, is one string constant per table: each integer as four characters,
+six bits each from `0` up, biased by 2^23, which `RisCodeTable` reads in place.
+A string is one static blob in the binary: a program starts with nothing to
+decode and threads may read it, and it costs the compiler nothing; an array
+literal of thirty thousand integers is thirty thousand stores for LLVM to chew
+on and made every program that imports the module several seconds slower to
+build.
 
 Every table is sorted by its first column, which is what the module's binary
 searches rely on.
@@ -116,7 +117,7 @@ def derived_core_properties(ucd: str, names: tuple[str, ...]) -> dict[str, set[i
     return properties
 
 
-# The general categories in the order the module's CATEGORY_NAMES lists them,
+# The general categories in the order the module's category_name answers them,
 # which is the order a GENERAL_CATEGORY row's third integer counts in. Cn is
 # not among them: an unassigned code point is in no row.
 CATEGORIES = (
@@ -292,16 +293,25 @@ def flat(rows: list[tuple[int, ...]]) -> list[int]:
     return [value for row in rows for value in row]
 
 
+def encode(value: int) -> str:
+    """An integer as `RisCodeTable` reads it, escaped for a string literal."""
+    biased = value + (1 << 23)
+    if not 0 <= biased < (1 << 24):
+        sys.exit(f"{value} does not fit a table entry")
+    digits = (chr(48 + ((biased >> shift) & 63)) for shift in (18, 12, 6, 0))
+    return "".join(digits).replace("\\", "\\\\")
+
+
 def literal(name: str, comment: str, values: list[int]) -> str:
-    text = ",".join(str(value) for value in values)
     lines = []
-    while text:
-        if len(text) <= WIDTH:
-            lines.append(text)
-            break
-        cut = text.rfind(",", 0, WIDTH) + 1
-        lines.append(text[:cut])
-        text = text[cut:]
+    line = ""
+    for value in values:
+        code = encode(value)
+        if len(line) + len(code) > WIDTH:
+            lines.append(line)
+            line = ""
+        line += code
+    lines.append(line)
     out = [f"  # {comment}"]
     prefix = f"  {name} = "
     pad = " " * len(prefix)
@@ -315,25 +325,41 @@ def literal(name: str, comment: str, values: list[int]) -> str:
     return "\n".join(out)
 
 
-def words(name: str, comment: str, names: list[str] | tuple[str, ...]) -> str:
-    """A string constant of names separated by commas, wrapped as `literal` wraps integers."""
-    text = ",".join(names)
-    lines = []
-    while text:
-        if len(text) <= WIDTH:
-            lines.append(text)
-            break
-        cut = text.rfind(",", 0, WIDTH) + 1
-        lines.append(text[:cut])
-        text = text[cut:]
-    prefix = f"  {name} = "
-    pad = " " * len(prefix)
-    out = [f"  # {comment}"]
-    for index, line in enumerate(lines):
-        lead = prefix if index == 0 else pad
-        tail = " \\" if index < len(lines) - 1 else ""
-        out.append(f'{lead}"{line}"{tail}')
+def words(count: str, reader: str, comment: str,
+          names: list[str] | tuple[str, ...]) -> str:
+    """How many names there are, and a def answering the name at an index:
+    each a literal, so nothing is built or stored."""
+    out = [f"  # {comment}", f"  {count} = {len(names)}", "",
+           f"  private def self.{reader}(index : Int32) : String",
+           "    case index"]
+    out.extend(f'    when {i} then "{word}"' for i, word in enumerate(names))
+    out.extend(['    else ""', "    end", "  end"])
     return "\n".join(out)
+
+
+def case_orbits(simple: list[tuple[int, ...]], casefold: list[tuple[int, ...]],
+                special: list[tuple[int, ...]]) -> dict[int, list[int]]:
+    """The simple foldings read backwards: each folded code point to every code
+    point that folds to it, itself included, sorted. A code point one table
+    folds is not folded again by a later one."""
+    orbits: dict[int, set[int]] = {}
+
+    def join(folded: int, point: int) -> None:
+        orbits.setdefault(folded, {folded}).add(point)
+
+    folded_simply = {row[0] for row in simple}
+    in_casefold = set()
+    for point, folded in simple:
+        join(folded, point)
+    for low, high, delta in casefold:
+        for point in range(low, high + 1):
+            in_casefold.add(point)
+            if point not in folded_simply:
+                join(point + delta, point)
+    for point, first, second, _third in special:
+        if second == 0 and point not in in_casefold and point not in folded_simply:
+            join(first, point)
+    return {folded: sorted(members) for folded, members in orbits.items()}
 
 
 def main() -> None:
@@ -394,6 +420,12 @@ def main() -> None:
     script = labelled_runs({point: script_names.index(name) for point, name in by_script.items()})
     simple_fold = simple_only_foldings(ucd)
     grapheme = labelled_runs(grapheme_values(ucd))
+    orbits = case_orbits(simple_fold, casefold, special_fold)
+    orbit_index = []
+    orbit_members: list[int] = []
+    for folded in sorted(orbits):
+        orbit_index.append((folded, len(orbit_members), len(orbits[folded])))
+        orbit_members.extend(orbits[folded])
 
     sections = [
         f'  # The version of the Unicode Character Database the tables below were written from.\n  VERSION = "{ucd}"',
@@ -420,11 +452,13 @@ def main() -> None:
         literal("COMPATIBILITY_DECOMPOSITION", f"{len(compat)} rows of {{code point, offset, count}}: compatibility decomposition mappings as windows of COMPATIBILITY_DATA.", flat(compat)),
         literal("COMPATIBILITY_DATA", f"{len(compat_data)} code points: the windows COMPATIBILITY_DECOMPOSITION names.", compat_data),
         literal("COMPOSITION", f"{len(compositions)} rows of {{first, second, composed}}: canonical compositions, the exclusions already left out, sorted by first then second.", flat(compositions)),
-        words("CATEGORY_NAMES", "The general categories GENERAL_CATEGORY counts in, from 0; Cn, unassigned, is the absence of a row.", CATEGORIES),
-        literal("GENERAL_CATEGORY", f"{len(general_category)} rows of {{from, to, category}}: every assigned code point's general category, by its place in CATEGORY_NAMES.", flat(general_category)),
-        words("SCRIPT_NAMES", "The scripts SCRIPT counts in, from 0, as Scripts.txt names them; Unknown is the absence of a row.", script_names),
-        literal("SCRIPT", f"{len(script)} rows of {{from, to, script}}: every code point's script, by its place in SCRIPT_NAMES.", flat(script)),
+        words("CATEGORY_COUNT", "category_name", "The general categories GENERAL_CATEGORY counts in, from 0; Cn, unassigned, is the absence of a row.", CATEGORIES),
+        literal("GENERAL_CATEGORY", f"{len(general_category)} rows of {{from, to, category}}: every assigned code point's general category, by its index in category_name.", flat(general_category)),
+        words("SCRIPT_COUNT", "script_name", "The scripts SCRIPT counts in, from 0, as Scripts.txt names them; Unknown is the absence of a row.", script_names),
+        literal("SCRIPT", f"{len(script)} rows of {{from, to, script}}: every code point's script, by its index in script_name.", flat(script)),
         literal("SIMPLE_FOLD", f"{len(simple_fold)} rows of {{code point, folded}}: the simple foldings CaseFolding.txt marks S, of code points whose full folding SPECIAL_FOLD holds.", flat(simple_fold)),
+        literal("ORBIT", f"{len(orbit_index)} rows of {{folded, offset, count}}: each simple folding's orbit, as a window of ORBIT_MEMBERS.", flat(orbit_index)),
+        literal("ORBIT_MEMBERS", f"{len(orbit_members)} code points: every code point that folds to an ORBIT row's folded, itself included, sorted.", orbit_members),
         literal("GRAPHEME", f"{len(grapheme)} rows of {{from, to, value}}: a code point's Grapheme_Cluster_Break in the low four bits (1 + its place in the generator's GRAPHEME_BREAKS, 0 for Other), 16 when it is Extended_Pictographic, and its Indic_Conjunct_Break from bit 5 (1 Consonant, 2 Extend, 3 Linker).", flat(grapheme)),
     ]
 
