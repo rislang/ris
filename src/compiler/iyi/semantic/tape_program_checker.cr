@@ -58,13 +58,16 @@ class Iyi::TapeProgramChecker
   @initializing = false
   @self_safe : Origin = Origin::Unknown
   @self_tape = false
+  @self_type : Type? = nil
   @returned : Origin? = nil
+  @root_types : Set(Type)? = nil
 
   class Binding
     getter block : Block, env : Env, program : Bool, origin : Origin, tape : Bool
     getter parent : Binding?
+    getter type : Type?
 
-    def initialize(@block, @env, @program, @origin, @parent, @tape)
+    def initialize(@block, @env, @program, @origin, @parent, @tape, @type)
     end
   end
 
@@ -143,6 +146,13 @@ class Iyi::TapeProgramChecker
     end) == true
   end
 
+  # The slot of a growing local String (`text << x`): the compiler made it
+  # in this frame, whatever text the local started from. A growing field's
+  # slot is an instance variable and follows its object.
+  private def local_growth?(node : Call, target : Def) : Bool
+    target.owner.to_s == "RisTextGrowth" && !node.obj.is_a?(InstanceVar)
+  end
+
   private def mutation(node : ASTNode)
     @mutations << node unless @program_context || @initializing
   end
@@ -154,7 +164,12 @@ class Iyi::TapeProgramChecker
   private def join(a : Origin, b : Origin) : Origin
     return b if a.kind == :scalar
     return a if b.kind == :scalar || a.same?(b)
-    return Origin::Unknown unless a.kind == b.kind
+    if a.kind != b.kind
+      return Origin::Unknown unless a.request? && b.request?
+      # Neither is program storage. Keep the one that may refer to some,
+      # so a read through the join stays as careful as through either.
+      a, b = b, a if a.kind == :local
+    end
     return a unless a.request?
     key = {a.object_id, b.object_id}
     return Origin::Unknown unless @joining.add?(key)
@@ -205,6 +220,10 @@ class Iyi::TapeProgramChecker
                  mutation(node)
                end
              when InstanceVar
+               # `@field << x` lowers with a rebind for a String field. On
+               # any other field that branch is dead and its value untyped:
+               # it stores nothing, and must not read as storing a scalar.
+               return Origin::Scalar unless node.value.type?
                growing_text = growing_text_rebind?(node, target)
                result = viewed(@self_safe) if growing_text
                # Shared lattice values are not object identities. Recording
@@ -214,7 +233,7 @@ class Iyi::TapeProgramChecker
                    join(old, result)
                  end || result
                end
-               if @self_tape && program_target?(@self_safe, node)
+               if @self_tape && program_target?(@self_safe, node, @self_type)
                  refuse(node) if tape?(node.value) && !result.program? && !growing_text
                  mutation(node)
                end
@@ -241,9 +260,11 @@ class Iyi::TapeProgramChecker
              value(node.cond, env)
              left, right = env.dup, env.dup
              a, b = value(node.then, left), value(node.else, right)
+             # A local assigned in one branch only is nil after the other:
+             # that branch adds no storage to it.
              (left.keys | right.keys).each do |name|
-               env[name] = join(left[name]? || Origin::Unknown,
-                 right[name]? || Origin::Unknown)
+               env[name] = join(left[name]? || Origin::Scalar,
+                 right[name]? || Origin::Scalar)
              end
              join(a, b)
            when While
@@ -283,12 +304,15 @@ class Iyi::TapeProgramChecker
                block, outer = binding.block, binding.env
                saved_program, saved_self = @program_context, @self_safe
                saved_binding, saved_tape = @binding, @self_tape
+               saved_type = @self_type
                @binding, @self_tape = binding.parent, binding.tape
+               @self_type = binding.type
                @program_context, @self_safe = binding.program, binding.origin
                block.args.each_with_index { |arg, i| outer[arg.name] = args[i]? || Origin::Unknown }
                result = value(block.body, outer)
                @program_context, @self_safe = saved_program, saved_self
                @binding, @self_tape = saved_binding, saved_tape
+               @self_type = saved_type
                result
              else
                Origin::Unknown
@@ -346,8 +370,10 @@ class Iyi::TapeProgramChecker
       elsif runtime && node.name == TapeScopeChecker::RESULT
         result = args[1]? || Origin::Unknown
       elsif runtime && node.name == "copy_to"
-        mutation(node)
-        result = node.args.first?.try(&.type?.try(&.to_s)) == "Program::TapeOwner" ? Origin::Program : Origin::Unknown
+        # Only a copy onto the program's tape writes program storage.
+        destination = node.args.first?.try(&.type?.try(&.to_s)) || ""
+        mutation(node) if destination.includes?("Program::TapeOwner")
+        result = destination == "Program::TapeOwner" ? Origin::Program : Origin::Unknown
       elsif runtime && ((target.owner.to_s == "Program::TapeOwner" && node.name == "run") ||
             (target.owner.to_s == "RisRegion.class" &&
             (node.name.starts_with?("program_") || node.name == "release_program")))
@@ -372,7 +398,8 @@ class Iyi::TapeProgramChecker
             end
           end
         end
-        if tape_receiver && program_target?(receiver, node) && writes
+        if tape_receiver && !local_growth?(node, target) &&
+           program_target?(receiver, node, node.obj ? node.obj.try(&.type?) : @self_type) && writes
           node.args.each_with_index do |arg, i|
             copies_bytes = target.owner.to_s == "String::Builder" ||
                            target.owner.to_s == "RisTextGrowth" ||
@@ -429,6 +456,8 @@ class Iyi::TapeProgramChecker
                    # Once reserved, reset copies into its captured owner.
                    TapeChecker.possible_string?(node.type?) ?
                      join(viewed(receiver), input) : input
+                 elsif local_growth?(node, target) && node.name == "append"
+                   active_origin
                  elsif node.name == "append" && target.owner.to_s == "RisTextGrowth"
                    viewed(receiver)
                  elsif READ_VIEWS.includes?(node.name) && tape_receiver
@@ -446,7 +475,7 @@ class Iyi::TapeProgramChecker
                  end
         result = result.try { |old| join(old, origin) } || origin
       else
-        binding = node.block.try { |block| Binding.new(block, env, @program_context, @self_safe, @binding, @self_tape) }
+        binding = node.block.try { |block| Binding.new(block, env, @program_context, @self_safe, @binding, @self_tape, @self_type) }
         reached = reach(target, args, receiver, binding)
         result = result.try { |old| join(old, reached) } || reached
       end
@@ -477,13 +506,16 @@ class Iyi::TapeProgramChecker
           placeholders = binding.block.args.map { Origin.new(:local) }
           saved_self, saved_tape = @self_safe, @self_tape
           saved_binding, saved_program = @binding, @program_context
+          saved_type = @self_type
           @self_safe, @self_tape = binding.origin, binding.tape
+          @self_type = binding.type
           @binding, @program_context = binding.parent, binding.program
           placeholders.each_with_index do |origin, i|
             binding.env[binding.block.args[i].name] = origin
           end
           yielded = value(binding.block.body, binding.env)
           @self_safe, @self_tape = saved_self, saved_tape
+          @self_type = saved_type
           @binding, @program_context = saved_binding, saved_program
           if !contains_program?(yielded) &&
              binding.env.values.none? { |origin| contains_program?(origin) } &&
@@ -529,6 +561,8 @@ class Iyi::TapeProgramChecker
     before = isolated ? input_shape([receiver] + args) : nil
     previous_self, previous_return, previous_binding = @self_safe, @returned, @binding
     previous_tape = @self_tape
+    previous_type = @self_type
+    @self_type = target.owner?
     @self_tape = target.owner?.try { |owner| TapeChecker.tape?(@program, owner) } || false
     @self_safe, @returned, @binding = receiver, nil, binding
     env = Env.new
@@ -540,6 +574,7 @@ class Iyi::TapeProgramChecker
     end
     @self_safe, @returned, @binding = previous_self, previous_return, previous_binding
     @self_tape = previous_tape
+    @self_type = previous_type
     @active.delete(target.object_id)
     # A result or an input acquiring a program alias makes this call
     # context-sensitive. Unknown results are not reusable either. Global
@@ -701,12 +736,88 @@ class Iyi::TapeProgramChecker
   # an unknown origin may be an alias of a root; library code holds one
   # only when handed it, so there it must be program storage itself: a
   # request value that merely refers to program data is no such target.
-  private def program_target?(origin : Origin, node : ASTNode) : Bool
+  #
+  # An unknown value of a type no program root can reach, by any path of
+  # fields and elements, is no alias of one either.
+  private def program_target?(origin : Origin, node : ASTNode, type : Type?) : Bool
     return false if origin.request?
     file = node.location.try(&.original_filename)
-    return true if file && file.ends_with?(".ri") &&
-                   !TapeRules.std?(node.location)
+    if file && file.ends_with?(".ri") && !TapeRules.std?(node.location)
+      return true if origin.kind == :program || !type
+      return root_type?(type)
+    end
     origin.kind == :program
+  end
+
+  private def root_type?(type : Type) : Bool
+    type = type.remove_typedef
+    case type
+    when UnionType
+      type.union_types.any? { |member| root_type?(member) }
+    when VirtualType
+      root_types.includes?(type.base_type) ||
+        type.base_type.all_subclasses.any? { |sub| root_types.includes?(sub) }
+    else
+      root_types.includes?(type)
+    end
+  end
+
+  private def root_types : Set(Type)
+    @root_types ||= begin
+      seen = Set(Type).new
+      @program.const_initializers.each do |init|
+        init.value.type?.try { |type| reach_type(type, seen) }
+      end
+      class_var_types(@program, Set(Type).new, seen)
+      seen
+    end
+  end
+
+  private def class_var_types(container : Type, visited : Set(Type),
+                              seen : Set(Type)) : Nil
+    return unless visited.add?(container)
+    if container.is_a?(ClassVarContainer)
+      container.class_vars?.try &.each_value do |var|
+        var.type?.try { |type| reach_type(type, seen) }
+      end
+    end
+    container.types?.try &.each_value do |type|
+      class_var_types(type, visited, seen)
+    end
+  end
+
+  private def reach_type(type : Type, seen : Set(Type)) : Nil
+    type = type.remove_typedef
+    case type
+    when UnionType
+      type.union_types.each { |member| reach_type(member, seen) }
+      return
+    when VirtualType
+      reach_type(type.base_type, seen)
+      type.base_type.all_subclasses.each { |sub| reach_type(sub, seen) }
+      return
+    end
+    return unless seen.add?(type)
+    case type
+    when TupleInstanceType
+      type.tuple_types.each { |member| reach_type(member, seen) }
+    when NamedTupleInstanceType
+      type.entries.each { |entry| reach_type(entry.type, seen) }
+    when PointerInstanceType
+      reach_type(type.element_type, seen)
+    when GenericClassInstanceType
+      type.type_vars.each_value do |var|
+        var.type?.try { |t| reach_type(t, seen) } if var.is_a?(Var)
+      end
+    end
+    if type.is_a?(InstanceVarContainer)
+      type.all_instance_vars.each do |name, ivar|
+        # A growing field's slot is reached only through that field's
+        # own appends, which are checked on its object.
+        next if name.starts_with?("@__ris_text_")
+        ivar.type?.try { |t| reach_type(t, seen) }
+      end
+    end
   end
 
   private def user?(target : Def) : Bool

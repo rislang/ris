@@ -1,0 +1,46 @@
+# `@items << x` on a non-String field keeps the field's origin: a local
+# owner's array stays local, so a threaded program may grow it.
+ROOT = "program"
+
+class Store
+  @items : Array(Int32)
+
+  def initialize
+    @items = Array(Int32).new(4)
+  end
+
+  def add(value : Int32) : Nil
+    @items << value
+    @items[0] = value
+    nil
+  end
+
+  def size : Int32
+    @items.size
+  end
+end
+
+def run : Int32
+  store = Store.new
+  store.add(1)
+  store.add(2)
+  # A copy onto the current tape writes no program storage.
+  kept = ["a"].copy_to(RisCurrentTape.new)
+  raise "lost a copy" unless kept[0] == "a"
+  # A local String grown from a literal is this frame's, not the literal's.
+  text = ""
+  text << "b" << "c"
+  text << "d"
+  raise "lost text" unless text == "bcd"
+  store.size
+end
+
+thread = IyiThread.start do
+  tape do
+    raise "lost an append" unless run == 2
+  end
+  nil
+end
+thread.join
+raise "lost an append" unless run == 2
+puts "PASS: #{ROOT} field append"

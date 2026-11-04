@@ -2609,6 +2609,13 @@ else
   echo "FAILED   toml_round_flags: $out"
   status=1
 fi
+out=$("$RIS" run test/ris/program_field_append.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: program field append' ]; then
+  echo 'runs     program_field_append'
+else
+  echo "FAILED   program_field_append: $out"
+  status=1
+fi
 out=$("$RIS" run test/ris/thread_program_initializers.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     [ "$out" = 'PASS: program initializers before threads' ]; then
