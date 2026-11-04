@@ -2593,6 +2593,22 @@ else
   status=1
 fi
 expect program_defer_store 'cannot store data made in this def'
+# SPEC 3.6: a struct whose constructor makes its own text holds round data.
+expect round_struct_made 'cannot store data made in this block'
+out=$("$RIS" run test/ris/round_struct_kept.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: round struct kept' ]; then
+  echo 'runs     round_struct_kept'
+else
+  echo "FAILED   round_struct_kept: $out"
+  status=1
+fi
+out=$("$RIS" run test/ris/toml_round_flags.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: toml round flags' ]; then
+  echo 'runs     toml_round_flags'
+else
+  echo "FAILED   toml_round_flags: $out"
+  status=1
+fi
 out=$("$RIS" run test/ris/thread_program_initializers.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     [ "$out" = 'PASS: program initializers before threads' ]; then

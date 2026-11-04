@@ -62,9 +62,10 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   `@line` and `@data` with a new builder in a round, and keeps `@type` and
   `@id_buffer` from `SSE.clean`'s scratch. Give them stable storage.
 
-* An `Any` made in a round and pushed onto an outer `Array(Any)` builds
-  and dies of a memory fault: `1000.times { |i| h = {} of String => Any;
-  h["x"] = Any.new(i); objects << Any.new(h) }`.
+* A struct whose constructor makes its own data is refused at a store
+  past its round only with no owner argument: one given an Array or Hash
+  it reads, or a builder, pool or class it does not allocate through, is
+  still taken by the older rule. Follow where the constructor allocates.
 * A def with several returns loses what its answer views: read_union's
   `Array(String)` member was taken as made in its caller's scratch and
   refused (SPEC 1.9); std/json reads it by a tail call instead.
@@ -218,10 +219,10 @@ String, Array, Hash or tape, so it can hide a refusal: tighten it.
 
 ## Known failures
 
-* check.sh (2026-11-01, 3a4b4810b): 63 FAILED. Every scope frees now;
-  std, samples and tests that keep scratch past a scope or return a
-  non-flat value made in a def are refused until steps 4-5 migrate them
-  (see step 4's list).
+* check.sh needs `ulimit -n 65536`: without it http_answer_scope and
+  samples/ris/web fail (`bin/minitest-check check` does not set it).
+* std_spec: process_spec.cr:196 timed out at 60 s on CI once (de771de49)
+  and passed on a rerun.
 * compiler_spec does not build: spec/compiler/iyi_import_spec.cr calls
   artifact_signature, removed in d5742ac68. Before that: 58 failures,
   427 errors in 93 files (General allocation unavailable, Crystal

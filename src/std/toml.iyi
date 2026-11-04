@@ -808,35 +808,33 @@ pub struct TapeTable
     @depth
   end
 
-  @explicit : Pointer(Bool)
+  # Explicit, then dotted. A table outlives the header's round that made it
+  # and its copies share these, so they are in the parser's pool.
+  @flags : SlicePool::Run(Bool)
 
   def explicit : Bool
-    @explicit.value
+    @flags[0]
   end
 
   def explicit=(value : Bool) : Bool
-    @explicit.value = value
+    @flags[0] = value
   end
 
-  @dotted : Pointer(Bool)
-
   def dotted : Bool
-    @dotted.value
+    @flags[1]
   end
 
   def dotted=(value : Bool) : Bool
-    @dotted.value = value
+    @flags[1] = value
   end
 
   def initialize(depth : Int32, explicit : Bool, dotted : Bool,
-                 pool : SlicePool(TapePair(TapeSlot)?))
-    @explicit = Pointer(Bool).new(
-      RisRegion.tape_bytes(sizeof(Bool).to_u64))
-    @dotted = Pointer(Bool).new(
-      RisRegion.tape_bytes(sizeof(Bool).to_u64))
+                 pool : SlicePool(TapePair(TapeSlot)?),
+                 flags : SlicePool(Bool))
+    @flags = flags.alloc_slice(2, false)
+    @flags[0] = explicit
+    @flags[1] = dotted
     @depth = depth
-    @explicit.value = explicit
-    @dotted.value = dotted
     @slots = TapeMap(TapeSlot).new(pool)
   end
 
@@ -951,6 +949,7 @@ struct TapeReader
   @key_starts : Array(Int32)
   @key_used : Int32
   @slot_pool : SlicePool(TapePair(TapeSlot)?)
+  @flag_pool : SlicePool(Bool)
   @table_pool : SlicePool(TapeTable?)
   @value_pool : SlicePool(TapeAny)
   @scratch : TapeConversionScratch
@@ -986,12 +985,13 @@ struct TapeReader
       RisRegion.tape_bytes(sizeof(Array(String)).to_u64))
     @scan.value = String::Scanner.new(text)
     @slot_pool = SlicePool(TapePair(TapeSlot)?).new
+    @flag_pool = SlicePool(Bool).new
     @table_pool = SlicePool(TapeTable?).new
     @value_pool = SlicePool(TapeAny).new
     # The tables' conversion to TapeAny, the reader's own.
     scratch = TapeConversionScratch.new
     @scratch = scratch
-    @root = TapeTable.new(0, true, false, @slot_pool)
+    @root = TapeTable.new(0, true, false, @slot_pool, @flag_pool)
     @current.value = @root
     @path.value = Array(String).new
     @key_parts = Array(String).new
@@ -1349,7 +1349,7 @@ struct TapeReader
     while i < parts.size - 1
       slot = t.slots[parts[i]]?
       if slot.nil?
-        child = TapeTable.new(t.depth + 1, false, true, @slot_pool)
+        child = TapeTable.new(t.depth + 1, false, true, @slot_pool, @flag_pool)
         t.slots[parts[i]] = TapeSlot.table(child)
         t = child
       else
@@ -1410,7 +1410,7 @@ struct TapeReader
     while i < parts.size - 1
       slot = t.slots[parts[i]]?
       if slot.nil?
-        child = TapeTable.new(t.depth + 1, false, false, @slot_pool)
+        child = TapeTable.new(t.depth + 1, false, false, @slot_pool, @flag_pool)
         t.slots[parts[i]] = TapeSlot.table(child)
         t = child
       else
@@ -1432,12 +1432,12 @@ struct TapeReader
     target = t
     if array
       if slot.nil?
-        target = TapeTable.new(t.depth + 1, true, false, @slot_pool)
+        target = TapeTable.new(t.depth + 1, true, false, @slot_pool, @flag_pool)
         t.slots[last] = TapeSlot.tables(target, @table_pool)
       else
         list = slot.tables
         if !list.nil?
-          target = TapeTable.new(t.depth + 1, true, false, @slot_pool)
+          target = TapeTable.new(t.depth + 1, true, false, @slot_pool, @flag_pool)
           list << target
         elsif slot.kind == TapeSlot::TABLE
           return fail("[[#{whole}]] names the table " \
@@ -1449,7 +1449,7 @@ struct TapeReader
       end
     else
       if slot.nil?
-        target = TapeTable.new(t.depth + 1, true, false, @slot_pool)
+        target = TapeTable.new(t.depth + 1, true, false, @slot_pool, @flag_pool)
         t.slots[last] = TapeSlot.table(target)
       else
         child = slot.table
@@ -1870,7 +1870,7 @@ struct TapeReader
     input_size = size
     start = pos
     self.pos = pos + 1
-    table = TapeTable.new(depth, false, false, @slot_pool)
+    table = TapeTable.new(depth, false, false, @slot_pool, @flag_pool)
     skip_blanks
     if pos < input_size && input[pos] == 125_u8
       self.pos = pos + 1

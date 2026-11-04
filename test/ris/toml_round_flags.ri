@@ -1,0 +1,25 @@
+# A table made in a header's round keeps its flags past that round: an
+# implicit table may be defined once, later, whatever the rounds wrote.
+import std/toml::{TOML, TOMLError}
+
+def doc(twice : Bool) : String
+  io = ""
+  40.times do |i|
+    io << "[a"; io << i; io << ".b.c.d.e]\nx = \""; io << ("y" * 200); io << "\"\n"
+    nil
+  end
+  40.times do |i|
+    io << "[a"; io << i; io << ".b.c]\nz = 1\n"
+    if twice
+      io << "[a"; io << i; io << ".b.c]\nw = 1\n"
+    end
+    nil
+  end
+  io
+end
+
+good = TOML.parse(doc(false))
+raise "valid document refused: #{good.message}" if good.is_a?(TOMLError)
+bad = TOML.parse(doc(true))
+raise "a table defined twice passes" unless bad.is_a?(TOMLError)
+puts "PASS: toml round flags"

@@ -376,7 +376,10 @@ class Iyi::TapeShrinkChecker
   private def source_roots(v : Value) : Array(UInt64)
     # A holder a one-call def handed on holds what the call made, which
     # no slot view names: it is a source itself.
-    v.roots.reject { |r| value_holder?(@root_types[r]?) && !@handed.includes?(r) } + v.views.map(&.root)
+    v.roots.reject do |r|
+      value_holder?(@root_types[r]?) && !@handed.includes?(r) &&
+        !@made_structs.includes?(r)
+    end + v.views.map(&.root)
   end
 
   private def source_scope(root : UInt64) : Array(UInt64)
@@ -1921,6 +1924,18 @@ class Iyi::TapeShrinkChecker
   # Struct values whose `new` allocated (a Params making its Arrays): what
   # they hold was made with them, so they are no plain value.
   @allocating_structs = Set(UInt64).new
+  @made_structs = Set(UInt64).new
+
+  # An argument a constructor can allocate through: a builder, a pool or a
+  # store. An Array or Hash is read as input, which is the common case;
+  # one it appends to is not told apart (TODO.md).
+  private def owner_argument?(type : Type?) : Bool
+    return false unless type = type.try(&.remove_typedef)
+    name = type_name(type)
+    return true if name == "String::Builder" || name.starts_with?("SlicePool(")
+    return false if name.starts_with?("Array(") || name.starts_with?("Hash(")
+    class_instance?(type)
+  end
 
   private def struct_value?(root : UInt64) : Bool
     return false if @handed.includes?(root) || @allocating_structs.includes?(root)
@@ -2856,6 +2871,9 @@ class Iyi::TapeShrinkChecker
           # holding a copied sentence is still a plain value.)
           if node.name == "new" && @graph.targets(node).try(&.any? { |t| @graph.allocates?(t.body) })
             @allocating_structs << node.object_id
+            # Given nowhere else to put it, what the constructor makes is
+            # on the running tape: the value holds this scope's data.
+            @made_structs << node.object_id unless node.args.any? { |arg| owner_argument?(arg.type?) }
           end
           holder = node.name == "new" && struct_value?(node.object_id)
           # Tracked fields carry replaceable borrows. A duplicate on the

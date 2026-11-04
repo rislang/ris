@@ -1,0 +1,27 @@
+# What the refusal in refused/round_struct_made.ri names: a copy keeps each
+# round's own value, and a value read in its round needs no copy.
+import std/json::{Any}
+
+@[OnTape]
+struct Val
+  getter text : String
+
+  def initialize(i : Int32)
+    @text = "v#{i}"
+  end
+end
+
+kept = [] of Val
+objects = [] of Any
+3.times do |i|
+  kept << Val.new(i).copy_to(Program.tape)
+  objects << Any.new(i.to_i64).copy_to(Program.tape)
+  read = Val.new(i)
+  raise "read in its round" unless read.text == "v#{i}"
+  nil
+end
+3.times do |i|
+  raise "kept text" unless kept[i].text == "v#{i}"
+  raise "kept Any" unless objects[i].as_i == i
+end
+puts "PASS: round struct kept"

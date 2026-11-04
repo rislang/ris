@@ -1,0 +1,17 @@
+# A struct whose constructor makes its own text holds this round's data:
+# keeping it past the round would leave every element on the last text.
+@[OnTape]
+struct Val
+  getter text : String
+
+  def initialize(i : Int32)
+    @text = "v#{i}"
+  end
+end
+
+kept = [] of Val
+3.times do |i|
+  kept << Val.new(i)
+  nil
+end
+kept.each { |v| puts v.text }
