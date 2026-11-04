@@ -216,8 +216,9 @@ section; a removed one leaves its number unused.
   or pipe end never crosses tasks: no owns:, task.take, resource move or
   exception. An HTTP server uses N tasks, each opening its own SO_REUSEPORT
   listener on the same port and accepting and serving one connection at a time;
-  N limits connections, with no permits or semaphore. On macOS N is 1: it gives
-  a SO_REUSEPORT port's connections to one listener; more is refused. Pipe and socket race IO
+  N limits connections, with no permits or semaphore. On macOS N is 1: it
+  gives a SO_REUSEPORT port's connections to one listener; more is refused.
+  Pipe and socket race IO
   stay in one task using OS facilities on the poller; board IO copies data.
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale

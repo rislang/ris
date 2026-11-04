@@ -189,8 +189,9 @@ The old open-listener/block overloads are refused with the replacement
 form. A caller chooses one port in 1..65535 before starting the pool;
 port zero is refused. `max_connections` is the positive number of serving
 tasks, including connections idle between keep-alive requests. The old
-zero-for-unlimited mode is refused. The kernel distributes new connections
-among listeners; it promises neither equal queues nor global FIFO order.
+zero-for-unlimited mode is refused. On Linux the kernel distributes new
+connections among listeners; it promises neither equal queues nor global
+FIFO order.
 
 A supervisor for each serving task observes its completion in an inner
 group. A handler panic unwinds and closes that task's client and listener;

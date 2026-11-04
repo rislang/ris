@@ -18,6 +18,7 @@ one. Entries before 2026-10-31 name the file by its old name, TAPE_SPEC.md.
   kept Linux's backtrace regex strict, ran socket_race and system on macOS
   and moved the target refusal to the prelude's top with a gate.
 * Open: pages returned to the OS are unmeasured on macOS; TODO.md lists it.
+* Drift report: MESSAGES' "the kernel distributes" is Linux's; lines rewrapped.
 
 ## 2026-11-02: the header drops the heap sentence
 

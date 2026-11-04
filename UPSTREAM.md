@@ -153,8 +153,8 @@ back.
 * std/aead `seal_at`/`open_at` and std/tls records opened and sealed in
   place (`TlsRecordCipher#seal_at`, `#open_at`): no tape, nothing per record.
 * CI is ris's own: `.github/workflows/ris.yml` builds from a clean checkout
-  and runs ris's gates on Linux; `ris-macos.yml` on macOS arm64. iyi's `iyi.yml` is not kept: when
-  merging iyi, drop its workflow changes.
+  and runs ris's gates on Linux; `ris-macos.yml` on macOS arm64. iyi's
+  `iyi.yml` is not kept: when merging iyi, drop its workflow changes.
 * Fixed lookup tables in time, cookies, DNS, MIME, system roots,
   compression, HPACK, JSON and TLS use static storage; `StaticArray#find`
   reads it without an Array copy.
