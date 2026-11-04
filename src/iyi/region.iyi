@@ -113,6 +113,30 @@ class RisRegion
     yield
   end
 
+  # A once initializer that starts inside another program initializer
+  # (a constant Regex reading Unicode's tables the first time) must not put
+  # its value on the program tape: that tape is the outer initializer's
+  # working tape, and the outer defs reset their scratch on it when they
+  # return. Its `copy_to(Program.tape)` goes to program storage instead,
+  # which never frees.
+  def self.once_scope(&)
+    return yield if @@program_depth == 0
+    saved_tape = @@tape
+    saved_program = @@program_tape
+    @@program_storage = acquire(CAPACITY) if @@program_storage == 0
+    @@program_tape = @@program_storage
+    @@program_depth = 0
+    defer once_restore(saved_tape, saved_program)
+    yield
+  end
+
+  def self.once_restore(saved_tape : UInt64, saved_program : UInt64) : Nil
+    @@program_storage = @@program_tape
+    @@program_tape = saved_program
+    @@program_depth = 1
+    @@tape = saved_tape
+  end
+
   def self.program_restore(saved : UInt64) : Nil
     @@program_tape = @@tape
     @@program_depth = 0

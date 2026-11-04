@@ -1,0 +1,11 @@
+# A constant's initializer runs on the program tape. The first time it
+# reads a lazily made class variable, that variable's `copy_to(Program.tape)`
+# must survive the constant's own defs returning: here the case-insensitive
+# Regex reads Unicode's fold tables for the first time.
+import std/regex::{Regex}
+
+PLAIN = Regex.new("(?i)\\A(?:[a-z]+|#[0-9a-f]{3,8})\\z")
+
+raise "case fold" unless PLAIN.match("Red") && PLAIN.match("#ABC")
+raise "no match" if PLAIN.match("r d")
+puts "PASS: once in program init"

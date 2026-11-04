@@ -882,6 +882,14 @@ else
   echo "FAILED   class_copy: $out"
   status=1
 fi
+# A lazy class variable first read by a constant keeps its value.
+out=$("$RIS" run test/ris/once_in_program_init.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: once in program init' ]; then
+  echo "runs     once_in_program_init"
+else
+  echo "FAILED   once_in_program_init: $out"
+  status=1
+fi
 # Copy jobs use scratch storage; depth never consumes the native stack.
 # Keep build and execution together when check_parallel.py splits blocks.
 out=$(

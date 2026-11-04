@@ -2070,7 +2070,7 @@ class IyiOnce
       # A proc is its function and its closure; this one closes over
       # nothing.
       cell = {initializer.address, 0_u64}
-      pointerof(cell).as(Pointer(Proc(Nil))).value.call
+      RisRegion.once_scope { pointerof(cell).as(Pointer(Proc(Nil))).value.call }
       IyiAtomic.store(flag, 1_u8, :release, false)
     end
     {% if !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (!flag?(:gc_none) && ((flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64))))) %}
