@@ -165,6 +165,73 @@ class Iyi::TapeScopeChecker
     flag.value = false
   end
 
+  # A kept round mark: its exits that nothing before them dirtied skip
+  # their reset (below).
+  def clean_exits(node : While) : Nil
+    return unless parts = TapeScopeChecker.parts(node.body)
+    return unless parts[0].value
+    clean_exits(node.body, false)
+  end
+
+  # Whether running *node* can leave the tape other than as it found it.
+  private def dirty?(node : ASTNode) : Bool
+    @graph.allocates?(node) || @graph.hands_back?(node) ||
+      @graph.suspends?(node)
+  end
+
+  # A round's `next` or `break` resets first (Exits); where nothing in the
+  # round before it can put anything on the tape, the tape is as the mark
+  # has it, and the reset is dropped: a round's fast path pays no check. A
+  # round runs forward (a nested loop or block binds its own `next`), so
+  # the code written before an exit is all that can run before it. Only
+  # sequences and branches are followed; an exit inside anything else
+  # keeps its reset. Returns whether *node* may have dirtied the tape.
+  private def clean_exits(node : ASTNode, dirty : Bool) : Bool
+    if exit_reset?(node)
+      node.as(Expressions).expressions[0] = Nop.new.at(node) unless dirty
+      return dirty
+    end
+    case node
+    when Expressions
+      exps = node.expressions
+      exps.each_with_index do |exp, i|
+        # Typing may flatten Exits' pair into the sequence around it.
+        if !dirty && reset_call?(exp) && (leave = exps[i + 1]?) &&
+           leaves?(leave)
+          exps[i] = Nop.new.at(exp)
+          next
+        end
+        dirty = clean_exits(exp, dirty)
+      end
+      dirty
+    when Assign
+      target = node.target
+      return dirty || dirty?(node) unless target.is_a?(Var)
+      clean_exits(node.value, dirty)
+    when If
+      dirty = clean_exits(node.cond, dirty)
+      a = clean_exits(node.then, dirty)
+      b = clean_exits(node.else, dirty)
+      a || b
+    else
+      dirty || dirty?(node)
+    end
+  end
+
+  # `__iyi_scope_reset(mark); next` (or `break`), as Exits writes it.
+  private def exit_reset?(node : ASTNode) : Bool
+    return false unless node.is_a?(Expressions) && node.expressions.size == 2
+    reset_call?(node.expressions[0]) && leaves?(node.expressions[1])
+  end
+
+  private def reset_call?(node : ASTNode) : Bool
+    node.is_a?(Call) && node.name == RESET
+  end
+
+  private def leaves?(node : ASTNode) : Bool
+    node.is_a?(Next) || (node.is_a?(Break) && node.exp.nil?)
+  end
+
   # An explicit return must receive its result before the def's rollback,
   # just like its final expression. Nested defs own their own marks.
   class Returns < Transformer
@@ -238,6 +305,7 @@ class Iyi::TapeScopeChecker
 
     def visit(node : While | Block)
       @checker.off_round(node.body)
+      @checker.clean_exits(node) if node.is_a?(While)
       true
     end
 

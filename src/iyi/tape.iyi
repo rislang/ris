@@ -276,11 +276,13 @@ struct String
   end
 
   # One unsigned compare on the way to the byte; a negative index
-  # takes the other branch, counted from the end.
+  # takes the other branch, counted from the end. Always inlined, as
+  # `Array#[]` is: a byte read in a scanning loop is not a call.
+  @[AlwaysInline]
   def [](index : Int32) : UInt8
     unless index.unsafe_to_u64 < @bytesize.unsafe_to_u64
       asked = index
-      index = index + @bytesize
+      index = index &+ @bytesize
       unless asked < 0 && index.unsafe_to_u64 < @bytesize.unsafe_to_u64
         Tape.out_of_range(asked, @bytesize, "bytes")
       end
@@ -1467,12 +1469,16 @@ struct Array(T)
   end
 
   # As `Array#[]`: a negative index counts from the end, and one still out
-  # of range raises rather than reading past the elements.
+  # of range raises rather than reading past the elements. Always inlined:
+  # `nodes[i].kind` then loads one field, not a copy of the whole element
+  # through a call, which LLVM's inliner judged too dear for a wide `T`.
+  # `index &+ count` may wrap for a huge index, which `asked < 0` refuses.
+  @[AlwaysInline]
   def [](index : Int32) : T
     count = size
     unless index.unsafe_to_u64 < count.unsafe_to_u64
       asked = index
-      index = index + count
+      index = index &+ count
       unless asked < 0 && index.unsafe_to_u64 < count.unsafe_to_u64
         Tape.out_of_range(asked, count, "elements")
       end

@@ -57,9 +57,84 @@ def proc_loop(text : String, handler : Proc(Int32, Int32)) : Int32
   count
 end
 
+# A round that makes text on one path only: its mark is kept, but its
+# `next`, which nothing before it makes text for, does not reset.
+@[NoInline]
+def escape_loop(text : String, writer : String::Builder) : Nil
+  at = 0
+  while at < text.bytesize
+    replacement = ""
+    replacement = "&lt;" if text[at] == 60_u8
+    if replacement.empty?
+      at += 1
+      next
+    end
+    writer << replacement << at
+    at += 1
+  end
+end
+
+# A round whose `next` comes after text is made: that exit resets.
+@[NoInline]
+def next_loop(text : String) : Int32
+  count = 0
+  at = 0
+  while at < text.bytesize
+    made = "#{text[at, 1]}#{at}"
+    at += 1
+    next if made.bytesize > 2
+    count += made.bytesize
+  end
+  count
+end
+
+# A wide element read for one field: `[]` is inlined, and only the field
+# is loaded.
+struct Wide
+  getter kind : Int32
+  getter a : Int32
+  getter b : Int32
+  getter c : Int32
+  getter d : Int32
+  getter e : Int32
+  getter f : Int32
+  getter g : Int32
+  getter h : Int32
+  getter i : Int32
+  getter j : Int32
+  getter k : Int32
+  getter l : Int32
+  getter m : Int32
+
+  def initialize(@kind, @a, @f)
+    @b = @c = @d = @e = @g = @h = @i = @j = @k = @l = @m = 0
+  end
+end
+
+@[NoInline]
+def wide_kind(wides : Array(Wide), at : Int32) : Int32
+  wides[at].kind
+end
+
+# A second and third reader: with one caller LLVM inlines `[]` anyway.
+@[NoInline]
+def wide_a(wides : Array(Wide), at : Int32) : Int32
+  wides[at].a
+end
+
+@[NoInline]
+def wide_f(wides : Array(Wide), at : Int32) : Int32
+  wides[at].f
+end
+
 text = "a b c"
 puts byte_scan(text)
 puts block_scan([1, 2, 3])
 puts builder_loop(text)
 puts yield_loop(text) { |at| "x#{at}".bytesize }
 puts proc_loop(text, ->(at : Int32) { "y#{at}".bytesize })
+puts String.build(64) { |w| escape_loop("a<b", w) }
+puts next_loop("abcdefghijklmnop")
+wides = Array(Wide).new(3)
+3.times { |i| wides << Wide.new(i * 7, 1, 6) }
+puts wide_kind(wides, 2) + wide_a(wides, 1) + wide_f(wides, 0)

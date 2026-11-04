@@ -1891,12 +1891,16 @@ else
 fi
 
 # A round that puts nothing on the tape has no mark, in a def as well; one
-# that makes text, yields or calls a proc keeps it.
+# that makes text, yields or calls a proc keeps it, and resets at a `next`
+# only after text may have been made. `[]` is always inlined.
 marks=$(mktemp -d)
 if "$RIS" build --release --emit llvm-ir -o "$marks/marks" \
-    test/ris/scope_round_marks.ri >"$marks/log" 2>&1; then
-  bad=$(python3 test/ris/scope_round_marks.py "$marks/marks.ll")
-  if [ -z "$bad" ] && [ "$("$marks/marks" | tr '\n' ' ')" = '2 6 10 10 10 ' ]; then
+    test/ris/scope_round_marks.ri >"$marks/log" 2>&1 &&
+   "$RIS" build --emit llvm-ir -o "$marks/debug" \
+    test/ris/scope_round_marks.ri >>"$marks/log" 2>&1; then
+  bad=$(python3 test/ris/scope_round_marks.py "$marks/marks.ll" \
+    "$marks/debug.ll")
+  if [ -z "$bad" ] && [ "$("$marks/marks" | tr '\n' ' ')" = '2 6 10 10 10 &lt;1 20 21 ' ]; then
     echo "lowers   scope_round_marks (no mark on a round that makes nothing)"
   else
     echo "FAILED   scope_round_marks: $bad"; status=1
