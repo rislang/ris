@@ -37,6 +37,36 @@ private def semantic_iyi(entry : String, iyi_module_dir : String? = nil,
   program
 end
 
+private def artifact_signature(name : String, parameters = [] of String, return_type = "")
+  Iyi::IyiMod::Signature.new(name, "", parameters, "", return_type,
+    [] of String, false)
+end
+
+private def exports(functions = [] of Iyi::IyiMod::Signature,
+                    types = [] of Iyi::IyiMod::TypeDecl,
+                    impls = [] of Iyi::IyiMod::ImplRecord)
+  Iyi::IyiMod::Exports.new(functions, types, impls)
+end
+
+# Written by hand rather than by a compile, so that what a consumer is being
+# fed is on the page: these specs are about what reading one does.
+private def write_iyimod(dir : String, module_name : String,
+                         exports = exports,
+                         imports = [] of String,
+                         compiler_version = Iyi::IyiMod.compiler_version)
+  reference = Iyi::Program.new
+  artifact = Iyi::IyiMod::Artifact.new(
+    module_name: module_name,
+    source_path: "#{module_name}.iyi",
+    compiler_version: compiler_version,
+    target_triple: reference.codegen_target.to_s,
+    flags: reference.flags.to_a.sort!,
+    imports: imports.map { |name| Iyi::IyiMod::ImportEdge.new(name) },
+    exports: exports,
+  )
+  Iyi::IyiMod.write artifact, File.join(dir, "#{module_name}.iyimod")
+end
+
 describe "Semantic: iyi import" do
   # iyi: what the compiler says the first time somebody meets these rules.
   # Each of these used to answer with a fact about the compiler's internals —
