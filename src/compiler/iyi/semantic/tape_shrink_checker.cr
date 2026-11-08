@@ -2248,7 +2248,11 @@ class Iyi::TapeShrinkChecker
   end
 
   def value(node : ASTNode, env : Env) : Value
-    result = evaluate(node, env)
+    finish_value(node, evaluate(node, env), env)
+  end
+
+  # What value adds to evaluate's result for *node*.
+  private def finish_value(node : ASTNode, result : Value, env : Env) : Value
     result = tape_text(node, result)
     result = growing_text(node, result, env)
     result = handed_on(node, result)
@@ -2389,26 +2393,55 @@ class Iyi::TapeShrinkChecker
   end
 
   @[NoInline]
+  # One If of an elsif chain, between its else branch and its end.
+  private record IfLevel, node : If, env : Env, left : Env, right : Env,
+    choice : UInt64, mark : Int32, a : Value, then_after : Guards,
+    shrinks_before : Int32
+
+  # An elsif chain (a long `case` too) is walked in a loop, not by
+  # recursion, so its length does not grow the compiler's stack.
   private def conditional_value(node : If, env : Env) : Value
-    value(node.cond, env)
-    left, right = env.dup, env.dup
-    choice = fresh
-    mark = @guards.size
-    @guards << {choice, true}
-    @scopes << node.then.object_id
-    @fallthrough = Guards.new
-    shrinks_before = @shrinks.size
-    a = value(node.then, left)
-    leave_branch(node.then, shrinks_before)
-    then_after = node.then.is_a?(If) || node.then.is_a?(Expressions) ? @fallthrough : Guards.new
-    @scopes.pop
-    @guards.pop(@guards.size - mark)
-    @guards << {choice, false}
-    @scopes << node.else.object_id
-    @fallthrough = Guards.new
-    shrinks_before = @shrinks.size
-    b = value(node.else, right)
-    leave_branch(node.else, shrinks_before)
+    levels = [] of IfLevel
+    b = EMPTY
+    loop do
+      value(node.cond, env)
+      left, right = env.dup, env.dup
+      choice = fresh
+      mark = @guards.size
+      @guards << {choice, true}
+      @scopes << node.then.object_id
+      @fallthrough = Guards.new
+      shrinks_before = @shrinks.size
+      a = value(node.then, left)
+      leave_branch(node.then, shrinks_before)
+      then_after = node.then.is_a?(If) || node.then.is_a?(Expressions) ? @fallthrough : Guards.new
+      @scopes.pop
+      @guards.pop(@guards.size - mark)
+      @guards << {choice, false}
+      @scopes << node.else.object_id
+      @fallthrough = Guards.new
+      shrinks_before = @shrinks.size
+      levels << IfLevel.new(node, env, left, right, choice, mark, a, then_after, shrinks_before)
+      branch = node.else
+      if branch.is_a?(If)
+        node, env = branch, right
+      else
+        b = value(branch, right)
+        break
+      end
+    end
+    result = EMPTY
+    levels.reverse_each.with_index do |level, i|
+      b = finish_value(levels[levels.size - i].node, result, levels[levels.size - i].env) if i > 0
+      result = finish_conditional(level, b)
+    end
+    result
+  end
+
+  private def finish_conditional(level : IfLevel, b : Value) : Value
+    node, env, left, right = level.node, level.env, level.left, level.right
+    choice, mark, a = level.choice, level.mark, level.a
+    leave_branch(node.else, level.shrinks_before)
     else_after = node.else.is_a?(If) || node.else.is_a?(Expressions) ? @fallthrough : Guards.new
     @scopes.pop
     @guards.pop(@guards.size - mark)
@@ -2419,7 +2452,7 @@ class Iyi::TapeShrinkChecker
     @fallthrough = if left_leaves && !right_leaves
                      [{choice, false}] + else_after
                    elsif right_leaves && !left_leaves
-                     [{choice, true}] + then_after
+                     [{choice, true}] + level.then_after
                    else
                      Guards.new
                    end
