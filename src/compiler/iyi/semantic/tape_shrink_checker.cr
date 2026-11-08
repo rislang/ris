@@ -18,7 +18,8 @@ class Iyi::TapeShrinkChecker
   record Summary, seeds : Array(UInt64), shrinks : Hash(UInt64, String), result : Value,
     stores : Hash(UInt64, Value) = Hash(UInt64, Value).new,
     retains : Array(UInt64) = [] of UInt64,
-    grows : Hash(UInt64, String) = Hash(UInt64, String).new
+    grows : Hash(UInt64, String) = Hash(UInt64, String).new,
+    yields : Array(Value) = [] of Value
   # Snapshots share variable bindings until the first write. Slot maps
   # remain independent: stores can replace or remove nested root paths.
   class Env
@@ -82,6 +83,8 @@ class Iyi::TapeShrinkChecker
   @fields = Hash(Tuple(UInt64, String), UInt64).new
   @parents = Hash(UInt64, Tuple(UInt64, String)).new
   @next_root = 0_u64
+  @yield_values = [] of Value
+  @yield_slots = Hash(UInt64, Value).new
   @returns = EMPTY
   # The returns that are not a String: a String return of a def whose
   # result is a union holding String moves down (`__iyi_scope_result`).
@@ -669,6 +672,37 @@ class Iyi::TapeShrinkChecker
     [root]
   end
 
+  # Resolve a borrowed intermediate field before following its children.
+  # The field slot is a reference, not storage owned by the holder.
+  private def resolved_roots(root : UInt64, env : Env,
+                             seen = Set(UInt64).new) : Array(UInt64)
+    return [root] unless seen.add?(root)
+    type = root_type(root).try(&.remove_typedef)
+    contents = env.slots[root]?
+    if contents && type && class_instance?(type) && !storage_type?(type)
+      borrowed = contents.roots.reject do |source|
+        contains_root?([source], root)
+      end
+      unless borrowed.empty?
+        return borrowed.flat_map { |r| resolved_roots(r, env, seen.dup) }
+      end
+    end
+    if parent = @parents[root]?
+      return resolved_roots(parent[0], env, seen).map do |base|
+        field_root(base, parent[1])
+      end
+    end
+    [root]
+  end
+
+  @[NoInline]
+  private def resolved(v : Value, env : Env) : Value
+    Value.new(v.roots.flat_map { |r| resolved_roots(r, env) }.uniq,
+      v.views.flat_map do |v|
+        resolved_roots(v.root, env).map { |r| v.copy_with(root: r) }
+      end.uniq, v.procs, v.unknown_proc)
+  end
+
   private def view(root : UInt64) : View
     View.new(root, @uses.size, @guards.dup)
   end
@@ -1166,6 +1200,8 @@ class Iyi::TapeShrinkChecker
         @uses.clear
         @shrinks.clear
         @returns = EMPTY
+        @yield_values = [] of Value
+        @yield_slots = Hash(UInt64, Value).new
         @kept_returns = EMPTY
         @retains.clear
         env = seed_env(target, old.seeds)
@@ -1185,13 +1221,24 @@ class Iyi::TapeShrinkChecker
         end
         result = Value.new(result.roots, result.views.map { |v| View.new(v.root, 0, index: v.index) })
         stores = old.stores.dup
-        env.slots.each do |root, contents|
-          next if translate(root, old, old.seeds.map { |r| Value.new([r], [] of View) }).empty? && !contains_root?(result.roots, root)
+        yielded_slots = env.slots.dup
+        @yield_slots.each do |root, contents|
+          yielded_slots[root] = merge(yielded_slots[root]? || EMPTY, contents)
+        end
+        yielded_slots.each do |root, contents|
+          inputs = old.seeds.map { |r| Value.new([r], [] of View) }
+          next if translate(root, old, inputs).empty? &&
+                  !contains_root?(result.roots, root) &&
+                  !@yield_values.any? { |v| contains_root?(v.roots, root) }
           canonical = Value.new(contents.roots, contents.views.map { |v| View.new(v.root, 0, index: v.index) })
           stores[root] = canonical
         end
         updated = Summary.new(old.seeds, effects, merge(old.result, result), stores,
-          (old.retains + @retains).uniq, grows)
+          (old.retains + @retains).uniq, grows, @yield_values.map do |v|
+            Value.new(v.roots, v.views.map do |borrow|
+              borrow.copy_with(born: 0, guards: Guards.new)
+            end)
+          end)
         if updated != old || @store_kinds[target.object_id]? != old_kinds
           changed = true
           callers[target.object_id]?.try { |ids| dirty.concat(ids) }
@@ -1624,6 +1671,67 @@ class Iyi::TapeShrinkChecker
       outer[arg.name] = merge(yielded, Value.new([arg.object_id], [] of View))
     end
     fresh
+  end
+
+  @[NoInline]
+  private def bind_yielded_fields(block : Block, targets : Array(Def)?,
+                                  receiver : Value, args : Array(Value),
+                                  named : Hash(String, Value), outer : Env)
+    # A yielded holder's own scratch and its borrowed fields have
+    # separate lifetimes (SPEC 3.1). Rebase both onto the block arg.
+    precise = Hash(String, Value).new
+    targets.try &.each do |target|
+      next unless summary = summary(target)
+      actuals = [receiver] + target.args.map_with_index do |arg, i|
+        named[arg.external_name]? || args[i]? || EMPTY
+      end
+      block.args.each_with_index do |arg, i|
+        next unless item = summary.yields[i]?
+        mapping = summary.copy_with(result: item)
+        mapped = translated(item, mapping, actuals, arg.object_id)
+        precise[arg.name] = merge(precise[arg.name]? || EMPTY, mapped)
+        summary.stores.each do |root, contents|
+          next unless contains_root?(item.roots, root)
+          destinations = translate(root, mapping, actuals, arg.object_id)
+          incoming = translated(contents, mapping, actuals, arg.object_id)
+          local = source_roots(contents).any? do |source|
+            translate(source, mapping, actuals, arg.object_id).empty?
+          end
+          destinations.each do |destination|
+            kept = local ? merge(incoming,
+              Value.new([destination], [view(destination)])) : incoming
+            outer.slots[destination] = merge(
+              outer.slots[destination]? || EMPTY, kept)
+          end
+        end
+      end
+    end
+    block.args.each_with_index do |arg, i|
+      if targets.try(&.all? { |t| summary(t).try(&.yields[i]?) })
+        outer[arg.name] = precise[arg.name]? || EMPTY
+      end
+    end
+  end
+
+  @[NoInline]
+  private def yielded_value(node : Yield, env : Env) : Value
+    yielded = EMPTY
+    node.exps.each_with_index do |exp, i|
+      item = value(exp, env)
+      use(item, node)
+      while @yield_values.size <= i
+        @yield_values << EMPTY
+      end
+      yielded = merge(yielded, item)
+      @yield_values[i] = merge(@yield_values[i], item)
+      # A forwarded callback's slots disappear when its block ends.
+      # Capture the fields at the yield, including every alternative.
+      env.slots.each do |root, contents|
+        next unless contains_root?(item.roots, root)
+        @yield_slots[root] = merge(@yield_slots[root]? || EMPTY, contents)
+      end
+    end
+    reference?(node) ? yielded : EMPTY
   end
 
   # Whether *target* yields tape data it made itself, or a view of it:
@@ -2280,6 +2388,52 @@ class Iyi::TapeShrinkChecker
     Value.new([root], [] of View)
   end
 
+  @[NoInline]
+  private def conditional_value(node : If, env : Env) : Value
+    value(node.cond, env)
+    left, right = env.dup, env.dup
+    choice = fresh
+    mark = @guards.size
+    @guards << {choice, true}
+    @scopes << node.then.object_id
+    @fallthrough = Guards.new
+    shrinks_before = @shrinks.size
+    a = value(node.then, left)
+    leave_branch(node.then, shrinks_before)
+    then_after = node.then.is_a?(If) || node.then.is_a?(Expressions) ? @fallthrough : Guards.new
+    @scopes.pop
+    @guards.pop(@guards.size - mark)
+    @guards << {choice, false}
+    @scopes << node.else.object_id
+    @fallthrough = Guards.new
+    shrinks_before = @shrinks.size
+    b = value(node.else, right)
+    leave_branch(node.else, shrinks_before)
+    else_after = node.else.is_a?(If) || node.else.is_a?(Expressions) ? @fallthrough : Guards.new
+    @scopes.pop
+    @guards.pop(@guards.size - mark)
+    # What follows an If one of whose branches never falls through runs
+    # only after the other: its events are on that branch's guard.
+    left_leaves = node.then.type?.is_a?(NoReturnType)
+    right_leaves = node.else.type?.is_a?(NoReturnType)
+    @fallthrough = if left_leaves && !right_leaves
+                     [{choice, false}] + else_after
+                   elsif right_leaves && !left_leaves
+                     [{choice, true}] + then_after
+                   else
+                     Guards.new
+                   end
+    (left.keys | right.keys).each { |key| env[key] = merge(left[key]? || EMPTY, right[key]? || EMPTY) }
+    (left.slots.keys | right.slots.keys).each do |key|
+      env.slots[key] = merge(left.slots[key]? || EMPTY, right.slots[key]? || EMPTY)
+    end
+    result = merge(a, b)
+    boundary = node.object_id
+    @root_scopes[boundary] = @scopes.dup
+    store([boundary], result, env, node)
+    result
+  end
+
   private def evaluate(node : ASTNode, env : Env) : Value
     case node
     when MacroIf, MacroFor, MacroExpression, MacroVerbatim
@@ -2681,7 +2835,9 @@ class Iyi::TapeShrinkChecker
               current_copy = source_roots(contents).any? { |r| current_copy?(r) }
               refuse_fresh_store(destinations, node) if current_copy
               refuse_fresh_store(destinations, node) if (store_kind.nil? || store_kind.not_nil! & 2_u8 != 0) && contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root) && !builder
-              incoming = translated(contents, summary, actuals, node.object_id)
+              incoming = resolved(
+                translated(contents, summary, actuals, node.object_id),
+                call_env)
               # A marked callee's own scratch cannot reach its stores: it
               # refused that itself. What it made and stored is not this
               # scope's.
@@ -2794,6 +2950,7 @@ class Iyi::TapeShrinkChecker
         # What the called def made and yields ends with that def or its
         # round: to the block it is scratch (SPEC 3.2, 3.6).
         fresh_args = fresh_block_args(node, block, targets, yielded, outer)
+        bind_yielded_fields(block, targets, receiver, args, named, outer)
         @callback_chain << "#{node.name} block"
         @scopes << block.object_id
         if node.name == "tape"
@@ -2917,7 +3074,12 @@ class Iyi::TapeShrinkChecker
         if !storage?(node) && !VIEWS.includes?(node.name)
           call_result = read_slots(call_result, env, node.type?, result_fields)
         end
-        call_result.roots.each { |r| @root_types[r] ||= node.type }
+        # A returned view can name a builder field. Its storage keeps
+        # the declared field type, rather than the view's String type.
+        string_view = type_name(node.type) == "String"
+        call_result.roots.each do |root|
+          @root_types[root] ||= (root_type(root) if string_view) || node.type
+        end
         if storage?(node)
           aliases = call_result.roots.flat_map do |root|
             (env.slots[root]?.try(&.roots) || [] of UInt64).reject do |source|
@@ -2929,6 +3091,7 @@ class Iyi::TapeShrinkChecker
           end
           call_result = merge(call_result, Value.new(aliases, [] of View))
         end
+        call_result = resolved(call_result, env)
         call_result = stored(call_result, env)
         views = call_result.views
         array_view = type_name(node.type).starts_with?("Array::View(")
@@ -2951,48 +3114,9 @@ class Iyi::TapeShrinkChecker
         EMPTY
       end
     when If
-      value(node.cond, env)
-      left, right = env.dup, env.dup
-      choice = fresh
-      mark = @guards.size
-      @guards << {choice, true}
-      @scopes << node.then.object_id
-      @fallthrough = Guards.new
-      shrinks_before = @shrinks.size
-      a = value(node.then, left)
-      leave_branch(node.then, shrinks_before)
-      then_after = node.then.is_a?(If) || node.then.is_a?(Expressions) ? @fallthrough : Guards.new
-      @scopes.pop
-      @guards.pop(@guards.size - mark)
-      @guards << {choice, false}
-      @scopes << node.else.object_id
-      @fallthrough = Guards.new
-      shrinks_before = @shrinks.size
-      b = value(node.else, right)
-      leave_branch(node.else, shrinks_before)
-      else_after = node.else.is_a?(If) || node.else.is_a?(Expressions) ? @fallthrough : Guards.new
-      @scopes.pop
-      @guards.pop(@guards.size - mark)
-      # What follows an If one of whose branches never falls through runs
-      # only after the other: its events are on that branch's guard.
-      left_leaves = node.then.type?.is_a?(NoReturnType)
-      right_leaves = node.else.type?.is_a?(NoReturnType)
-      @fallthrough = if left_leaves && !right_leaves
-                       [{choice, false}] + else_after
-                     elsif right_leaves && !left_leaves
-                       [{choice, true}] + then_after
-                     else
-                       Guards.new
-                     end
-      (left.keys | right.keys).each { |key| env[key] = merge(left[key]? || EMPTY, right[key]? || EMPTY) }
-      (left.slots.keys | right.slots.keys).each do |key|
-        env.slots[key] = merge(left.slots[key]? || EMPTY, right.slots[key]? || EMPTY)
-      end
-      result = merge(a, b)
-      boundary = node.object_id
-      @root_scopes[boundary] = @scopes.dup
-      store([boundary], result, env, node)
-      result
+      conditional_value(node, env)
+    when Yield
+      yielded_value(node, env)
     when Return
       result = node.exp.try { |exp| value(exp, env) } || EMPTY
       @returns = merge(@returns, result)

@@ -1,0 +1,60 @@
+# A cloned owner keeps attribute text in its stable builder.
+# The Html callback wrapper must preserve that field provenance.
+@[OnTape]
+struct Attr
+  getter name : String
+  getter value : String
+  getter prefix : String
+  def initialize(@name : String, @value : String,
+                 @prefix : String); end
+end
+@[OnTape]
+struct Dom
+  getter attrs : Array(Attr)
+  def initialize(@attrs : Array(Attr)); end
+  @joined = String::Builder.new
+  def duplicate(& : Dom -> T) : T forall T
+    copy = Dom.new(Array(Attr).new)
+    copy.copy_from(self)
+    yield copy
+  end
+  def copy_from(other : Dom) : Nil
+    other.attrs.each { |attr| append_attribute(attr) }
+  end
+  def keep_span(text : String) : Tuple(Int32, Int32)
+    at = @joined.bytesize
+    @joined.append(text)
+    {at, text.bytesize}
+  end
+  def view_text(span : Tuple(Int32, Int32)) : String
+    @joined.finish[span[0], span[1]]
+  end
+  def keep(text : String) : String
+    view_text(keep_span(text))
+  end
+  def append_attribute(attr : Attr) : Nil
+    name = String.new(attr.name)
+    value = String.new(attr.value)
+    prefix = String.new(attr.prefix)
+    kept = Attr.new(keep(name), keep(value), keep(prefix))
+    @attrs << kept
+    nil
+  end
+end
+@[OnTape]
+struct Html
+  getter dom : Dom
+  def initialize(@dom : Dom); end
+  def duplicate(& : Html -> T) : T forall T
+    @dom.duplicate { |dom| yield Html.new(dom) }
+  end
+end
+attrs = [Attr.new("a", "first", "")]
+dom = Dom.new(attrs)
+tree = Html.new(dom)
+tree.duplicate do |copy|
+  copy.dom.append_attribute(Attr.new("b", "#{42}", ""))
+  raise "wrong copy" unless copy.dom.attrs[1].value == "42"
+  nil
+end
+raise "changed original" unless dom.attrs.size == 1

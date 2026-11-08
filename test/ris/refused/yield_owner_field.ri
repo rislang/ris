@@ -1,0 +1,39 @@
+# The row owns temporary text but borrows an older connection.
+# Only the connection field may supply a retained record.
+# Retaining scratch instead of the owner view must stay refused.
+@[OnTape]
+struct Record
+  getter name : String
+  def initialize(@name : String); end
+end
+@[OnTape]
+struct Row
+  def initialize(@statement : String, @conn : Connection); end
+  def text : String
+    @statement
+  end
+end
+class Connection
+  @texts = String::Builder.new
+  def keep(text : String) : String
+    at = @texts.bytesize
+    @texts << text
+    @texts.finish[at, text.bytesize]
+  end
+  def finish_query(step : Int32) : Nil
+    nil
+  end
+  def query_one(& : Row -> T) : T? forall T
+    row = Row.new("#{1}", self)
+    step = 1
+    result = step == 1 ? (yield row) : nil
+    finish_query(step)
+    result
+  end
+end
+def lookup(conn : Connection) : Record?
+  conn.query_one { |row| Record.new(row.text) }
+end
+conn = Connection.new
+value = lookup(conn) || raise "no result"
+raise "wrong text" unless value.name == "retained"

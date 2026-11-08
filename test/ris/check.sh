@@ -51,6 +51,18 @@ expect() {
   fi
 }
 
+# Yielded holders retain the provenance of their borrowed owner fields.
+for name in yield_owner_field yield_clone_attrs; do
+  out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
+  if [ "$code" -eq 0 ] && [ -z "$out" ]; then
+    echo "runs     $name"
+  else
+    echo "FAILED   $name: $out"; status=1
+  fi
+done
+expect yield_owner_field 'cannot return a value made in this block'
+expect yield_clone_attrs 'cannot store data made in this def'
+
 # SPEC 2.2: helpers and aliases cannot grow the unfinished receiver.
 expect construct_helper_growth 'grow after new'
 expect construct_alias_growth 'grow after new'
