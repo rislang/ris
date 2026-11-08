@@ -2455,15 +2455,11 @@ pub struct Time
     end
 
     def parse(string : String | String) : Time | TimeParseError
-      parser = Parser.new(string)
-      parser.pattern(@pattern) && parser.at_end
-      parser.finish(@offset, @location)
+      Parser.new(string).pattern_answer(@pattern, @offset, @location)
     end
 
     def parse(string : String | String, offset : Int32?) : Time | TimeParseError
-      parser = Parser.new(string)
-      parser.pattern(@pattern) && parser.at_end
-      parser.finish(offset)
+      Parser.new(string).pattern_answer(@pattern, offset, nil)
     end
 
     # An offset is less than a day either side of UTC: the widest RFC 3339
@@ -2717,7 +2713,7 @@ pub struct Time
 
     # Reads a text by a pattern or by one of the named grammars. Every step
     # answers whether it matched; the first that did not leaves its sentence
-    # in `@error`, and `finish` answers that, so no text a program is handed
+    # in `@why`, and `finish` answers it, so no text a program is handed
     # ends it in a panic.
     @[OnTape]
     struct Parser
@@ -2725,7 +2721,9 @@ pub struct Time
       @bytes : String
       @len : Int32
       @pos : Int32 = 0
-      @error : TimeParseError? = nil
+      @failed : Int32 = -1
+      # The error's sentence, written here so it lives as long as the parser.
+      @why : String::Builder = String::Builder.new(128)
       @year : Int64 = 1_i64
       @century : Int32? = nil
       @year_in_century : Int32? = nil
@@ -2772,10 +2770,9 @@ pub struct Time
       end
 
       def fail(what : String) : Bool
-        if @error.nil?
-          @error = TimeParseError.new(
-            "#{what} at byte #{@pos} of #{@input.inspect}",
-            @input, @pos)
+        if @failed < 0
+          @why << what << " at byte " << @pos << " of " << @input.inspect
+          @failed = @pos
         end
         false
       end
@@ -2783,7 +2780,9 @@ pub struct Time
       # A sentence about fields that were all read, where no one byte is to
       # blame.
       def refuse(what : String) : TimeParseError
-        TimeParseError.new("#{what} in #{@input.inspect}", @input, @pos)
+        @why.clear
+        @why << what << " in " << @input.inspect
+        TimeParseError.new(@why.to_s, @input, @pos)
       end
 
       def text(start : Int32, stop : Int32) : String
@@ -3285,6 +3284,40 @@ pub struct Time
         year > now + 50_i64 ? year - 100_i64 : year
       end
 
+      # The `_answer` defs run one grammar and end with `finish`, so each
+      # `parse` ends with one call and answers what it answers (SPEC 1.9):
+      # a parser in `parse`'s own scratch is not returned from.
+      def pattern_answer(pattern : String, offset : Int32?,
+                         location : Location?) : Time | TimeParseError
+        pattern(pattern) && at_end
+        finish(offset, location)
+      end
+
+      def http_date_answer : Time | TimeParseError
+        http_date
+        finish(0)
+      end
+
+      def rfc_2822_answer : Time | TimeParseError
+        rfc_2822
+        finish(0)
+      end
+
+      def iso_date_answer(offset : Int32) : Time | TimeParseError
+        iso_date && at_end
+        finish(offset)
+      end
+
+      def iso_date_time_answer : Time | TimeParseError
+        iso_date_time
+        finish(nil)
+      end
+
+      def iso_time_answer : Time | TimeParseError
+        iso_time && zone_z_or_offset && at_end
+        finish(nil)
+      end
+
       # RFC 9110 section 5.6.7's three forms of an HTTP date: the
       # IMF-fixdate `Sun, 06 Nov 1994 08:49:37 GMT`, the obsolete RFC 850
       # `Sunday, 06-Nov-94 08:49:37 GMT`, and asctime's `Sun Nov  6 08:49:37
@@ -3527,8 +3560,8 @@ pub struct Time
       # names no zone is read at *default_offset*, or failing that on
       # *location*'s wall clock; with a location the time answered is in it.
       def finish(default_offset : Int32?, location : Location? = nil) : Time | TimeParseError
-        if error = @error
-          return error
+        if @failed >= 0
+          return TimeParseError.new(@why.to_s, @input, @failed)
         end
         hour = @hour
         if @hour_is_12
@@ -3633,9 +3666,7 @@ pub struct Time
       end
 
       def self.parse(string : String | String) : Time | TimeParseError
-        parser = Parser.new(string)
-        parser.http_date
-        parser.finish(0)
+        Parser.new(string).http_date_answer
       end
     end
 
@@ -3654,9 +3685,7 @@ pub struct Time
       end
 
       def self.parse(string : String | String) : Time | TimeParseError
-        parser = Parser.new(string)
-        parser.rfc_2822
-        parser.finish(0)
+        Parser.new(string).rfc_2822_answer
       end
     end
 
@@ -3672,9 +3701,7 @@ pub struct Time
         string : String | String,
         offset : Int32 = 0,
       ) : Time | TimeParseError
-        parser = Parser.new(string)
-        parser.iso_date && parser.at_end
-        parser.finish(offset)
+        Parser.new(string).iso_date_answer(offset)
       end
     end
 
@@ -3687,9 +3714,7 @@ pub struct Time
       end
 
       def self.parse(string : String | String) : Time | TimeParseError
-        parser = Parser.new(string)
-        parser.iso_date_time
-        parser.finish(nil)
+        Parser.new(string).iso_date_time_answer
       end
     end
 
@@ -3702,9 +3727,7 @@ pub struct Time
       end
 
       def self.parse(string : String | String) : Time | TimeParseError
-        parser = Parser.new(string)
-        parser.iso_time && parser.zone_z_or_offset && parser.at_end
-        parser.finish(nil)
+        Parser.new(string).iso_time_answer
       end
     end
 

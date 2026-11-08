@@ -1,0 +1,47 @@
+# std/time's date parsers answer from a parser in their own scratch:
+# RFC 9110's three HTTP-date forms, RFC 2822, and a refusal whose message
+# still reads right after other scratch text is written over the def's.
+import std/time::{Time, TimeParseError}
+import std/int
+
+def unix(got : Time | TimeParseError) : Int64
+  got.is_a?(Time) ? got.to_unix : -1_i64
+end
+
+# Scratch text written after a parse, where a dangling message would be.
+def scribble(n : Int32) : Int32
+  total = 0
+  i = 0
+  while i < 4
+    s = "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ" + (n + i).to_s +
+        "YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+    total = total + s.bytesize
+    i = i + 1
+  end
+  total
+end
+
+def message(text : String, wanted : String) : Nil
+  got = Time::Format::HTTP_DATE.parse(text)
+  scribble(3)
+  raise "not refused: #{text}" unless got.is_a?(TimeParseError)
+  raise "message of #{text}: #{got.message}" unless got.message == wanted
+end
+
+example = 784111777_i64
+http = Array(String){
+  "Sun, 06 Nov 1994 08:49:37 GMT",
+  "Sunday, 06-Nov-94 08:49:37 GMT",
+  "Sun Nov  6 08:49:37 1994",
+}
+http.each do |text|
+  got = unix(Time::Format::HTTP_DATE.parse(text))
+  raise "#{text}: #{got}" unless got == example
+end
+mail = unix(Time::Format::RFC_2822.parse("Sun, 06 Nov 1994 08:49:37 +0000"))
+raise "RFC 2822: #{mail}" unless mail == example
+message("Sun, 32 Nov 1994 08:49:37 GMT",
+  "1994-11 has days 1 to 30, not day 32 in " +
+  "\"Sun, 32 Nov 1994 08:49:37 GMT\"")
+message("garbage", "\"garbage\" is not a day name at byte 0 of \"garbage\"")
+puts "PASS: HTTP dates parsed on the tape"

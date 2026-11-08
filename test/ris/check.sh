@@ -847,6 +847,13 @@ else
   echo "FAILED   time_tape_offset: $out"
   status=1
 fi
+# std/time's parsers answer from their own scratch: HTTP dates, RFC 2822.
+out=$("$RIS" run test/ris/time_http_date.ri 2>&1)
+if [ "$out" = 'PASS: HTTP dates parsed on the tape' ]; then
+  echo "runs     time_http_date"
+else
+  echo "FAILED   time_http_date: $out"; status=1
+fi
 
 # Owners are classes; construction requires a named declaration.
 expect owner_temporary 'owner temporary requires a named declaration'
