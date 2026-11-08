@@ -219,6 +219,23 @@ String, Array, Hash or tape, so it can hide a refusal: tighten it.
 
 ## Known failures
 
+* Every growing tape value reserves 128 MiB of address space, even a
+  128-byte builder (region.iyi:367-370, 523-535). Under
+  `vm.overcommit_memory=2` each is charged: a FileServer answer holds
+  up to eight (doc/drafts/fileserver-outgoing.md, Memory).
+* Compiler: an inline argument stored as a view escapes SPEC 1.1/3.6.
+  `k.put("<" + n.to_s + ">")`, where `put` stores `value.as_tape` in
+  a field, compiles, and the field dangles once the def returns; the
+  same value in a local is refused. Seen in Outgoing#header
+  (doc/drafts/fileserver-outgoing.md, P1). Suspect: tape_text,
+  src/compiler/iyi/semantic/tape_shrink_checker.cr:514-548. The fix
+  commits five programs under test/ris/refused/ and their expect
+  lines after check.sh:64:
+    expect inline_view_concat 'cannot store data made in this def'
+    expect inline_view_interp 'cannot store data made in this def'
+    expect inline_view_call 'cannot store data made in this def'
+    expect inline_view_instance 'cannot store data made in this def'
+    expect inline_view_class 'cannot store data made in this def'
 * check.sh needs `ulimit -n 65536`: without it http_answer_scope and
   samples/ris/web fail (`bin/minitest-check check` does not set it).
 * std_spec: process_spec.cr:196 timed out at 60 s on CI once (de771de49)

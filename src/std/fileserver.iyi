@@ -1,17 +1,22 @@
-# Files served from a directory: what a server's block answers with
-# `FileServer.serve(root, request)` for the requests it means to be
-# files. Go's `http.FileServer`, and the same RFC 9110 rules.
+# Files served from a directory: what a `Server.answer` block writes
+# into its `Outgoing` with `FileServer.serve(root, req, res)` for the
+# requests it means to be files. Go's `http.FileServer`, and the same
+# RFC 9110 rules.
 #
 # The type is std/mime's for the extension, text and JSON with
 # `charset=utf-8`. Caching is `Last-Modified` and an `ETag` made of the
 # modification time and the size in hex: `If-None-Match` (weakly
 # compared) and, without it, `If-Modified-Since` answer 304 (§13.2.2
-# orders them so). One `Range: bytes=` range is a 206 with its
-# `Content-Range`, a suffix range included; one that starts past the end
-# is 416 with `bytes */size`; several ranges, another unit, or a range
-# under an `If-Range` that names another version is the whole file, which
-# §14.2 allows. The file is copied out by the server as it is read, never
-# whole, from where the range starts.
+# orders them so), with the validators and no type (§15.4.5). One
+# `Range: bytes=` range is a 206 with its `Content-Range`, a suffix range
+# included; one that starts past the end is 416 with `bytes */size`;
+# several ranges, another unit, or a range under an `If-Range` that names
+# another version is the whole file, which §14.2 allows.
+#
+# The file, or its range, is read whole into the answer's body on the
+# request's tape, up to *max* bytes (16 MiB by default, at most
+# `MAX_BODY`); above it the answer is a 500 and a log warning. A HEAD
+# reads nothing and states the length.
 #
 # The request path is percent-decoded and must stay below *root*: a `..`
 # segment, a NUL and a backslash are 404s, the same answer a file that is
@@ -26,98 +31,170 @@
 
 module std/fileserver
 
-import std/http::{HTTP, Request, Response}
+import std/http::{HTTP, Incoming, Outgoing}
 import std/uri::{URI}
 import std/mime::{MIME}
 import std/file::{File}
 import std/time::{Time}
+import std/log::{Log}
 
 pub struct FileServer
-  # The answer to *req* from the files under *root*: what a server's
-  # block returns to serve a directory. A GET or HEAD only, 405 otherwise.
-  # The path is percent-decoded and read below *root*: a `..` segment, a
-  # NUL or a backslash is a 404 rather than a way out of it. A directory
-  # is its *index* file, and one asked for without its trailing `/` is
-  # redirected there, so relative links inside resolve. The type comes
-  # from the extension (std/mime), text with `charset=utf-8`.
+  # The default *max*: the most bytes one answer reads into its body.
+  MAX_FILE = 16_777_216_i64
+  # The largest *max* honoured, 120 MiB: a body reserves 128 MiB of
+  # address space (src/iyi/region.iyi SIDE_RESERVE) and cannot grow past.
+  MAX_BODY = 125_829_120_i64
+
+  # Answers *req* into *res* from the files under *root*: what a
+  # `Server.answer` block calls to serve a directory. A GET or HEAD only,
+  # 405 otherwise. The path is percent-decoded and read below *root*: a
+  # `..` segment, a NUL or a backslash is a 404 rather than a way out of
+  # it. A directory is its *index* file, and one asked for without its
+  # trailing `/` is redirected there, so relative links inside resolve.
+  # The type comes from the extension (std/mime), text with
+  # `charset=utf-8`.
   #
   # Caching and ranges are RFC 9110's: `Last-Modified` and an `ETag` made
   # from the modification time and size; `If-None-Match`, and without it
   # `If-Modified-Since`, answer 304. One `Range: bytes=` range is a 206
   # with its `Content-Range`, one past the end a 416; several are served
   # as the whole file (§14.2 lets a server ignore a range), and so is a
-  # range whose `If-Range` names another version. The file is read as it
-  # is sent, never whole.
-  def self.serve(root : String, req : Request, index : String = "index.html") : Response
-    unless HTTP.same_name?(req.method, "GET") || HTTP.same_name?(req.method, "HEAD")
-      return Response.new(405, "method not allowed\n", {"Allow" => "GET, HEAD", "Content-Type" => "text/plain; charset=utf-8"})
+  # range whose `If-Range` names another version. The file is read into
+  # `res.body` whole, so an answer of more than *max* bytes is a 500 and
+  # a log warning; *max* is honoured up to `MAX_BODY`, and a file larger
+  # than that is not served from memory.
+  def self.serve(root : String, req : Incoming, res : Outgoing,
+                 index : String = "index.html",
+                 max : Int64 = MAX_FILE) : Nil
+    get = HTTP.same_name?(req.method, "GET")
+    unless get || HTTP.same_name?(req.method, "HEAD")
+      res.status = 405
+      res.header("Allow", "GET, HEAD")
+      return text(res, "method not allowed\n")
     end
     decoded = URI.decode?(req.path)
-    return not_found unless decoded && decoded.starts_with?("/")
-    return not_found if decoded.includes?("\0") || decoded.includes?("\\")
+    return not_found(res) unless decoded && decoded.starts_with?("/")
+    return not_found(res) if decoded.includes?("\0") || decoded.includes?("\\")
     decoded.split('/').each do |segment|
-      return not_found if segment == ".."
+      return not_found(res) if segment == ".."
     end
     path = root + decoded
     info = File.info?(path)
-    return not_found unless info
+    return not_found(res) unless info
     if info.directory?
       unless decoded.ends_with?("/")
-        target = req.path + "/"
-        if q = req.query
-          target = target + "?" + q
+        res.status = 301
+        res.header("Location") do |w|
+          w << req.path << "/"
+          if q = req.query
+            w << "?" << q
+          end
         end
-        return Response.new(301, "", {"Location" => target})
+        return
       end
       path = path + index
       info = File.info?(path)
-      return not_found unless info
+      return not_found(res) unless info
     end
-    return not_found unless info.file?
+    return not_found(res) unless info.file?
     size = info.size
-    modified = Time.unix(info.modification_time)
+    mtime = info.modification_time
+    modified = Time.unix(mtime)
     stamp = modified.to_rfc1123
-    tag = "\"" + HTTP.hex_text(info.modification_time) + "-" + HTTP.hex_text(size) + "\""
-    headers = {
-      "Content-Type"  => MIME.with_charset(MIME.from_extension(path)),
-      "Last-Modified" => stamp,
-      "ETag"          => tag,
-      "Accept-Ranges" => "bytes",
-    }
+    tag = "\"" + HTTP.hex_text(mtime) + "-" + HTTP.hex_text(size) + "\""
     if none = req.header("If-None-Match")
-      return Response.new(304, "", headers) if none.strip == "*" || FileServer.tag_listed?(none, tag)
+      if none.strip == "*" || tag_listed?(none, tag)
+        return validators(res, 304, tag, stamp)
+      end
     elsif since = req.header("If-Modified-Since")
-      asked = Time::Format::HTTP_DATE.parse(since)
-      if asked.is_a?(Time) && modified.to_unix <= asked.to_unix
-        return Response.new(304, "", headers)
+      asked = Time::Format::HTTP_DATE.parse(since.strip)
+      if asked.is_a?(Time) && mtime <= asked.to_unix
+        return validators(res, 304, tag, stamp)
       end
     end
     start = 0_i64
-    length = size
+    count = size
     status = 200
-    if (range = req.header("Range")) && FileServer.range_applies?(req, tag, stamp)
-      # Nil is not one range this server reads: the whole file.
-      span = FileServer.byte_range(range, size)
+    if (range = req.header("Range")) && range_applies?(req, tag, stamp)
+      span = byte_range(range, size)
       if span.is_a?(Bool)
-        headers["Content-Range"] = "bytes */#{size}"
-        headers["Content-Type"] = "text/plain; charset=utf-8"
-        return Response.new(416, "range not satisfiable\n", headers)
+        res.status = 416
+        res.header("Content-Range") { |w| w << "bytes */" << size }
+        return text(res, "range not satisfiable\n")
       elsif span
         start = span[0]
-        length = span[1] - span[0] + 1_i64
+        count = span[1] - span[0] + 1_i64
         status = 206
-        headers["Content-Range"] = "bytes #{span[0]}-#{span[1]}/#{size}"
       end
     end
-    headers["Content-Length"] = length.to_s
-    return Response.new(status, "", headers) if HTTP.same_name?(req.method, "HEAD") || length == 0_i64
-    file = File.open(path)
-    file.seek(start) if start > 0_i64
-    Response.new(status, file, headers)
+    # The body reserves at most 128 MiB (SIDE_RESERVE): above MAX_BODY a
+    # read would fail where it should answer.
+    max = MAX_BODY if max > MAX_BODY
+    if count > max
+      Log.warn("fileserver: answer over max", path: path, bytes: count,
+               max: max)
+      res.status = 500
+      return text(res, "file too large to serve\n")
+    end
+    if !get
+      res.length = count
+    elsif count > 0_i64
+      return unless read_into(res, path, start, count)
+    end
+    validators(res, status, tag, stamp)
+    res.header("Content-Type") do |w|
+      MIME.with_charset(MIME.from_extension(path), w)
+    end
+    if status == 206
+      res.header("Content-Range") do |w|
+        w << "bytes " << start << "-" << start + count - 1_i64 << "/" << size
+      end
+    end
   end
 
-  private def self.not_found : Response
-    Response.new(404, "not found\n", {"Content-Type" => "text/plain; charset=utf-8"})
+  # Reads *count* bytes of *path* from *start* into `res.body`. A file
+  # that shrank since its stat gives fewer: the body is dropped and the
+  # answer is a 500, never a partial one under the old size's ETag.
+  private def self.read_into(res : Outgoing, path : String,
+                             start : Int64, count : Int64) : Bool
+    want = count.to_i32
+    body = res.body
+    body.reserve(want)
+    got = 0
+    File.open(path) do |file|
+      file.seek(start) if start > 0_i64
+      while got < want
+        n = file.read_str(want - got, body)
+        break if n == 0
+        got = got + n
+      end
+    end
+    return true if got == want
+    body.truncate(0)
+    Log.warn("fileserver: file changed while read", path: path)
+    res.status = 500
+    text(res, "file changed while read\n")
+    false
+  end
+
+  # The status and the lines a 304, a 200 and a 206 share.
+  private def self.validators(res : Outgoing, status : Int32,
+                              tag : String, stamp : String) : Nil
+    res.status = status
+    res.header("Last-Modified") { |w| w << stamp }
+    res.header("ETag") { |w| w << tag }
+    res.header("Accept-Ranges", "bytes")
+  end
+
+  # A plain-text answer's type and its body.
+  private def self.text(res : Outgoing, body : String) : Nil
+    res.header("Content-Type", "text/plain; charset=utf-8")
+    res.body << body
+  end
+
+  private def self.not_found(res : Outgoing) : Nil
+    res.status = 404
+    text(res, "not found\n")
   end
 
   # Whether an `If-None-Match` list names *tag*, weakly compared (§13.1.2).
@@ -132,7 +209,7 @@ pub struct FileServer
 
   # A `Range` is honoured on a GET, and under `If-Range` only when it
   # names this version - its tag, or its date exactly (§13.1.5).
-  protected def self.range_applies?(req : Request, tag : String, stamp : String) : Bool
+  protected def self.range_applies?(req : Incoming, tag : String, stamp : String) : Bool
     return false unless HTTP.same_name?(req.method, "GET")
     if given = req.header("If-Range")
       named = given.strip

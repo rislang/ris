@@ -2211,23 +2211,29 @@ struct RequestHead
 end
 
 # The answer `Server.answer`'s block writes: a status, 200 until set, up
-# to `LINES` header lines, and its body, written into `body`. The lines
-# go in slots made at their final size, so the body's writer is the one
-# value that grows. The server adds `Content-Length` and `Connection`,
-# and refuses the block's own.
+# to `LINES` header lines, and its body, written into `body`. Each line is
+# copied into the answer's own text, so a value made in the block's def
+# need not outlive it; `header(name) { |w| ... }` writes a computed value
+# there directly. `length=` states the length of an answer to HEAD, which
+# sends no body. The server adds `Content-Length` and `Connection`, and
+# refuses the block's own.
 @[OnTape]
 pub struct Outgoing
   LINES = 32
 
-  # The status and the number of lines.
+  # The status, the number of lines, 1 while a header block runs, and
+  # the length `length=` set or -1. An @[OnTape] struct is passed by
+  # value: a field a method changes is a slot the copies share.
   @state : Array(Int32)
-  @lines : Array(Field)
+  # Each line's name and value, as spans of @text.
+  @spans : Array(String::Span)
+  @text : String::Builder
   getter body : String::Builder
 
   def initialize
-    @state = Array(Int32).new(2) { |i| i == 0 ? 200 : 0 }
-    none = "".as_tape
-    @lines = Array(Field).new(LINES) { Field.new(none, none) }
+    @state = Array(Int32).new(4) { |i| i == 0 ? 200 : (i == 3 ? -1 : 0) }
+    @spans = Array(String::Span).new(LINES * 2) { String::Span.new(0, 0) }
+    @text = String::Builder.new(1024)
     @body = String::Builder.new
   end
 
@@ -2240,26 +2246,76 @@ pub struct Outgoing
     @state[0] = code
   end
 
-  # A header line, checked as `format_response` checks one: a name that is
-  # a token, a value with no line break or control character, and none of
-  # the lines the server writes itself.
+  # A header line, copied into this answer's own text and checked as
+  # `format_response` checks one: a name that is a token, a value with
+  # no line break or control character, and none of the lines the server
+  # writes itself.
   def header(name : String, value : String) : Nil
-    value = value.as_tape
-    Server.check_line(name, value)
+    header(name) { |w| w << value }
+  end
+
+  # A header line whose value the block writes into the answer's own
+  # text, checked as `header(name, value)` checks one. A header written
+  # inside the block raises: its bytes would land in this value.
+  def header(name : String, & : String::Builder -> Nil) : Nil
+    raise "HTTP: a header inside a header block" if @state[2] == 1
+    count = @state[1]
+    raise "HTTP: more than #{LINES} header lines" if count == LINES
     if HTTP.same_name?(name, "Content-Length") || HTTP.same_name?(name, "Connection") || HTTP.same_name?(name, "Transfer-Encoding")
       raise "HTTP: #{name} is the server's own line"
     end
-    count = @state[1]
-    raise "HTTP: more than #{LINES} header lines" if count == LINES
-    @lines[count] = Field.new(name.as_tape, value.as_tape)
+    @state[2] = 1
+    named = @text.append_span(name)
+    from = @text.length
+    yield @text
+    value = String::Span.new(from, @text.length - from)
+    # A refused line's bytes stay in @text unreferenced and the raise
+    # ends the request; cutting @text back is refused while a view lives.
+    why = Outgoing.refusal(@text.to_s, named, value)
+    if why > 0
+      raise "HTTP: not a header name: #{name.inspect}" if why == 1
+      raise "HTTP: header #{name} contains a line break" if why == 2
+      raise "HTTP: header #{name} contains a control character"
+    end
+    @spans[count * 2] = named
+    @spans[count * 2 + 1] = value
     @state[1] = count + 1
+    @state[2] = 0
   end
 
-  # Each header line the block wrote, in order.
+  # 0 for a good line, else what is wrong: 1 the name, 2 a line break,
+  # 3 a control character (`Server.check_line`'s rules).
+  protected def self.refusal(text : String, named : String::Span,
+                             value : String::Span) : Int32
+    return 1 unless HTTP.token?(text[named])
+    return 2 if HTTP.has_break?(text[value])
+    return 3 if HTTP.control?(text[value])
+    0
+  end
+
+  # The Content-Length of an answer to HEAD, which sends no body. Unless
+  # the answer is to HEAD, it must equal the body's bytes, or writing the
+  # head raises.
+  def length=(count : Int64) : Int64
+    unless count >= 0_i64 && count <= 2147483647_i64
+      raise "HTTP: not a length: #{count}"
+    end
+    @state[3] = count.to_i32
+    count
+  end
+
+  # The Content-Length `format_head` writes: the one set, else the body's.
+  def length : Int64
+    given = @state[3]
+    given < 0 ? @body.length.to_i64 : given.to_i64
+  end
+
+  # Each header line the block wrote, in order, viewing the answer's text.
   def each_line(& : Field -> Nil) : Nil
+    text = @text.to_s
     i = 0
     while i < @state[1]
-      yield @lines[i]
+      yield Field.new(text[@spans[i * 2]], text[@spans[i * 2 + 1]])
       i = i + 1
     end
   end
@@ -2416,7 +2472,9 @@ pub struct Server
   end
 
   # The tape response's wire head, shared by measurement and serving.
-  def self.format_head(res : Outgoing, close : Bool) : String
+  # Unless *head*, a length set with `length=` must be the body's.
+  def self.format_head(res : Outgoing, close : Bool,
+                       head : Bool = false) : String
     status = res.status
     raise "HTTP: not a status: #{status}" unless status >= 100 && status <= 999
     w = String::Builder.new
@@ -2433,8 +2491,13 @@ pub struct Server
     end
     bodiless = (status >= 100 && status < 200) || status == 204 || status == 304
     unless bodiless
+      given = res.length
+      if !head && given != res.body.length.to_i64
+        raise "HTTP: length= #{given} with a body of #{res.body.length} " +
+              "bytes; length= is for a HEAD answer"
+      end
       w << "Content-Length: "
-      w.append_int(res.body.length)
+      w.append_int(given)
       w << "\r\n"
     end
     w << (close ? "Connection: close\r\n\r\n" : "Connection: keep-alive\r\n\r\n")
@@ -2442,7 +2505,7 @@ pub struct Server
   end
 
   def self.format_response(res : Outgoing, head : Bool, close : Bool) : String
-    top = format_head(res, close)
+    top = format_head(res, close, head)
     head || HTTP.bodiless?(res.status) ? top : top + res.body.finish
   end
 
@@ -2452,7 +2515,7 @@ pub struct Server
     res = Outgoing.new
     answerer.call(req, res)
     body = res.body.finish
-    top = format_head(res, close)
+    top = format_head(res, close, HTTP.same_name?(req.method, "HEAD"))
     bodiless = HTTP.bodiless?(res.status)
     method = req.method
     sends = !bodiless && !HTTP.same_name?(method, "HEAD")

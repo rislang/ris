@@ -1193,6 +1193,28 @@ else
 fi
 out=$("$RIS" run test/ris/answer.ri 2>&1)
 if [ "$out" = 'PASS: read and answered on the tape, fast path and not' ]; then echo "runs     answer"; else echo "FAILED   answer: $out"; status=1; fi
+# Outgoing's length= and block-header refusals, raised at run time.
+out=$(RIS="$RIS" bash test/ris/outgoing_refusals.sh 2>&1)
+if [ "$?" -eq 0 ] &&
+    [ "$out" = 'PASS: length= and block headers refused' ]; then
+  echo "runs     outgoing_refusals"
+else
+  echo "FAILED   outgoing_refusals: $out"; status=1
+fi
+# FileServer answers into the caller's Outgoing, nothing moved or beside.
+out=$("$RIS" run test/ris/fileserver.ri 2>&1)
+if [ "$out" = 'PASS: files answered into Outgoing' ]; then
+  echo "runs     fileserver"
+else
+  echo "FAILED   fileserver: $out"; status=1
+fi
+stats=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/fileserver.ri 2>&1 |
+  grep '^ris tape: ')
+case "$stats" in
+  *' 0 growth moves '*' 0 side regions '*)
+    echo "runs     fileserver tape" ;;
+  *) echo "FAILED   fileserver tape: $stats"; status=1 ;;
+esac
 out=$("$RIS" run test/ris/query.ri 2>&1)
 if [ "$out" = 'PASS: read as Params reads, nothing on the heap' ]; then echo "runs     query"; else echo "FAILED   query: $out"; status=1; fi
 out=$("$RIS" run test/ris/truncate.ri 2>&1)

@@ -524,7 +524,8 @@ end
 #
 #     router = Router.new
 #     router.handle("GET /users/{id}") { |req, params| Response.new(200, params["id"]) }
-#     router.handle("/static/") { |req, params| FileServer.serve(root, req) }
+#     # Files: call FileServer.serve(root, req, res) from a Server.answer
+#     # block; Router is not ported to Outgoing yet.
 #     # Build this router inside Handler.new(copied_config), then use:
 #     # Handler#call(req) = @router.call(req)
 #     Server.serve("0.0.0.0", 3000, config, Handler)
