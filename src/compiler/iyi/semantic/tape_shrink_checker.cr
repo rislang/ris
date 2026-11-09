@@ -682,7 +682,11 @@ class Iyi::TapeShrinkChecker
   # A callee's root at this call; what a default made is made here.
   private def placed(root : UInt64, summary : Summary, inputs : Array(Value),
                      allocation : UInt64?) : Array(UInt64)
-    found = translate(root, summary, inputs, allocation)
+    # A default is made here even when the callee's summary also answers
+    # it as the call's own allocation: a marked callee's allocation is
+    # its scratch, dropped at its stores, and the default would be lost.
+    default = allocation && @default_roots.has_key?(root)
+    found = default ? [] of UInt64 : translate(root, summary, inputs, allocation)
     return found unless found.empty? && allocation && @default_roots.has_key?(root)
     @default_roots[root].try { |type| @root_types[root] = type }
     @root_scopes[root] = @scopes.dup
@@ -1785,6 +1789,54 @@ class Iyi::TapeShrinkChecker
     @yields_fresh[id] = scan.found
   end
 
+  # Whether runtime *target* stores what its block answers into its
+  # receiver (`self[key] = yield old`, Hash#update): the value moves down
+  # from the block's round into the caller's scope (the runtime def has
+  # no mark), and the receiver keeps it.
+  @keeps_block = Hash(UInt64, Bool).new
+
+  def keeps_block_value?(target : Def) : Bool
+    id = target.object_id
+    known = @keeps_block[id]?
+    return known unless known.nil?
+    return @keeps_block[id] = false if target.is_a?(External) ||
+                                       !TapeRules.runtime?(@program, target.location)
+    scan = BlockKeepScan.new
+    target.body.accept scan
+    @keeps_block[id] = scan.found
+  end
+
+  class BlockKeepScan < Visitor
+    getter found = false
+
+    def visit(node : Call)
+      if {"[]=", "<<", "push", "unshift", "put"}.includes?(node.name) &&
+         self_receiver?(node.obj) && node.args.last?.try { |arg| yielded?(arg) }
+        @found = true
+      end
+      !@found
+    end
+
+    def visit(node : ASTNode)
+      !@found
+    end
+
+    # The block's value itself, or one branch of a choice
+    # (Hash#merge_in_place's `has_key?(key) ? (yield ...) : value`).
+    private def yielded?(arg : ASTNode) : Bool
+      case arg
+      when Yield       then true
+      when Expressions then arg.expressions.last?.try { |e| yielded?(e) } || false
+      when If          then yielded?(arg.then) || yielded?(arg.else)
+      else                  false
+      end
+    end
+
+    private def self_receiver?(obj : ASTNode?) : Bool
+      obj.nil? || obj.is_a?(Self) || (obj.is_a?(Var) && obj.name == "self")
+    end
+  end
+
   def yield_targets(node : Call) : Array(Def)
     @graph.targets(node) || [] of Def
   end
@@ -1891,6 +1943,25 @@ class Iyi::TapeShrinkChecker
     def visit(node : ASTNode)
       true
     end
+  end
+
+  # A block value a runtime def keeps in its receiver (Hash#update) is
+  # made at the call, in this scope: stored as `h[key] = value` would be.
+  private def keep_block_value(node : Call, block : Block, block_value : Value,
+                               receiver : Value, targets : Array(Def)?,
+                               env : Env) : Nil
+    return unless @checking && !@text_only
+    return unless targets && targets.any? { |t| keeps_block_value?(t) }
+    type = block.body.type?
+    return unless type && TapeChecker.tape_in(@program, type)
+    made = block.object_id
+    @root_scopes[made] = @scopes.dup
+    @root_types[made] = type
+    @root_births[made] = @uses.size
+    note_fresh(made)
+    kept = Value.new([made], block_value.views)
+    store(receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }, kept,
+      env, node, false)
   end
 
   # The scopes *root* was made in, outermost first.
@@ -2021,6 +2092,22 @@ class Iyi::TapeShrinkChecker
   end
 
   @handed = Set(UInt64).new
+
+  # RisBoard.take and poll decode the message onto the running tape, in
+  # the scope that takes it: what it holds is made here (SPEC 5.2).
+  private def board_taken(node : ASTNode, result : Value) : Value
+    return result unless @checking && !@text_only && !@tape_blocks.empty?
+    return result unless node.is_a?(Call) && {"take", "poll"}.includes?(node.name)
+    return result unless (obj = node.obj) && obj.type?.try { |t| {"RisBoard:Module", "RisBoard.class"}.includes?(type_name(t)) }
+    type = node.type?
+    return result unless type && TapeChecker.tape_in(@program, type) && !flat_result?(type)
+    @root_scopes[node.object_id] ||= @scopes.dup
+    @root_types[node.object_id] = type
+    @root_births[node.object_id] ||= @uses.size
+    note_fresh(node.object_id)
+    @handed << node.object_id
+    merge(result, Value.new([node.object_id], [] of View))
+  end
 
   # An @[OnTape] struct: a value whose fields may hold tape storage.
   # A union with a class instance or a tape struct in it (`Box?`): a call
@@ -2285,6 +2372,7 @@ class Iyi::TapeShrinkChecker
     result = tape_text(node, result)
     result = growing_text(node, result, env)
     result = handed_on(node, result)
+    result = board_taken(node, result)
     if (fields = @condition_storage) && storage?(node)
       result.roots.each do |root|
         if parent = @parents[root]?
@@ -3040,6 +3128,7 @@ class Iyi::TapeShrinkChecker
         end
         @scopes.pop
         @callback_chain.pop
+        keep_block_value(node, block, block_value, receiver, targets, env)
         use(yielded, block)
         env.keys.each { |key| env[key] = merge(env[key], outer[key]? || EMPTY) }
         (@text_only ? (env.slots.keys | outer.slots.keys) : env.slots.keys).each do |key|

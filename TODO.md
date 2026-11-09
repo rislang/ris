@@ -19,18 +19,15 @@ The items are below; this is only their order.
 
 1. The user's own ris programs: each obstacle becomes an item here.
 2. SocketError in a socket union.
-3. Holes: `T.from_json` in a def, `Hash#update`'s block value,
-   RisBoard.take's result.
-4. Holes: SPEC 3.3 `clear`, a store into `self`'s field, a tape block
-   in a constant, the one-call def's default, `flat_result?` callers.
-5. Wrong refusals and the literal String's run-time error: when a program
+3. Hole: SPEC 3.3 `clear` of an Array a local aliases (a SPEC question).
+4. Wrong refusals and the literal String's run-time error: when a program
    hits one.
-6. test/ris/sse.ri, then HTTPClient's pooling.
-7. Tighten heap_trap.
-8. The checker's `evaluate` uses a lot of stack: small changes must not
+5. test/ris/sse.ri, then HTTPClient's pooling.
+6. Tighten heap_trap.
+7. The checker's `evaluate` uses a lot of stack: small changes must not
    decide whether it fits.
-9. Step 5: benches.
-10. std additions, language and runtime, other known failures.
+8. Step 5: benches.
+9. std additions, language and runtime, other known failures.
 
 Speed work stays out of minitest. The jq check at jqg.ri:424 is the
 maintainer's.
@@ -54,8 +51,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   refused at the append inside std/option_parser, with a generic message:
   the refusal belongs at the caller's `parse` line
   (doc/drafts/option-parser/probes/p14d.ri).
-* `h.update(k) { |v| w.downcase }` builds: Hash keeps the block's value,
-  made in a block round. Any other runtime def keeping a block's value too.
 * A yield is judged per def, not per argument: `each_field`'s name is a
   view, its joined value is fresh, and storing either is refused.
 * test/ris/sse.ri is refused and is not in check.sh: EventParser replaces
@@ -70,24 +65,13 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   `Array(String)` member was taken as made in its caller's scratch and
   refused (SPEC 1.9); std/json reads it by a tail call instead.
 
-* `def load(t : String) : T; T.from_json(t); end` builds: an @[OnTape]
-  struct's String may view the document's decoded text, in load's scratch.
+* SPEC 3.3: `v = w.rows`, `w.rows.clear`, `puts v.size` passes, as
+  does the same with a local `v = a`. v aliases the Array handle (SPEC
+  1.4) and reads size 0: nothing dangles. A view through the getter
+  (`w.rows[0]`, `w.buf.finish`) is refused. Whether an alias is a 3.3
+  "holder" a clear must refuse is a SPEC question: decide it (EGM),
+  then refuse both forms or drop this item.
 
-* An unmarked one-call def with an untyped class default still loses
-  that default's roots at a cycle store. A body containing only
-  `@nodes << v` in `def node(a = -1, v = C.new)` passes; the marked
-  two-expression body is now refused. Track the default at the call.
-
-* SPEC 3.3: `v = w.rows`, `w.rows.clear`, `puts v.size` passes: a view
-  taken through a getter stays live over the clear. Refuse it.
-* A store into `self`'s field inside a method is not checked against
-  the method's scope; the same store is refused at a caller that holds
-  the receiver in a local. Check it where it is made.
-
-* A multi-expression def answering RisBoard.take's non-flat message
-  can lose its decoded payloads when its scratch ends, unrefused
-  (autocert's reader_settings). Attribute decoded data to its receiving
-  scope; the one-call constructor form now keeps that gate safe.
 * HTTPClient's ordinary open/request pooling still needs transport
   storage supplied by its caller. DoH now retains an explicit exchange
   owner and uses HTTP.open_at_into; a request-local Conn cannot be kept
@@ -96,9 +80,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
 * A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
   is refused: the block frees its scratch before the task copy takes
   the value. Copy the value at the boundary before the reset.
-* A tape block in a constant's initializer (program_local_init:
-  `INIT = tape { State.keep(String.new("x")) }`) stores block text into
-  a class variable unrefused.
 * The call graph's `fresh?` takes a call's String-or-error union as
   fresh when any path allocates (an error sentence's interpolation),
   though every String it answers views the parser (toml's
@@ -119,9 +100,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   (a 0 or 1 byte first) to answer bytes or an error in one value.
 * A SocketError in a union with IyiSocket, made in a round and kept, is
   not refused: a connect's union is exempt for the socket's sake.
-* A class instance made in a def and returned after other work was
-  taken as flat (no tape fields): UdpSocket.bind? answered a freed
-  socket. Now refused; check other `flat_result?` callers.
 * A block's value that its yielder discards (`each`, `tape`) is still
   checked as leaving: blocks end with `nil` to pass. Skip the check when
   the yielder ignores the value.
