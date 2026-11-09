@@ -18,37 +18,40 @@ Testing ris programs can start now: what a program hits comes first.
 The items are below; this is only their order.
 
 1. The user's own ris programs: each obstacle becomes an item here.
-2. TlsClient's ticket and SocketError in a socket union.
-3. Holes: `T.from_json` in a def, `Hash#update`'s block value,
-   RisBoard.take's result.
-4. Holes: SPEC 3.3 `clear`, a store into `self`'s field, a tape block
-   in a constant, the one-call def's default, `flat_result?` callers.
-5. Wrong refusals and the literal String's run-time error: when a program
-   hits one.
-6. test/ris/sse.ri, then HTTPClient's pooling.
-7. Tighten heap_trap.
-8. The checker's `evaluate` uses a lot of stack: small changes must not
-   decide whether it fits.
-9. Step 5: benches. Then remove `to_heap` and `@[TapeToHeap]`.
-10. std additions, language and runtime, other known failures.
+2. Checker errors (wrong refusals, holes, the literal String's run-time
+   error, SocketError in a socket union): the ones programs hit first
+   come first.
+3. SPEC 3.3 alias question (`clear` of an Array a local aliases),
+   decided with EGM.
+4. test/ris/sse.ri, then HTTPClient's pooling.
+5. Tighten heap_trap.
+6. A gate on the checker `evaluate`'s stack use.
+7. Benches as one item.
+8. Speed.
+9. Language and runtime.
+10. std.
+11. macOS arm64.
+12. Known failures.
 
 Speed work stays out of minitest. The jq check at jqg.ri:424 is the
 maintainer's.
 
-## Now: code to the new SPEC (1.1, 1.5, 1.9, 2.1, 3.2, 3.3, 3.5, 3.6)
+## The user's programs
 
-Breakage between steps is fine; no transition stages.
+Each obstacle a program under ~/contribute/rispacks hits, with a repro.
+
+## Checker errors
+
+Code to the new SPEC (1.1, 1.5, 1.9, 2.1, 3.2, 3.3, 3.5, 3.6); breakage
+between steps is fine; no transition stages.
 
 Fewest tokens: the compiler's refusals are the list. One task per
 clone (ris1/2/3) and per cluster below; build with
 `RIS_SCOPE_ERRORS=all ris build --no-codegen x.ri` to see every
 refusal of a file at once, fix by message, rerun only that cluster's
 files; one full check.sh on minitest per finished step, not per fix.
-Fix a checker hole below only when a cluster hits it.
 
-5. Benches: build each, group the refusals by message, fix per group.
-
-Checker holes found on the way (unknown must be refused, SPEC 3.6):
+Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
 
 * OptionParser.parse given an `args` shorter-lived than `found` is
   refused at the append inside std/option_parser, with a generic message:
@@ -58,9 +61,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   made in a block round. Any other runtime def keeping a block's value too.
 * A yield is judged per def, not per argument: `each_field`'s name is a
   view, its joined value is fresh, and storing either is refused.
-* test/ris/sse.ri is refused and is not in check.sh: EventParser replaces
-  `@line` and `@data` with a new builder in a round, and keeps `@type` and
-  `@id_buffer` from `SSE.clean`'s scratch. Give them stable storage.
 
 * A struct whose constructor makes its own data is refused at a store
   past its round only with no owner argument: one given an Array or Hash
@@ -78,8 +78,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   `@nodes << v` in `def node(a = -1, v = C.new)` passes; the marked
   two-expression body is now refused. Track the default at the call.
 
-* SPEC 3.3: `v = w.rows`, `w.rows.clear`, `puts v.size` passes: a view
-  taken through a getter stays live over the clear. Refuse it.
 * A store into `self`'s field inside a method is not checked against
   the method's scope; the same store is refused at a caller that holds
   the receiver in a local. Check it where it is made.
@@ -88,10 +86,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   can lose its decoded payloads when its scratch ends, unrefused
   (autocert's reader_settings). Attribute decoded data to its receiving
   scope; the one-call constructor form now keeps that gate safe.
-* HTTPClient's ordinary open/request pooling still needs transport
-  storage supplied by its caller. DoH now retains an explicit exchange
-  owner and uses HTTP.open_at_into; a request-local Conn cannot be kept
-  in a longer-lived client's idle list.
 
 * A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
   is refused: the block frees its scratch before the task copy takes
@@ -131,18 +125,51 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   (interpolation, inspect) as a view of them; tape_text now adds a
   fresh root for an allocating String call not known to answer a view.
 
-## macOS arm64
+## SPEC 3.3 alias question
 
-SPEC 7.1 lists it; these are what Linux has and it lacks yet.
+Decide with EGM, then gate:
 
-* Measure pages returned to the OS: scope_frees.ri and fibers/spares.ri read
-  /proc, and `MADV_FREE` is lazy, so resident size may not fall. Decide
-  between `task_info` with `MADV_FREE_REUSABLE`, or `mmap` over the range.
-* Port the other checks in `ris-macos.yml`'s `RIS_CHECK_SKIP`: file_copy_to.ri
-  and tls_session_tickets.ri.
-* Short frame names in a backtrace, then drop check.sh's `frame_edge`.
-* A tarball, its release job and `install_ris.sh`: static LLVM fails there.
-* Run a reservation-heavy program on a small Mac: `MAP_NORESERVE` is a no-op.
+* SPEC 3.3: `v = w.rows`, `w.rows.clear`, `puts v.size` passes: a view
+  taken through a getter stays live over the clear. Refuse it.
+
+## sse.ri and HTTPClient pooling
+
+* test/ris/sse.ri is refused and is not in check.sh: EventParser replaces
+  `@line` and `@data` with a new builder in a round, and keeps `@type` and
+  `@id_buffer` from `SSE.clean`'s scratch. Give them stable storage.
+* HTTPClient's ordinary open/request pooling still needs transport
+  storage supplied by its caller. DoH now retains an explicit exchange
+  owner and uses HTTP.open_at_into; a request-local Conn cannot be kept
+  in a longer-lived client's idle list.
+
+## Tighten heap_trap
+
+`heap_trap` (`test/ris/check.sh:29`) passes on any compile error naming
+String, Array, Hash or tape, so it can hide a refusal: tighten it.
+
+## Checker evaluate stack
+
+The checker's `evaluate` uses a lot of stack: small changes must not
+decide whether it fits. Add a gate on its stack use.
+
+## Benches
+
+* Benches: build each, group the refusals by message, fix per group.
+  Known before the new rules: 5.1 task captures (tls server configs,
+  udp:274, dns:951, http.iyi:2154 serve's `handle`, sse.iyi:513 and :543,
+  std_compress's opaque source proc); HTTP.tls_config= removed but
+  still called by acme, http2_exercise and std_http_exercise.sh; std/gc
+  importers and server_load drop it.
+
+Then remove to_heap and its mark:
+
+No rule needs them (SPEC_CHANGELOG 2026-11-02). Remove the method
+(`src/iyi/tape.iyi`), `@[TapeToHeap]`, the census's `to_heap` and
+`@[TapeToHeap]` reasons, the checker exemptions (`tape_shrink_checker.cr`;
+that they cannot dangle is unproved), test, bench and doc uses and the
+`to_heap.ri` gate. Make `call_error.cr:740,839` and `tape_spec.cr` name
+`copy_to`. Gate: no `to_heap` or `TapeToHeap` left outside doc/archive.
+
 
 ## Speed
 
@@ -183,16 +210,8 @@ change. Gates stay structural.
   in std/yaml, toml, xml and mail. Gate: O(1) lookup on a large map,
   insertion order.
 
-## std and benches
+## std
 
-After the Now steps; their refusals replace most of the old bench list.
-
-* Benches: build each, group the refusals by message, fix per group.
-  Known before the new rules: 5.1 task captures (tls server configs,
-  udp:274, dns:951, http.iyi:2154 serve's `handle`, sse.iyi:513 and :543,
-  std_compress's opaque source proc); HTTP.tls_config= removed but
-  still called by acme, http2_exercise and std_http_exercise.sh; std/gc
-  importers and server_load drop it.
 * HTTP answer's slow request path still uses String-based read_head and
   body readers. Recheck prefork, TLS and samples/ris/web after it.
 * TlsConfig reads the system roots per handshake: make Certificate
@@ -205,17 +224,18 @@ After the Now steps; their refusals replace most of the old bench list.
   TERM handler) is not caught.
 * Add 128-bit formatting, IDNA and URI resolution.
 
-## Remove to_heap and its mark
+## macOS arm64
 
-No rule needs them (SPEC_CHANGELOG 2026-11-02). Remove the method
-(`src/iyi/tape.iyi`), `@[TapeToHeap]`, the census's `to_heap` and
-`@[TapeToHeap]` reasons, the checker exemptions (`tape_shrink_checker.cr`;
-that they cannot dangle is unproved), test, bench and doc uses and the
-`to_heap.ri` gate. Make `call_error.cr:740,839` and `tape_spec.cr` name
-`copy_to`. Gate: no `to_heap` or `TapeToHeap` left outside doc/archive.
+SPEC 7.1 lists it; these are what Linux has and it lacks yet.
 
-`heap_trap` (`test/ris/check.sh:29`) passes on any compile error naming
-String, Array, Hash or tape, so it can hide a refusal: tighten it.
+* Measure pages returned to the OS: scope_frees.ri and fibers/spares.ri read
+  /proc, and `MADV_FREE` is lazy, so resident size may not fall. Decide
+  between `task_info` with `MADV_FREE_REUSABLE`, or `mmap` over the range.
+* Port the other checks in `ris-macos.yml`'s `RIS_CHECK_SKIP`: file_copy_to.ri
+  and tls_session_tickets.ri.
+* Short frame names in a backtrace, then drop check.sh's `frame_edge`.
+* A tarball, its release job and `install_ris.sh`: static LLVM fails there.
+* Run a reservation-heavy program on a small Mac: `MAP_NORESERVE` is a no-op.
 
 ## Known failures
 
