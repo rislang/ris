@@ -504,6 +504,9 @@ class Iyi::TapeShrinkChecker
       (derived.views + read.map { |root| view(root) }).uniq)
   end
 
+  # Text an unmarked def's call made, on its caller's scratch.
+  @unmarked_texts = Set(UInt64).new
+
   # Arrays a runtime def made and answered (`split`): their items view
   # its inputs, not the Array's own storage.
   @runtime_made = Set(UInt64).new
@@ -512,7 +515,22 @@ class Iyi::TapeShrinkChecker
   # allocates and answers a String viewing none of its inputs - is that
   # block's storage, as an allocated Array is.
   private def tape_text(node : ASTNode, result : Value) : Value
-    return result if @tape_blocks.empty? || !@checking
+    if @tape_blocks.empty?
+      # An unmarked def (a one-call body) makes its call's text in its
+      # caller's scratch: the caller checks a store of it (SPEC 3.6).
+      # Summaries are solved unchecked, so this is noted either way.
+      if node.is_a?(Call) && TapeChecker.possible_string?(node.type?) &&
+         !VIEWS.includes?(node.name) && !TEXT_VIEWS.includes?(node.name) &&
+         node.name != "copy_to" &&
+         node.obj.try(&.type?.try(&.to_s)) != "RisTextGrowth" &&
+         (copying_text?(node) || (!node.expanded && @graph.allocates?(node)))
+        @unmarked_texts << node.object_id
+      elsif node.is_a?(StringInterpolation)
+        @unmarked_texts << node.object_id
+      end
+      return result
+    end
+    return result unless @checking
     return result unless TapeChecker.possible_string?(node.type?)
     # A call that allocates and answers text made its bytes, though its
     # summary may show only the inputs it read (interpolation, inspect):
@@ -982,6 +1000,17 @@ class Iyi::TapeShrinkChecker
     else
       [] of UInt64
     end
+  end
+
+  # Text or storage a callee made itself: no seed, field or program data,
+  # and not a copy onto an owner.
+  private def callee_made?(root : UInt64, summary : Summary,
+                           inputs : Array(Value)) : Bool
+    (@made_texts.includes?(root) || @unmarked_texts.includes?(root) ||
+     @root_tapes.has_key?(root)) &&
+      !@parents.has_key?(root) && !summary.seeds.includes?(root) &&
+      !@global_ids.includes?(root) && !copied_root?(root) &&
+      !current_copy?(root) && translate(root, summary, inputs).empty?
   end
 
   # Do not solve a second provenance lattice for programs with no
@@ -2867,6 +2896,14 @@ class Iyi::TapeShrinkChecker
               store_kind = @store_kinds[target.object_id]?.try &.[root]?
               current_copy = source_roots(contents).any? { |r| current_copy?(r) }
               refuse_fresh_store(destinations, node) if current_copy
+              # An unmarked callee (a one-call body) makes its arguments
+              # in this scope's scratch: text or storage it made and
+              # stored is this scope's, though no root of it translates
+              # here (`k.put(n.to_s)`), as a local holding it would be.
+              if !@text_only && !summary_marked?(target) &&
+                 source_roots(contents).any? { |r| callee_made?(r, summary, actuals) }
+                refuse_fresh_store(destinations, node)
+              end
               refuse_fresh_store(destinations, node) if (store_kind.nil? || store_kind.not_nil! & 2_u8 != 0) && contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root) && !builder
               incoming = resolved(
                 translated(contents, summary, actuals, node.object_id),

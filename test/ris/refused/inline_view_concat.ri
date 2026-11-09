@@ -1,0 +1,48 @@
+# An inline argument stored as a view must be refused like a local.
+module test/ris/refused/inline_view_concat
+
+import std/int
+
+@[OnTape]
+struct Keep
+  @texts : Array(String)
+
+  def initialize
+    @texts = Array(String).new(1) { "".as_tape }
+  end
+
+  def put(value : String) : Nil
+    @texts[0] = value.as_tape
+  end
+
+  def first : String
+    @texts[0]
+  end
+end
+
+def fill(k : Keep, n : Int32) : Nil
+  k.put("<" + n.to_s + ">")
+end
+
+# Scratch text written after fill returns lands where its value was.
+def scribble(n : Int32) : Int32
+  total = 0
+  i = 0
+  while i < 4
+    s = "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ" + (n + i).to_s +
+        "YYYYYYYYYYYYYYYYYYYYY"
+    total = total + s.bytesize
+    i = i + 1
+  end
+  total
+end
+
+def call(k : Keep) : Nil
+  fill(k, 12345)
+  scribble(7)
+end
+
+k = Keep.new
+call(k)
+scribble(9)
+puts k.first.inspect

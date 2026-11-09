@@ -2992,7 +2992,8 @@ pub struct Server
       conn.no_deadline
       return false unless id
       headers = {} of String => String
-      parts = h2.request_head(id, headers)
+      texts = String::Builder.new(1024)
+      parts = h2.request_head(id, headers, texts)
       if parts.nil?
         h2.done(id)
         return true
@@ -7592,8 +7593,10 @@ class H2Connection
   # The request stream *id* carries, its body to be read as it comes; nil
   # when its head is not one (it has been reset already).
   # Stream *id*'s request head: its method, path and query, its fields
-  # put into *headers*, the caller's; nil when it has none.
-  def request_head(id : Int32, headers : Hash(String, String)) : {String, String, String?}?
+  # put into *headers*, the caller's; nil when it has none. A field on
+  # several lines is joined into *texts*, the caller's builder.
+  def request_head(id : Int32, headers : Hash(String, String),
+                   texts : String::Builder) : {String, String, String?}?
     s = @streams[id]?
     return nil unless s
     fields = s.fields
@@ -7608,7 +7611,7 @@ class H2Connection
       when ":authority" then authority = f.value
       when ":scheme"    then nil
       else
-        H2Connection.join(headers, f.name, f.value)
+        H2Connection.join(headers, f.name, f.value, texts)
       end
     end
     if host = authority
@@ -8095,12 +8098,18 @@ class H2Connection
 
   # *value* added to the field *name*: a second line joined to the first
   # as HTTP/1.1 joins them, cookies with "; " (§8.2.3).
-  def self.join(headers : Hash(String, String), name : String, value : String) : Nil
+  # *value* under *name*, after a value already there; the joined text
+  # is written into *texts*, the caller's, so it outlives this call.
+  def self.join(headers : Hash(String, String), name : String,
+                value : String, texts : String::Builder) : Nil
     if had = headers[name]?
-      headers[name] = had + (name == "cookie" ? "; " : ", ") + value
+      from = texts.bytesize
+      texts << had << (name == "cookie" ? "; " : ", ") << value
+      headers[name] = texts.finish[from, texts.bytesize - from]
     else
       headers[name] = value
     end
+    nil
   end
 
   def self.field(fields : Std::Hpack::TapeHeaders,

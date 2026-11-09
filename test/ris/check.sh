@@ -73,6 +73,11 @@ for name in yield_owner_field yield_clone_attrs; do
   fi
 done
 expect yield_owner_field 'cannot return a value made in this block'
+expect inline_view_concat 'cannot store data made in this def'
+expect inline_view_interp 'cannot store data made in this def'
+expect inline_view_call 'cannot store data made in this def'
+expect inline_view_instance 'cannot store data made in this def'
+expect inline_view_class 'cannot store data made in this def'
 expect yield_clone_attrs 'cannot store data made in this def'
 
 # SPEC 2.2: helpers and aliases cannot grow the unfinished receiver.

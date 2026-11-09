@@ -1,18 +1,24 @@
 # A String's `+` is a new String: storing it back in the Hash it was
-# read from leaves no view of that Hash live.
+# read from leaves no view of that Hash live. The joined text is written
+# into the caller's builder, so it outlives the round that joined it.
 struct Joiner
-  def self.join(h : Hash(String, String), n : String, v : String) : Nil
+  def self.join(h : Hash(String, String), n : String, v : String,
+                texts : String::Builder) : Nil
     if had = h[n]?
-      h[n] = had + ", " + v
+      from = texts.bytesize
+      texts << had << ", " << v
+      h[n] = texts.finish[from, texts.bytesize - from]
     else
       h[n] = v
     end
+    nil
   end
 end
 
 def exercise(fields : Array(String))
   headers = {} of String => String
-  fields.each { |f| Joiner.join(headers, f, f) }
+  texts = String::Builder.new(64)
+  fields.each { |f| Joiner.join(headers, f, f, texts) }
   puts headers.size
 end
 
