@@ -240,10 +240,8 @@ String, Array, Hash or tape, so it can hide a refusal: tighten it.
   samples/ris/web fail (`bin/minitest-check check` does not set it).
 * std_spec: process_spec.cr:196 timed out at 60 s on CI once (de771de49)
   and passed on a rerun.
-* compiler_spec does not build: spec/compiler/iyi_import_spec.cr calls
-  artifact_signature, removed in d5742ac68. Before that: 58 failures,
-  427 errors in 93 files (General allocation unavailable, Crystal
-  prelude requires, missing exception types).
+* compiler_spec: 225 failures and two segfaulting groups (Code gen: if,
+  Codegen: special vars), each top-level describe run apart (80fc5b354).
 * bench/concurrency_exercise.sh needs `ulimit -n 8192` and is not in
   check.sh; recheck after runtime changes.
 * bench/parallel_exercise.iyi:124 (a task value's Panicked arm) and
