@@ -229,8 +229,6 @@ String, Array, Hash or tape, so it can hide a refusal: tighten it.
     expect inline_view_call 'cannot store data made in this def'
     expect inline_view_instance 'cannot store data made in this def'
     expect inline_view_class 'cannot store data made in this def'
-* check.sh needs `ulimit -n 65536`: without it http_answer_scope and
-  samples/ris/web fail (`bin/minitest-check check` does not set it).
 * std_spec: process_spec.cr:196 timed out at 60 s on CI once (de771de49)
   and passed on a rerun.
 * compiler_spec: 225 failures and two segfaulting groups (Code gen: if,

@@ -112,6 +112,11 @@ def main():
     else:
         ssh(command)
         return
+    # check.sh's socket tests need many open files (as may a gate or run):
+    # raise the soft limit to 65536, or the hard limit if lower.
+    command += ('; n=$(ulimit -Hn); '
+                'if [ "$n" = unlimited ] || [ "$n" -gt 65536 ]; '
+                'then n=65536; fi; ulimit -Sn "$n"')
     command += (f"; if {test} > test.log 2>&1; "
                 "then cat test.log; else cat test.log; exit 1; fi")
     ssh(command)

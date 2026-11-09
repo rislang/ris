@@ -9,6 +9,18 @@
 #   bash test/ris/check.sh
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+# http_answer_scope and samples/ris/web open many sockets: raise the soft
+# open-file limit to 65536, or the hard limit if that is lower.
+want_files=65536
+hard_files=$(ulimit -Hn)
+if [ "$hard_files" != unlimited ] && [ "$hard_files" -lt "$want_files" ]; then
+  want_files=$hard_files
+fi
+if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt "$want_files" ]
+then
+  ulimit -Sn "$want_files" ||
+    echo "check.sh: cannot raise open-file limit to $want_files" >&2
+fi
 RIS=${RIS:-./bin/ris}
 status=0
 # By default the blocks below run on every core (check_parallel.py).
