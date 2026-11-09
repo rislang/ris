@@ -48,8 +48,7 @@ It returns tape data on the caller's tape; the owning scope frees it all:
   no cost. Every def, loop round and block frees its own temporaries when
   it ends (SPEC 1.1); there is no `local_tape`.
 * The caller decides what outlives its tape: `copy_to(owner)` on a `String`,
-  `Array`, `@[OnTape]` struct or class. There is no heap: `to_heap` is a
-  historical spelling of a copy on the current tape, to remove.
+  `Array`, `@[OnTape]` struct or class. There is no heap.
   Writing into the caller's `String::Builder` beats building, then copying.
 * A def's result follows SPEC 1.5 and 1.9: end the def with the call, grow a
   local in place, or append to a parameter. A copy is always written.

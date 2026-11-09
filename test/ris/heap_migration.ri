@@ -1,6 +1,5 @@
 module test/ris/heap_migration
 
-@[TapeToHeap]
 def migrated(value : String) : String
   value.to_s
 end
@@ -10,4 +9,4 @@ def string_api(value : String) : String
 end
 
 text = String.build { |w| w << "named" }
-puts string_api(migrated("marked")), text.to_heap
+puts string_api(migrated("marked")), text

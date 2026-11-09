@@ -1,6 +1,6 @@
 # Census rules (typed, after lowering; locations deduplicate specializations):
 # class: heap-backed .new and allocate; ordinary tape classes are excluded.
-# string: String construction/build/to_heap/interpolation; static literals
+# string: String construction/build/interpolation; static literals
 #   are data in the executable and never counted.
 # array/hash: typed Array/Hash/Set construction and literal lowerings.
 # closure: ProcLiteral whose typed Def has captures; noncapturing procs
@@ -119,15 +119,9 @@ class Iyi::HeapCensus < Iyi::Visitor
       end
       string_api = node.obj.try(&.type?).to_s.in?("String", "String.class") ||
                    node.args.any? { |arg| arg.type?.to_s == "String" }
-      if node.name == "to_heap" ||
-         (node.name == "to_s" && node.type?.to_s == "String") ||
-         target.annotation(@program.tape_to_heap_annotation) || string_api
-        reason = if node.name == "to_heap"
-                   "to_heap"
-                 elsif node.name == "to_s" && node.type?.to_s == "String"
+      if (node.name == "to_s" && node.type?.to_s == "String") || string_api
+        reason = if node.name == "to_s" && node.type?.to_s == "String"
                    "to_s to String"
-                 elsif target.annotation(@program.tape_to_heap_annotation)
-                   "@[TapeToHeap]"
                  else
                    "String API"
                  end
@@ -159,7 +153,7 @@ class Iyi::HeapCensus < Iyi::Visitor
                  file.try(&.ends_with?("/iyi/io.iyi"))
         add node, kind(type), "#{type}.new" unless stream ||
                                                    TapeChecker.class_instance?(@program, type)
-      elsif node.name.in?("to_heap", "build") && type &&
+      elsif node.name == "build" && type &&
             type.reference_like?
         add node, kind(type), "#{target.owner}##{node.name}"
       elsif body.is_a?(Primitive) &&

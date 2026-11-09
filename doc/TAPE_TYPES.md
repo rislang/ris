@@ -169,7 +169,6 @@ Each written form, and what the compiler does with it:
   holding the value in a long-lived container. Copies stay visible where
   their cost is not bounded by one store.
 * `x.to_s`, `String.new`, `.dup`: built on the current tape.
-* `x.to_heap`: a copy onto the current tape, kept for old code.
 * A task's value and a board message: copied to the reader, as now.
 
 * A copy happens only at a store into a long-lived container, into its

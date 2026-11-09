@@ -14,7 +14,6 @@ class Cache
 end
 
 # The copy a caller keeps, made at the boundary it leaves the tape by.
-@[TapeToHeap]
 def retain(text : String) : String
   text.to_s
 end
@@ -24,19 +23,19 @@ def page : String
   String.build(1) { |writer| writer.append("café <&>") }
 end
 
-@[TapeToHeap]
 def retained_page : String
+  kept = ""
   tape do
-    return page.to_s
+    kept = page.copy_to(Program.tape)
   end
-  "".to_heap
+  kept
 end
 
 cache = Cache.new
 tape do
   borrowed = page
   owned = retain(borrowed)
-  cache.store(owned)
+  cache.store(owned.copy_to(Program.tape))
   same = borrowed == owned && borrowed == "café <&>"
   raise "copy differs from source" unless same
   empty = String.build(0) { |writer| }

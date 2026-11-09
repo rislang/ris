@@ -30,7 +30,7 @@ describe "ris tape text" do
   end
 
   it "requires an explicit heap copy for typed arguments" do
-    expect_raises(Iyi::TypeException, /\.to_heap/) do
+    expect_raises(Iyi::TypeException, /copy_to\(owner\)/) do
       tape_compile(<<-'CODE')
         def text(value : String) : String
           value
@@ -87,7 +87,7 @@ describe "ris tape text" do
       def text(value : String) : String
         value
       end
-      text("literal".to_heap)
+      text("literal")
       CODE
   end
 
@@ -96,7 +96,7 @@ describe "ris tape text" do
       class Kept
         @text : String
         def initialize
-          @text = "number #{42}".to_heap
+          @text = "number #{42}"
         end
       end
       Kept.new
@@ -154,7 +154,7 @@ describe "ris tape text" do
         def choose(text : String) : String
           text
         end
-        heap = "abc".to_heap + "d".to_heap
+        heap = "abc" + "d"
         width(heap)
         width(text: heap)
         result : String = choose(heap)
@@ -169,7 +169,7 @@ describe "ris tape text" do
           text ? text.size : 0
         end
         def choose(text : Str?, n : Int64) : String?
-          "wrong overload".to_heap
+          "wrong overload"
         end
         def choose(text : String?, n : Int64) : String?
           text
@@ -177,13 +177,13 @@ describe "ris tape text" do
         def optional(text : String, present : Bool) : String?
           present ? text : nil
         end
-        present = optional("abc".to_heap, true)
-        absent = optional("abc".to_heap, false)
+        present = optional("abc", true)
+        absent = optional("abc", false)
         width(present)
         width(absent)
         width(text: present)
         width(text: absent)
-        width("abc".to_heap)
+        width("abc")
         result : String? = choose(present, 1)
         result = choose(text: absent, n: 1)
         CODE
@@ -210,7 +210,7 @@ describe "ris tape text" do
         def optional(text : String?) : String?
           text
         end
-        view : Str? = optional("abc".to_heap)
+        view : Str? = optional("abc")
         CODE
     end
   end
@@ -218,7 +218,7 @@ describe "ris tape text" do
   it "does not borrow String assignments" do
     expect_raises(Iyi::TypeException) do
       tape_compile(<<-'CODE')
-        heap = "abc".to_heap + "d"
+        heap = "abc" + "d"
         view : Str = heap
         CODE
     end

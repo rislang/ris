@@ -42,7 +42,7 @@ def optional_width(text : String?) : Int32
 end
 
 def optional_choose(text : String?) : String?
-  "wrong overload".to_heap
+  "wrong overload"
 end
 
 def optional_choose(text : String?) : String?
@@ -50,7 +50,7 @@ def optional_choose(text : String?) : String?
 end
 
 def optional_choose(text : String?, n : Int64) : String?
-  "wrong overload".to_heap
+  "wrong overload"
 end
 
 def optional_choose(text : String?, n : Int64) : String?
@@ -62,7 +62,7 @@ def optional_text(text : String, present : Bool) : String?
   present ? text : nil
 end
 
-heap = "abc".to_heap + "d"
+heap = "abc" + "d"
 field = ArgumentText.new(heap)
 array = [heap]
 present = optional_text(heap, true)
@@ -90,5 +90,5 @@ raise "evaluate once" unless optional_width(source.take) == 4 &&
   source.calls == 1
 raise "nil evaluate once" unless optional_width(text: nil_source.take) == 0 &&
   nil_source.calls == 1
-raise "temporary" unless width("abc".to_heap + "d") == 4
+raise "temporary" unless width("abc" + "d") == 4
 puts "PASS: String arguments borrow without allocation"

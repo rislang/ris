@@ -29,7 +29,7 @@ The items are below; this is only their order.
 7. Tighten heap_trap.
 8. The checker's `evaluate` uses a lot of stack: small changes must not
    decide whether it fits.
-9. Step 5: benches. Then remove `to_heap` and `@[TapeToHeap]`.
+9. Step 5: benches.
 10. std additions, language and runtime, other known failures.
 
 Speed work stays out of minitest. The jq check at jqg.ri:424 is the
@@ -205,14 +205,7 @@ After the Now steps; their refusals replace most of the old bench list.
   TERM handler) is not caught.
 * Add 128-bit formatting, IDNA and URI resolution.
 
-## Remove to_heap and its mark
-
-No rule needs them (SPEC_CHANGELOG 2026-11-02). Remove the method
-(`src/iyi/tape.iyi`), `@[TapeToHeap]`, the census's `to_heap` and
-`@[TapeToHeap]` reasons, the checker exemptions (`tape_shrink_checker.cr`;
-that they cannot dangle is unproved), test, bench and doc uses and the
-`to_heap.ri` gate. Make `call_error.cr:740,839` and `tape_spec.cr` name
-`copy_to`. Gate: no `to_heap` or `TapeToHeap` left outside doc/archive.
+## Tighten heap_trap
 
 `heap_trap` (`test/ris/check.sh:29`) passes on any compile error naming
 String, Array, Hash or tape, so it can hide a refusal: tighten it.

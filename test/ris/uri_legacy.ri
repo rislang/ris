@@ -15,5 +15,5 @@ raise "invalid" if URI.parse?("http://h:65536")
 raise "decode" unless URI.decode("%C3%A9+") == "é+"
 raise "invalid decode" if URI.decode?("%GG")
 raise "encode" unless URI.encode_path("a/b ?") == "a/b%20%3F"
-raise "resolve" unless URI.parse("http://a/b/c/d;p?q".to_heap).resolve("../g").to_s == "http://a/b/g"
+raise "resolve" unless URI.parse("http://a/b/c/d;p?q").resolve("../g").to_s == "http://a/b/g"
 puts "URI: legacy wrappers"

@@ -518,7 +518,7 @@ class Iyi::TapeShrinkChecker
     # summary may show only the inputs it read (interpolation, inspect):
     # unless it is known to answer a view, the text is fresh too.
     # A copy is on its owner (copy_to(Program.tape)), not this block.
-    return result if node.is_a?(Call) && {"copy_to", "to_heap"}.includes?(node.name)
+    return result if node.is_a?(Call) && node.name == "copy_to"
     # Growing text answers the text grown, in its own reservation.
     return result if node.is_a?(Call) && node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth"
     # These runtime constructors copy every input byte. Their output is
@@ -1771,7 +1771,7 @@ class Iyi::TapeShrinkChecker
     when Cast, NilableCast then fresh_text?(node.obj, names)
     when Call
       return false unless reference?(node)
-      return false if {"copy_to", "to_heap"}.includes?(node.name)
+      return false if node.name == "copy_to"
       return made_union?(node) if made_union_type?(node.type?)
       obj = node.obj
       if obj && (VIEWS.includes?(node.name) || TEXT_VIEWS.includes?(node.name))
@@ -1881,7 +1881,7 @@ class Iyi::TapeShrinkChecker
   # String or Array made there moves down to the caller's boundary; any
   # other value made there would have to be copied out, which is refused
   # (SPEC 1.9). What it views from outside is checked as a store.
-  # Roots a copy_to or to_heap made: they are on their owner.
+  # Roots a copy_to made: they are on their owner.
   @copied_roots = Set(UInt64).new
   @growth_fallbacks = Set(UInt64).new
   # copy_to(RisCurrentTape.new): on whichever tape runs the call, so a store
@@ -2844,7 +2844,7 @@ class Iyi::TapeShrinkChecker
             # another owner, `copy_to(Program.tape)`, answers no such thing.)
             # A tape struct (an @[OnTape] answer) holding what the callee
             # allocated is made here the same way.
-            if !@tape_blocks.empty? && !{"copy_to", "to_heap"}.includes?(node.name) && (@graph.fresh?(node) ||
+            if !@tape_blocks.empty? && node.name != "copy_to" && (@graph.fresh?(node) ||
                (node.type?.try { |t| TapeChecker.possible_string?(t) || tape_struct?(t) } &&
                 @graph.allocates?(node)) || made_union?(node))
               @root_scopes[node.object_id] ||= @scopes.dup
@@ -3040,19 +3040,18 @@ class Iyi::TapeShrinkChecker
         # allocating constructors, it must retain that storage's lifetime.
         Value.new([] of UInt64,
           (derived.views + derived.roots.map { |root| view(root) }).uniq)
-      elsif {"copy_to", "dup", "to_heap", "new"}.includes?(node.name) || concatenated
+      elsif {"copy_to", "dup", "new"}.includes?(node.name) || concatenated
         if reference?(node)
-          copying = {"copy_to", "to_heap"}.includes?(node.name)
-          current = node.name == "to_heap" ||
-            (node.name == "copy_to" && node.args.first?.try(&.type?).try do |t|
+          copying = node.name == "copy_to"
+          current = (node.name == "copy_to" && node.args.first?.try(&.type?).try do |t|
               t.to_s.includes?("RisCurrentTape")
             end)
           @root_scopes[node.object_id] = copying && !current ? [] of UInt64 : @scopes.dup
-          # copy_to and to_heap put the copy on its owner, not here.
+          # copy_to puts the copy on its owner, not here.
           note_fresh(node.object_id) unless copying && !current
-          @copied_roots << node.object_id if {"copy_to", "to_heap"}.includes?(node.name)
+          @copied_roots << node.object_id if node.name == "copy_to"
           @current_copies << node.object_id if copying && current && node.name == "copy_to"
-          if {"copy_to", "to_heap"}.includes?(node.name)
+          if node.name == "copy_to"
             env.slots.reject! { |root, _| contains_root?([node.object_id], root) }
           end
           # A struct `new` holds what its arguments give it: a value it

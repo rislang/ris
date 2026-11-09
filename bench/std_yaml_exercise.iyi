@@ -105,7 +105,7 @@ def reads(source : String, msg : String) : Any
   parser = Parser.new(source)
   docs = parser.parse_all
   raise "ASSERTION FAILED: #{msg}: refused with #{parser.error.inspect}" if docs.nil?
-  docs.size == 0 ? Any.new(nil) : docs[0].to_heap
+  docs.size == 0 ? Any.new(nil) : docs[0]
 end
 
 puts "== scalars and collections"

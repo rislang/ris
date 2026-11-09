@@ -35,7 +35,6 @@ module bench/std_http_latency
 # one another's lifecycle messages. Stop gives the response time to flush.
 # These exercises still use std's legacy String APIs and assertions.
 # Board messages themselves own copied tape text; this is the heap adapter.
-@[TapeToHeap]
 def ris_heap_text(value : String) : String
   value.to_s
 end

@@ -87,7 +87,7 @@ class AutocertBenchHandler
   end
 
   def listening(port : Int32) : Nil
-    File.write(@ready.to_heap, "ready\n") unless @ready.empty?
+    File.write(@ready, "ready\n") unless @ready.empty?
   end
 
   def call(request : Request) : Response
@@ -316,7 +316,7 @@ def handshake_ms(manager : AutocertView, name : String) : Int64
       unless settings.is_a?(Cancelled)
         client = IyiSocket.connect("127.0.0.1", settings.port)
         if client.is_a?(IyiSocket)
-          TlsClient.over(client, settings.name.to_heap, TlsConfig.new, 10000)
+          TlsClient.over(client, settings.name, TlsConfig.new, 10000)
           client.close
         end
       end

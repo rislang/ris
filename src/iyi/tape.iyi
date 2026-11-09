@@ -2363,11 +2363,6 @@ struct NamedTuple
 end
 
 class Object
-  # Historical spelling: a deep copy on this tape, never a heap escape.
-  def to_heap
-    Tape.owner_copy(self, RisCurrentTape.new)
-  end
-
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     {% if @type < ::Enum || @type < ::Number || @type == ::Bool || @type == ::Char || @type == ::Symbol || @type == ::Nil %}
       target.value = self

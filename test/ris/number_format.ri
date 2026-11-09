@@ -11,7 +11,7 @@ tape do
   writer = String::Builder.new(1)
   1234.5678.format(writer, decimal_places: 2)
   exit 2 unless writer.finish == "1,234.57"
-  kept = writer.finish.to_heap
+  kept = writer.finish.copy_to(Program.tape)
   writer = String::Builder.new(1)
   (-9223372036854775807_i64 - 1_i64).format(writer)
   exit 8 unless writer.finish == "-9,223,372,036,854,775,808"

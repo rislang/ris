@@ -737,7 +737,7 @@ class Iyi::Call
         str << ", not #{actual_type.devirtualize}"
         if actual_type.to_s == "String" &&
            expected_types.any? { |t| t.to_s == "String" }
-          str << "\nText is tape text; keep it with `.to_heap` "
+          str << "\nText is tape text; keep it with `copy_to(owner)` "
           str << "when an API requires String."
         end
         if actual_type.to_s == "String" &&
@@ -836,7 +836,7 @@ class Iyi::Call
     error_message = String.build do |str|
       yield str
       if named_args.try(&.any? { |arg| arg.value.type?.try(&.to_s) == "String" })
-        str << "\nText is tape text; keep it with `.to_heap` "
+        str << "\nText is tape text; keep it with `copy_to(owner)` "
         str << "when a parameter requires String."
       end
 
@@ -1505,6 +1505,13 @@ class Iyi::Call
 
   private def raise_undefined_method(owner, def_name, obj)
     check_macro_wrong_number_of_arguments(owner, def_name)
+
+    # ris: `to_heap` was a copy on the current tape (TODO.md, item 9).
+    if obj && def_name == "to_heap"
+      raise "`to_heap` is removed: the value is already on the current " \
+            "tape. Drop `.to_heap`, or keep a copy longer with " \
+            "`copy_to(owner)`."
+    end
 
     owner_trace = obj.try &.find_owner_trace(owner.program, owner)
     # A receiver other than `self` reaches no private def, so it is offered

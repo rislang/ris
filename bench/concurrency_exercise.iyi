@@ -33,7 +33,7 @@ end
 def hear : String
   event = RisBoard.take(BenchText)
   raise "missing task observation" unless event.is_a?(BenchText)
-  event.text.to_heap
+  event.text
 end
 
 def number(n : Int64) : Nil

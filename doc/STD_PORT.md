@@ -23,8 +23,8 @@ pointer only at the OS call, with the required local safety mark.
 ## Retained state
 
 copy_to(owner) deeply copies String, Array and tape structs into an
-explicit owner, such as Program.tape. to_s, dup and the historical to_heap
-spelling copy onto the current tape; none retains bytes beyond that tape.
+explicit owner, such as Program.tape. to_s and dup copy onto the current
+tape; neither retains bytes beyond that tape.
 Never retain a request's borrowed bytes in state.
 
 Ruby syntax stays: String << and bang methods rebind the receiver; old

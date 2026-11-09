@@ -16,13 +16,13 @@ tape do
   exit 5 unless w.finish.starts_with?("prefix:plain 'two words'")
   again = Shlex.split(Shlex.join(words))
   exit 6 if again.is_a?(ShlexError)
-  exit 7 unless again.to_heap == words.to_heap
+  exit 7 unless again == words
   exit 8 unless Shlex.quote("a'b") == "'a'\"'\"'b'"
   exit 9 unless Shlex.split("'bad").is_a?(ShlexError)
   exit 10 unless Shlex.split("bad\\").is_a?(ShlexError)
   comments = Shlex.split("a# rest\nb", true)
   exit 11 if comments.is_a?(ShlexError)
-  exit 12 unless comments.to_heap == ["a", "b"]
+  exit 12 unless comments == ["a", "b"]
   kept = words.copy_to(Program.tape)
 end
 exit 13 unless kept == ["plain", "two words",

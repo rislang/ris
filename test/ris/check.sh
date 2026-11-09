@@ -192,6 +192,8 @@ expect yield_element_store 'cannot store data made in this block'
 # split's Array is made in the round that calls it (SPEC 1.1, 3.6).
 expect split_round_kept 'Copy it with .copy_to(owner)'
 expect split_yield_kept 'Copy it with .copy_to(owner)'
+# to_heap is removed; the refusal names copy_to (TODO.md item 9).
+expect to_heap 'Drop `.to_heap`, or keep a copy longer'
 # An `until` round is checked as a `while` round (SPEC 1.1, 3.6).
 expect until_round_kept 'cannot store data made in this loop round'
 expect while_union_class_store 'cannot store data made in this loop round'
@@ -2145,7 +2147,6 @@ else
   echo "FAILED   samples/ris/web: does not build"; status=1
 fi
 rm -rf "$web"
-heap_trap to_heap
 out=$("$RIS" run test/ris/text_api.ri 2>&1)
 if grep -qF $'3 12 true\ntrue false\n4 212\n/users/1\n4 true true\n-42 7 true\ntrue -2147483648\nShip it|7|it|7 Ship\ntrue\n1 5 11\n3 café false\n200 /users/1 took 12 ms\n200 /users/1 took 12 ms' <<<"$out" && grep -qF "not a number" <<<"$out"; then echo "runs     text_api"; else echo "FAILED   text_api: $out"; status=1; fi
 out=$("$RIS" run test/ris/each_line.ri 2>&1)
@@ -2522,7 +2523,7 @@ for pair in 'heap_migration migration' 'heap_opaque opaque' \
   fi
 done
 out=$("$RIS" heap --user test/ris/heap_migration.ri 2>&1)
-for mark in 'to_heap:' 'to_s to String:' '@[TapeToHeap]:' 'String API:'; do
+for mark in 'to_s to String:' 'String API:'; do
   if ! grep -qF "$mark" <<<"$out"; then
     echo "FAILED   heap_migration: missing $mark"
     status=1

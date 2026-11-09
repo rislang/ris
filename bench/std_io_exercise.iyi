@@ -496,7 +496,7 @@ record PipeEvent, code : Int32
 # full, and every byte reaches the reader in order; closing the writer is
 # the reader's end.
 pipe_in, pipe_out = IyiIO.pipe
-pipe_piece = ("0123456789abcdef" * 1024).to_heap
+pipe_piece = ("0123456789abcdef" * 1024)
 group do |g|
   g.spawn do
     64.times { pipe_out.write(pipe_piece) }
