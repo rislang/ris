@@ -2027,10 +2027,11 @@ else
 fi
 
 # A session reuses fixed ticket slots; take rebuilds caller-owned bytes
-# and certificates after the receiving connection's scope has ended.
+# and certificates after the receiving connection's scope has ended;
+# take_into refills a client's slot per resumption, growing nothing.
 out=$(timeout 300 "$RIS" run test/ris/tls_session_tickets.ri 2>&1)
-if [ "$?" = 0 ] && [ "$(grep -c '^PASS: ' <<<"$out")" = 3 ]; then
-  echo 'runs     tls_session_tickets (100000 tickets, flat RSS, take)'
+if [ "$?" = 0 ] && [ "$(grep -c '^PASS: ' <<<"$out")" = 4 ]; then
+  echo 'runs     tls_session_tickets (100000 tickets, resumptions, flat RSS)'
 else
   echo "FAILED   tls_session_tickets: $out"; status=1
 fi

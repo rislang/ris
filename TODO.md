@@ -18,7 +18,7 @@ Testing ris programs can start now: what a program hits comes first.
 The items are below; this is only their order.
 
 1. The user's own ris programs: each obstacle becomes an item here.
-2. TlsClient's ticket and SocketError in a socket union.
+2. SocketError in a socket union.
 3. Holes: `T.from_json` in a def, `Hash#update`'s block value,
    RisBoard.take's result.
 4. Holes: SPEC 3.3 `clear`, a store into `self`'s field, a tape block
@@ -119,8 +119,6 @@ Checker holes found on the way (unknown must be refused, SPEC 3.6):
   (a 0 or 1 byte first) to answer bytes or an error in one value.
 * A SocketError in a union with IyiSocket, made in a round and kept, is
   not refused: a connect's union is exempt for the socket's sake.
-* TlsClient keeps a resumed ticket with `copy_to(Program.tape)`: the
-  program tape grows per resumption. Give the client a slot to refill.
 * A class instance made in a def and returned after other work was
   taken as flat (no tape fields): UdpSocket.bind? answered a freed
   socket. Now refused; check other `flat_result?` callers.
