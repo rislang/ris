@@ -95,8 +95,9 @@ assert_true node_ref.active, "pre_initialized node active"
 assert_true node_storage.to_reference.id == 1001_i64, "node_storage to_reference matches"
 puts "  pre_initialize sets type header for initialize"
 
-puts "\n== heap allocation and custom storage"
-raw = Pointer(UInt8).malloc(instance_sizeof(Point).to_u64)
+puts "\n== custom storage in place"
+raw_storage = uninitialized ReferenceStorage(Point)
+raw = pointerof(raw_storage).as(Pointer(UInt8))
 heap_pt = Point.unsafe_construct(raw, 77, 88)
 assert_i32 77, heap_pt.x, "heap constructed x"
 assert_i32 88, heap_pt.y, "heap constructed y"

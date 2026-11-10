@@ -564,7 +564,8 @@
     # TF_SA_FLAGS names it.
     def install_stop_handler : Nil
       Stop.pid = __iyi_conc_syscall3(TF_SYS_GETPID, 0_i64, 0_i64, 0_i64)
-      action = Pointer(UInt64).malloc(4_u64)
+      action_buffer = StaticArray(UInt64, 4).new
+      action = pointerof(action_buffer).as(Pointer(UInt64))
       action[0] = __tf_stop_handler_address
       action[1] = TF_SA_FLAGS
       {% if flag?(:x86_64) %}
@@ -998,7 +999,8 @@
         end
 
         def install_parks(count : Int64) : Nil
-          action = Pointer(UInt64).malloc(2_u64)
+          action_buffer = StaticArray(UInt64, 2).new
+          action = pointerof(action_buffer).as(Pointer(UInt64))
           action[0] = __tf_resume_handler_address
           action[1] = TF_SA_WORD
           result = LibC.sigaction(TF_SIGUSR2, action.as(Void*), Pointer(Void).new(0_u64))
@@ -1050,7 +1052,8 @@
         end
 
         def install_parks(count : Int64) : Nil
-          fds = Pointer(Int32).malloc(2_u64)
+          fds_buffer = StaticArray(Int32, 2).new
+          fds = pointerof(fds_buffer).as(Pointer(Int32))
           index = 0_i64
           while index < count
             fail("pipe failed") if LibC.pipe(fds) != 0
@@ -1088,7 +1091,8 @@
       end
 
       def install_stop_handler : Nil
-        action = Pointer(UInt64).malloc(2_u64)
+        action_buffer = StaticArray(UInt64, 2).new
+        action = pointerof(action_buffer).as(Pointer(UInt64))
         action[0] = __tf_stop_handler_address
         {% if flag?(:tf_park_sigsuspend) %}
           action[1] = TF_SA_STOP_WORD
