@@ -1,8 +1,9 @@
 # Draft: spec blocks in module files
 
-Status: amended after EGM review
+Status: steps 1-3 built. D16-D18 (2026-11-11) replace the program
+handle; amended after a second EGM review of the changed sections
 ([consolidated_review_report.md](consolidated_review_report.md));
-section 10 says what changed. No compiler code yet.
+section 10 says what changed.
 
 ROOT is the nearest directory up holding `ris.mod` or `iyi.mod`
 (spec-cli 4.1).
@@ -62,10 +63,8 @@ in `run(...)`) may hold spec blocks. The test build leaves its
 top-level code out. Inside its blocks the module's name (`blog`, the
 last path segment of `module blog`) is the running program: the file
 is built once as a normal binary, started lazily on first use as its
-own process with a free port and a temporary directory, and stopped at
-the block's end. Each block gets a fresh process. Examples:
-`blog.get("/").status_code == 200`, `blog.env["PORT"] = "8080"`.
-A local named like the module is an error with the fix.
+own process in the block's temporary directory. D17 says how: the
+core only runs a process; ports and HTTP come from a package (D18).
 
 D7. Tags carry only N.M. `ris spec ack` keeps each clause's hash in a
 lock file, `spec.lock` at ROOT, so `ris check spec` still reports a
@@ -83,8 +82,8 @@ D11 (was Q1). The spec section starts at the first `spec N.M` block;
 there is no bare `spec` line. A test-only import goes after the first
 block (5.4).
 
-D12 (was Q2). v1 has `blog.run(args, stdin:)` and `blog.file(path,
-text)` (5.7). A text check in a spec block uses the existing `=~` with
+D12 (was Q2). The run and file forms are D16's `tmp.file` and D17's
+`demo(...)` (5.7). A text check in a spec block uses the existing `=~` with
 a Regex (std/regex); the suggested form is `%r{...}`, so HTML needs no
 escaped `/` (the lexer already reads `%r` with `{`, `(`, `[`, `<` or
 `|`: lexer.cr, delimiter_state_for_percent_literal). There is no `~`,
@@ -109,13 +108,40 @@ fails on a stale one. It is optional, but when present must match
 (5.15). It is a label, not a review: `ris spec ack` is still needed
 after a clause changes.
 
+D16 (2026-11-11). Every spec block, module or program file, has `tmp`:
+the block's own temporary directory, removed at the block's end.
+`tmp.path`, `tmp.file(path, text)` (parents made), `tmp.read(path)`,
+`tmp.children(path = ".")`. A Store proof writes `Store.new(tmp.path)`.
+A local, parameter or helper named `tmp` in a spec section is refused.
+
+D17 (2026-11-11). In a program file's spec section the module's name
+(`demo`) runs the plain binary in `tmp` to its end and returns a
+RisRun (5.7 has the signatures). `==` and `=~` with a
+String or Regex compare its stdout; it has `.status`, `.stderr`,
+`.stdout`. Every call is a new process (`out = demo` to reuse one). A
+failing line prints stdout, stderr and status. `demo.start(args,
+env:)` starts it in the background and returns a RisProcess:
+`wait_for(regex, timeout)`, `write(text)` to its stdin, `stdout`,
+`stderr`, `stop`, `status`; it is stopped (SIGTERM, 2 s, SIGKILL) at
+the block's end. `free_port` is a core helper. No `port`, `url`, `get`,
+`post`, `request` and no port wait in the core: that is protocol
+knowledge for packages (D18). A local named like the module is refused.
+
+D18 (2026-11-11). A package may ship test vocabulary as a module
+`<package>/spec` (web/spec: `get(program, path)`, `post`, `browse`).
+A spec section imports it explicitly (`import web/spec::*`); importing
+a `*/spec` module anywhere else is refused with the fix. When a name is
+undefined in a spec block and a directly imported package's spec module
+defines it, the error names the import to add. web/spec itself is later
+work in rispacks/web (section 9).
+
 ## 3. Goals and non-goals
 
 Goals: a clause is proved next to the code that keeps it, private defs
-included; every check names a clause; a program is tested by starting
-it, with no harness; a release binary carries no check; `ris test` and
-`ris spec` walk the same files; a failure names the clause, file:line
-and the values.
+included; every check names a clause; a program is tested by running
+it, with no harness; protocol helpers live in packages (D18); a
+release binary carries no check; `ris test` and `ris spec` walk the
+same files; a failure names the clause, file:line and the values.
 
 Non-goals: no suites or nesting; no description strings; no new
 matcher library beyond what section 8 asks; no result cache; no
@@ -166,15 +192,17 @@ number (D14).
     end
 
     spec 1.4
-      store = Store.new
+      store = Store.new(tmp.path)
       Post.create(store, hello, "a").as(Post).slug == "hello"
       Post.create(store, hello, "b").as(Post).slug == "hello-2"
     end
 
     spec 1.5  # A post needs a title and some text.
-      Post.create(Store.new, "", "text").is_a?(Refusal)
-      Post.create(Store.new, "   ", "text").is_a?(Refusal)
-      Post.create(Store.new, "Hello", "").is_a?(Refusal)
+      store = Store.new(tmp.path)
+      Post.create(store, "", "text").is_a?(Refusal)
+      Post.create(store, "   ", "text").is_a?(Refusal)
+      Post.create(store, "Hello", "").is_a?(Refusal)
+      tmp.children == [] of String
     end
 
     spec 3.4
@@ -188,6 +216,8 @@ number (D14).
 `spec 3.4` here is only to show `todo`; 3.4 is proved in site.ri and
 blog.ri. A clause with one real block is covered even beside a todo
 block (5.14). The 1.1 comment is cut at a word to fit 80 columns (D15).
+`tmp` is the block's own directory (D16): Store writes there, and the
+1.5 block checks that a refused post wrote nothing.
 
 ### 4.3 End of site.ri
 
@@ -197,7 +227,7 @@ block (5.14). The 1.1 comment is cut at a word to fit 80 columns (D15).
     ...
 
     spec 3.4  # A post that is not valid (1.5) is refused with 422; nothing…
-      store = Store.new
+      store = Store.new(tmp.path)
       answer = Site.new(store).handle(Request.post("/posts", "title="))
       answer.status_code == 422
       answer.body =~ %r{<p class="error">[^<]*title}
@@ -209,27 +239,52 @@ block (5.14). The 1.1 comment is cut at a word to fit 80 columns (D15).
     module blog
 
     import site
-    run(Site.new, port: ENV["PORT"].to_i)
+    run(Site.new(Store.new("data")), port: ENV["PORT"].to_i)
 
-    spec 3.4
-      blog.post("/posts", form: {"title" => ""}).status_code == 422
+    spec 3.4  # A post that is not valid (1.5) is refused with 422; nothing…
+      post(blog, "/posts", {"title" => ""}).status == 422
     end
+
+    import web/spec::*
 
     spec 3.6
-      blog.post("/posts", form: {"title" => "Old", "text" => "a"})
-      blog.post("/posts", form: {"title" => "New", "text" => "b"})
-      page = blog.get("/").body
-      page.index("New").not_nil! < page.index("Old").not_nil!
+      page = browse(blog)
+      page.visit("/posts/new")
+      page.fill("Title", "Old")
+      page.fill("Text", "a")
+      page.click("Publish")
+      page.visit("/posts/new")
+      page.fill("Title", "New")
+      page.fill("Text", "b")
+      page.click("Publish")
+      page.visit("/")
+      page =~ %r{New.*Old}m
     end
 
-`ris test blog.ri` builds blog.ri without its spec section as a normal
-binary, then a test program from the spec section. On the first use
-of `blog` in a block the harness starts the binary with `PORT` set to
-a free port and the working directory set to a fresh temporary
-directory, and waits until the port accepts. `blog.get` and
-`blog.post` send to that port.
+`post` and `browse` are not core: they come from web/spec, later work
+in rispacks/web (D18, section 9). The core gives web/spec what it
+needs: `blog` as an argument is the program (5.7); web/spec starts it
+with `PORT` set to `free_port`, in `tmp`. The import follows the first
+block, as every test-only import (D11), and serves every block of the
+file, above it too: an import is file-wide (5.6).
 
-### 4.5 Output
+### 4.5 A CLI program
+
+`ris init demo` writes demo.ri; its spec section uses only the core:
+
+    module demo
+
+    puts "hello from #{ARGV[0]? || "demo"}"
+
+    spec 1.1  # Running demo.ri prints `hello from demo`.
+      demo == "hello from demo\n"
+      demo("ris") =~ %r{ris}
+    end
+
+`ris test demo.ri` builds demo.ri as `ris build` does, then the test
+program; each `demo` line runs the binary once in the block's `tmp`.
+
+### 4.6 Output
 
 `ris spec` reports coverage from the source; it runs nothing (5.14):
 
@@ -242,7 +297,7 @@ directory, and waits until the port accepts. `blog.get` and
     1.5     covered     post.ri:30
     3.4     covered     site.ri:41, blog.ri:6
             todo        post.ri:36
-    3.6     covered     blog.ri:10
+    3.6     covered     blog.ri:12
 
 `ris test` runs the blocks and gives pass, broken or todo:
 
@@ -377,17 +432,24 @@ may call them qualified (`Post.slugify`) or not. It sees the module's
 imports, its test-only imports and its helpers. Nothing outside the
 file sees a block or a helper.
 
-A program file is a file with at least one top-level statement other
-than a declaration. The test build keeps its declarations: `import`,
-`def`, `struct`, `class`, `enum`, `lib`, `alias`, annotations and
-constants whose value is a literal. It drops every other top-level
-statement (calls, assignments, constants with computed values). A
-kept def that uses a dropped name is a compile error in `ris test`:
-"`config` is set by blog.ri's top-level code, which spec blocks do
-not run; reach it through `blog` or move it into a def".
+Every block, in a module or a program file, also sees `tmp` (D16,
+5.7).
 
-A program file's block (D6) sees the kept declarations, plus one
-local: the program handle named after the module (5.7).
+A program file is a file with at least one top-level statement other
+than a declaration before its spec section. The test build keeps its
+declarations: `module`, `import`, `def`, `macro`, `struct`, `class`,
+`module ... end`, `enum`, `lib`, `alias`, annotations and constants
+whose value is a literal. It drops every other top-level statement
+(calls, assignments, constants with computed values). A kept def that
+uses a dropped name is a compile error in `ris test`: "`config` is set
+by blog.ri's top-level code, which spec blocks do not run; reach it
+through `blog` or move it into a def". The check sees a dropped local
+or constant named in a kept body; a name reached another way (a macro)
+fails later as an undefined name.
+
+A program file's block sees the kept declarations, `tmp`, and the
+module's name as a generated private def that runs the program (D17,
+5.7).
 
 ### 5.6 Test-only imports
 
@@ -402,55 +464,112 @@ proof of post imports site, which imports post; prove it in site.ri".
 `ris build` does not type-check spec sections; `ris check types` and
 `ris test` do, so `ris check` still catches a broken block.
 
-### 5.7 The program handle
+### 5.7 tmp and the program (D16, D17)
 
-For a file with top-level code and spec blocks, `ris test FILE`:
+The core is what any program needs: a directory and a process. It
+knows no port and no protocol; those live in package spec modules
+(D18, 5.16).
 
-1. builds FILE without its spec section as a normal binary (the same
-   build `ris build` makes), once per run;
-2. builds the test program from the module's scope minus top-level
-   code, plus the spec section;
-3. in each block, binds the module's name to a `RisProgram` value.
+`tmp` (every block): a RisTmp. The parser makes it the block's first
+local and `defer`s its removal, so a panic removes it too.
 
-`RisProgram` (std, test-only, not linked into builds):
+- `tmp.path : String`: the block's directory, made fresh under the
+  system temp directory when the block starts, removed with all it
+  holds when the block ends.
+- `tmp.file(path, text) : Nil`: writes *text* to *path* under it,
+  parents made.
+- `tmp.read(path) : String`.
+- `tmp.children(path = ".") : Array(String)`: the names in a directory
+  under it, sorted.
 
-- `env : Hash(String, String)`: set before first use; starts with
-  `PORT` (a free port), and `TMPDIR` and `HOME` both set to the
-  block's temp directory. Setting it after start breaks the block
-  with the fix ("set `blog.env` before the first request").
-- `get(path : String) : HTTP::Client::Response`
-- `post(path : String, form : Hash(String, String))` and
-  `post(path : String, body : String)`, same result.
-- `request(method : String, path : String, headers = HTTP::Headers.new,
-  body = "") : HTTP::Client::Response`.
-  The first of these starts the server with cwd = the block's temp
-  directory, waits up to 10 s for PORT to accept (else the block is
-  broken with the program's stderr), then sends. Any status is
-  returned; a non-2xx answer is not a failure by itself.
-- `stdout : String`, `stderr : String`: what the process has written
-  so far.
-- `file(path : String, text : String)`: writes *text* to *path* under
-  the block's temp directory (parents made). Only before first use;
-  after start it breaks the block with the same fix as `env`.
-- `run(args = [] of String, stdin : String = "") : RisRun`: for CLI
-  programs; starts the binary with *args* and *stdin* in the temp
-  directory, waits for exit (the block's timeout applies) and returns
-  `stdout`, `stderr` and `status : Int32`. No port wait. Each `run`
-  is a new process; `env` and `file` apply to it.
-- At the block's end the harness sends SIGTERM, waits 2 s, then
-  SIGKILL, and removes the temp directory. A block that never uses the
-  handle starts nothing.
+For a program file `ris test FILE` first builds FILE as `ris build`
+does, once per run, and gives the test program its path. In the spec
+section the module's name (`demo`, the last segment of `module demo`;
+without a header the file's base name) is a generated private def:
 
-Each block gets a fresh process: no state leaks between clauses. A
-program that does not read `PORT` cannot be reached; the 10 s timeout
-message says so ("blog did not accept on PORT=41237; does it read
-ENV[\"PORT\"]?").
+    demo(*args : String, stdin = "", env = {} of String => String)
 
-A local, parameter or helper named like the module is refused in the
-spec section: "`blog` is the running program in a spec block; rename
-the local".
+It runs the binary with *args* in `tmp` and waits for its end. The
+child's environment is the test program's, less `RIS_SPEC_JSON` and
+`RIS_SPEC_PROGRAM`, with `HOME` and `TMPDIR` set to `tmp.path`, then
+*env*. *stdin* is written to it (std/process `Process.run`). There is
+no per-block timer: `ris test --timeout` kills the whole test binary
+and the processes it started (TestTree), and the running block is
+reported broken. It returns a RisRun (`@[OnTape]`, on the block's
+tape):
 
-`file` and `run` are in v1 (D12).
+- `stdout`, `stderr : String`, `status : Int32` (std/process's
+  `exit_code`: 128 + N after signal N on Linux and darwin);
+- `==(text : String) : Bool` compares stdout; `=~(pattern : Regex) :
+  Int32?` matches stdout; a failed `=~` line prints the Regex as the
+  pattern and the RisRun as the text;
+- `inspect` shows stdout, stderr and status, so a failing line prints
+  all three.
+
+Every call is a new process; `out = demo` keeps one run.
+
+`demo.start(args = [] of String, env = {} of String => String)`
+starts it in the background, in `tmp` as above, and returns a
+RisProcess:
+
+- `wait_for(regex, timeout = 10) : Bool`: true once stdout matches,
+  false after *timeout* seconds or when the process ended first; as a
+  block line it is an assertion. It polls every 20 ms (`sleep`);
+- `write(text)`: to its stdin;
+- `stdout`, `stderr : String`: what it has written so far;
+- `stop : Int32`: SIGTERM, 2 s (polled), SIGKILL; returns the status;
+- `status : Int32?`: nil while it runs.
+
+Its stdout and stderr go to two files beside `tmp` (not in it, so
+`tmp.children` does not see them) through `/bin/sh -c 'exec ...'`, so
+no pipe fills and nothing must drain it; stdin is a pipe. Linux and
+darwin only: on Windows and wasm32 `demo` and `start` panic with the
+reason; `tmp` works everywhere.
+
+At the block's end every process the block started is stopped as
+`stop` does, then `tmp` is removed. The lowering writes
+`demo.start(...)` as `tmp.started(RisProgram.new("demo",
+tmp).start(...))`: the process is made in the block's scope, as tape
+requires of a value `tmp` keeps (SPEC 1.1). A package helper that
+starts a process hands it to `tmp.started` the same way, from the
+block; one started inside the helper alone would be refused.
+
+The module's name has two meanings, chosen by its place in the source
+as written; the parser rewrites a block's lines before it lowers them
+to assertions (5.2), so the lowering's own calls do not count:
+
+- `demo.start(...)`: the program, started (above);
+- `demo` with no arguments as a positional or named argument of a call
+  that is not an operator (`browse(demo)`, `get(demo, "/")`): the
+  program itself, a RisProgram with `name`, `path` and `start`;
+- everywhere else, including `demo == ...`, `demo =~ ...` and
+  `x == demo`: a run, `demo(tmp, ...)` of the generated def.
+
+A package helper takes a RisProgram and decides how to start and reach
+it (D18). Only block lines are rewritten: a helper def in the section
+that needs the program takes it as a parameter.
+
+`free_port : Int32` (every block): a TCP port on 127.0.0.1 that was
+free when asked. Another process may take it before the program
+binds; a package helper that sees the bind fail retries once with a
+new port. The core knows ports only this far.
+
+A local, parameter or helper named `tmp`, or named like the module in
+a program file, is refused in the spec section: "`tmp` is the block's
+temporary directory in a spec block; rename the local", "`demo` runs
+the program in a spec block; rename the local".
+
+RisTmp, RisRun, RisProcess, RisProgram and `free_port` live in
+std/ris_spec (built on std/process, std/dir, std/file). `ris build
+--spec` (`ris_lower_spec`) inserts `import std/ris_spec::{...}` after
+the module header; nothing else imports it, so a `ris build` binary
+has none of them. RisSpecRun, the assertion runtime of 5.2, stays in
+the prelude (testing.iyi), where unused code is not linked.
+
+The check of 5.5 for a dropped name matters for computed constants
+(`CONFIG = load`): a kept def that reads a top-level local does not
+compile in a plain build either, so `ris test` reports the plain
+build's error first.
 
 ### 5.8 The test program and verdicts
 
@@ -469,10 +588,10 @@ for the clause; reports show file:line.
 Tape: each block is a def body and frees its temporaries when it ends
 (ris SPEC.md 1.1).
 
-CLI to compiler: today run_one_test shells out to `build FILE -o`
-(test.cr:363). `ris test` calls `build --spec FILE -o BIN` instead,
+CLI to compiler: run_one_test calls `build --spec FILE -o BIN`,
 which keeps the spec section and emits the generated `main`; for a
-program file it first runs the plain `build FILE`. The test binary
+program file it first runs the plain `build FILE` and passes its path
+to the test binary in `RIS_SPEC_PROGRAM` (5.7). The test binary
 writes one JSON line per block to stdout when `RIS_SPEC_JSON=1`:
 `{clause, ordinal, file, line, status, failures, reason}`; `ris test
 --json` passes them on. `--timeout` applies per block (the harness
@@ -556,8 +675,8 @@ Instead init writes no test/. demo.ri ends with:
 and init writes spec.lock with 1.1's line. AGENTS.md's text and the
 usage text (init.cr:223-234) teach spec blocks instead of tags.
 SPEC.md and SPEC_CHANGELOG.md are unchanged. With `run` in v1 (D12)
-and step 7 after step 4, init writes a real check instead of the
-todo: `demo.run.stdout == "hello from demo\n"`.
+step 7 (after step 4) has init write a real check instead of the
+todo: `demo == "hello from demo\n"` (4.5).
 
 ### 5.12 Tools
 
@@ -611,6 +730,24 @@ ends in `…`; a label matches when it equals that cut form.
 
 Step 6 builds it, beside spec.lock: both read the clause text.
 
+### 5.16 Package spec modules (D18)
+
+A package `p` may ship a module `p/spec` with test vocabulary: defs a
+spec block calls, taking a RisProgram, RisProcess or `tmp` from the
+core. A spec section imports it like any test-only import (5.6):
+`import web/spec::*`. An import of a module whose last segment is
+`spec` (two segments or more) anywhere but in a spec section is
+refused: "web/spec is test vocabulary; import it after the first
+`spec` block". The module `p/spec` itself may import other spec
+modules. A project whose own module is named `x/spec` for another
+reason renames it.
+
+When a name in a spec block is undefined and the spec module of a
+package in the file's import closure defines it, the error adds:
+"web/spec defines `get`; add `import web/spec::*` after the first
+`spec` block". The closure, not only direct imports: blog.ri reaches
+web through site. Step 6 builds it.
+
 ## 6. Steps, each with a gate in test/cli/
 
 1. Shared walk (5.9), B1. Gate (test/cli/test_walk.sh): a failing
@@ -623,10 +760,18 @@ Step 6 builds it, beside spec.lock: both read the clause text.
    private def passes; a failing line prints clause, file:line,
    expression and both sides, the next line still runs, exit 1; todo
    gives 77; an unknown clause is refused.
-4. Program handle (5.7). Gate: a tiny HTTP program; a block's
-   `get("/")` passes; two blocks get two processes and ports; no
-   process is left after the run; a local named like the module is
-   refused.
+4. tmp and the program (5.5, 5.7, 5.16 refusal). Gate
+   (test/cli/spec_blocks_program.sh): a module block uses
+   `tmp.file`, `tmp.read`, `tmp.children` and the directory is gone
+   after; a CLI program: `demo == "...\n"`, a status, stdin, env and a
+   failing line printing stdout, stderr and status; a background
+   program: start, `wait_for` a ready line, write to stdin, `wait_for`
+   its echo, no process left (pgrep); a kept def using a dropped name
+   is refused; locals named `tmp` or like the module are refused; a
+   `*/spec` import above the section is refused; the plain build has
+   no RisRun or RisProcess symbol. The undefined-name hint (5.16)
+   moves to step 6: it needs the type check's error path. Not in the
+   gate: a panicking block's `tmp` (the `defer` covers it).
 5. Test-only imports (5.6). Gate: a block importing std/dir runs; the
    binary names no std/dir symbol; a cyclic test import is refused.
 6. `ris spec` on blocks, spec.lock, B2 (5.10, 5.14); AGENTS.md and
@@ -637,9 +782,12 @@ Step 6 builds it, beside spec.lock: both read the clause text.
    Also the clause label (5.15): `ris check --fix` writes and
    refreshes it; a stale label fails `ris check`; a long clause is
    cut at a word with `…` within 80 columns; a fresh label alone
-   does not clear "to review".
+   does not clear "to review". The 5.16 hint: a block calling `get`
+   in a file that imports web (directly or through site) without
+   web/spec names the import.
 7. `ris init` (5.11). Gate: `ris init demo`, then `ris check` is
-   green with 1.1 covered by `demo.run` (D12), and no test/ exists.
+   green with 1.1 covered by `demo == "hello from demo\n"` (4.5), and
+   no test/ exists.
 8. Remove `test "x" do` (D9) once ris's own test/ is moved. Gate:
    `ris check` green with test/ holding only test/cli/ and test/speed/.
 
@@ -650,6 +798,9 @@ Step 6 builds it, beside spec.lock: both read the clause text.
   clause is the name (D1).
 - `assert` on each line: noise; a Bool line is enough (D3).
 - A harness library for programs: each project rewrites it (D6).
+- HTTP in the core program handle (`blog.get`, a port wait): protocol
+  knowledge in the compiler; a package's spec module carries it (D17,
+  D18).
 - Hash in the tag (`@VERSION`): every ack edits test files; the lock
   keeps tags stable (D7).
 
@@ -668,6 +819,11 @@ None: Q1 to Q4 were answered as D11 to D14.
 - `ris test --affected FILE`: modules whose closure (with test-only
   imports) holds FILE, and program files importing it.
 - LSP: hover on `spec 1.2` shows the clause; go-to opens SPEC.md.
+- web/spec in rispacks/web (D18), its own draft: `get(program, path)`
+  and `post` start the program with `PORT=free_port` and wait until
+  the port accepts; a Capybara-style `browse(blog)` with `visit`,
+  `fill(label, value)`, `click(text)`, `path`, `status` and
+  `page =~`.
 
 ## 10. What the review changed
 
@@ -687,3 +843,27 @@ None: Q1 to Q4 were answered as D11 to D14.
 - Minors: counts, excerpt bullets and 1.3, `includes?` for `~`,
   column, AGENTS.md and spec-cli edits in step 6, where `todo` lives,
   `--affected` and LSP moved to section 9, wording.
+
+Second review (2026-11-11, D16-D18 and the sections they touch):
+
+- B-1, m-13: the module name's two meanings are fixed in the source
+  before lowering (5.7).
+- B-2: no per-block timer; `--timeout` kills the binary and its
+  children (5.7).
+- M-1: 5.11 and step 7 use `demo == ...`.
+- M-2: a timeout kill takes the children with it (TestTree); a killed
+  binary's `tmp` may stay in the system temp directory.
+- M-3: a section import is file-wide (4.4).
+- M-4, m-7: std/ris_spec and how it is imported (5.7).
+- M-5: RisRun's `==` and `=~`; `match` labels by the side that is not
+  the text (5.7; testing.iyi fixed).
+- M-6, M-7: status is std/process's exit code; waits poll; output goes
+  to files; Linux and darwin only (5.7).
+- M-8: the child's environment (5.7).
+- M-9: the hint looks at the import closure; step 6 gates it.
+- Built in step 4 and changed by it: `demo.start` registers through
+  `tmp.started` in the block (tape); the dropped-name check matters
+  for computed constants (5.7).
+- Minors: D12/D17 cite 5.7, the Goals line, 5.8's stale test.cr
+  line, 4.6's line number, `free_port`'s race, `*/spec` refusal
+  scope, step 4 gate scope.

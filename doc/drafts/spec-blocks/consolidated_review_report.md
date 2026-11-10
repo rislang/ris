@@ -1,153 +1,179 @@
-# EGM review: spec-blocks.md
+# EGM Consolidated Review: spec blocks (changed sections)
 
-Verdict: REVISE. 2 Blockers, 10 Majors, 8 Minors. D1-D10 not reopened;
-fix B-1, B-2 and the Majors before SPEC.md or code changes.
+**Verdict:** REVISE (2 blockers, 9 majors, 13 minors)
 
-Target: doc/drafts/spec-blocks/spec-blocks.md (whole file)
+**Target:** `doc/drafts/spec-blocks/spec-blocks.md`, changed sections only:
+D16-D18, D6 and D12 edits, 4.2-4.5, 5.5, 5.7, 5.8 last paragraph,
+5.11 end, 5.16, section 6 step 4, additions in 7 and 9. D1-D18 are the
+user's decisions and are not reopened; findings concern how the draft
+states them.
 
 ## Reviewer status
 
-| Reviewer                 | Status    |
-| ------------------------ | --------- |
-| design                   | completed |
-| implementation-readiness | completed |
-| zoom-out                 | completed |
-| codebase-details         | completed |
-| comprehension            | completed |
-| structural               | completed |
-| style                    | completed |
-
-design and implementation-readiness did not read SPEC.md or spec-cli;
-codebase-details and zoom-out did, and cover that ground.
+| Reviewer | Status |
+| --- | --- |
+| `egm-design` | completed |
+| `egm-implementation-readiness` | completed |
+| `egm-zoom-out` | completed |
+| `egm-codebase-details` | completed |
 
 ## Blockers
 
-B-1. 5.10, 5.13 (D7): SPEC_CHANGELOG check unaddressed. Today
-spec_check (spec_clauses.cr:575-578) fails a clause without a
-changelog entry `N.M@HASH`; ris init writes that heading. The draft
-drops `@VERSION` but never says whether the changelog check stays.
-Fix: in 5.10 state that the lock hash is spec-cli 4.2's version (SHA-256
-of normalized clause text, 8 hex) and that changelog headings keep
-`N.M@HASH` taken from it, or that the check is dropped. Match 5.11.
+### B-1 The two meanings of the module name do not survive lowering
 
-B-2. 5.10, step 6 gate: old `@V` tags contradict themselves. ack "leaves
-the tag alone", but spec_check (lines 569-572) fails a tag whose
-version differs, so a reviewed clause never clears.
-Fix: once spec.lock holds a line for N.M, ignore the version in an old
-`# spec: N.M@V` tag; say so in 5.10 and in the step 6 gate.
+- Section: 5.7 (two meanings of `demo`), D17, 4.4, 4.5.
+- Problem: 5.7 makes bare `demo` a RisProgram as a call argument and
+  a RisRun elsewhere; D17 does not state this rule. Lowering runs in
+  the parser before typing (parser.cr:430-499). The `=~` rewrite
+  passes its left side straight into `RisSpecRun.match`
+  (parser.cr:477-481), so `demo =~ %r{..}` makes `demo` an argument,
+  hence the program. `demo` is a generated def, so `demo.start` parses
+  as "run, then `.start` on the run". `assert_eq(demo, ..)`, `p demo`
+  and `x = demo; get(x, "/")` are ambiguous too. (all four reviewers)
+- Fix: give the program one spelling (e.g. `demo.program`, through
+  which `.start` also goes) and keep bare `demo` always a run; or state
+  the syntactic rule in D17, say the parser rewrites `demo.start` and
+  argument `demo` to a RisProgram before lowering, and make the `=~`
+  rewrite bind its left side to a temporary as comparisons do
+  (parser.cr:469). Update 4.4, 5.16 and the section 9 web/spec item.
+
+### B-2 "The block's timeout" does not exist
+
+- Section: 5.7, D16, D17, 5.8.
+- Problem: `demo(...)` and `wait_for` rely on a per-block timeout, but
+  the limit is per test binary: on expiry test.cr:444-454 kills the
+  tree and marks the whole file hung; `RisSpecRun.block`
+  (testing.iyi:260-285) has no timer. (codebase-details)
+- Fix: state that the limit is per file today and becomes per block
+  in step 4, adding it to step 4's scope and gate; or drop the reliance.
 
 ## Majors
 
-M-1. 5.10: hash input undefined (with B-1). Clause extent, nested
-N.M.K text, whitespace and markdown handling, algorithm and length
-are unstated; no rule for orphan lock lines.
-Fix: text runs from `N.M ` to the next clause or heading, children
-excluded, whitespace collapsed; SHA-256, first 8 hex. `ris check spec`
-reports orphan lines; `ris spec ack` removes them.
+### M-1 Stale `demo.run` / `run` references
 
-M-2. 5.10, step 6: turning the check on reddens existing projects.
-Every clause with proofs but no lock line fails; nothing seeds the
-lock from today's `@V` tags.
-Fix: step 6 seeds spec.lock from existing tags (e.g. `ris spec ack
---from-tags`); gate: ris's own `ris check spec` green after seeding.
+- Section: 5.11 end, section 6 step 7 gate, section 10 M-9.
+- Problem: "With `run` in v1 (D12)" and "1.1 covered by `demo.run`
+  (D12)" name the old handle; 5.11 offers both the todo form and a
+  real check, so what init writes is unclear. (all four)
+- Fix: since step 7 follows step 4, init writes
+  `demo == "hello from demo\n"` (4.5); gate reads "covered by a `demo`
+  block"; drop the todo variant.
 
-M-3. 4.5, 4.2 "(7.2)", 5.8: clause states undefined and contradictory.
-There is no 7.2; kept/missing/todo/broken are not defined; `ris spec`
-shows 1.2 `kept` while `ris test` shows `FAIL 1.2`. Today `ris spec`
-reads tags only (SPEC_STATUSES, line 394) and section 3 rules out a
-result cache, so it cannot know pass/fail.
-Fix: add 5.14 "Clause state": `ris spec` reports coverage from tags
-and blocks (covered/todo/uncovered/to review, mapped from today's
-names); pass/broken comes only from `ris test`. Fix 4.5 and line 150.
+### M-2 Children and `tmp` outlive a timeout kill or crash
 
-M-4. D6, 5.5, 5.7: "top-level code" of a program file undefined.
-Unclear whether constants, type defs and imports beside `run(...)`
-stay, and what a def using a dropped value does.
-Fix: list kept nodes (import, def, type, constant declarations);
-drop all other top-level statements; a def referring to dropped code
-is a compile error with a fix message.
+- Section: 5.7, 5.8, step 4 gate.
+- Problem: cleanup is "at block end", which never runs when the
+  harness SIGKILLs the test binary or wasm32 panics; `demo.start`
+  children, hung `demo(...)` runs and `tmp` remain. The pgrep gate
+  covers only the clean path. (design, impl-readiness)
+- Fix: run each test binary in its own process group and kill the
+  group; harness removes a per-run temp root. Gate: a block hanging
+  in `demo.start` is killed and leaves no process or tmp dir.
 
-M-5. 5.1, `test "x"` refusal vs D8/D9. Refusing it at any top-level
-line breaks today's `*_test.ri` programs, which D8 and D9 keep.
-Fix: refuse `test "x"` only in a file with a spec section until
-step 8; refuse everywhere after.
+### M-3 Import scope inside the spec section
 
-M-6. 5.2: Bool-line lowering unspecified. No pass, runtime call or
-carrier of line text and both sides; how `assert` (which panics)
-fits beside "a failed line does not stop the block"; Bool? and
-unions not covered.
-Fix: name the rewrite, e.g. `a OP b` ->
-`__ris_spec_check(a, b, "OP", text, file, line)`, recording without
-panic, and the pass that does it. Only static type exactly `Bool`
-asserts; `Bool?` refused with fix "write `x == true`". `assert` in
-a nested body panics: block broken.
+- Section: 4.4, 5.4, 5.6, 5.16.
+- Problem: `post(blog, ..)` appears above `import web/spec::*`; no
+  text says a test-only import covers blocks above it. If not, the
+  example fails and 5.16's hint suggests an import already present.
+  (design, impl-readiness)
+- Fix: state that test-only imports apply to the whole section, or
+  move the import above its first use and say imports apply below.
 
-M-7. 5.8: execution model split and vague. "a task of its own" does
-not say sequential; wasm32 "first broken or todo ends the program"
-contradicts D2 (todo ends only its block) and 5.2.
-Fix: blocks run one after another, each awaited; failed lines and
-todo are recorded per block on every target; only a panic differs on
-wasm32 (ends the program, reported against its block).
+### M-4 Where the runtime lives and how it is imported
 
-M-8. 5.8 vs test.cr:363: CLI-to-compiler interface missing. Today
-run_one_test shells out to `build FILE -o`.
-Fix: name the replacement (e.g. `build --spec FILE`), the per-block
-`--json` record (clause, ordinal, file:line, status, output), and how
-`--timeout` applies to a module with many blocks.
+- Section: 5.7 vs 5.2, step 4 gate.
+- Problem: 5.7 puts RisTmp, RisRun, RisProcess, RisProgram in
+  std/ris_spec "which only `ris build --spec` imports"; RisSpecRun is
+  in the prelude (testing.iyi:213) and `ris_lower_spec` injects no
+  import (parser.cr:430-437). Nothing says how `tmp` and `free_port`
+  reach a block. (all four)
+- Fix: say `ris_lower_spec` adds `import std/ris_spec` to kept nodes,
+  or place the types beside RisSpecRun and rely on dead-code removal.
+  Name `free_port`'s home; make the step 4 symbol check match.
 
-M-9. 5.7, 5.11, Q2: RisProgram API incomplete and HTTP-only. `request`
-has no signature; return type and non-2xx behaviour unstated; init's
-demo is a CLI program but `run` is open in Q2 and called with no args.
-Fix: give typed signatures; the port wait applies only to
-get/post/request; `run(args = [] of String, stdin = "")` waits for
-exit. Until Q2 is answered, 5.11 writes the `todo` form only.
+### M-5 `RisRun =~ regex` failures label the wrong side
 
-M-10. 5.11, header (init.cr:161), 5.9: claims do not match code.
-init.cr:161 is the heredoc, not the module grammar; init's
-demo_test.ri has no import (lines 198-202) so nothing "fails"; real
-clause text is "Running demo.ri prints `hello from demo`." (line 171);
-init also writes SPEC_CHANGELOG.md and AGENTS.md (lines 215-218 teach
-`# spec:` tags). spec_walk takes any .ri/.iyi/.cr/.sh/.py under test/
-and skips symlinks; test.cr globs both suffixes, any case.
-Fix: cite the parser rule for `module PATH`; describe init's real
-output and list AGENTS.md, SPEC_CHANGELOG.md and usage text (lines
-223-234) as changing; state the shared walk's match, case and
-symlink rules and keep test.cr's miscased-name refusal (line 121).
+- Section: 5.7, 4.4, 4.5.
+- Problem: `RisSpecRun.match` picks the pattern by
+  `left.is_a?(String)` (testing.iyi:250); a RisRun on the left prints
+  as the pattern. The type check (parser.cr:463) also needs RisRun's
+  `=~` and `==(String)`, which 5.7 does not declare. (codebase-details)
+- Fix: decide by `is_a?(Regex)` in step 4; declare RisRun `=~ :
+  Int32?` and `==(String) : Bool` in 5.7.
+
+### M-6 Exit status and timed waits have no named primitive
+
+- Section: 5.7, step 4.
+- Problem: std/process reports exit code and signal separately
+  (process.iyi:163, :268), not "128 + N"; it has `terminate`, `kill`,
+  `signal` (process.iyi:517-533) but no timed wait, which `stop`
+  (SIGTERM, 2 s, SIGKILL) and `wait_for(regex, timeout)` need.
+  (codebase-details)
+- Fix: define status as `signal > 0 ? 128 + signal : exit_code`;
+  name the timed-wait mechanism (task plus timer, or a new std
+  helper) and add it to step 4.
+
+### M-7 Pipe draining and wasm32 behaviour unspecified
+
+- Section: 5.7, 5.8.
+- Problem: `stdout`/`stderr` "so far" and `wait_for` need something
+  to drain both pipes, or a chatty child blocks; 5.8 says wasm32 has
+  no tasks but not what `tmp`, `demo`, `start` do there.
+  (impl-readiness)
+- Fix: state the reader (e.g. one task per stream appending to a
+  builder, reusing process.iyi's child output state) and the wasm32
+  rule (e.g. `demo`, `start`, `free_port` are compile errors; `tmp`
+  works).
+
+### M-8 Child environment only partly specified
+
+- Section: 5.7.
+- Problem: not said whether the parent environment is inherited
+  (PATH, `ENV["PORT"]` in blog.ri); `RIS_SPEC_JSON` and
+  `RIS_SPEC_PROGRAM` leak into the child and change a ris runner
+  under test. (design, impl-readiness)
+- Fix: "parent environment minus `RIS_SPEC_*`, then HOME and TMPDIR,
+  then *env*", same for `start`; process.iyi's nil env values unset.
+
+### M-9 5.16 hint misses the draft's own example
+
+- Section: 5.16, 4.4, steps 4 and 6.
+- Problem: the hint fires only for a package the file imports
+  directly; blog.ri imports `site`, not `web`, so a missing
+  `import web/spec::*` gets no hint. Step 4 says the hint moves to
+  step 6, but step 6 does not list it. (design, zoom-out)
+- Fix: widen to the import closure or say blog.ri gets no hint; add
+  the chosen case to step 6's text and gate.
 
 ## Minors
 
-m-1. 4.5, 5.8 line 376: "9 blocks: 7 ok" but 4.2-4.4 hold 8 blocks.
-Fix: "3 modules, 8 blocks: 6 ok, 1 broken, 1 todo" in both places.
-
-m-2. 4.1, 4.5: excerpt lacks the `* ` bullet spec-cli 4.2 requires;
-1.3 is listed `missing` but absent from 4.1.
-Fix: write clauses as `* 1.1 ...`; add 1.3 to the excerpt and note
-the excerpt is partial.
-
-m-3. 4.3 line 162: `answer.body ~ "title"` uses `~`, still open in Q2.
-Fix: use `answer.body.includes?("title")`, or mark "assumes Q2".
-
-m-4. 4.5 line 200: the `todo` row sits under `proofs`, not `state`.
-Fix: align `todo` under the state column.
-
-m-5. AGENTS.md lines 42-45 and spec-cli 6.7-6.9 still teach
-`# spec: N.M@VERSION` tags and test/spec/; no step updates them.
-Fix: add these edits to step 6's work and gate.
-
-m-6. 5.3, 5.8 vs testing.iyi: IyiTestCases.verdict (line 201) knows
-only 0 and 1; `todo`/exit 77 lives elsewhere.
-Fix: name the file defining `todo` today; say the verdict gains a
-todo count.
-
-m-7. 5.12, step 7: `--affected` and LSP hover are not needed by D1-D9
-(D10: later work in section 9).
-Fix: move them to section 9; keep formatter and `ris doc`.
-
-m-8. Wording and placement: ROOT used (D7, 5.1) before its definition
-in 5.9; "TMPDIR and HOME (the temp directory)" ambiguous; "SPEC 1.1"
-in 5.8 ambiguous; "The rule is simple and" (5.2) adds nothing; the
-gate in 5.11 belongs in step 7; 5.13 says "5.1 to 5.10" but 5.11 and
-5.12 are user-visible.
-Fix: define ROOT at first use; "both set to the block's temp
-directory"; "ris SPEC.md 1.1"; delete the phrase; move the gate;
-write "5.1 to 5.12" or say why 5.11-5.12 are left out.
+- m-1 D12: writes `demo(args, stdin:)`; copy D17's
+  `demo(*args, stdin = "", env = {})` or just cite D17.
+- m-2 D17 vs 5.7: signatures differ (`start(args, env:)` vs
+  `start(args = [] of String, ...)`); say 5.7 is authoritative and cut
+  D17's SIGTERM/2 s/method list to a pointer to 5.7.
+- m-3 5.16/D18: refusing any import whose last segment is `spec`
+  hits ordinary modules (`billing/spec`); limit to package roots in
+  `lib/`/`mods/` or reserve the name with its own error.
+- m-4 5.7/section 9: `free_port` race; require web/spec to retry
+  `start` once on a bind failure.
+- m-5 5.7 opening, D17: "core knows no port" yet defines
+  `free_port`; say "no port wait and no protocol".
+- m-6 4.4 last paragraph: reads as if the core sets `PORT`; write
+  `web/spec calls blog.start(env: {"PORT" => free_port.to_s})`.
+- m-7 5.7: add that std/ris_spec is a thin layer over std/process
+  and std/dir, so no second process or temp-dir code is written.
+- m-8 5.8 CLI paragraph: "run_one_test shells out to `build FILE -o`
+  (test.cr:363)" is stale; it is test.cr:400 and already uses
+  `build --spec` with `RIS_SPEC_JSON=1` (test.cr:417, :424). Only
+  `RIS_SPEC_PROGRAM` is new.
+- m-9 4.6: `ris spec` lists 3.6 at `blog.ri:10`; in 4.4 that is the
+  import, `spec 3.6` is line 12.
+- m-10 5.7 vs 5.5/D6: the header-less module name (file base name)
+  is stated only in 5.7; state it once in D6 or 5.5.
+- m-11 Step 4 gate: add `tmp` removal after a panic and a
+  `free_port` case.
+- m-12 Section 3: the Goals line exceeds 80 columns; rewrap.
+- m-13 5.7: an explicit note that the parser, not the typer, picks
+  the program vs run meaning (folds into B-1 if the rule is kept).

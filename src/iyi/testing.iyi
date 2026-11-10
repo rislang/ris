@@ -247,7 +247,9 @@ class RisSpecRun
   # the prelude does not load it). Fails when the match is nil.
   def self.match(left, right, text : String, file : String, line : Int32) : Bool
     return true unless (left =~ right).nil?
-    pattern, subject = left.is_a?(String) ? {right, left} : {left, right}
+    # The pattern is the side that is not the text: a String, or a
+    # RisRun's stdout (5.7) on the left.
+    pattern, subject = right.is_a?(String) ? {left, right} : {right, left}
     @@failures << ("  " + file + ":" + line.to_s + "  " + text + "\n    pattern: " + pattern.inspect + "\n    text:    " + subject.inspect).copy_to(Program.tape)
     false
   end

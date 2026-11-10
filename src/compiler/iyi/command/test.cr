@@ -411,7 +411,17 @@ class Iyi::Command
     # had, and on Windows every test left its program and its `.pdb` in
     # %TEMP%.
     binary = File.tempname("iyi-test", {{ flag?(:win32) ? ".exe" : nil }})
+    # ris: a program file's blocks run its plain binary (5.7), built
+    # first as `ris build` builds it.
+    plain = spec && spec_program_file?(file) ? File.tempname("ris-program", {{ flag?(:win32) ? ".exe" : nil }}) : nil
     begin
+      if plain
+        built = Process.run(Process.executable_path.not_nil!, ["build", file, "-o", plain],
+          output: output, error: output)
+        unless built.success?
+          return {file: file, status: "does not build", seconds: elapsed(started), output: output.to_s, blocks: blocks}
+        end
+      end
       build_status = Process.run(
         Process.executable_path.not_nil!,
         spec ? ["build", "--spec", file, "-o", binary] : ["build", file, "-o", binary],
@@ -422,6 +432,7 @@ class Iyi::Command
       end
 
       env = spec ? {"RIS_SPEC_JSON" => "1"} : nil
+      env["RIS_SPEC_PROGRAM"] = plain if env && plain
       process = Process.new(binary, env: env, output: stdout, error: output)
       tree = TestTree.new(process)
       running = tree
@@ -456,6 +467,7 @@ class Iyi::Command
     ensure
       running.try &.close
       File.delete?(binary)
+      plain.try { |path| File.delete?(path) }
       # And what the link wrote beside it: MSVC's `.pdb`, and on darwin the
       # `.dwarf` dsymutil makes, which the new check found there too.
       {% if flag?(:win32) %}
@@ -464,6 +476,19 @@ class Iyi::Command
         File.delete?("#{binary}.dwarf")
       {% end %}
     end
+  end
+
+  # ris: whether *file* is a program file (5.5): top-level code before its
+  # spec section. One that does not parse is built as a module, whose
+  # build then reports it.
+  private def spec_program_file?(file : String) : Bool
+    parser = Parser.new(File.read(file))
+    parser.filename = file
+    parser.ris_raw_top = true
+    nodes = parser.parse
+    Parser.ris_program_file?(nodes.is_a?(Expressions) ? nodes.expressions : [nodes] of ASTNode)
+  rescue
+    false
   end
 
   # ris: whether *file* holds a spec section: a line that starts `spec N`

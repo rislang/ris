@@ -1,6 +1,7 @@
 require "set"
 require "./ast"
 require "./lexer"
+require "./transformer"
 
 module Iyi
   class Parser < Lexer
@@ -213,6 +214,8 @@ module Iyi
       next_token_skip_statement_end
 
       nodes = parse_expressions.tap { iyi_check_eof }
+      return nodes if @ris_raw_top
+      ris_check_spec_imports(nodes) if @iyi && @filename.is_a?(String)
       nodes = ris_spec_section(nodes) if @ris_spec_blocks || @ris_top_tests
       apply_module_header(iyi_check_depth(nodes))
     end
@@ -222,6 +225,10 @@ module Iyi
     # resolution: `ris build`, `run` and `doc` see no block, no helper and
     # no test-only import (doc/drafts/spec-blocks, 5.6).
     property ris_keep_spec = false
+    # ris: `parse` answers the file's top level as written: no header
+    # applied, no spec section checked (`ris test` asks if it is a program
+    # file, 5.5).
+    property ris_raw_top = false
 
     @ris_exprs_depth = 0
     @ris_spec_blocks : Array(SpecBlock)? = nil
@@ -427,9 +434,281 @@ module Iyi
       Call.new(Path.global(["RisSpecRun"]).at(at), name, args).at(at)
     end
 
+    # ris: a `*/spec` module is a package's test vocabulary (5.16): it is
+    # imported only in a spec section, below the first block.
+    private def ris_check_spec_imports(nodes : ASTNode) : Nil
+      list = nodes.is_a?(Expressions) ? nodes.expressions : [nodes] of ASTNode
+      list.each do |node|
+        break if node.is_a?(SpecBlock)
+        return if node.is_a?(ModuleHeader) && node.path.last? == "spec"
+        if node.is_a?(ImportDecl) && node.path.size >= 2 && node.path.last == "spec"
+          written = node.path.join('/')
+          raise "#{written} is test vocabulary; import it after the first " \
+                "`spec` block", node.location.not_nil!
+        end
+      end
+    end
+
+    # ris: a program file (5.5) is one with a top-level statement other
+    # than a declaration before its spec section.
+    def self.ris_program_file?(list : Array(ASTNode)) : Bool
+      list.each do |node|
+        break if node.is_a?(SpecBlock)
+        return true unless ris_declaration?(node)
+      end
+      false
+    end
+
+    # What a program file's test build keeps (5.5).
+    def self.ris_declaration?(node : ASTNode) : Bool
+      node = node.exp if node.is_a?(VisibilityModifier)
+      case node
+      when ModuleHeader, ImportDecl, UsingDecl, Require, Def, Macro,
+           ClassDef, ModuleDef, EnumDef, LibDef, Alias, AnnotationDef,
+           Annotation, CStructOrUnionDef, FunDef, TypeDef, Nop, SpecBlock
+        true
+      when Assign
+        node.target.is_a?(Path) && ris_literal?(node.value)
+      else
+        false
+      end
+    end
+
+    def self.ris_literal?(node : ASTNode) : Bool
+      case node
+      when NumberLiteral, StringLiteral, CharLiteral, BoolLiteral,
+           NilLiteral, SymbolLiteral, RegexLiteral
+        true
+      else
+        false
+      end
+    end
+
+    # The program's name: the last segment of `module a/blog`, else the
+    # file's base name (5.7).
+    private def ris_program_name(list : Array(ASTNode)) : String
+      if header = list.find(&.is_a?(ModuleHeader))
+        return header.as(ModuleHeader).path.last
+      end
+      file = @filename
+      file.is_a?(String) ? File.basename(file).sub(/\.(ri|iyi)\z/i, "") : "program"
+    end
+
+    # Drops a program file's top-level code; a kept declaration using a
+    # name only that code sets is refused (5.5).
+    private def ris_program_declarations(list : Array(ASTNode), file : String,
+                                         program : String) : Array(ASTNode)
+      kept = [] of ASTNode
+      vars = Set(String).new
+      consts = Set(String).new
+      list.each do |node|
+        if Parser.ris_declaration?(node)
+          kept << node
+          next
+        end
+        case node
+        when Assign
+          case target = node.target
+          when Var  then vars << target.name
+          when Path then consts << target.names.last if target.names.size == 1
+          end
+        when MultiAssign
+          node.targets.each { |target| vars << target.name if target.is_a?(Var) }
+        end
+      end
+      unless vars.empty? && consts.empty?
+        kept.each do |node|
+          finder = RisDroppedFinder.new(vars, consts)
+          node.accept(finder)
+          if found = finder.found
+            raise "`#{found[0]}` is set by #{File.basename(file)}'s top-level " \
+                  "code, which spec blocks do not run; reach it through " \
+                  "`#{program}` or move it into a def", found[1]
+          end
+        end
+      end
+      kept
+    end
+
+    private class RisDroppedFinder < Visitor
+      getter found : {String, Location}? = nil
+
+      def initialize(@vars : Set(String), @consts : Set(String))
+      end
+
+      def visit(node : Path)
+        if @found.nil? && node.names.size == 1 && @consts.includes?(node.names[0]) &&
+           (location = node.location)
+          @found = {node.names[0], location}
+        end
+        true
+      end
+
+      def visit(node : Call)
+        if @found.nil? && node.obj.nil? && node.args.empty? && !node.block &&
+           @vars.includes?(node.name) && (location = node.location)
+          @found = {node.name, location}
+        end
+        true
+      end
+
+      def visit(node : Var)
+        if @found.nil? && @vars.includes?(node.name) && (location = node.location)
+          @found = {node.name, location}
+        end
+        true
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
+    # A local, parameter or helper with a name the spec section owns:
+    # `tmp`, and in a program file the module's name (5.7).
+    private class RisNameFinder < Visitor
+      getter found : {String, Location}? = nil
+
+      def initialize(@names : Array(String))
+      end
+
+      private def hit(name : String, node : ASTNode) : Nil
+        if @found.nil? && @names.includes?(name) && (location = node.location)
+          @found = {name, location}
+        end
+      end
+
+      def visit(node : Assign)
+        target = node.target
+        hit(target.name, node) if target.is_a?(Var)
+        true
+      end
+
+      def visit(node : OpAssign)
+        target = node.target
+        hit(target.name, node) if target.is_a?(Var)
+        true
+      end
+
+      def visit(node : MultiAssign)
+        node.targets.each { |target| hit(target.name, target) if target.is_a?(Var) }
+        true
+      end
+
+      def visit(node : TypeDeclaration)
+        var = node.var
+        hit(var.name, node) if var.is_a?(Var)
+        true
+      end
+
+      def visit(node : Def)
+        hit(node.name, node)
+        node.args.each { |arg| hit(arg.name, arg) }
+        true
+      end
+
+      def visit(node : Block)
+        node.args.each { |arg| hit(arg.name, arg) }
+        true
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
+    # In a block of a program file the module's name runs the program:
+    # `demo(...)` gets the block's `tmp` first; `demo.start(...)` and `demo`
+    # alone as a call's argument are the program itself (5.7).
+    # In every block `tmp` is the block's local, though the parser read it
+    # as a call: nothing assigned it in the source.
+    private class RisProgramRewriter < Transformer
+      def initialize(@name : String?)
+      end
+
+      private def mine?(node : ASTNode) : Bool
+        node.is_a?(Call) && !@name.nil? && node.obj.nil? && node.name == @name &&
+          node.block.nil? && node.block_arg.nil?
+      end
+
+      private def tmp?(node : Call) : Bool
+        node.obj.nil? && node.name == "tmp" && node.args.empty? &&
+          node.named_args.nil? && node.block.nil? && node.block_arg.nil?
+      end
+
+      private def bare?(node : ASTNode) : Bool
+        mine?(node) && node.as(Call).args.empty? && node.as(Call).named_args.nil?
+      end
+
+      private def program(at : ASTNode) : ASTNode
+        Call.new(Path.new(["RisProgram"]).at(at), "new",
+          [StringLiteral.new(@name.not_nil!).at(at), Var.new("tmp").at(at)] of ASTNode).at(at)
+      end
+
+      def transform(node : Call)
+        return Var.new("tmp").at(node) if tmp?(node)
+        if mine?(node)
+          node.args = node.args.map { |arg| arg.transform(self).as(ASTNode) }
+          node.named_args.try &.each { |named| named.value = named.value.transform(self) }
+          node.args.unshift(Var.new("tmp").at(node))
+          return node
+        end
+        if (receiver = node.obj) && bare?(receiver) && node.name == "start"
+          node.obj = program(receiver)
+          node.args = node.args.map { |arg| arg.transform(self).as(ASTNode) }
+          node.named_args.try &.each { |named| named.value = named.value.transform(self) }
+          # Made in the block's scope, stopped at its end (5.7).
+          return Call.new(Var.new("tmp").at(node), "started", [node] of ASTNode).at(node)
+        elsif receiver = node.obj
+          node.obj = receiver.transform(self)
+        end
+        operator = !(node.name[0].ascii_letter? || node.name[0] == '_')
+        node.args = node.args.map do |arg|
+          (!operator && bare?(arg) ? program(arg) : arg.transform(self)).as(ASTNode)
+        end
+        node.named_args.try &.each do |named|
+          named.value = bare?(named.value) ? program(named.value) : named.value.transform(self)
+        end
+        node.block = node.block.try &.transform(self).as(Block)
+        node
+      end
+    end
+
     private def ris_lower_spec(list : Array(ASTNode), first : Int32) : ASTNode
       file = (name = @filename).is_a?(String) ? Iyi.relative_filename(name) : "?"
-      kept = list[0...first].dup
+      program = Parser.ris_program_file?(list) ? ris_program_name(list) : nil
+      kept = program ? ris_program_declarations(list[0...first], file, program) : list[0...first].dup
+      owned = program ? ["tmp", program] : ["tmp"]
+      finder = RisNameFinder.new(owned)
+      list[first..].each do |node|
+        node.accept(finder)
+        if found = finder.found
+          if found[0] == "tmp"
+            raise "`tmp` is the block's temporary directory in a spec block; " \
+                  "rename the local", found[1]
+          end
+          raise "`#{found[0]}` runs the program in a spec block; rename the " \
+                "local", found[1]
+        end
+      end
+      # The core of every block, test-only: after the header (5.7).
+      core = Parser.new("import std/ris_spec::{RisTmp, RisRun, RisProcess, RisProgram, free_port}\n")
+      core.filename = @filename
+      at = list[first]
+      imported = core.parse
+      imported = imported.is_a?(Expressions) ? imported.expressions : [imported] of ASTNode
+      imported.each(&.location=(at.location))
+      header = kept.index(&.is_a?(ModuleHeader))
+      kept.insert_all(header ? header + 1 : 0, imported)
+      if program
+        runner_text = "private def #{program}(tmp : RisTmp, *args, stdin : String = \"\", " \
+                      "env : Hash(String, String) = {} of String => String) : RisRun\n" \
+                      "  RisProgram.new(#{program.inspect}, tmp).run(args, stdin, env)\nend\n"
+        runner_parser = Parser.new(runner_text)
+        runner_parser.filename = @filename
+        kept << runner_parser.parse
+      end
+      rewriter = RisProgramRewriter.new(program)
       main = [] of ASTNode
       temp = 0
       list[first..].each do |node|
@@ -441,12 +720,18 @@ module Iyi
         where = "spec #{block.clause} at #{file}:#{block.location.try(&.line_number)}"
         ris_check_clause(block)
         index = main.size
-        body = [] of ASTNode
+        # `tmp`, removed with the block's processes when it ends (5.7).
+        body = [
+          Assign.new(Var.new("tmp").at(block),
+            Call.new(Path.new(["RisTmp"]).at(block), "new").at(block)).at(block),
+          Defer.new(Call.new(Var.new("tmp").at(block), "close").at(block)).at(block),
+        ] of ASTNode
         typed = [] of ASTNode
         typed_lines = [] of Int32
         asserts = 0
         has_todo = false
         ris_block_statements(block).each do |statement|
+          statement = statement.transform(rewriter)
           line = statement.location.try(&.line_number) || 0
           text = StringLiteral.new(ris_spec_text(statement))
           site = [text, StringLiteral.new(file), NumberLiteral.new(line.to_s)] of ASTNode
