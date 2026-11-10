@@ -1,11 +1,11 @@
-# Exercises `std/yaml`: YAML 1.2 core schema, `Any`, dump, anchors, merge.
+# Exercises `std/yaml`: YAML 1.2 core schema, `TapeValue`, dump, anchors, merge.
 #
 # Run via:
 #     ./bin/iyi run bench/std_yaml_exercise.iyi
 
 module bench/std_yaml_exercise
 
-import std/yaml::{YAML, Any, Parser, yaml_serializable}
+import std/yaml::{YAML, TapeValue, TapeParser, yaml_serializable}
 import std/json::{JSON, serializable}
 
 def assert_true(cond : Bool, msg : String) : Nil
@@ -17,7 +17,7 @@ def assert_str(expected : String, actual : String, msg : String) : Nil
 end
 
 def refused(source : String, sentence : String) : Nil
-  parser = Parser.new(source)
+  parser = TapeParser.new(source)
   docs = parser.parse_all
   err = parser.error
   raise "ASSERTION FAILED: accepted #{source.inspect}" if err.nil?
@@ -41,6 +41,7 @@ end
 # `Record` derive std/json's `serializable` as well, which is how a type
 # that is both spells it, and what lets the corpus below hand Python the
 # same value as JSON.
+@[OnTape]
 struct Inner
   getter x : Int32
   getter label : String?
@@ -51,6 +52,7 @@ struct Inner
   derive serializable, yaml_serializable
 end
 
+@[OnTape]
 struct Record
   getter name : String
   getter tags : Array(String)
@@ -71,6 +73,7 @@ struct Record
   derive serializable, yaml_serializable
 end
 
+@[OnTape]
 struct Spot
   getter x : Float64
   getter name : String
@@ -80,6 +83,7 @@ struct Spot
 end
 
 # Fields with defaults, as the json exercise's `Listener` has them.
+@[OnTape]
 struct Listener
   @port : Int32 = 8080
   @host : String? = "localhost"
@@ -90,8 +94,9 @@ struct Listener
   derive yaml_serializable
 end
 
+@[OnTape]
 struct Kinds
-  getter any : Any
+  getter any : TapeValue
   getter by_number : Hash(Int32, String)
   getter maybes : Array(Int32?)
   getter empty : Array(String)
@@ -101,11 +106,14 @@ end
 
 # The document `source` reads to, or a failed assertion naming `msg` (not
 # the parser's own panic) when the reader refuses it.
-def reads(source : String, msg : String) : Any
-  parser = Parser.new(source)
+def reads(source : String, msg : String) : TapeValue
+  first_read(TapeParser.new(source), msg)
+end
+
+def first_read(parser : TapeParser, msg : String) : TapeValue
   docs = parser.parse_all
   raise "ASSERTION FAILED: #{msg}: refused with #{parser.error.inspect}" if docs.nil?
-  docs.size == 0 ? Any.new(nil) : docs[0]
+  docs.size == 0 ? TapeValue.new(nil) : docs[0]
 end
 
 puts "== scalars and collections"
@@ -179,8 +187,8 @@ assert_str("b c", reads("a: b\n  \tc\n", "a tab after a continuation line's inde
 # the two take about as long; copying, 140 times as long here.
 quoted_lines = "xxxxxxxxxx\n" * 20000
 quoted_line = "xxxxxxxxxx " * 20000
-double_lines = Any.new(nil)
-single_lines = Any.new(nil)
+double_lines = TapeValue.new(nil)
+single_lines = TapeValue.new(nil)
 lines_ns = 9223372036854775807_i64
 line_ns = 9223372036854775807_i64
 3.times do
@@ -204,27 +212,27 @@ puts "\n== dump round trip"
 again = YAML.parse(YAML.dump(doc))
 assert_true(again == doc, "dump reads back")
 assert_true(YAML.dump(doc).starts_with?("a: 1"), "dump is block YAML")
-assert_true(YAML.parse(YAML.dump(Any.new(nil))).null?, "dumped null")
-assert_str("\"- a\"\n", YAML.dump(Any.new("- a")), "a string that looks like a sequence entry is quoted")
-assert_str("\"? a\"\n", YAML.dump(Any.new("? a")), "a string that looks like an explicit key is quoted")
+assert_true(YAML.parse(YAML.dump(TapeValue.new(nil))).null?, "dumped null")
+assert_str("\"- a\"\n", YAML.dump(TapeValue.new("- a")), "a string that looks like a sequence entry is quoted")
+assert_str("\"? a\"\n", YAML.dump(TapeValue.new("? a")), "a string that looks like an explicit key is quoted")
 # `?x` was dumped bare, which the reader refuses, and a leading byte order
 # mark bare, which the reader skips: neither read back to what was dumped.
 ["?x", "\uFEFFmarked"].each do |text|
-  assert_true(YAML.parse(YAML.dump(Any.new(text))) == Any.new(text), "#{text.inspect} reads back from its dump")
-  keyed = Any.new({Any.new(text) => Any.new(text)} of Any => Any)
+  assert_true(YAML.parse(YAML.dump(TapeValue.new(text))) == TapeValue.new(text), "#{text.inspect} reads back from its dump")
+  keyed = YAML.to_any({text => text})
   assert_true(YAML.parse(YAML.dump(keyed)) == keyed, "#{text.inspect} as a key and a value reads back")
 end
-assert_str("- a", YAML.parse(YAML.dump(Any.new([Any.new("- a")] of Any)))[0].as_s, "an entry-like string reads back inside a sequence")
+assert_str("- a", YAML.parse(YAML.dump(YAML.to_any(["- a"])))[0].as_s, "an entry-like string reads back inside a sequence")
 merge_key = YAML.parse("\"<<\": 1\n")
 assert_str("\"<<\": 1\n", YAML.dump(merge_key), "the merge key is quoted when dumped as a plain key")
 assert_true(YAML.parse(YAML.dump(merge_key)) == merge_key, "a quoted << key reads back")
-bom = YAML.dump(Any.new("\uFEFF"))
+bom = YAML.dump(TapeValue.new("\uFEFF"))
 assert_str("\"\\ufeff\"\n", bom, "a byte order mark is escaped when dumped")
 assert_str("\uFEFF", YAML.parse(bom).as_s, "a dumped byte order mark reads back")
-assert_str("\"\\x80\\u2028\"\n", YAML.dump(Any.new("\u0080\u2028")), "a C1 control and a 1.1 line break are escaped when dumped")
-asked = YAML.parse?(YAML.dump(Any.new("?a")))
+assert_str("\"\\x80\\u2028\"\n", YAML.dump(TapeValue.new("\u0080\u2028")), "a C1 control and a 1.1 line break are escaped when dumped")
+asked = YAML.parse?(YAML.dump(TapeValue.new("?a")))
 assert_true(!asked.nil? && asked.as_s == "?a", "a dumped string starting with '?' reads back")
-puts "  dump reads back as the same Any; entry-like strings and << are quoted"
+puts "  dump reads back as the same TapeValue; entry-like strings and << are quoted"
 puts "  a byte order mark, C1 controls and 1.1 line breaks are escaped; '?a' reads back"
 
 puts "\n== anchors, aliases, merge"
@@ -256,18 +264,18 @@ docs = YAML.parse_all("1\n---\n2\n")
 assert_true(docs.size == 2 && docs[0].as_i == 1_i64 && docs[1].as_i == 2_i64, "two documents")
 # A document's end marked twice is one end, as libyaml reads it: the
 # second `...` was refused as "a document end marker with no document".
-marked = Parser.new("a: 1\n...\n...\n---\nb\n").parse_all
+marked = TapeParser.new("a: 1\n...\n...\n---\nb\n").parse_all
 assert_true(!marked.nil? && marked.size == 2 && marked[1].as_s == "b", "a document's end may be marked more than once")
 # A block scalar at the root may start at the first column, where a
 # document marker ends it: `--- |\nfoo` was refused as "unexpected
 # content" and `|-\n#x` read as "", the line taken for a comment.
 assert_str("foo\nbar\n", reads("--- |\nfoo\nbar\n", "a root block scalar may start at the first column").as_s, "a root block scalar may start at the first column")
 assert_str("#x", reads("|-\n#x\n", "a '#' at a root block scalar's first column is text").as_s, "a '#' at a root block scalar's first column is text")
-scalar_docs = Parser.new("--- |\nfoo\n--- >\nbar\nbaz\n...\n").parse_all
+scalar_docs = TapeParser.new("--- |\nfoo\n--- >\nbar\nbaz\n...\n").parse_all
 assert_true(!scalar_docs.nil? && scalar_docs.size == 2 && scalar_docs[0].as_s == "foo\n" && scalar_docs[1].as_s == "bar baz\n", "a document marker ends a root block scalar at the first column")
 puts "  a root block scalar may start at the first column, and a document marker ends it"
 keys = YAML.parse("1: one\ntrue: x\n")
-assert_str("one", keys[Any.new(1_i64)].as_s, "integer key")
+assert_str("one", keys[TapeValue.new(1_i64)].as_s, "integer key")
 # The core schema's integer is `[-+]?[0-9]+`: `0777` is 777, as the header
 # says now - it said a string, and a program trusting it compared a string.
 # Keep chomping keeps the line breaks the text has, and the stream's end
@@ -276,23 +284,23 @@ kept = {"a: |+\n  x\n" => "x\n", "a: |+\n  x\n\n" => "x\n\n", "a: >+\n  x\n" => 
 kept.each do |text, value|
   assert_str(value, YAML.parse(text)["a"].as_s, "#{text.inspect} keeps what it has")
 end
-assert_true(YAML.parse("0777\n") == Any.new(777_i64) && YAML.parse("0o17\n") == Any.new(15_i64), "0777 is 777, 0o17 is 15")
-assert_str("x", keys[Any.new(true)].as_s, "boolean key")
+assert_true(YAML.parse("0777\n") == TapeValue.new(777_i64) && YAML.parse("0o17\n") == TapeValue.new(15_i64), "0777 is 777, 0o17 is 15")
+assert_str("x", keys[TapeValue.new(true)].as_s, "boolean key")
 # A core tag on a key is read as on a value: `!!str a: b` was refused as
 # "an alias, anchor or tag as a mapping key is not supported", where the
 # header refused only an anchor on a key.
 assert_str("{\"a\" => \"b\", \"1\" => 2}", reads("!!str a: b\n!!str 1: 2\n", "a core tag on a key is read").inspect, "a core tag on a key is read")
 puts "  a core tag on a key: !!str 1 is the string key \"1\""
-# An Int32 reaches an integer key as `Any.new(1)` does: `keys[1]` panicked
+# An Int32 reaches an integer key as `TapeValue.new(1)` does: `keys[1]` panicked
 # "expected a sequence, not a mapping", and `[]?` and `dig?` answered nil.
 by_index = keys[1]?
 dug = keys.dig?(1)
 assert_true(!by_index.nil? && by_index.as_s == "one" && !dug.nil? && dug.as_s == "one", "an Int32 reaches an integer key through []? and dig?")
 assert_str("one", keys[1].as_s, "an Int32 reaches an integer key through []")
 assert_str("x", YAML.parse("a:\n  1: x\n").dig("a", 1).as_s, "dig walks to an integer key")
-h = Hash(Any, Int32).new
+h = Hash(TapeValue, Int32).new
 h[YAML.parse("a: 1")] = 7
-assert_true(h[YAML.parse("a: 1")]? == 7, "Any hashes with ==")
+assert_true(h[YAML.parse("a: 1")]? == 7, "TapeValue hashes with ==")
 # A sequence hashes as an Array does and a mapping by its pairs mixed:
 # `31 * h + item` and a sum of `31 * key + value` gave a 150 by 150 grid
 # of [i, j] 4,769 hashes and of {x: i, y: j} 299, and {a: 1, b: 2} the
@@ -303,8 +311,8 @@ gi = 0
 while gi < 150
   gj = 0
   while gj < 150
-    seq_hashes[Any.new([Any.new(gi), Any.new(gj)] of Any).hash] = true
-    map_hashes[Any.new({Any.new("x") => Any.new(gi), Any.new("y") => Any.new(gj)} of Any => Any).hash] = true
+    seq_hashes[YAML.parse("[#{gi}, #{gj}]").hash] = true
+    map_hashes[YAML.parse("{x: #{gi}, y: #{gj}}").hash] = true
     gj = gj + 1
   end
   gi = gi + 1
@@ -314,7 +322,7 @@ assert_true(map_hashes.size >= 22000, "a 150 by 150 grid of mappings has at leas
 swapped = YAML.parse("{a: 1, b: 2}").hash != YAML.parse("{a: 2, b: 1}").hash
 assert_true(swapped && YAML.parse("{a: 1, b: 2}").hash == YAML.parse("{b: 2, a: 1}").hash, "a mapping's hash follows its pairs, not their order")
 puts "  a 150 by 150 grid of sequences and of mappings has at least 22,000 hashes each"
-puts "  parse_all, integer and boolean keys, Any as a Hash key"
+puts "  parse_all, integer and boolean keys, TapeValue as a Hash key"
 
 puts "\n== what the reader refuses"
 refused("a: 1\na: 2\n", "duplicate key \"a\" at line 2, column 1")
@@ -349,7 +357,7 @@ assert_str("b\u0085c", YAML.parse("a: b\u0085c\n")["a"].as_s, "U+0085 is text, a
 # A UTF-16 stream (Windows PowerShell 5.1's `Out-File` and `>`) is named
 # by its byte order mark; it was "control character U+0000".
 ["\xFF\xFEa\0:\0 \0x\0", "\xFE\xFF\0a\0:\0 \0x"].each do |wide|
-  wide_parser = Parser.new(wide)
+  wide_parser = TapeParser.new(wide)
   assert_true(wide_parser.parse_all.nil?, "a UTF-16 stream is refused")
   assert_str("encoding 'UTF-16' is not supported: the input is read as UTF-8 at line 1, column 1", wide_parser.error || "", "a UTF-16 stream is named by its byte order mark")
 end
@@ -432,24 +440,30 @@ tricky = ["yes", "No", "on", "OFF", "y", "n", "=", "1_000", "0b101", "22:30", "2
 weights = Hash(String, Float64).new
 tricky.each_with_index { |text, index| weights[text] = index * 0.5 }
 no_weights = Hash(String, Float64).new
-records = [
-  Record.new("full", tricky, weights, -9223372036854775807_i64 - 1, 255_u8, 9223372036854775807_u64, 0.1 + 0.2, true, "seen",
-    Inner.new(1, "one"), [Inner.new(2, nil), Inner.new(-3, "yes")], Inner.new(4, "")),
-  Record.new("on", [] of String, no_weights, 9223372036854775807_i64, 0_u8, 0_u64, 1.0e20, false, nil,
-    Inner.new(0, nil), [] of Inner, nil),
-  Record.new("22:30", ["1.0e-05"], {"-0" => -0.0, "1e300" => 1.0e300}, 0_i64, 7_u8, 1_u64, 1.0e-5, true, "\n",
-    Inner.new(2147483647, "\u2029"), [Inner.new(-2147483648, "~")], Inner.new(5, "<<")),
-]
+record_full = Record.new("full", tricky, weights, -9223372036854775807_i64 - 1, 255_u8, 9223372036854775807_u64, 0.1 + 0.2, true, "seen",
+    Inner.new(1, "one"), [Inner.new(2, nil), Inner.new(-3, "yes")], Inner.new(4, ""))
+record_on = Record.new("on", [] of String, no_weights, 9223372036854775807_i64, 0_u8, 0_u64, 1.0e20, false, nil,
+    Inner.new(0, nil), [] of Inner, nil)
+record_time = Record.new("22:30", ["1.0e-05"], {"-0" => -0.0, "1e300" => 1.0e300}, 0_i64, 7_u8, 1_u64, 1.0e-5, true, "\n",
+    Inner.new(2147483647, "\u2029"), [Inner.new(-2147483648, "~")], Inner.new(5, "<<"))
 # The corpus first, before any check here can stop the program: the gate
 # hands each line to Python, whose `yaml` must read the YAML to what its
 # `json` reads the JSON to. The YAML text travels as a JSON string.
-records.each do |record|
+def corpus(record : Record) : Nil
   puts "CORPUS #{record.to_json}\t#{JSON.to_json(record.to_yaml)}"
 end
-records.each do |record|
+
+def round_trips(record : Record) : Nil
   assert_str(record.to_json, Record.from_yaml(record.to_yaml).to_json, "a nested derived type reads back from its YAML: #{record.name}")
   assert_str(record.to_yaml, Record.from_json(record.to_json).to_yaml, "a type deriving both writes the same YAML after a JSON round trip: #{record.name}")
 end
+
+corpus(record_full)
+corpus(record_on)
+corpus(record_time)
+round_trips(record_full)
+round_trips(record_on)
+round_trips(record_time)
 puts "  three records of every field kind, nested, read back equal through YAML and through JSON"
 
 assert_str("x: 1.0\nname: a\nnote: null\n", panic_of(-> { Spot.from_yaml("x: 1\nname: a\n").to_yaml }), "a missing key for a nilable field without a default holds nil")
@@ -473,11 +487,11 @@ assert_str("port: 8080\nhost: localhost\nname: x\n", panic_of(-> { Listener.from
 puts "  defaults kept for a missing key and for a null their type does not admit"
 
 kinds = Kinds.from_yaml("any: {a: [1, x]}\nby_number: {1: one, -2: two}\nmaybes: [1, null, ~, 3]\nempty: []\n")
-assert_str("any:\n  a:\n    - 1\n    - x\nby_number:\n  1: one\n  -2: two\nmaybes:\n  - 1\n  - null\n  - null\n  - 3\nempty: []\n", kinds.to_yaml, "Any, integer keys, nil entries and an empty array written")
-assert_str(kinds.to_yaml, Kinds.from_yaml(kinds.to_yaml).to_yaml, "Any, integer keys and nil entries read back")
+assert_str("any:\n  a:\n    - 1\n    - x\nby_number:\n  1: one\n  -2: two\nmaybes:\n  - 1\n  - null\n  - null\n  - 3\nempty: []\n", kinds.to_yaml, "TapeValue, integer keys, nil entries and an empty array written")
+assert_str(kinds.to_yaml, Kinds.from_yaml(kinds.to_yaml).to_yaml, "TapeValue, integer keys and nil entries read back")
 numbered = YAML.from_yaml(YAML.to_yaml({3 => [1.5, nil], 4 => [] of Float64?}), Hash(Int32, Array(Float64?)))
 assert_true(numbered[3][0] == 1.5 && numbered[3][1].nil? && numbered[4].empty?, "YAML.to_yaml and from_yaml of a Hash(Int32, Array(Float64?))")
-puts "  Any, Hash(Int32, String), Array(Int32?) and empty collections read and written"
+puts "  TapeValue, Hash(Int32, String), Array(Int32?) and empty collections read and written"
 
 assert_str("YAML for Spot has no key \"name\"", panic_of(-> { Spot.from_yaml("x: 1\n").to_yaml }), "a missing field refused by name")
 assert_str("expected a mapping for Spot, not a sequence", panic_of(-> { Spot.from_yaml("- x: 1\n").to_yaml }), "a sequence refused where a derived type is read")

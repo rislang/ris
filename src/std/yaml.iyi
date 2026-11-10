@@ -736,7 +736,7 @@ class TapeViewScratch
 end
 
 @[OnTape]
-struct TapeParser
+pub struct TapeParser
   # Deep enough for any document a person wrote, and shallow enough for a
   # task's 256 KB stack: at 256 a task parsing a 256-deep flow sequence,
   # or comparing two 128 deep, died of a stack overflow that took the
