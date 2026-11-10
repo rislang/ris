@@ -1,7 +1,7 @@
 name: ris
 
 # ris's gates: the compiler built from a clean checkout, test/ris/check.sh on
-# the two targets ris programs have (SPEC 7.1), and the library's specs.
+# the two targets ris programs have (SPEC 7.1), and the library's tests.
 #
 # Never upload or restore .build/crystal here. bin/crystal prefers it to the
 # Crystal on PATH, and a compiler built from this source has String as a
@@ -70,20 +70,20 @@ jobs:
           RIS_CHECK_TIMEOUT: "600"
 
   # The compiler is still a Crystal program built with this library.
-  std-spec:
+  std-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     container:
       image: crystallang/crystal:1.21.0-build
-    name: "The library's specs"
+    name: "The library's tests"
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: LLVM 23 and the checks' tools
         run: bash .github/ci-setup.sh
-      - name: make std_spec
-        run: make std_spec
+      - name: make std_test
+        run: make std_test
 
   vscode:
     runs-on: ubuntu-24.04

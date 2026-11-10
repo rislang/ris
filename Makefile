@@ -19,9 +19,9 @@ all: ##
 ## Run tests
 ##   $ make test
 ## Run stdlib tests
-##   $ make std_spec
+##   $ make std_test
 ## Run compiler tests
-##   $ make compiler_spec
+##   $ make compiler_test
 ## Run generators (Unicode, SSL config, ...)
 ##   $ make -B generate_data
 
@@ -32,12 +32,12 @@ stats              ?= ## Enable statistics output
 progress           ?= ## Enable progress output
 threads            ?= ## Maximum number of threads to use
 debug              ?= ## Add symbolic debug info
-verbose            ?= ## Run specs in verbose mode
+verbose            ?= ## Run tests in verbose mode
 junit_output       ?= ## Path to output junit results
 static             ?= ## Enable static linking
 target             ?= ## Cross-compilation target
 check              ?= ## Enable only check when running format
-order              ?= random## Enable order for spec execution (values: "default" | "random" | seed number)
+order              ?= random## Enable order for test execution (values: "default" | "random" | seed number)
 deref_symlinks     ?= ## Dereference symbolic links for `make install`
 sequential_codegen ?= $(if $(filter 0,$(supports_mt)),true,)## Enforce sequential codegen in compiler builds.
 
@@ -45,7 +45,7 @@ O            := .build
 # iyi: the two version files are compiled in with `read_file`, so a build that
 # does not depend on them says the old number after the number changes.
 SOURCES      := $(shell find src -name '*.cr') src/VERSION src/IYI_VERSION
-SPEC_SOURCES := $(shell find spec -name '*.cr')
+TEST_SOURCES := $(shell find test -name '*.cr')
 MAN1PAGES    := $(patsubst doc/man/%.adoc,man/%.1,$(wildcard doc/man/*.adoc))
 override FLAGS += -D strict_multi_assign -D preview_overload_order $(if $(release),--release )$(if $(stats),--stats )$(if $(progress),--progress )$(if $(threads),--threads $(threads) )$(if $(debug),-d )$(if $(static),--static )$(if $(LDFLAGS),--link-flags="$(LDFLAGS)" )$(if $(target),--cross-compile --target $(target) )
 # iyi: -Dwithout_iconv because iyi's String has no encoding conversion, so the
@@ -88,7 +88,7 @@ override FLAGS += -D strict_multi_assign -D preview_overload_order $(if $(releas
 override COMPILER_FLAGS += -Dwithout_openssl -Dwithout_zlib -Dwithout_iconv$(if $(sequential_codegen), -Dwithout_mt,)
 
 # The collector choice, and it is deliberately not in COMPILER_FLAGS, because
-# the shipped binary and the spec harness want opposite answers.
+# the shipped binary and the test harness want opposite answers.
 #
 # `-Dgc_none` is iyi's default because the objective is a compiler carrying no
 # ancestor library, and `libgc` was the last one that was not a deliberate
@@ -97,7 +97,7 @@ override COMPILER_FLAGS += -Dwithout_openssl -Dwithout_zlib -Dwithout_iconv$(if 
 # and exits, measured at 598MB against 464MB on the 7,207-line project and
 # 7,430MB against 5,702MB self-hosting.
 #
-# `compiler_spec` is the opposite shape. It compiles thousands of programs
+# `compiler_test` is the opposite shape. It compiles thousands of programs
 # inside one long-lived process, and with no collector that process was
 # `Killed` on CI, `Error 137`, which is the honest upper bound on an allocator
 # that never frees rather than a bug. So the harness keeps bdw-gc and the
@@ -105,11 +105,11 @@ override COMPILER_FLAGS += -Dwithout_openssl -Dwithout_zlib -Dwithout_iconv$(if 
 # compiler and the programs it builds.
 #
 # ris: the binaries keep bdw-gc by default; `gc_none=1` takes it off. Without
-# it peak memory has no bound: building `compiler_spec --release` passed 59GB
+# it peak memory has no bound: building `compiler_test --release` passed 59GB
 # and was `Killed`, and a user's large program would be next.
 BINARY_GC_FLAGS := $(if $(gc_none),-Dgc_none,)
-SPEC_WARNINGS_OFF := --exclude-warnings spec/std --exclude-warnings spec/compiler --exclude-warnings spec/primitives --exclude-warnings src/float/printer --exclude-warnings src/random.cr
-override SPEC_FLAGS += $(if $(verbose),-v )$(if $(junit_output),--junit_output $(junit_output) )$(if $(order),--order=$(order) )
+TEST_WARNINGS_OFF := --exclude-warnings test/std --exclude-warnings test/compiler --exclude-warnings test/primitives --exclude-warnings src/float/printer --exclude-warnings src/random.cr
+override TEST_FLAGS += $(if $(verbose),-v )$(if $(junit_output),--junit_output $(junit_output) )$(if $(order),--order=$(order) )
 IYI_CONFIG_LIBRARY_PATH := '$$ORIGIN/../lib/iyi'
 ifndef IYI_CONFIG_BUILD_COMMIT
 	IYI_CONFIG_BUILD_COMMIT := $(shell git rev-parse --short HEAD 2> /dev/null)
@@ -259,58 +259,56 @@ check_llvm_config = $(eval \
 all: crystal iyi
 
 .PHONY: test
-test: spec ## Run tests
+test: ## Run tests
+test: std_test primitives_test compiler_test
 
-.PHONY: spec
-spec: std_spec primitives_spec compiler_spec
+.PHONY: std_test
+std_test: $(O)/std_test$(EXE) ## Run standard library tests
+	$(O)/std_test$(EXE) $(TEST_FLAGS)
 
-.PHONY: std_spec
-std_spec: $(O)/std_spec$(EXE) ## Run standard library specs
-	$(O)/std_spec$(EXE) $(SPEC_FLAGS)
+.PHONY: compiler_test
+compiler_test: $(O)/compiler_test$(EXE) ## Run compiler tests
+	$(O)/compiler_test$(EXE) $(TEST_FLAGS)
 
-.PHONY: compiler_spec
-compiler_spec: $(O)/compiler_spec$(EXE) ## Run compiler specs
-	$(O)/compiler_spec$(EXE) $(SPEC_FLAGS)
-
-.PHONY: primitives_spec
-primitives_spec: $(O)/primitives_spec$(EXE) ## Run primitives specs
-	$(O)/primitives_spec$(EXE) $(SPEC_FLAGS)
+.PHONY: primitives_test
+primitives_test: $(O)/primitives_test$(EXE) ## Run primitives tests
+	$(O)/primitives_test$(EXE) $(TEST_FLAGS)
 
 # iyi: the daemon refuses a client built from a different compiler, and it is
 # right to — it holds an analysed prelude and would serve builds from the old
-# one. What it cannot do is say so once: the spec sees nine failures, each
+# one. What it cannot do is say so once: the test sees nine failures, each
 # printing two version strings, and the reason is in none of them.
 #
 # The mismatch is easy to arrive at and hard to see, because the build commit
 # is baked in from git HEAD while make compares file times: commit, rebuild one
 # of the two, and they disagree about a commit while agreeing about every line
-# of code. Asked here instead, once, before the specs run.
+# of code. Asked here instead, once, before the tests run.
 .PHONY: check_daemon_matches
 check_daemon_matches: $(O)/crystal$(EXE) $(O)/$(CRYSTAL_DAEMON_BIN)
 	@client="$$($(O)/crystal$(EXE) --version | head -1)"; \
 	 daemon="$$($(O)/$(CRYSTAL_DAEMON_BIN) --version | head -1)"; \
 	 if [ "$$client" != "$$daemon" ]; then \
-	   echo "the daemon and the compiler are different builds, so every daemon spec will fail:"; \
+	   echo "the daemon and the compiler are different builds, so every daemon test will fail:"; \
 	   echo "  compiler: $$client"; \
 	   echo "  daemon:   $$daemon"; \
 	   echo "rebuild the one that is behind: make -B crystal-daemon"; \
 	   exit 1; \
 	 fi
 
-.PHONY: cli_spec
-# `$(O)/iyi` too: one spec here runs `iyi daemon start` to read the name it
-# looks its server up by. Not `iyi-daemon` — that spec is about the lookup
+.PHONY: cli_test
+# `$(O)/iyi` too: one test here runs `iyi daemon start` to read the name it
+# looks its server up by. Not `iyi-daemon` — that test is about the lookup
 # failing, so a server would be the wrong thing to have.
-cli_spec: $(O)/cli_spec$(EXE) check_daemon_matches $(O)/iyi$(EXE) ## Run compiler CLI specs
-	$(O)/cli_spec$(EXE) $(SPEC_FLAGS)
+cli_test: $(O)/cli_test$(EXE) check_daemon_matches $(O)/iyi$(EXE) ## Run compiler CLI tests
+	$(O)/cli_test$(EXE) $(TEST_FLAGS)
 
 .PHONY: simple_smoke_test
-simple_smoke_test: ## Build std specs as a smoke test
-simple_smoke_test: $(O)/std_spec$(EXE)
+simple_smoke_test: ## Build std tests as a smoke test
+simple_smoke_test: $(O)/std_test$(EXE)
 
 .PHONY: smoke_test
-smoke_test: ## Build std specs, compiler specs and compiler as a smoke test
-smoke_test: $(O)/std_spec$(EXE) $(O)/compiler_spec$(EXE) $(O)/$(CRYSTAL_BIN)
+smoke_test: ## Build std tests, compiler tests and compiler as a smoke test
+smoke_test: $(O)/std_test$(EXE) $(O)/compiler_test$(EXE) $(O)/$(CRYSTAL_BIN)
 
 SHELLCHECK_SOURCES := $(wildcard **/*.sh) $(wildcard **/*.bash) bin/crystal bin/check-compiler-flag scripts/git/pre-commit
 
@@ -318,12 +316,12 @@ SHELLCHECK_SOURCES := $(wildcard **/*.sh) $(wildcard **/*.bash) bin/crystal bin/
 lint-shellcheck:
 	shellcheck --severity=warning $(SHELLCHECK_SOURCES)
 
-.PHONY: all_spec
-all_spec: $(O)/all_spec$(EXE) ## Run all specs (note: this builds a huge program; `test` recipe builds individual binaries and is recommended for reduced resource usage)
-	$(O)/all_spec$(EXE) $(SPEC_FLAGS)
+.PHONY: all_test
+all_test: $(O)/all_test$(EXE) ## Run all tests (note: this builds a huge program; `test` recipe builds individual binaries and is recommended for reduced resource usage)
+	$(O)/all_test$(EXE) $(TEST_FLAGS)
 
 .PHONY: crystal
-crystal: $(O)/$(CRYSTAL_BIN) ## Build the compiler under Crystal's name (specs and bench use this one)
+crystal: $(O)/$(CRYSTAL_BIN) ## Build the compiler under Crystal's name (tests and bench use this one)
 
 .PHONY: iyi
 iyi: $(O)/iyi$(EXE) ## iyi: build `iyi` itself, runnable as ./bin/iyi [default, with crystal]
@@ -518,27 +516,27 @@ install_dlls: $(O)/$(CRYSTAL_BIN) ## Install the compiler's dependent DLLs at DE
 	@ldd $(O)/$(CRYSTAL_BIN) | grep -iv ' => /c/windows/system32' | sed 's/.* => //; s/ (.*//' | xargs -t -i $(INSTALL) -m 0755 '{}' "$(DESTDIR)$(BINDIR)/"
 endif
 
-$(O)/all_spec$(EXE): $(DEPS) $(SOURCES) $(SPEC_SOURCES)
+$(O)/all_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
 	$(call check_llvm_config)
 	@mkdir -p $(O)
-	$(EXPORT_CC) $(EXPORTS) ./bin/crystal build $(FLAGS) $(SPEC_WARNINGS_OFF) -o $@ spec/all_spec.cr
+	$(EXPORT_CC) $(EXPORTS) ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/all_test.cr
 
-$(O)/std_spec$(EXE): $(DEPS) $(SOURCES) $(SPEC_SOURCES)
+$(O)/std_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
 	$(call check_llvm_config)
 	@mkdir -p $(O)
-	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(SPEC_WARNINGS_OFF) -o $@ spec/std_spec.cr
-$(O)/compiler_spec$(EXE): $(DEPS) $(SOURCES) $(SPEC_SOURCES)
+	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/std_test.cr
+$(O)/compiler_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
 	$(call check_llvm_config)
 	@mkdir -p $(O)
-	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(SPEC_WARNINGS_OFF) -o $@ spec/compiler_spec.cr --release
+	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/compiler_test.cr --release
 
-$(O)/primitives_spec$(EXE): $(O)/$(CRYSTAL_BIN) $(DEPS) $(SOURCES) $(SPEC_SOURCES)
+$(O)/primitives_test$(EXE): $(O)/$(CRYSTAL_BIN) $(DEPS) $(SOURCES) $(TEST_SOURCES)
 	@mkdir -p $(O)
-	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(SPEC_WARNINGS_OFF) -o $@ spec/primitives_spec.cr
+	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/primitives_test.cr
 
-$(O)/cli_spec$(EXE): $(O)/$(CRYSTAL_BIN) $(O)/$(IYI_DAEMON_BIN) $(DEPS) $(SOURCES) $(SPEC_SOURCES)
+$(O)/cli_test$(EXE): $(O)/$(CRYSTAL_BIN) $(O)/$(IYI_DAEMON_BIN) $(DEPS) $(SOURCES) $(TEST_SOURCES)
 	@mkdir -p $(O)
-	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(SPEC_WARNINGS_OFF) -o $@ spec/cli_spec.cr
+	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/cli_test.cr
 
 $(O)/$(CRYSTAL_BIN): $(DEPS) $(SOURCES)
 	$(call check_llvm_config)
@@ -599,7 +597,7 @@ $(LLVM_EXT_OBJ): $(LLVM_EXT_DIR)/llvm_ext.cc
 	$(call check_llvm_config)
 	$(CXX) -c $(CXXFLAGS) -o $@ $< $(if $(LLVM_CONFIG),$(shell $(LLVM_CONFIG) --cxxflags))
 endif
-$(O)/crystal-pu$(EXE): spec/support/process-utils.cr $(SOURCES)
+$(O)/crystal-pu$(EXE): test/support/process-utils.cr $(SOURCES)
 	@mkdir -p $(O)
 	$(EXPORT_CC) ./bin/crystal build $(FLAGS) -o $@ $<
 

@@ -21,7 +21,7 @@ sections below and are listed here in order:
 * Checking time per nested block (sections 1 and 2): web's examples
   must check in seconds.
 * Benches build (section 7), including `HTTP.tls_config=` callers.
-* compiler_spec passes: fix its 225 failures and two segfaulting
+* compiler_test passes: fix its 225 failures and two segfaulting
   groups (section 12).
 * Release: Linux tarball and its job, `install_ris.sh`, tag v0.1.0;
   `ris --version` prints 0.1.0.
@@ -254,7 +254,7 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
   128-byte builder (SIDE_RESERVE, region.iyi:529). Under
   `vm.overcommit_memory=2` each is charged: a FileServer answer holds
   up to eight (doc/drafts/fileserver-outgoing.md, Memory).
-* compiler_spec: 225 failures and two segfaulting groups (Code gen: if,
+* compiler_test: 225 failures and two segfaulting groups (Code gen: if,
   Codegen: special vars), each top-level describe run apart (80fc5b354).
 * bench/concurrency_exercise.sh needs `ulimit -n 8192` and is not in
   check.sh; recheck on minitest.
@@ -264,7 +264,7 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
 * bench/std_websocket_exercise.iyi appends to an `io` builder and reads
   it back: move it to a String local, then recheck the artifact
   comparison on minitest.
-* spec/compiler/iyimod_spec.cr's getter/defer case cannot resolve
+* test/compiler/iyimod_test.cr's getter/defer case cannot resolve
   `Pointer(RisArrayPool(String))` from boot/shelf's type ids.
 * bench/socket_exercise.sh: several mutations are not caught; a
   unix-socket mutation fails with "the address is in use". Recheck on

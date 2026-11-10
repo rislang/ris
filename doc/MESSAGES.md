@@ -1,7 +1,7 @@
 # Messages between tasks: RisBoard
 
 The rules are SPEC 5.1-5.3 and 5.6. RisBoard copies the typed-queue
-transport in doc/reference/goose/docs/goose_spec.md §11.2, not Goose's
+transport in doc/reference/goose/docs/goose_test.md §11.2, not Goose's
 thread, global-copy or abort model. Main and all tasks use one board.
 
 ## Operations and identity

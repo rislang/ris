@@ -1,0 +1,1711 @@
+require "../../test_helper"
+
+describe "Semantic: module" do
+  it "includes but not a module" do
+    assert_error "class Foo; end; class Bar; include Foo; end",
+      "Foo is not a module"
+  end
+
+  it "includes module in a class" do
+    assert_type("module Foo; def foo; 1; end; end; class Bar; include Foo; end; Bar.new.foo") { int32 }
+  end
+
+  it "includes module in a module" do
+    assert_type(<<-CODE) { int32 }
+      module Moo
+        def foo
+          1
+        end
+      end
+
+      module Boo
+        include Moo
+      end
+
+      class Foo
+        include Boo
+      end
+
+      Foo.new.foo
+      CODE
+  end
+
+  it "finds in module when included" do
+    assert_type(<<-CODE) { int32 }
+      module Moo
+        class B
+          def foo; 1; end
+        end
+      end
+
+      include Moo
+
+      B.new.foo
+      CODE
+  end
+
+  it "includes generic module with type" do
+    assert_type(<<-CODE) { int32 }
+      module Foo(T)
+        def foo(x : T)
+          x
+        end
+      end
+
+      class Bar
+        include Foo(Int)
+      end
+
+      Bar.new.foo(1)
+      CODE
+  end
+
+  it "includes generic module and errors in call" do
+    assert_error <<-CODE, "expected argument #1 to 'Bar#foo' to be Int, not Float64"
+      module Foo(T)
+        def foo(x : T)
+          x
+        end
+      end
+
+      class Bar
+        include Foo(Int)
+      end
+
+      Bar.new.foo(1.5)
+      CODE
+  end
+
+  it "includes module but not generic" do
+    assert_error <<-CODE, "Foo is not a generic type"
+      module Foo
+      end
+
+      class Bar
+        include Foo(Int)
+      end
+      CODE
+  end
+
+  it "includes module but wrong number of arguments" do
+    assert_error <<-CODE, "wrong number of type vars for Foo(T, U) (given 1, expected 2)"
+      module Foo(T, U)
+      end
+
+      class Bar
+        include Foo(Int)
+      end
+      CODE
+  end
+
+  it "errors if including generic module and not specifying type vars" do
+    assert_error <<-CODE, "generic type arguments must be specified when including Foo(T)"
+      module Foo(T)
+      end
+
+      class Bar
+        include Foo
+      end
+      CODE
+  end
+
+  it "includes generic module explicitly" do
+    assert_type(<<-CODE) { int32 }
+      module Foo(T)
+        def foo(x : T)
+          x
+        end
+      end
+
+      class Bar(U)
+        include Foo(U)
+      end
+
+      Bar(Int32).new.foo(1)
+      CODE
+  end
+
+  it "includes generic module explicitly and errors" do
+    assert_error <<-CODE, "expected argument #1 to 'Bar(Int32)#foo' to be Int32, not Float64"
+      module Foo(T)
+        def foo(x : T)
+          x
+        end
+      end
+
+      class Bar(U)
+        include Foo(U)
+      end
+
+      Bar(Int32).new.foo(1.5)
+      CODE
+  end
+
+  it "reports can't use instance variables inside module" do
+    assert_error "def foo; @a = 1; end; foo",
+      "can't use instance variables at the top level"
+  end
+
+  it "works with int including enumerable" do
+    assert_type(<<-CODE) { array_of(float64) }
+      require "prelude"
+
+      struct Int32
+        include Enumerable(Int32)
+
+        def each
+          yield self
+          yield self + 2
+        end
+      end
+
+      1.map { |x| x * 0.5 }
+      CODE
+  end
+
+  it "works with range and map" do
+    assert_type(<<-CODE) { array_of(float64) }
+      require "prelude"
+      (1..3).map { |x| x * 0.5 }
+      CODE
+  end
+
+  it "declares module automatically if not previously declared when declaring a class" do
+    assert_type(<<-CODE
+      class Foo::Bar
+      end
+      Foo
+      CODE
+    ) do
+      foo = types["Foo"]
+      foo.module?.should be_true
+      foo.metaclass
+    end
+  end
+
+  it "declares module automatically if not previously declared when declaring a module" do
+    assert_type(<<-CODE
+      module Foo::Bar
+      end
+      Foo
+      CODE
+    ) do
+      foo = types["Foo"]
+      foo.module?.should be_true
+      foo.metaclass
+    end
+  end
+
+  it "errors when a generic instance type alias is used as namespace (#8512)" do
+    assert_error <<-CODE, "Foo(Int32) can't be used as a namespace"
+      struct Foo(T)
+      end
+
+      alias Bar = Foo(Int32)
+
+      module Bar::X
+      end
+      CODE
+  end
+
+  it "includes generic module with another generic type" do
+    assert_type(<<-CODE) { generic_class("Baz", int32).metaclass }
+      module Foo(T)
+        def foo
+          T
+        end
+      end
+
+      class Baz(X)
+      end
+
+      class Bar(U)
+        include Foo(Baz(U))
+      end
+
+      Bar(Int32).new.foo
+      CODE
+  end
+
+  it "includes generic module with self" do
+    assert_type(<<-CODE) { generic_class("Bar", int32).metaclass }
+      module Foo(T)
+        def foo
+          T
+        end
+      end
+
+      class Bar(U)
+        include Foo(self)
+      end
+
+      Bar(Int32).new.foo
+      CODE
+  end
+
+  it "includes generic module with self, and inherits it" do
+    assert_type(<<-CODE) { generic_class("Bar", int32).metaclass }
+      module Foo(T)
+        def foo
+          T
+        end
+      end
+
+      class Bar(U)
+        include Foo(self)
+      end
+
+      class Baz < Bar(Int32)
+      end
+
+      Baz.new.foo
+      CODE
+  end
+
+  it "includes generic module with self (check argument type, success)" do
+    assert_type(<<-CODE) { generic_class("Bar", int32) }
+      module Foo(T)
+        def foo(x : T)
+          x
+        end
+      end
+
+      class Bar(U)
+        include Foo(self)
+      end
+
+      Bar(Int32).new.foo Bar(Int32).new
+      CODE
+  end
+
+  it "includes generic module with self (check argument superclass type, success)" do
+    assert_type(<<-CODE) { types["Baz"] }
+      module Foo(T)
+        def foo(x : T)
+          x
+        end
+      end
+
+      class Bar(U)
+        include Foo(self)
+      end
+
+      class Baz < Bar(Int32)
+      end
+
+      Bar(Int32).new.foo Baz.new
+      CODE
+  end
+
+  it "includes generic module with self (check argument type, error)" do
+    assert_error <<-CODE, "expected argument #1 to 'Baz1#foo' to be Bar(Int32), not Baz2"
+      module Foo(T)
+        def foo(x : T)
+          x
+        end
+      end
+
+      class Bar(U)
+        include Foo(self)
+      end
+
+      class Baz1 < Bar(Int32)
+      end
+
+      class Baz2 < Bar(Float64)
+      end
+
+      Baz1.new.foo Baz2.new
+      CODE
+  end
+
+  it "includes generic module with self (check argument superclass type, success)" do
+    assert_type(<<-CODE) { types["Baz2"] }
+      module Foo(T)
+        def foo(x : T)
+          x
+        end
+      end
+
+      class Bar(U)
+        include Foo(self)
+      end
+
+      class Baz1 < Bar(Int32)
+      end
+
+      class Baz2 < Bar(Int32)
+      end
+
+      Baz1.new.foo Baz2.new
+      CODE
+  end
+
+  it "includes generic module with self (check return type, success)" do
+    assert_type(<<-CODE) { generic_class("Bar", int32) }
+      module Foo(T)
+        def foo : T
+          Bar(Int32).new
+        end
+      end
+
+      class Bar(U)
+        include Foo(self)
+      end
+
+      Bar(Int32).new.foo
+      CODE
+  end
+
+  it "includes generic module with self (check return subclass type, success)" do
+    assert_type(<<-CODE) { types["Baz"] }
+      module Foo(T)
+        def foo : T
+          Baz.new
+        end
+      end
+
+      class Bar(U)
+        include Foo(self)
+      end
+
+      class Baz < Bar(Int32)
+      end
+
+      Bar(Int32).new.foo
+      CODE
+  end
+
+  it "includes generic module with self (check return type, error)" do
+    assert_error <<-CODE, "method Baz#foo must return Bar(Float64) but it is returning Bar(Int32)"
+      module Foo(T)
+        def foo : T
+          Bar(Int32).new
+        end
+      end
+
+      class Bar(U)
+        include Foo(self)
+      end
+
+      class Baz < Bar(Float64)
+      end
+
+      Baz.new.foo
+      CODE
+  end
+
+  it "includes generic module with self (check return subclass type, error)" do
+    assert_error <<-CODE, "method Baz1#foo must return Bar(Int32) but it is returning Baz2"
+      module Foo(T)
+        def foo : T
+          Baz2.new
+        end
+      end
+
+      class Bar(U)
+        include Foo(self)
+      end
+
+      class Baz1 < Bar(Int32)
+      end
+
+      class Baz2 < Bar(Float64)
+      end
+
+      Baz1.new.foo
+      CODE
+  end
+
+  it "includes module but can't access metaclass methods" do
+    assert_error <<-CODE, "undefined method 'foo'"
+      module Foo
+        def self.foo
+          1
+        end
+      end
+
+      class Bar
+        include Foo
+      end
+
+      Bar.foo
+      CODE
+  end
+
+  it "extends a module" do
+    assert_type(<<-CODE) { int32 }
+      module Foo
+        def foo
+          1
+        end
+      end
+
+      class Bar
+        extend Foo
+      end
+
+      Bar.foo
+      CODE
+  end
+
+  it "extends self" do
+    assert_type(<<-CODE) { int32 }
+      module Foo
+        extend self
+
+        def foo
+          1
+        end
+      end
+
+      Foo.foo
+      CODE
+  end
+
+  it "gives error when including self" do
+    assert_error <<-CODE, "cyclic include detected"
+      module Foo
+        include self
+      end
+      CODE
+  end
+
+  it "gives error with cyclic include" do
+    assert_error <<-CODE, "cyclic include detected"
+      module Foo
+      end
+
+      module Bar
+        include Foo
+      end
+
+      module Foo
+        include Bar
+      end
+      CODE
+  end
+
+  it "gives error when including self, generic module" do
+    assert_error <<-CODE, "cyclic include detected"
+      module Foo(T)
+        include self
+      end
+      CODE
+  end
+
+  it "gives error when including instantiation of self, generic module" do
+    assert_error <<-CODE, "cyclic include detected"
+      module Foo(T)
+        include Foo(Int32)
+      end
+      CODE
+  end
+
+  it "gives error with cyclic include, generic module" do
+    assert_error <<-CODE, "cyclic include detected"
+      module Foo(T)
+      end
+
+      module Bar(T)
+        include Foo(T)
+      end
+
+      module Foo(T)
+        include Bar(T)
+      end
+      CODE
+  end
+
+  it "gives error with cyclic include between non-generic and generic module" do
+    assert_error <<-CODE, "cyclic include detected"
+      module Foo
+      end
+
+      module Bar(T)
+        include Foo
+      end
+
+      module Foo
+        include Bar(Int32)
+      end
+      CODE
+  end
+
+  it "gives error with cyclic include between non-generic and generic module (2)" do
+    assert_error <<-CODE, "cyclic include detected"
+      module Bar(T)
+      end
+
+      module Foo
+        include Bar(Int32)
+      end
+
+      module Bar(T)
+        include Foo
+      end
+      CODE
+  end
+
+  it "finds types close to included module" do
+    assert_type(<<-CODE) { types["Foo"].types["T"].metaclass }
+      module Foo
+        class T
+        end
+
+        def foo
+          T
+        end
+      end
+
+      class Bar
+        class T
+        end
+
+        include Foo
+      end
+
+      Bar.new.foo
+      CODE
+  end
+
+  it "finds nested type inside method in block inside module" do
+    assert_type(<<-CODE) { types["Foo"].types["Bar"].metaclass }
+      def foo
+        yield
+      end
+
+      module Foo
+        class Bar; end
+
+        @@x : Bar.class
+        @@x = foo { Bar }
+
+        def self.x
+          @@x
+        end
+      end
+
+      Foo.x
+      CODE
+  end
+
+  it "finds class method in block" do
+    assert_type(<<-CODE) { int32 }
+      def foo
+        yield
+      end
+
+      module Foo
+        def self.bar
+          1
+        end
+
+        @@x : Int32
+        @@x = foo { bar }
+
+        def self.x
+          @@x
+        end
+      end
+
+      Foo.x
+      CODE
+  end
+
+  it "types pointer of module" do
+    assert_type(<<-CODE, inject_primitives: true) { types["Moo"] }
+      module Moo
+      end
+
+      class Foo
+        include Moo
+
+        def foo
+          1
+        end
+      end
+
+      p = Pointer(Moo).malloc(1_u64)
+      p.value = Foo.new
+      p.value
+      CODE
+  end
+
+  it "types pointer of module with method" do
+    assert_type(<<-CODE, inject_primitives: true) { int32 }
+      module Moo
+      end
+
+      class Foo
+        include Moo
+
+        def foo
+          1
+        end
+      end
+
+      p = Pointer(Moo).malloc(1_u64)
+      p.value = Foo.new
+      p.value.foo
+      CODE
+  end
+
+  it "types pointer of module with method with two including types" do
+    assert_type(<<-CODE, inject_primitives: true) { union_of(int32, char) }
+      module Moo
+      end
+
+      class Foo
+        include Moo
+
+        def foo
+          1
+        end
+      end
+
+      class Bar
+        include Moo
+
+        def foo
+          'a'
+        end
+      end
+
+      p = Pointer(Moo).malloc(1_u64)
+      p.value = Foo.new
+      p.value = Bar.new
+      p.value.foo
+      CODE
+  end
+
+  it "types pointer of module with generic type" do
+    assert_type(<<-CODE, inject_primitives: true) { int32 }
+      module Moo
+      end
+
+      class Foo(T)
+        include Moo
+
+        def foo
+          1
+        end
+      end
+
+      p = Pointer(Moo).malloc(1_u64)
+      p.value = Foo(Int32).new
+      p.value.foo
+      CODE
+  end
+
+  it "types pointer of module with generic type" do
+    assert_type(<<-CODE, inject_primitives: true) { union_of(int32, char) }
+      module Moo
+      end
+
+      class Bar
+        def self.boo
+          1
+        end
+      end
+
+      class Baz
+        def self.boo
+          'a'
+        end
+      end
+
+      class Foo(T)
+        include Moo
+
+        def foo
+          T.boo
+        end
+      end
+
+      p = Pointer(Moo).malloc(1_u64)
+      p.value = Foo(Bar).new
+      x = p.value.foo
+
+      p.value = Foo(Baz).new
+
+      x
+      CODE
+  end
+
+  it "allows overloading with included generic module" do
+    assert_type(<<-CODE) { union_of(int32, string) }
+      module Foo(T)
+        def foo(x : T)
+          bar(x)
+        end
+      end
+
+      class Bar
+        include Foo(Int32)
+        include Foo(String)
+
+        def bar(x : Int32)
+          1
+        end
+
+        def bar(x : String)
+          "a"
+        end
+      end
+
+      Bar.new.foo(1 || "hello")
+      CODE
+  end
+
+  it "finds constant in generic module included in another module" do
+    assert_type(<<-CODE) { int32.metaclass }
+      module Foo(T)
+        def foo
+          T
+        end
+      end
+
+      module Bar(T)
+        include Foo(T)
+      end
+
+      class Baz
+        include Bar(Int32)
+      end
+
+      Baz.new.foo
+      CODE
+  end
+
+  it "calls super on included generic module" do
+    assert_type(<<-CODE) { int32 }
+      module Foo(T)
+        def foo
+          1
+        end
+      end
+
+      class Bar
+        include Foo(Int32)
+
+        def foo
+          super
+        end
+      end
+
+      Bar.new.foo
+      CODE
+  end
+
+  it "calls super on included generic module and finds type var" do
+    assert_type(<<-CODE) { int32.metaclass }
+      module Foo(T)
+        def foo
+          T
+        end
+      end
+
+      class Bar(T)
+        include Foo(T)
+
+        def foo
+          super
+        end
+      end
+
+      Bar(Int32).new.foo
+      CODE
+  end
+
+  it "calls super on included generic module and finds type var (2)" do
+    assert_type(<<-CODE) { int32.metaclass }
+      module Foo(T)
+        def foo
+          T
+        end
+      end
+
+      module Bar(T)
+        include Foo(T)
+
+        def foo
+          super
+        end
+      end
+
+      class Baz(T)
+        include Bar(T)
+      end
+
+      Baz(Int32).new.foo
+      CODE
+  end
+
+  it "types union of module and class that includes it" do
+    assert_type(<<-CODE) { union_of(types["Bar"].metaclass, types["Moo"].metaclass) }
+      module Moo
+        def self.foo
+          1
+        end
+      end
+
+      class Bar
+        include Moo
+
+        def self.foo
+          2
+        end
+      end
+
+      Bar || Moo
+      CODE
+  end
+
+  it "works ok in a case where a typed-def type has an underlying type that has an included generic module (bug)" do
+    assert_type(<<-CODE, inject_primitives: true) { int32 }
+      lib LibC
+        type X = Void*
+        fun x : X
+      end
+
+      module Mod(T)
+        def bar(other : T)
+          1
+        end
+      end
+
+      struct Pointer
+        include Mod(self)
+
+        def foo
+          address
+        end
+      end
+
+      LibC.x.foo
+
+      p = Pointer(Void).malloc(1_u64)
+      p.bar(p)
+      CODE
+  end
+
+  it "finds inner class from inherited one (#476)" do
+    assert_type(<<-CODE) { types["Foo"].types["Bar"].types["Baz"].metaclass }
+      class Foo
+        class Bar
+          class Baz
+          end
+        end
+      end
+
+      class Quz < Foo
+      end
+
+      Quz::Bar::Baz
+      CODE
+  end
+
+  it "type def does not reopen type from parent namespace (#11181)" do
+    assert_type <<-CODE, inject_primitives: false { types["Baz"].types["Foo"].types["Bar"].metaclass }
+      module Foo::Bar
+      end
+
+      module Baz
+        module Foo::Bar
+        end
+      end
+
+      Baz::Foo::Bar
+      CODE
+  end
+
+  it "correctly types type var in included module, with a restriction with a free var (bug)" do
+    assert_type(<<-CODE) { int32.metaclass }
+      module Moo(T)
+      end
+
+      class Foo(T)
+        include Moo(T)
+
+        def foo(x : Moo(U)) forall U
+          T
+        end
+      end
+
+      Foo(Int32).new.foo(Foo(Char).new)
+      CODE
+  end
+
+  it "types proc of module after type changes" do
+    assert_type(<<-CODE, inject_primitives: true) { int32 }
+      module Moo
+      end
+
+      class Foo(T)
+        include Moo
+
+        def foo
+          3
+        end
+      end
+
+      z = ->(x : Moo) { x.foo }
+      z.call(Foo(Int32).new)
+      CODE
+  end
+
+  it "types proc of module with generic class" do
+    assert_type(<<-CODE, inject_primitives: true) { char }
+      module Moo
+      end
+
+      class Foo(T)
+        include Moo
+
+        def foo
+          'a'
+        end
+      end
+
+      z = ->(x : Moo) { x.foo }
+      z.call(Foo(Int32).new)
+      CODE
+  end
+
+  it "errors if declares module inside if" do
+    assert_error <<-CODE, "can't declare module dynamically"
+      if 1 == 2
+        module Foo; end
+      end
+      CODE
+  end
+
+  it "can't reopen as class" do
+    assert_error <<-CODE, "Foo is not a class, it's a module"
+      module Foo
+      end
+
+      class Foo
+      end
+      CODE
+  end
+
+  it "can't reopen as struct" do
+    assert_error <<-CODE, "Foo is not a struct, it's a module"
+      module Foo
+      end
+
+      struct Foo
+      end
+      CODE
+  end
+
+  it "errors if reopening non-generic module as generic" do
+    assert_error <<-CODE, "Foo is not a generic module"
+      module Foo
+      end
+
+      module Foo(T)
+      end
+      CODE
+  end
+
+  it "errors if reopening generic module with different type vars" do
+    assert_error <<-CODE, "type var must be T, not U"
+      module Foo(T)
+      end
+
+      module Foo(U)
+      end
+      CODE
+  end
+
+  it "errors if reopening generic module with different type vars (2)" do
+    assert_error <<-CODE, "type vars must be A, B, not C"
+      module Foo(A, B)
+      end
+
+      module Foo(C)
+      end
+      CODE
+  end
+
+  it "errors if reopening generic module with different splat index" do
+    assert_error <<-CODE, "type var must be A, not *A"
+      module Foo(A)
+      end
+
+      module Foo(*A)
+      end
+      CODE
+  end
+
+  it "errors if reopening generic module with different splat index (2)" do
+    assert_error <<-CODE, "type var must be *A, not A"
+      module Foo(*A)
+      end
+
+      module Foo(A)
+      end
+      CODE
+  end
+
+  it "errors if reopening generic module with different splat index (3)" do
+    assert_error <<-CODE, "type vars must be *A, B, not A, *B"
+      module Foo(*A, B)
+      end
+
+      module Foo(A, *B)
+      end
+      CODE
+  end
+
+  it "uses :Module name for modules in errors" do
+    assert_error <<-CODE, "undefined method 'new' for Moo:Module"
+      module Moo; end
+
+      Moo.new
+      CODE
+  end
+
+  it "gives error when trying to instantiate with new" do
+    assert_error <<-CODE, "undefined local variable or method 'allocate' for Moo:Module (modules cannot be instantiated)"
+      module Moo
+        def initialize
+        end
+      end
+      Moo.new
+      CODE
+  end
+
+  it "gives error when trying to instantiate with allocate" do
+    assert_error <<-CODE, "undefined method 'allocate' for Moo:Module (modules cannot be instantiated)"
+      module Moo
+        def initialize
+        end
+      end
+      Moo.allocate
+      CODE
+  end
+
+  it "uses type declaration inside module" do
+    assert_type(<<-CODE) { int32 }
+      module Moo
+        @x : Int32
+
+        def initialize
+          @x = 1
+        end
+
+        def x
+          @x
+        end
+      end
+
+      class Foo
+        include Moo
+      end
+
+      Foo.new.x
+      CODE
+  end
+
+  it "uses type declaration inside module and gives error" do
+    assert_error <<-CODE, "instance variable '@x' of Foo must be Int32, not Bool"
+      module Moo
+        @x : Int32
+
+        def initialize(@x)
+        end
+
+        def moo
+          @x = false
+        end
+      end
+
+      class Foo
+        include Moo
+
+        def initialize
+          super(1)
+          @x = 1
+        end
+      end
+
+      Foo.new.moo
+      CODE
+  end
+
+  it "uses type declaration inside module, recursive, and gives error" do
+    assert_error <<-CODE, "instance variable '@x' of Foo must be Int32"
+      module Moo
+        @x : Int32
+
+        def initialize(@x)
+        end
+
+        def moo
+          @x = false
+        end
+      end
+
+      module Moo2
+        include Moo
+      end
+
+      class Foo
+        include Moo2
+
+        def initialize
+          super(1)
+          @x = 1
+        end
+      end
+
+      Foo.new.moo
+      CODE
+  end
+
+  it "initializes variable in module" do
+    assert_type(<<-CODE) { int32 }
+      module Moo
+        @x = 1
+
+        def x
+          @x
+        end
+      end
+
+      class Foo
+        include Moo
+      end
+
+      Foo.new.x
+      CODE
+  end
+
+  it "initializes variable in module, recursive" do
+    assert_type(<<-CODE) { int32 }
+      module Moo
+        @x = 1
+
+        def x
+          @x
+        end
+      end
+
+      module Moo2
+        include Moo
+      end
+
+      class Foo
+        include Moo2
+      end
+
+      Foo.new.x
+      CODE
+  end
+
+  it "inherits instance var type annotation from generic to concrete" do
+    assert_type(<<-CODE) { nilable int32 }
+      module Foo(T)
+        @x : Int32?
+
+        def x
+          @x
+        end
+      end
+
+      class Bar
+        include Foo(Int32)
+      end
+
+      Bar.new.x
+      CODE
+  end
+
+  it "inherits instance var type annotation from generic to concrete with T" do
+    assert_type(<<-CODE) { nilable int32 }
+      module Foo(T)
+        @x : T?
+
+        def x
+          @x
+        end
+      end
+
+      class Bar
+        include Foo(Int32)
+      end
+
+      Bar.new.x
+      CODE
+  end
+
+  it "inherits instance var type annotation from generic to generic to concrete" do
+    assert_type(<<-CODE) { nilable int32 }
+      module Foo(T)
+        @x : Int32?
+
+        def x
+          @x
+        end
+      end
+
+      module Bar(T)
+        include Foo(T)
+      end
+
+      class Baz
+        include Bar(Int32)
+      end
+
+      Baz.new.x
+      CODE
+  end
+
+  it "instantiates generic variadic module, accesses T from instance method" do
+    assert_type(<<-CODE) { tuple_of([int32, char]).metaclass }
+      module Moo(*T)
+        def t
+          T
+        end
+      end
+
+      class Foo
+        include Moo(Int32, Char)
+      end
+
+      Foo.new.t
+      CODE
+  end
+
+  it "instantiates generic variadic module, accesses T from class method" do
+    assert_type(<<-CODE) { tuple_of([int32, char]).metaclass }
+      module Moo(*T)
+        def t
+          T
+        end
+      end
+
+      class Foo
+        extend Moo(Int32, Char)
+      end
+
+      Foo.t
+      CODE
+  end
+
+  it "instantiates generic variadic module, accesses T from instance method through generic include" do
+    assert_type(<<-CODE) { tuple_of([int32, char]).metaclass }
+      module Moo(*T)
+        def t
+          T
+        end
+      end
+
+      class Foo(*T)
+        include Moo(*T)
+      end
+
+      Foo(Int32, Char).new.t
+      CODE
+  end
+
+  it "instantiates generic variadic module, accesses T from class method through generic extend" do
+    assert_type(<<-CODE) { tuple_of([int32, char]).metaclass }
+      module Moo(*T)
+        def t
+          T
+        end
+      end
+
+      class Foo(*T)
+        extend Moo(*T)
+      end
+
+      Foo(Int32, Char).t
+      CODE
+  end
+
+  it "instantiates generic variadic module, accesses T from instance method, more args" do
+    assert_type(<<-CODE) { tuple_of([int32.metaclass, tuple_of([float64, char]).metaclass, string.metaclass]) }
+      module Moo(A, *T, B)
+        def t
+          {A, T, B}
+        end
+      end
+
+      class Foo
+        include Moo(Int32, Float64, Char, String)
+      end
+
+      Foo.new.t
+      CODE
+  end
+
+  it "instantiates generic variadic module, accesses T from instance method through generic include, more args" do
+    assert_type(<<-CODE) { tuple_of([int32.metaclass, tuple_of([float64, char]).metaclass, string.metaclass]) }
+      module Moo(A, *T, B)
+        def t
+          {A, T, B}
+        end
+      end
+
+      class Foo(*T)
+        include Moo(Int32, *T, String)
+      end
+
+      Foo(Float64, Char).new.t
+      CODE
+  end
+
+  it "includes module with Union(T*)" do
+    assert_type(<<-CODE) { union_of(int32, char).metaclass }
+      module Foo(U)
+        def u
+          U
+        end
+      end
+
+      struct Tuple
+        include Foo(Union(*T))
+      end
+
+      {1, 'a'}.u
+      CODE
+  end
+
+  it "doesn't lookup type in ancestor when matches in current type (#2982)" do
+    assert_error <<-CODE, "undefined constant Qux::Bar"
+      module Foo
+        module Qux
+          class Bar
+          end
+        end
+      end
+
+      class Qux
+      end
+
+      include Foo
+
+      Qux::Bar
+      CODE
+  end
+
+  it "can restrict module with module (#3029)" do
+    assert_type(<<-CODE) { int32 }
+      module Foo
+      end
+
+      class Gen(T)
+      end
+
+      def foo(x : Gen(Foo))
+        1
+      end
+
+      foo(Gen(Foo).new)
+      CODE
+  end
+
+  it "can instantiate generic module" do
+    assert_type(<<-CODE) { generic_module("Foo", int32).metaclass }
+      module Foo(T)
+      end
+
+      Foo(Int32)
+      CODE
+  end
+
+  it "can use generic module as instance variable type" do
+    assert_type(<<-CODE) { union_of int32, char }
+      module Moo(T)
+        def foo
+          1
+        end
+      end
+
+      class Foo
+        include Moo(Int32)
+      end
+
+      class Bar
+        include Moo(Int32)
+
+        def foo
+          'a'
+        end
+      end
+
+      class Mooer
+        def initialize(@moo : Moo(Int32))
+        end
+
+        def moo
+          @moo.foo
+        end
+      end
+
+      mooer = Mooer.new(Foo.new)
+      mooer.moo
+      CODE
+  end
+
+  it "can use generic module as instance variable type (2)" do
+    assert_type(<<-CODE) { union_of int32, char }
+      module Moo(T)
+        def foo
+          1
+        end
+      end
+
+      class Foo(T)
+        include Moo(T)
+      end
+
+      class Bar(T)
+        include Moo(T)
+
+        def foo
+          'a'
+        end
+      end
+
+      class Mooer
+        def initialize(@moo : Moo(Int32))
+        end
+
+        def moo
+          @moo.foo
+        end
+      end
+
+      mooer = Mooer.new(Foo(Int32).new)
+      mooer = Mooer.new(Bar(Int32).new)
+      mooer.moo
+      CODE
+  end
+
+  it "errors when extending module that defines instance vars (#4065)" do
+    assert_error <<-CODE, "can't declare instance variables in Foo because Bar extends it"
+      module Foo
+        @x = 0
+      end
+
+      module Bar
+        extend Foo
+      end
+      CODE
+  end
+
+  it "errors when extending module that defines instance vars (2) (#4065)" do
+    assert_error <<-CODE, "can't declare instance variables in Foo because Bar extends it"
+      module Foo
+        @x : Int32?
+      end
+
+      module Bar
+        extend Foo
+      end
+      CODE
+  end
+
+  it "errors when extending generic module that defines instance vars" do
+    assert_error <<-CODE, "can't declare instance variables in Foo(T) because Bar(T) extends it"
+      module Foo(T)
+        @x = 0
+      end
+
+      module Bar(T)
+        extend Foo(T)
+      end
+      CODE
+  end
+
+  it "errors when extending generic module that defines instance vars (2)" do
+    assert_error <<-CODE, "can't declare instance variables in Foo(T) because Bar(T) extends it"
+      module Foo(T)
+        @x : T?
+      end
+
+      module Bar(T)
+        extend Foo(T)
+      end
+      CODE
+  end
+
+  it "errors when recursively extending module that defines instance vars" do
+    assert_error <<-CODE, "can't declare instance variables in Foo because Baz extends it"
+      module Foo
+        @x = 0
+      end
+
+      module Bar
+        include Foo
+      end
+
+      module Baz
+        extend Bar
+      end
+      CODE
+  end
+
+  it "errors when recursively extending module that defines instance vars (2)" do
+    assert_error <<-CODE, "can't declare instance variables in Foo because Baz extends it"
+      module Foo
+        @x : Int32?
+      end
+
+      module Bar
+        include Foo
+      end
+
+      module Baz
+        extend Bar
+      end
+      CODE
+  end
+
+  it "errors when extending self and self defines instance vars (#9568)" do
+    assert_error <<-CODE, "can't declare instance variables in Foo because Foo extends it"
+      module Foo
+        extend self
+
+        @x = 0
+      end
+      CODE
+  end
+
+  it "errors when extending self and self defines instance vars (2) (#9568)" do
+    assert_error <<-CODE, "can't declare instance variables in Foo because Foo extends it"
+      module Foo
+        extend self
+
+        @x : Int32?
+      end
+      CODE
+  end
+
+  it "errors when extending self and self defines instance vars (3) (#9568)" do
+    assert_error <<-CODE, "can't declare instance variables in Foo because Foo extends it"
+      module Foo
+        extend self
+
+        def initialize
+          @x = 0
+        end
+      end
+      CODE
+  end
+
+  it "can't pass module class to virtual metaclass (#6113)" do
+    assert_error <<-CODE, "expected argument #1 to 'Gen(Foo.class).foo' to be Foo.class, not Moo:Module"
+      module Moo
+      end
+
+      class Foo
+      end
+
+      class Bar < Foo
+        include Moo
+      end
+
+      class Gen(T)
+        def self.foo(x : T)
+        end
+      end
+
+      Gen(Foo.class).foo(Moo)
+      CODE
+  end
+
+  it "extends module from generic class and calls class method (#7167)" do
+    assert_type(<<-CODE) { int32 }
+      module Foo
+        def foo
+          1
+        end
+      end
+
+      class Gen(T)
+        extend Foo
+      end
+
+      Gen(Int32).foo
+      CODE
+  end
+
+  it "extends generic module from generic class and calls class method (#7167)" do
+    assert_type(<<-CODE) { int32.metaclass }
+      module Foo(T)
+        def foo
+          T
+        end
+      end
+
+      class Gen(U)
+        extend Foo(U)
+      end
+
+      Gen(Int32).foo
+      CODE
+  end
+
+  it "extends generic module from generic module and calls class method (#7167)" do
+    assert_type(<<-CODE) { int32.metaclass }
+      module Foo(T)
+        def foo
+          T
+        end
+      end
+
+      module Gen(U)
+        extend Foo(U)
+      end
+
+      Gen(Int32).foo
+      CODE
+  end
+
+  it "doesn't look up initialize past module that defines initialize (#7007)" do
+    assert_error <<-CODE, "wrong number of arguments"
+      module Moo
+        def initialize(x)
+        end
+      end
+
+      class Foo
+        include Moo
+      end
+
+      Foo.new
+      CODE
+  end
+
+  it "gives helpful error message when generic type var is missing" do
+    assert_error <<-CODE, "can't infer the type parameter T for the generic module Foo(T). Please provide it explicitly"
+      module Foo(T)
+        def self.foo
+          T.bar
+        end
+      end
+
+      Foo.foo
+      CODE
+  end
+
+  it "gives helpful error message when generic type var is missing in block spec" do
+    assert_error <<-CODE, "can't infer the type parameter T for the generic module Foo(T). Please provide it explicitly"
+      module Foo(T)
+        def self.foo(&block : T -> )
+          block
+        end
+      end
+
+      Foo.foo { |x| }
+      CODE
+  end
+end

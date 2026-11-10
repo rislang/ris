@@ -21,7 +21,7 @@ loops and refine Effects"; keep the IR gates; drop the allow list.
 ## Major
 
 M1. "Goose implementation C.2" is the wrong cite: the watermark rule
-is in implementation.md 6.2 (Stack assignment) and goose_spec C.1.
+is in implementation.md 6.2 (Stack assignment) and goose_test C.1.
 M2. Order contradicts AGENTS.md: TODO says time at each step end now,
 AGENTS.md says measurement is off until later. Change AGENTS.md now to
 the baseline rule; defer only optimization work.

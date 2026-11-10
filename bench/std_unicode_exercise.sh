@@ -160,7 +160,7 @@ for program in programs:
         print(f"  {program.rsplit('/', 1)[-1]}: all {len(cases)} cases split as the file splits them")
 sys.exit(status)
 PY
-  "$PY" "$WORK/graphemes.py" "$REPO/spec/std/string/grapheme_break_spec.cr" "$WORK/unicode-plain" "$WORK/unicode-release" || status=1
+  "$PY" "$WORK/graphemes.py" "$REPO/test/std/string/grapheme_break_test.cr" "$WORK/unicode-plain" "$WORK/unicode-release" || status=1
 fi
 
 echo

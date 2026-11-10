@@ -12,7 +12,7 @@ require "ecr"
 # CLDR-18479 Update CLDR data to TZDB 2025b. (#4593)
 WINDOWS_ZONE_NAMES_SOURCE = "https://raw.githubusercontent.com/unicode-org/cldr/f8369ba0795c79f3bac8eb89967eea359f77835e/common/supplemental/windowsZones.xml"
 TARGET_FILE               = File.join(__DIR__, "..", "src", "crystal", "system", "win32", "zone_names.cr")
-ZONEINFO_ZIP              = File.join(__DIR__, "..", "spec", "std", "data", "zoneinfo.zip")
+ZONEINFO_ZIP              = File.join(__DIR__, "..", "test", "std", "data", "zoneinfo.zip")
 
 response = HTTP::Client.get(WINDOWS_ZONE_NAMES_SOURCE)
 xml = XML.parse(response.body)

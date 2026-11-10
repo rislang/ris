@@ -12,7 +12,7 @@ debug compiler is about 1.5x here and both columns pay it.
     python3 bench/artifact_speed.py
 
 What it does not measure is whether the two builds produce the same program;
-`spec/compiler/iyimod_spec.cr` and the samples do that, and a speed harness
+`test/compiler/iyimod_test.cr` and the samples do that, and a speed harness
 that also checked correctness would be believed about neither.
 """
 

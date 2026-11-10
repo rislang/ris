@@ -56,12 +56,12 @@ src/openssl/ssl/defaults.cr linguist-generated
 src/string/grapheme/properties.cr linguist-generated
 # produced by scripts/generate_unicode_data.cr
 src/unicode/data.cr linguist-generated
-# produced by scripts/generate_glob_specs.cr
-spec/std/file/match-fast-glob_spec.cr
-# produced by scripts/generate_grapheme_break_specs.cr
-spec/std/string/grapheme_break_spec.cr linguist-generated
-# produced by spec/generate_wasm32_spec.sh
-spec/wasm32_std_spec.cr linguist-generated
+# produced by scripts/generate_glob_tests.cr
+test/std/file/match-fast-glob_test.cr
+# produced by scripts/generate_grapheme_break_tests.cr
+test/std/string/grapheme_break_test.cr linguist-generated
+# produced by test/generate_wasm32_test.sh
+test/wasm32_std_test.cr linguist-generated
 
 
 # iyi: Crystal's library specs compare what these files hold byte for byte - a
@@ -69,11 +69,11 @@ spec/wasm32_std_spec.cr linguist-generated
 # wrote them with CRLF, so on Windows those specs compared against bytes
 # the file does not have in the repository. The binary files in the same
 # directory are left as they are.
-spec/std/data/**/*.txt text eol=lf
-spec/std/data/**/*.xml text eol=lf
-spec/std/data/**/*.ini text eol=lf
-spec/std/data/**/*.types text eol=lf
-spec/std/data/**/*.crt text eol=lf
-spec/std/data/**/*.key text eol=lf
-spec/std/data/*_sample text eol=lf
-spec/std/data/collect_within_ensure text eol=lf
+test/std/data/**/*.txt text eol=lf
+test/std/data/**/*.xml text eol=lf
+test/std/data/**/*.ini text eol=lf
+test/std/data/**/*.types text eol=lf
+test/std/data/**/*.crt text eol=lf
+test/std/data/**/*.key text eol=lf
+test/std/data/*_sample text eol=lf
+test/std/data/collect_within_ensure text eol=lf

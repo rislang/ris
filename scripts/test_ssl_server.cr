@@ -5,11 +5,11 @@
 # testssl.sh is a tool for validating TLS implementations.
 
 require "http"
-require "../spec/support/ssl"
+require "../test/support/ssl"
 
 # This is needed for the ssl_context_pair helper
 def datapath(*components)
-  File.join("spec", "std", "data", *components)
+  File.join("test", "std", "data", *components)
 end
 
 server = HTTP::Server.new do |context|

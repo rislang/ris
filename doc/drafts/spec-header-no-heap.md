@@ -50,7 +50,7 @@ The SPEC goes silent on an API that survives. The TODO item owns it,
 including:
 
 * `call_error.cr:740,839` still suggest `.to_heap`, as does
-  `spec/compiler/tape_spec.cr:33`, and agents follow errors.
+  `test/compiler/tape_test.cr:33`, and agents follow errors.
 * `tape_shrink_checker.cr` treats `to_heap` as a copy to an owner and skips
   the SPEC 1.9 refusal. Probes returning it from a def and keeping it from
   a loop round read correct text and a store out of a `tape` block is

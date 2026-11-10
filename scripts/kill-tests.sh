@@ -4,7 +4,7 @@
 # not an ancestor of this script, and either runs a binary under .build/
 # of this checkout, or runs a binary from a temp or compiler cache
 # directory with its working directory in this checkout. A process under
-# another live run (make, check.sh, check_parallel.py, spec-par.sh) is left
+# another live run (make, check.sh, check_parallel.py, test-par.sh) is left
 # alone: that run still owns it. SIGKILL, no grace: our run is over.
 #
 #   bash scripts/kill-tests.sh        (DRY=1 lists without killing)
@@ -39,7 +39,7 @@ owned() {
     [ -n "${keep[$p]:-}" ] && return 1
     cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
     case $cmd in
-      make\ *|*/make\ *|*check.sh*|*check_parallel.py*|*spec-par.sh*)
+      make\ *|*/make\ *|*check.sh*|*check_parallel.py*|*test-par.sh*)
         return 0 ;;
     esac
   done

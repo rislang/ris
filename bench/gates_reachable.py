@@ -116,7 +116,7 @@ def reached(every):
             for found in REFERENCE.findall(text_of(path)):
                 note(found, extra)
 
-    for tree in ("scripts", "spec"):
+    for tree in ("scripts", "test"):
         base = os.path.join(ROOT, tree)
         for directory, _, files in os.walk(base):
             for name in files:

@@ -2366,7 +2366,7 @@ module Iyi
     # and a second grammar here is a second thing to keep correct. The text is
     # the *normalised* body rather than the file's, because that is what
     # survives to this point — which makes it worth checking that what comes
-    # out still parses, and `spec/compiler/iyimod_spec.cr` does.
+    # out still parses, and `test/compiler/iyimod_test.cr` does.
     # iyi: the macros a module declares, as source text, for `MacroBodies`
     # (iyi SPEC IV.1).
     #

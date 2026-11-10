@@ -13,18 +13,18 @@ REPO = Path(__file__).resolve().parent.parent
 # Trees and files that are Crystal's, not iyi's. Each carries its reason.
 ALLOWED_PATHS: list[tuple[str, str]] = [
     (r"^src/(?!compiler/|iyi/|std/)", "Crystal's standard library"),
-    (r"^spec/std/", "that library's own specs"),
-    (r"^spec/primitives/", "that library's primitives specs"),
+    (r"^test/std/", "that library's own specs"),
+    (r"^test/primitives/", "that library's primitives specs"),
     # Crystal's compiler, tested as Crystal: these suites assert Crystal's
     # semantics on `.cr` sources through the compatibility binary, and their
     # fixtures are Crystal programs naming Crystal's runtime symbols.
-    (r"^spec/compiler/(codegen|semantic|parser|formatter|lexer|loader)/", "Crystal's own semantics, tested as Crystal"),
-    (r"^spec/compiler/data/", "Crystal source fixtures"),
-    (r"^spec/(syntax|std|wasm32_std)_spec\.cr$", "that library's spec entrypoints"),
-    (r"^spec/support/", "the harness those suites share"),
+    (r"^test/compiler/(codegen|semantic|parser|formatter|lexer|loader)/", "Crystal's own semantics, tested as Crystal"),
+    (r"^test/compiler/data/", "Crystal source fixtures"),
+    (r"^test/(syntax|std|wasm32_std)_test\.cr$", "that library's test entrypoints"),
+    (r"^test/support/", "the harness those suites share"),
     (r"^scripts/", "generators that emit Crystal's stdlib tables"),
     # Drives the compatibility binary by the name a user types.
-    (r"^spec/compiler-cli/", "compatibility binary's CLI specs"),
+    (r"^test/compiler-cli/", "compatibility binary's CLI specs"),
     # crystal-metric's port: each note beside a changed line says what the
     # Crystal original does there, which is the other language by name.
     (r"^bench/metric/", "a port that compares itself with the Crystal program"),
@@ -63,10 +63,10 @@ ALLOWED_PATHS: list[tuple[str, str]] = [
     # measurement. `bench/identity_floor.py` is excluded above for its prose.
     (r"^bench/(build_speed|artifact_speed|incremental|macro_cost|runtime)", "benches that measure iyi against Crystal's library"),
     (r"^bench/(incremental|build_speed)/", "the generators those benches drive"),
-    (r"^spec/(debug|spec_helper\.cr)", "the spec harness driving both binaries"),
+    (r"^test/(debug|test_helper\.cr)", "the spec harness driving both binaries"),
     (r"^bin/check-compiler-flag$", "builds the compatibility binary twice"),
     (r"^bench/(machine_probe|dependency_floor|build_tool_floor|build_tool_scan)", "measures the compatibility binary, its libraries, and build tools"),
-    (r"^spec/compiler/util_spec\.cr$", "specs Crystal's own util module"),
+    (r"^test/compiler/util_test\.cr$", "specs Crystal's own util module"),
     (r"^samples/iyi/", "programs whose comments compare iyi with Crystal"),
 ]
 
