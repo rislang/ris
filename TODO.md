@@ -14,6 +14,11 @@ How to work (fewer tokens, faster to the goal):
 
 ## 1. Programs first
 
+* HTTP handlers: port every HTTP bench and samples/iyi/autocert.iyi
+  from `def call(req) : Response` to `call(req : Incoming, res :
+  Outgoing) : Nil` (HTTP.answer, src/std/http.iyi:2384). The old form
+  stays refused; no adapter (decided 2026-11-10).
+
 * The user's own ris programs: each obstacle becomes an item here.
 
 * Checking time doubles per nested block: each loop's two final
