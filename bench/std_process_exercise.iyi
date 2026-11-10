@@ -201,7 +201,8 @@ if mode = args[0]?
   when "fds"
     # What this child holds besides its three streams and the listing's
     # own descriptor (Linux).
-    stdout.write("#{Dir.new("/proc/self/fd").children.size - 4}\n")
+    fd_dir = Dir.new("/proc/self/fd")
+    stdout.write("#{fd_dir.children.size - 4}\n")
   when "emfile"
     # Started with room for its three streams and one more: the run's
     # pipe finds no descriptor left.

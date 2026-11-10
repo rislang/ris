@@ -259,7 +259,8 @@ check set.lookup(ip("8.8.8.8")).nil?, "a deleted prefix holds nothing"
 halves = PrefixSet.new([prefix("192.0.2.0/25"), prefix("192.0.2.128/26"), prefix("192.0.2.192/26"), prefix("192.0.3.0/24")])
 same "192.0.2.0/23", texts(halves.collapsed), "two halves collapse into their whole"
 check Prefix.parse("10.1.2.3/8", mask: true).as(Prefix).masked == prefix("10.0.0.0/8") && set.add(Prefix.new(ip("172.16.5.5"), 12)) && set.includes?(prefix("172.16.0.0/12")), "a set holds a prefix masked"
-check PrefixSet.new.empty? && PrefixSet.new.collapsed.empty? && PrefixSet.new.lookup(ip("::")).nil?, "an empty set holds nothing"
+empty_set = PrefixSet.new
+check empty_set.empty? && empty_set.collapsed.empty? && empty_set.lookup(ip("::")).nil?, "an empty set holds nothing"
 
 puts "== allocation"
 # The questions an allowlist asks of every packet build nothing on the

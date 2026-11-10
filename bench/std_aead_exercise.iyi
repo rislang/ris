@@ -32,14 +32,14 @@ end
 
 def hex(bytes : String) : String
   digits = "0123456789abcdef"
-  out = String::Builder.new
+  out = ""
   i = 0
   while i < bytes.bytesize
-    out.push(digits[bytes[i].to_i32 >> 4, 1])
-    out.push(digits[bytes[i].to_i32 & 15, 1])
+    out << digits[bytes[i].to_i32 >> 4, 1]
+    out << digits[bytes[i].to_i32 & 15, 1]
     i = i + 1
   end
-  out.finish
+  out
 end
 
 def array_of(bytes : String) : Array(UInt8)
@@ -192,10 +192,10 @@ stream = ChaCha20.new(key1, b("000000000000000000000002"), 1_u32)
 pieces = ""
 at = 0
 [1, 5, 58, 64, 1, 63, 65, 100].each do |n|
-  pieces = pieces + stream.xor(ietf[at, n])
+  pieces << stream.xor(ietf[at, n])
   at = at + n
 end
-pieces = pieces + stream.xor(ietf[at, ietf.bytesize - at])
+pieces << stream.xor(ietf[at, ietf.bytesize - at])
 assert_str ietf_ct, hex(pieces), "chacha20 in pieces"
 assert_str "", stream.xor(""), "no bytes after the last"
 assert_str hex(ChaCha20.new(key1, zero_nonce, 0xffffffff_u32).xor(zeros)), hex(ChaCha20.new(key1, zero_nonce, 0xfffffffe_u32).xor(zeros + zeros)[64, 64]), "the last block, 2^32 - 1, is there"

@@ -110,7 +110,7 @@ assert_true(mem.empty?, "clear empties the buffer")
 assert_int(0_i64, mem.size.to_i64, "cleared size")
 
 given = Memory.new("héllo\r\nwörld")
-assert_int(14_i64, given.size.to_i64, "Memory.new(text) copies the bytes")
+assert_int(14_i64, given.size.to_i64, "memory_1 copies the bytes")
 assert_str("héllo", given.read_line(true).to_s, "chomp drops CR LF")
 assert_str("wörld", given.read_line(true).to_s, "the last line has no line end")
 assert_true(given.read_line(true).nil?, "then nil")
@@ -202,11 +202,11 @@ file.close
 assert_int(20_i64, moved, "copy answers the bytes moved")
 assert_str("alpha\nb\u00e9\u0442\u0430\ngamma\n", sink.to_s, "copy moves every byte")
 
-sink = Memory.new
+limited = Memory.new
 file = File.open(path, "r", 4)
-moved = IyiIO.copy(file, sink, 7)
+moved = IyiIO.copy(file, limited, 7)
 assert_int(7_i64, moved, "copy with a limit stops at the limit")
-assert_str("alpha\nb", sink.to_s, "the limited copy")
+assert_str("alpha\nb", limited.to_s, "the limited copy")
 seen = [] of String
 file.each_line(true) do |line|
   seen << line
@@ -229,9 +229,9 @@ int32s.each do |v|
   buffer = written.to_s
   puts "  LE Int32 #{v} #{hex_of(buffer)}"
   assert_int(v.to_i64, ByteFormat::LittleEndian.decode_int32(buffer).to_i64, "LE Int32 round trip of #{v}")
-  written = Memory.new
-  ByteFormat::BigEndian.encode(v, written)
-  buffer = written.to_s
+  written_2 = Memory.new
+  ByteFormat::BigEndian.encode(v, written_2)
+  buffer = written_2.to_s
   puts "  BE Int32 #{v} #{hex_of(buffer)}"
   assert_int(v.to_i64, ByteFormat::BigEndian.decode_int32(buffer).to_i64, "BE Int32 round trip of #{v}")
 
@@ -251,9 +251,9 @@ int64s.each do |v|
   buffer = written.to_s
   puts "  LE Int64 #{v} #{hex_of(buffer)}"
   assert_int(v, ByteFormat::LittleEndian.decode_int64(buffer), "LE Int64 round trip of #{v}")
-  written = Memory.new
-  ByteFormat::BigEndian.encode(v, written)
-  buffer = written.to_s
+  written_2 = Memory.new
+  ByteFormat::BigEndian.encode(v, written_2)
+  buffer = written_2.to_s
   puts "  BE Int64 #{v} #{hex_of(buffer)}"
   assert_int(v, ByteFormat::BigEndian.decode_int64(buffer), "BE Int64 round trip of #{v}")
 
@@ -272,9 +272,9 @@ uint64s.each do |v|
   buffer = written.to_s
   puts "  LE UInt64 #{v} #{hex_of(buffer)}"
   assert_true(v == ByteFormat::LittleEndian.decode_uint64(buffer), "LE UInt64 round trip of #{v}")
-  written = Memory.new
-  ByteFormat::BigEndian.encode(v, written)
-  buffer = written.to_s
+  written_2 = Memory.new
+  ByteFormat::BigEndian.encode(v, written_2)
+  buffer = written_2.to_s
   puts "  BE UInt64 #{v} #{hex_of(buffer)}"
   assert_true(v == ByteFormat::BigEndian.decode_uint64(buffer), "BE UInt64 round trip of #{v}")
 
@@ -293,9 +293,9 @@ uint8s.each do |v|
   buffer = written.to_s
   puts "  LE UInt8 #{v} #{hex_of(buffer)}"
   assert_true(v == ByteFormat::LittleEndian.decode_uint8(buffer), "LE UInt8 round trip of #{v}")
-  written = Memory.new
-  ByteFormat::BigEndian.encode(v, written)
-  buffer = written.to_s
+  written_2 = Memory.new
+  ByteFormat::BigEndian.encode(v, written_2)
+  buffer = written_2.to_s
   puts "  BE UInt8 #{v} #{hex_of(buffer)}"
   assert_true(v == ByteFormat::BigEndian.decode_uint8(buffer), "BE UInt8 round trip of #{v}")
 
@@ -313,9 +313,9 @@ written = Memory.new
 ByteFormat::SystemEndian.encode(305419896, written)
 buffer = written.to_s
 system_hex = hex_of(buffer)
-written = Memory.new
-ByteFormat::NetworkEndian.encode(305419896, written)
-buffer = written.to_s
+written2 = Memory.new
+ByteFormat::NetworkEndian.encode(305419896, written2)
+buffer = written2.to_s
 network_hex = hex_of(buffer)
 assert_str("12345678", network_hex, "NetworkEndian is big-endian")
 assert_true(system_hex == "78563412" || system_hex == "12345678", "SystemEndian is one of the two")
@@ -353,16 +353,19 @@ assert_true(third.eof?, "eof without a delimiter")
 assert_true(source.eof?, "the inner stream is drained")
 puts "  delimited: rest, line two"
 
-tricky = Delimited.new(Memory.new("abababcXYZ"), "ababc")
+memory_2 = Memory.new("abababcXYZ")
+tricky = Delimited.new(memory_2, "ababc")
 assert_str("ab", tricky.read_all, "a partial match that restarts is content")
-tricky = Delimited.new(Memory.new("aaab"), "aab")
-assert_str("a", tricky.read_all, "a repeated prefix restarts the match")
+memory_3 = Memory.new("aaab")
+tricky2 = Delimited.new(memory_3, "aab")
+assert_str("a", tricky2.read_all, "a repeated prefix restarts the match")
 tail = Memory.new("ab-")
-tricky = Delimited.new(tail, "--")
-assert_str("ab-", tricky.read_all, "a held prefix at the end of the stream is content")
+tricky3 = Delimited.new(tail, "--")
+assert_str("ab-", tricky3.read_all, "a held prefix at the end of the stream is content")
 assert_true(tail.eof?, "and the inner stream is drained")
-tricky = Delimited.new(Memory.new("--tail"), "--")
-assert_str("", tricky.read_all, "a delimiter at the start answers nothing")
+memory_4 = Memory.new("--tail")
+tricky4 = Delimited.new(memory_4, "--")
+assert_str("", tricky4.read_all, "a delimiter at the start answers nothing")
 inner = Memory.new("héllo--wörld")
 head = Delimited.new(inner, "--")
 assert_str("hé", head.read_bytes(3), "read_bytes on a Delimited counts bytes")
@@ -386,14 +389,15 @@ assert_true(sized.read_byte.nil?, "a spent Sized answers nil")
 assert_str(" wörld\nsecond\n", sized_source.read_all, "the inner stream continues")
 puts "  sized: héllo"
 
-sized_source = Memory.new("one\ntwo\nthree")
-sized = Sized.new(sized_source, 8)
-assert_str("one", sized.read_line(true).to_s, "read_line on a Sized")
-assert_true(sized.read_byte == 116_u8, "read_byte on a Sized")
-assert_str("wo\n", sized.read_bytes(10), "read_bytes on a Sized is cut to the limit")
-assert_true(sized.read_line.nil?, "spent")
-assert_str("three", sized_source.read_all, "the rest is the inner stream's")
-carriage = Sized.new(Memory.new("x\r\r\ny\rz"), 6)
+sized_source2 = Memory.new("one\ntwo\nthree")
+sized2 = Sized.new(sized_source, 8)
+assert_str("one", sized2.read_line(true).to_s, "read_line on a Sized")
+assert_true(sized2.read_byte == 116_u8, "read_byte on a Sized")
+assert_str("wo\n", sized2.read_bytes(10), "read_bytes on a Sized is cut to the limit")
+assert_true(sized2.read_line.nil?, "spent")
+assert_str("three", sized_source2.read_all, "the rest is the inner stream's")
+memory_5 = Memory.new("x\r\r\ny\rz")
+carriage = Sized.new(memory_5, 6)
 assert_true(carriage.lines(true) == ["x\r", "y\r"], "lines(chomp) on a Sized keeps a CR that ends it")
 
 # A count is a most: reading two bytes under a limit of 100 MB allocates
@@ -403,10 +407,15 @@ most_path = sandbox + "/std_io_exercise_most_#{args.size}.txt"
 File.write(most_path, "ef")
 most_file = File.open(most_path)
 most_before = RisRegion.tape_bytes(1_u64)
-wide = Sized.new(Delimited.new(Memory.new("ab-"), "-"), 100_000_000)
+memory_6 = Memory.new("ab-")
+delimited_7 = Delimited.new(memory_6, "-")
+wide = Sized.new(delimited_7, 100_000_000)
 wide_got = wide.read_all
-direct_got = Delimited.new(Memory.new("cd-"), "-").read_bytes(100_000_000)
-file_got = Sized.new(most_file, 100_000_000).read_all
+memory_8 = Memory.new("cd-")
+delimited_9 = Delimited.new(memory_8, "-")
+direct_got = delimited_9.read_bytes(100_000_000)
+sized_10 = Sized.new(most_file, 100_000_000)
+file_got = sized_10.read_all
 most_after = RisRegion.tape_bytes(1_u64)
 most_file.close
 File.delete(most_path)
@@ -414,7 +423,8 @@ assert_str("ab", wide_got, "a Sized under a large limit reads what there is")
 assert_str("cd", direct_got, "read_bytes on a Delimited with a large count reads what there is")
 assert_str("ef", file_got, "a Sized over a file under a large limit reads what there is")
 assert_true(most_after - most_before < 1_000_000_u64, "a large count allocates what is read, not the count: #{most_after - most_before} bytes")
-generous = Sized.new(Memory.new("ab"), 100)
+memory_11 = Memory.new("ab")
+generous = Sized.new(memory_11, 100)
 assert_str("ab", generous.read_all, "a limit past the stream answers the stream")
 assert_int(98_i64, generous.remaining.to_i64, "remaining counts what was read")
 assert_true(generous.eof?, "eof follows the inner stream")
@@ -431,7 +441,7 @@ expected_short = "00000000  48 65 6c 6c 6f 2c 20 69  79 69 21 00 c3 bf        |H
 assert_str(expected_short, dumped.to_s, "a short line pads the hex columns")
 print dumped.to_s
 
-dumped = Memory.new
+dumped2 = Memory.new
 bytes = String.from_bytes(40) do |raw|
   i = 0
   while i < 40
@@ -439,20 +449,21 @@ bytes = String.from_bytes(40) do |raw|
     i = i + 1
   end
 end
-Hexdump.new(dumped).dump(bytes)
-lines = dumped.to_s.lines
+Hexdump.new(dumped2).dump(bytes)
+lines = dumped2.to_s.lines
 assert_int(3_i64, lines.size.to_i64, "forty bytes are three lines")
 assert_str("00000000  1e 25 2c 33 3a 41 48 4f  56 5d 64 6b 72 79 80 87  |.%,3:AHOV]dkry..|", lines[0], "a full line")
 assert_str("00000010  8e 95 9c a3 aa b1 b8 bf  c6 cd d4 db e2 e9 f0 f7  |................|", lines[1], "the second line's offset is 10")
 assert_str("00000020  fe 05 0c 13 1a 21 28 2f                           |.....!(/|", lines[2], "the last eight bytes")
-print dumped.to_s
+print dumped2.to_s
 
-dumped = Memory.new
-Hexdump.new(dumped).dump(Memory.new("from an IO"))
-assert_str("00000000  66 72 6f 6d 20 61 6e 20  49 4f                    |from an IO|\n", dumped.to_s, "dump reads an IyiIO to its end")
-dumped = Memory.new
-Hexdump.new(dumped).dump("")
-assert_str("", dumped.to_s, "nothing dumps as nothing")
+dumped3 = Memory.new
+memory_12 = Memory.new("from an IO")
+Hexdump.new(dumped3).dump(memory_12)
+assert_str("00000000  66 72 6f 6d 20 61 6e 20  49 4f                    |from an IO|\n", dumped3.to_s, "dump reads an IyiIO to its end")
+dumped4 = Memory.new
+Hexdump.new(dumped4).dump("")
+assert_str("", dumped4.to_s, "nothing dumps as nothing")
 Hexdump.new(stdout).dump("to stdout")
 puts "  hexdump lines verified: full, short, an IO source and empty input"
 
@@ -470,7 +481,7 @@ both.write_byte(0x20_u8)
 both.print("multi: printed\n")
 both.flush
 assert_str(left.to_s, right.to_s, "both memories hold the same bytes")
-assert_str("  multi: to three streams\n  multi: chained 42\n multi: printed\n", left.to_s, "the bytes are what was written")
+assert_str("  multi: to three streams\n  multi: chained 42\n multi: printed\n", left.to_s, "the bytes are what was written2")
 assert_true(both.eof?, "a writer has nothing to read")
 assert_true(!both.closed?, "open until closed")
 both.close
@@ -488,7 +499,7 @@ puts "  MultiWriter puts, <<, write_byte, print, flush, close and use as an IyiI
 # ---------------------------------------------------------------------------
 
 puts "\n== a pipe between tasks"
-# Events cross tasks on the board (SPEC 5.1): 1 "written", 100
+# Events cross tasks on the board (SPEC 5.1): 1 "written2", 100
 # "reading", then the byte count and 0 for a clean end.
 record PipeEvent, code : Int32
 
@@ -530,7 +541,8 @@ assert_str("100,1,1048576,0", pipe_events.join(","), "a pipe's writer waits whil
 copy_in, copy_out = IyiIO.pipe
 copied = group do |g|
   g.spawn do
-    IyiIO.copy(Memory.new("abc" * 50_000), copy_out)
+    memory_13 = Memory.new("abc" * 50_000)
+    IyiIO.copy(memory_13, copy_out)
     copy_out.write("z" * 20_000)
     copy_out.close
     0
