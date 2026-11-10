@@ -69,10 +69,13 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
 * `def load(t : String) : T; T.from_json(t); end` builds: an @[OnTape]
   struct's String may view the document's decoded text, in load's scratch.
 
-* An unmarked one-call def with an untyped class default still loses
-  that default's roots at a cycle store. A body containing only
-  `@nodes << v` in `def node(a = -1, v = C.new)` passes; the marked
-  two-expression body is now refused. Track the default at the call.
+* An untyped class default still loses its roots at a cycle store
+  when the def answers the Array it stored into: in
+  refused/cycle_default_untyped, `def node(a = -1, v = C.new)` with the
+  body `@nodes << v` and `node(b).size` in pipe passes; ending node with
+  `0` is refused. In the checking pass the call's store holds an untyped
+  root that `placed` does not find in @default_roots. Track the default
+  at the call.
 
 * A store into `self`'s field inside a method is not checked against
   the method's scope; the same store is refused at a caller that holds
