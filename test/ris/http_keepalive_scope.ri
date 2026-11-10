@@ -4,7 +4,7 @@
 module test/ris/http_keepalive_scope
 
 import std/socket::{IyiSocket}
-import std/http::{Server, Request, Response}
+import std/http::{Server, Incoming, Outgoing}
 
 struct Listening
 end
@@ -17,16 +17,8 @@ struct Echo
     RisBoard.post(Listening.new)
   end
 
-  # One call: the Response is built in the server's scope (SPEC 1.5).
-  def call(req : Request) : Response
-    Response.new(200, Echo.text_for(req))
-  end
-
-  # A local grown in place, returned where it is.
-  def self.text_for(req : Request) : String
-    answer = ""
-    answer << req.path << " " << req.body.bytesize
-    answer
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.body << req.path << " " << req.body.bytesize
   end
 end
 
@@ -56,7 +48,9 @@ port = probe.local_port
 probe.close
 group do |g|
   g.spawn do
-    Server.serve("127.0.0.1", port, 0, Echo, max_connections: {% if flag?(:darwin) %}1{% else %}4{% end %})
+    # compress: true keeps the connection on the full path (serve_h1);
+    # an untyped answer is not coded.
+    Server.answer("127.0.0.1", port, 0, Echo, compress: true, max_connections: {% if flag?(:darwin) %}1{% else %}4{% end %})
     0
   end
   RisBoard.take(Listening).or_panic

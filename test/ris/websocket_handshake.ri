@@ -1,7 +1,7 @@
 module test/websocket_handshake
 
 import std/socket::{IyiSocket}
-import std/http::{Server, Request, Response}
+import std/http::{Server, Incoming, Outgoing}
 import std/websocket::{WebSocket, Message, WebSocketError}
 
 # A real loopback handshake: WebSocket.connect offers permessage-deflate,
@@ -20,12 +20,12 @@ struct Echo
     RisBoard.post(Listening.new)
   end
 
-  def call(req : Request) : Response
-    WebSocket.upgrade(req, ["chat"])
+  def call(req : Incoming, res : Outgoing) : Nil
+    WebSocket.upgrade(req, res, ["chat"])
   end
 
-  def take_over(socket, leftover : String, response : Response) : Nil
-    WebSocket.serve(socket, leftover, response) do |ws|
+  def take_over(socket, leftover : String, res : Outgoing) : Nil
+    WebSocket.serve(socket, leftover, res) do |ws|
       got = ws.receive
       ws.send("echo #{got.data}") if got.is_a?(Message)
       nil
@@ -54,7 +54,7 @@ port = probe.local_port
 probe.close
 group do |g|
   g.spawn do
-    Server.serve("127.0.0.1", port, 0, Echo, max_connections: {% if flag?(:darwin) %}1{% else %}3{% end %})
+    Server.answer("127.0.0.1", port, 0, Echo, max_connections: {% if flag?(:darwin) %}1{% else %}3{% end %})
     0
   end
   RisBoard.take(Listening).or_panic
