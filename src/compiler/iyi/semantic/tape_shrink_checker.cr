@@ -1569,7 +1569,10 @@ class Iyi::TapeShrinkChecker
     return true if storage_type?(type)
     return false unless type
     name = type_name(type.remove_typedef)
-    name == "String" || name == "String::Span" || name.starts_with?("Array::Link(") || name.includes?("View(") || name.includes?("Iterator") ||
+    # The type's own name, not its module's: std/iterator's Stop is a
+    # plain value.
+    own = name.split('(').first.split("::").last
+    name == "String" || name == "String::Span" || name.starts_with?("Array::Link(") || name.includes?("View(") || own.includes?("Iterator") ||
       name.starts_with?("Pointer(") || !!TapeChecker.tape_in(@program, type)
   end
 
