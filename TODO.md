@@ -17,7 +17,6 @@ How to work (fewer tokens, faster to the goal):
 What CHANGELOG's 0.1.0 promises must work; the items stay in their
 sections below and are listed here in order:
 
-* HTTP handlers on Incoming/Outgoing (section 1).
 * Checking time per nested block (sections 1 and 2): web's examples
   must check in seconds.
 * Benches build (section 7), including `HTTP.tls_config=` callers.
@@ -28,10 +27,13 @@ sections below and are listed here in order:
 
 ## 1. Programs first
 
-* HTTP handlers: port every HTTP bench and samples/iyi/autocert.iyi
-  from `def call(req) : Response` to `call(req : Incoming, res :
-  Outgoing) : Nil` (HTTP.answer, src/std/http.iyi:2384). The old form
-  stays refused; no adapter (decided 2026-11-10).
+* std on the tape, found porting the HTTP handlers (drift report in
+  doc/drafts/server-answer-features.md): Router's `Pattern.parse` (SPEC
+  1.9, router.iyi:189), the HTTPS client (`records_handshake` returns
+  an owner, http.iyi:4847; blocks samples/iyi/autocert.iyi),
+  `Zstd.decompress` (view check, zstd.iyi:1410), `Cookie.parse_header`
+  and `HTTP.cookie_pairs` (a Hash from a def). Then give `Incoming`
+  back `form`, `multipart` and `cookies`, which `Request` had.
 
 * The user's own ris programs: each obstacle becomes an item here.
 
@@ -177,6 +179,10 @@ Unknown must be refused (SPEC 3.6).
   and :543, std_compress's opaque source proc); drop std/gc imports
   from its importers and server_load. HTTP.tls_config= is removed but
   still called by acme, http2_exercise and std_http_exercise.sh.
+* std_http_exercise's and std_fuzz's parse checks call
+  `Server.parse_request`, gone with `Request`: read through
+  `Server.parse_head` or a socket round trip. Most of
+  std_http_exercise.sh's mutation patterns no longer match http.iyi.
 
 ## 8. Speed
 

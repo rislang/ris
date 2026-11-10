@@ -264,6 +264,52 @@ kept beside them (AGENTS.md: a dropped form is removed).
 |                                            | planned            |
 | serve kept or removed                      | removed            |
 | HTTP/1.0 on fast path                      | stays off it       |
-| remove Router/Acme forms in 0.1.0          | open, for the user |
+| remove Router/Acme forms in 0.1.0          | removed (decision) |
 | WebSocket block form (codebase item 6)     | already refused    |
 |                                            | (:512); no change  |
+
+## Drift report (2026-11-10, after the implementation)
+
+What was built against this draft, item by item. AGENTS.md, LEARN.md,
+README.md and UPSTREAM.md name neither form: no drift there.
+doc/MESSAGES.md is updated to the one entry point.
+
+As drafted:
+
+* `Server.answer`'s options, the fast-path choice, its timeouts and
+  its HTTP/2 preface check; `serve_h1`/`serve_h2` on Incoming and
+  Outgoing; `Server.serve`, `Request` and the server's `Response` forms
+  removed.
+* `Incoming` (version, remote_address, tls_resumed?,
+  peer_certificates, body_io) moved into http.iyi; `Outgoing` with
+  stream, send, length=, upgrade, close, header(name) and the 6-slot
+  state; the refusals (old `call`, `upgrade` without `take_over`, a
+  second end) and the "not a server's" raise.
+* Compression, SSE.stream(res), WebSocket.upgrade(req, res),
+  WebSocket.serve(socket, leftover, res), Router, AcmeHttp01 and
+  AutocertView `answer(req, res) : Bool`.
+
+Differs:
+
+* `H2Out` holds the `H2Connection`, not the `Conn`: the server never
+  set `conn.h2`, so a streamed HTTP/2 answer raised "the connection
+  speaks no HTTP/2" (found by answer_tls).
+* `Incoming` has no `form`, `multipart` or `cookies`, which `Request`
+  had: a def answering a `Params`, `Multipart` or `Hash` made in its
+  scratch is refused (SPEC 1.9), and so are `HTTP.cookie_pairs` and
+  `Cookie.parse_header` today. A handler writes
+  `Multipart.new(req.body_io, boundary)` itself.
+* `Server.parse_request` went with `Request`; std_http_exercise's and
+  std_fuzz's parse checks still call it.
+* Gates: answer_tls drives TLS with `TlsClient` and HTTP/2 with raw
+  frames over cleartext (prior knowledge), as std/http's HTTPS client
+  is refused today (`records_handshake` returns an owner). HTTP/2 over
+  TLS by ALPN and a 413 on a stream are not gated; they share
+  `serve_h2` with h2c. answer_upgrade has no Router: `Pattern.parse`
+  is refused by the tape checks (it was before this work); the router
+  port compiles only as far as that. answer_compress checks zstd by
+  its frame magic: `Zstd.decompress` is refused by the view check.
+* The port set's benches did not build before (client owners, views,
+  `HTTP.upgrade`, `TlsServerConfig.from_pem`); each now stops first at
+  such an error, none at a server form. samples/iyi/autocert.iyi
+  stops at `records_handshake`.
