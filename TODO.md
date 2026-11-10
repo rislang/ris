@@ -173,6 +173,10 @@ Unknown must be refused (SPEC 3.6).
 
 ## 7. Benches
 
+* bench/agent_loop.py fails at step 12 on main (2026-11-10) and no CI
+  job runs it (gates_reachable counts it only through a spec comment):
+  fix it and put it in .github/workflows/ris.yml.
+
 * Build each bench, group the refusals by message, fix per group (old
   step 5). Known before the new rules: 5.1 task captures (tls server
   configs, udp:274, dns:951, http.iyi:2154 serve's `handle`, sse.iyi:513
