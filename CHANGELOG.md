@@ -22,6 +22,9 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   select and Mutex.
 * iyi's tooling for agents: modules, imports by URL, fast modular
   rebuilds, `check`, `fix`, `lsp`, `mcp`; `ris init` starts a project.
+* `ris ok`: fmt, mod tidy, check, vet and test in one verdict; exit 0
+  means the work is done, `next:` names the fix. Also an MCP tool, and
+  `ris init` writes an AGENTS.md that says so.
 * Runs on Linux x86_64 and aarch64, and macOS arm64 (built from source).
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.

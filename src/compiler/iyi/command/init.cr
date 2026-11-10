@@ -99,6 +99,14 @@ class Iyi::Command
       puts "wrote #{Iyi.relative_filename(File.join(directory, name))}"
     end
 
+    # The agent's note: what "done" means here. An AGENTS.md already in
+    # the directory is the project's own and is kept as it is.
+    agents = File.join(directory, "AGENTS.md")
+    unless File.exists?(agents)
+      File.write(agents, iyi_init_agents)
+      puts "wrote #{Iyi.relative_filename(agents)}"
+    end
+
     # Two lines, not one joined with `&&`: Windows PowerShell 5.1 refuses
     # `&&` ("not a valid statement separator"), and no one separator means
     # the same in cmd, PowerShell and a POSIX shell. None when it is this
@@ -144,6 +152,18 @@ class Iyi::Command
     }
   end
 
+  private def iyi_init_agents : String
+    name = Command.program_name
+    <<-MD
+      # Agents
+
+      The work is done when `#{name} ok` passes. Run it before you say
+      done; use `#{name} check`, `#{name} test --affected FILE` for quick
+      loops.
+
+      MD
+  end
+
   private def iyi_init_usage
     <<-USAGE
     Usage: #{Command.program_name} init MODULE [DIR]
@@ -152,7 +172,8 @@ class Iyi::Command
     module, where NAME is MODULE's last segment (`-` written `_`) - `ris
     init kemal` writes ris.mod and kemal.ri. DIR is where, and the current
     directory when it is left out. Nothing that is already there is
-    overwritten.
+    overwritten; an AGENTS.md saying `ris ok` decides
+    when the work is done is written unless one is there.
 
     MODULE is the path other projects would import this one by — a URL's
     path half, `example.com/me/hello` — or a bare name like `hello` for a

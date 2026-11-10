@@ -89,12 +89,17 @@ and offset; `ris check` warns of an `@pos += 1` that indexes tape text.
 Needs Crystal and LLVM 23. In the clone: `make ris`, then
 `./bin/ris run samples/ris/hello.ri`. To install, follow README.md.
 
-* `ris init example.com/me/app` writes `ris.mod` and `app.ri`;
-  `ris get github.com/x/y` adds a requirement.
+* `ris init example.com/me/app` writes `ris.mod`, `app.ri` and an
+  `AGENTS.md`; `ris get github.com/x/y` adds a requirement.
 * After every edit: `ris check -f json FILE` (errors, with suggested
   edits), `ris fix FILE`, `ris fmt`, `ris test` (runs every `*_test.ri`;
   exit 0 passes). A test is a program: `import app::*`, then
   `exit 1 unless parse_age("7") == 7`.
+* Before you say done: `ris ok`. It runs `fmt --check`, `mod tidy
+  --check`, `check`, `vet` and `test`, stops at the first failure with a
+  `next:` line naming the fix, and exits 0 only when all pass. `--json`
+  gives the verdict as data; `--affected FILE` narrows check and test.
 * `ris doc MODULE` prints a module's exported surface: read that, not its
-  body. `ris mcp` serves check, fix, context and test as MCP tools.
+  body. `ris mcp` serves check, fix, context, test and ok as MCP
+  tools.
 * `ris help` and `ris COMMAND --help` say the rest.

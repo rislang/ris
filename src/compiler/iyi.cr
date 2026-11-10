@@ -40,6 +40,7 @@ module Iyi
         run          build and run a program (default)
         mod          inspect a .iyimod artifact; `mod tidy` fixes ris.mod
         doc          print a module's exported surface, or a prelude type's
+        ok           run every check and test: exit 0 means the work is done
         test         run every *_test.ri: exit 0 passes, else fails
         vet          report unreachable code; findings are the exit code
         check        type-check only; errors are the exit code, -f json data
@@ -70,7 +71,7 @@ module Iyi
   VERSION = Iyi::Config.iyi_version
 
   DELEGATED = %w(init get build run mod env clear_cache tool daemon test
-    doc lsp vet check unsafe heap fix mcp)
+    doc lsp vet check unsafe heap fix mcp ok)
 
   # The ones that belong to Crystal and are still in the binary underneath.
   # Named rather than swallowed, because "unknown command" would be a lie.

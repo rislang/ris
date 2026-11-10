@@ -46,8 +46,8 @@ cd "$WORK" || exit 1
 "$IYI" init example.com/me/hello app > init.txt 2>&1
 say "init writes a project and says what it wrote" \
   "$([ $? -eq 0 ] && grep -qE 'wrote app[/\\]hello.ri' init.txt && grep -q 'run hello.ri' init.txt; echo $?)"
-say "two files and no more: ris.mod and hello.ri" \
-  "$([ "$(ls app | sort | tr '\n' ' ')" = "hello.ri ris.mod " ]; echo $?)"
+say "three files and no more: AGENTS.md, ris.mod and hello.ri" \
+  "$([ "$(ls app | sort | tr '\n' ' ')" = "AGENTS.md hello.ri ris.mod " ]; echo $?)"
 grep -q '^module example.com/me/hello$' app/ris.mod
 say "the manifest names the module" $?
 grep -q '^module hello$' app/hello.ri
@@ -91,8 +91,8 @@ say "a directory with ; or \$ in its name is one word to cd" \
 
 # ── the name, the current directory, and the refusals ────────────────────
 mkdir -p here && (cd here && "$IYI" init kemal) > here.txt 2>&1
-say "init kemal writes ris.mod and kemal.ri into the current directory" \
-  "$([ "$(ls here | sort | tr '\n' ' ')" = "kemal.ri ris.mod " ] && grep -q '^module kemal$' here/ris.mod; echo $?)"
+say "init kemal writes AGENTS.md, ris.mod and kemal.ri into the current directory" \
+  "$([ "$(ls here | sort | tr '\n' ' ')" = "AGENTS.md kemal.ri ris.mod " ] && grep -q '^module kemal$' here/ris.mod; echo $?)"
 "$IYI" init github.com/me/iyi-web dash > dash.txt 2>&1
 say "a repository name with - is a module name with _" \
   "$([ -f dash/iyi_web.ri ] && grep -q '^module iyi_web$' dash/iyi_web.ri; echo $?)"
@@ -112,7 +112,7 @@ say "a path with a newline in it is refused, and nothing written" \
 # project that did not build. Refused by name, and nothing written.
 "$IYI" init example.com/me/string clash > clash.txt 2>&1
 say "a name that is a prelude type is refused, naming the type" \
-  "$([ $? -ne 0 ] && grep -q "String is already the prelude's class" clash.txt && [ ! -e clash ]; echo $?)"
+  "$([ $? -ne 0 ] && grep -q "String is already the prelude's struct" clash.txt && [ ! -e clash ]; echo $?)"
 "$IYI" init class klass > klass.txt 2>&1
 say "and so is one that is the prelude's metaclass" \
   "$([ $? -ne 0 ] && grep -q "Class is already the prelude's metaclass" klass.txt && [ ! -e klass ]; echo $?)"

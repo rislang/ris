@@ -54,6 +54,7 @@ class Iyi::Command
         doc                      print a module's exported surface, docs included
         build                    build an executable
         clear_cache              clear the compiler cache
+        ok                       run every check and test: exit 0 means the work is done
         check                    type-check only: no codegen, no binary; errors are the exit code
         fix                      apply the compiler's did-you-mean edits until the file is clean
         env                      print Crystal environment information
@@ -175,6 +176,10 @@ class Iyi::Command
       # holds its full name.
       options.shift
       check
+    when command == "ok"
+      # Exact, like `check`: it runs every verb a change must pass.
+      options.shift
+      ok
     when command == "heap"
       options.shift
       heap

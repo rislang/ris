@@ -63,6 +63,11 @@ jobs:
       - name: The respond sample runs
         if: matrix.shard == 'heap'
         run: ./bin/ris run samples/ris/respond.ri
+      - name: ris ok
+        if: matrix.shard == 'heap'
+        run: python3 bench/ok_verb.py
+        env:
+          IYI: ./bin/ris
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:

@@ -832,7 +832,7 @@ def main():
     rpc("notifications/initialized")
     tools = [t["name"] for t in rpc("tools/list", None, 2)["result"]["tools"]]
     step("mcp lists the loop's tools",
-         tools == ["check", "fix", "context", "test", "doc"], f"{tools}")
+         tools == ["check", "fix", "context", "test", "ok", "doc"], f"{tools}")
     reply = rpc("tools/call", {"name": "check", "arguments": {"file": "app.iyi"}}, 3)
     step("mcp check answers [] on the clean file",
          json.loads(reply["result"]["content"][0]["text"]) == [], "")

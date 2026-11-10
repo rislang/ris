@@ -35,7 +35,8 @@ class Iyi::Command
 
         Tools: check (front-end verdict with suggested edits), fix
         (apply them), context (a file's grounding pack), test (run
-        tests, optionally only those an edit can reach).
+        tests, optionally only those an edit can reach), ok (every
+        check and test in one verdict: is the work done).
         USAGE
       exit
     end
@@ -143,7 +144,7 @@ class Iyi::Command
     end
   end
 
-  # The catalogue, verbatim JSON: five tools, each one existing verb.
+  # The catalogue, verbatim JSON: six tools, each one existing verb.
   # Schemas are the arguments those verbs already take — nothing here
   # exists only over the wire.
   MCP_TOOLS = <<-JSON
@@ -187,6 +188,17 @@ class Iyi::Command
         }
       },
       {
+        "name": "ok",
+        "description": "Is the work done? Runs fmt --check, mod tidy --check (when ris.mod exists), check, vet and test, fastest first, and stops at the first failure. Returns {ok, steps, failed, output, next}: next names the command that fixes the failing step. Pass affected=[changed files] to check and test only what a change reaches.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string", "description": "project directory or file (default: .)"},
+            "affected": {"type": "array", "items": {"type": "string"}, "description": "files that changed; check and test only what they reach"}
+          }
+        }
+      },
+      {
         "name": "doc",
         "description": "What can be called: a module's exported surface (functions, types, methods, impls, with their doc comments, no bodies) from a .ri file or a .iyimod artifact, or a type of the prelude by name - `String`, `Array`, `Hash`, `Float64`, `Program` - the same way. Text.",
         "inputSchema": {
@@ -218,8 +230,8 @@ class Iyi::Command
       when "context"
         return mcp_tool_error(id, "context needs a file") unless file
         ["mod", "context", "--json", file]
-      when "test"
-        built = ["test", "--json"]
+      when "test", "ok"
+        built = [name, "--json"]
         arguments.try(&.dig?("affected")).try(&.as_a?).try &.each do |changed|
           if path = changed.as_s?
             built << "--affected" << path
@@ -235,8 +247,8 @@ class Iyi::Command
         ["doc", target]
       else
         # With the catalogue, because a caller that guessed a name wrong
-        # has no other way to learn the five from an error, and the list
-        # is five words long.
+        # has no other way to learn the six from an error, and the list
+        # is six words long.
         return mcp_tool_error(id, "unknown tool: #{name}. This server has #{mcp_tool_names.join(", ")}")
       end
 
