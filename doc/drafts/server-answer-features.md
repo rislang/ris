@@ -313,3 +313,10 @@ Differs:
   `HTTP.upgrade`, `TlsServerConfig.from_pem`); each now stops first at
   such an error, none at a server form. samples/iyi/autocert.iyi
   stops at `records_handshake`.
+* Not gated: answer_upgrade has no `SSE.stream` case, though Gates
+  promised SSE events there. answer_h2.ri was not made; its cases are
+  in answer_tls.ri.
+* New refusals the draft did not name: `SSE.stream` raises when the
+  handler already wrote a `Content-Type` (sse.iyi:542), and
+  `res.header` raises "a header after the head was sent" after
+  `stream` or `send` (http.iyi:2117).

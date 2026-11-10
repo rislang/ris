@@ -890,9 +890,9 @@ end
 #
 #     responder = AcmeHttp01.new
 #     # Build responder and app in Handler.new(copied_config).
-#     # Handler#call(request) first asks @responder.answer(request), then
-#     # falls back to @app.call(request).
-#     Server.serve("0.0.0.0", 80, config, Handler)
+#     # Handler#call(req, res) first asks @responder.answer(req, res),
+#     # then falls back to @app.call(req, res).
+#     Server.answer("0.0.0.0", 80, config, Handler)
 pub class AcmeHttp01
   PATH = "/.well-known/acme-challenge/"
   @answers : Hash(String, String) = {} of String => String
