@@ -14,7 +14,7 @@ module std_mail_exercise
 
 import std/text
 
-import std/mail::{Mail, MailError}
+import std/mail::{Mail, MailAddresses, MailError}
 import std/digest::{SHA256}
 
 def assert_true(cond : Bool, msg : String) : Nil
@@ -62,16 +62,31 @@ def bytes(list : Array(Int32)) : String
   end
 end
 
-def parsed(text : String) : Mail::TapePart
-  got = Mail.parse(text)
+# The message *text* parses to; its parser lives in the caller's scope.
+macro parsed(text)
+  %parser = Mail::RisMailParser.new({{text}})
+  parsed_part(%parser.parse, {{text}})
+end
+
+def parsed_part(got : Mail::TapePart | MailError, text : String) : Mail::TapePart
   raise "ASSERTION FAILED: #{text[0, text.bytesize > 60 ? 60 : text.bytesize].inspect} did not parse: #{got.message}" if got.is_a?(MailError)
   got
 end
 
-def refused(text : String) : String
-  got = Mail.parse(text)
+macro refused(text)
+  %parser = Mail::RisMailParser.new({{text}})
+  refusal(%parser.parse)
+end
+
+def refusal(got : Mail::TapePart | MailError) : String
   return got.message if got.is_a?(MailError)
   "parsed"
+end
+
+# The mailboxes *text* lists; its parser lives in the caller's scope.
+macro address_list(text)
+  %parser = MailAddresses.new({{text}})
+  %parser.list
 end
 
 def text_of(part : Mail::TapePart?) : String
@@ -135,54 +150,71 @@ end
 
 def build(spec : String, dir : String) : Nil
   count = 0
+  lines = File.read(spec).split('\n')
+  start = 0
+  lines.each_with_index do |line, i|
+    if line.split(' ')[0] == "end"
+      write_message(lines, start, i, dir, count)
+      count = count + 1
+      start = i + 1
+    end
+  end
+end
+
+# One message of the spec, *lines* from *start* before *stop*, written as
+# *count*.eml.
+def write_message(lines : Array(String), start : Int32, stop : Int32, dir : String, count : Int32) : Nil
   msg = Mail::Message.new
-  File.read(spec).split('\n').each do |line|
+  (start...stop).each do |k|
+    line = lines[k]
     f = line.split(' ')
     case f[0]
     when "from"
-      msg.from = Mail::Address.new(unhex(f[2]), unhex(f[1]))
+      msg.from = Mail::Address.new(unhex(f[2]), unhex(f[1])).copy_to(Program.tape)
     when "to"
-      msg.to << Mail::Address.new(unhex(f[2]), unhex(f[1]))
+      msg.to << Mail::Address.new(unhex(f[2]), unhex(f[1])).copy_to(Program.tape)
     when "cc"
-      msg.cc << Mail::Address.new(unhex(f[2]), unhex(f[1]))
+      msg.cc << Mail::Address.new(unhex(f[2]), unhex(f[1])).copy_to(Program.tape)
     when "bcc"
-      msg.bcc << Mail::Address.new(unhex(f[2]), unhex(f[1]))
+      msg.bcc << Mail::Address.new(unhex(f[2]), unhex(f[1])).copy_to(Program.tape)
     when "reply"
-      msg.reply_to << Mail::Address.new(unhex(f[2]), unhex(f[1]))
+      msg.reply_to << Mail::Address.new(unhex(f[2]), unhex(f[1])).copy_to(Program.tape)
     when "subject"
-      msg.subject = unhex(f[1])
+      msg.subject = unhex(f[1]).copy_to(Program.tape)
     when "date"
-      msg.date = Mail.date(f[1].to_i64, f[2].to_i)
+      msg.date = Mail.date(f[1].to_i64, f[2].to_i).copy_to(Program.tape)
     when "id"
-      msg.message_id = unhex(f[1])
+      msg.message_id = unhex(f[1]).copy_to(Program.tape)
     when "text"
-      msg.text = unhex(f[1])
+      msg.text = unhex(f[1]).copy_to(Program.tape)
     when "html"
-      msg.html = unhex(f[1])
+      msg.html = unhex(f[1]).copy_to(Program.tape)
     when "attach"
-      msg.attach(unhex(f[1]), unhex(f[2]), f[3] == "-" ? nil : unhex(f[3]))
+      msg.attach(unhex(f[1]).copy_to(Program.tape), unhex(f[2]).copy_to(Program.tape), f[3] == "-" ? nil : unhex(f[3]).copy_to(Program.tape))
     when "header"
-      msg.header(unhex(f[1]), unhex(f[2]))
-    when "end"
-      File.write("#{dir}/#{count}.eml", msg.to_s)
-      puts "#{count} #{msg.recipients.map { |r| hex(r) }.join(",")} #{msg.utf8?}"
-      count = count + 1
-      msg = Mail::Message.new
+      msg.header(unhex(f[1]).copy_to(Program.tape), unhex(f[2]).copy_to(Program.tape))
     end
   end
+  File.write("#{dir}/#{count}.eml", msg.to_s)
+  recipients = Array(String).new
+  recipient_text = String::Builder.new(256)
+  msg.recipients(recipients, recipient_text)
+  puts "#{count} #{recipients.map { |r| hex(r) }.join(",")} #{msg.utf8?}"
 end
 
 def describe(dir : String, count : Int32) : Nil
   i = 0
   while i < count
     puts "message #{i}"
-    got = Mail.parse(File.read("#{dir}/#{i}.eml"))
+    parser = Mail::RisMailParser.new(File.read("#{dir}/#{i}.eml"))
+    got = parser.parse
     if got.is_a?(MailError)
       puts "error #{got.message}"
     else
       puts "subject #{hex(got.subject || "")}"
       ["From", "To", "Cc", "Reply-To"].each do |field|
-        list = got.addresses(field)
+        field_parser = MailAddresses.new("")
+        list = got.addresses(field, field_parser)
         if list.is_a?(MailError)
           puts "#{field} error #{list.message}"
         else
@@ -229,11 +261,12 @@ def codec(cases : String) : Nil
       got = Mail.parse_date(data)
       puts got.is_a?(MailError) ? "error" : "#{got[0]} #{got[1]}"
     when "addresses"
-      got = Mail::Address.parse_list(data)
-      if got.is_a?(MailError)
+      address_parser = MailAddresses.new(data)
+      listed = address_parser.list
+      if listed.is_a?(MailError)
         puts "error"
       else
-        puts got.map { |a| hex(a.name) + "/" + hex(a.address) }.join(",")
+        puts listed.map { |a| hex(a.name) + "/" + hex(a.address) }.join(",")
       end
     end
   end
@@ -351,38 +384,39 @@ assert_str "Subject: ascii only\r\n", Mail.fold("Subject", "ascii only"), "ASCII
 puts "  78 columns, 75 an encoded-word, values back whole"
 
 puts "== addresses, RFC 5322 appendix A"
-assert_str "John Doe|jdoe@machine.example", addrs(Mail::Address.parse_list("John Doe <jdoe@machine.example>")), "A.1.1"
-assert_str "Joe Q. Public|john.q.public@example.com", addrs(Mail::Address.parse_list("\"Joe Q. Public\" <john.q.public@example.com>")), "A.1.2 From"
+assert_str "John Doe|jdoe@machine.example", addrs(address_list("John Doe <jdoe@machine.example>")), "A.1.1"
+assert_str "Joe Q. Public|john.q.public@example.com", addrs(address_list("\"Joe Q. Public\" <john.q.public@example.com>")), "A.1.2 From"
 assert_str "Mary Smith|mary@x.test, |jdoe@example.org, Who?|one@y.test",
-  addrs(Mail::Address.parse_list("Mary Smith <mary@x.test>, jdoe@example.org, Who? <one@y.test>")), "A.1.2 To"
+  addrs(address_list("Mary Smith <mary@x.test>, jdoe@example.org, Who? <one@y.test>")), "A.1.2 To"
 assert_str "|boss@nil.test, Giant; \"Big\" Box|sysservices@example.net",
-  addrs(Mail::Address.parse_list("<boss@nil.test>, \"Giant; \\\"Big\\\" Box\" <sysservices@example.net>")), "A.1.2 Cc"
+  addrs(address_list("<boss@nil.test>, \"Giant; \\\"Big\\\" Box\" <sysservices@example.net>")), "A.1.2 Cc"
 assert_str "Ed Jones|c@a.test, |joe@where.test, John|jdoe@one.test",
-  addrs(Mail::Address.parse_list("A Group:Ed Jones <c@a.test>,joe@where.test,John <jdoe@one.test>;")), "A.1.3 a group's members"
-assert_str "", addrs(Mail::Address.parse_list("Undisclosed recipients:;")), "A.1.3 an empty group"
-assert_str "Pete|pete@silly.test", addrs(Mail::Address.parse_list("Pete(A nice \\) chap) <pete(his account)@silly.test(his host)>")), "A.5 comments are passed over"
+  addrs(address_list("A Group:Ed Jones <c@a.test>,joe@where.test,John <jdoe@one.test>;")), "A.1.3 a group's members"
+assert_str "", addrs(address_list("Undisclosed recipients:;")), "A.1.3 an empty group"
+assert_str "Pete|pete@silly.test", addrs(address_list("Pete(A nice \\) chap) <pete(his account)@silly.test(his host)>")), "A.5 comments are passed over"
 assert_str "Chris Jones|c@public.example, |joe@example.org, John|jdoe@one.test",
-  addrs(Mail::Address.parse_list("A Group(Some people)\r\n     :Chris Jones <c@(Chris's host.)public.example>,\r\n         joe@example.org,\r\n  John <jdoe@one.test> (my dear friend); (the end of the group)")), "A.5 a group with comments"
-assert_str "", addrs(Mail::Address.parse_list("(Empty list)(start)Hidden recipients  :(nobody(that I know))  ;")), "A.5 nested comments"
-assert_str "Joe Q. Public|john.q.public@example.com", addrs(Mail::Address.parse_list("Joe Q. Public <john.q.public@example.com>")), "A.6.1 obs-phrase"
+  addrs(address_list("A Group(Some people)\r\n     :Chris Jones <c@(Chris's host.)public.example>,\r\n         joe@example.org,\r\n  John <jdoe@one.test> (my dear friend); (the end of the group)")), "A.5 a group with comments"
+assert_str "", addrs(address_list("(Empty list)(start)Hidden recipients  :(nobody(that I know))  ;")), "A.5 nested comments"
+assert_str "Joe Q. Public|john.q.public@example.com", addrs(address_list("Joe Q. Public <john.q.public@example.com>")), "A.6.1 obs-phrase"
 assert_str "Mary Smith|mary@example.net, |jdoe@test.example",
-  addrs(Mail::Address.parse_list("Mary Smith <@node.test:mary@example.net>, , jdoe@test  . example")), "A.6.1 a route, an empty member, obs-domain"
-assert_str "|\"john doe\"@example.com", addrs(Mail::Address.parse_list("\"john doe\"@example.com")), "a quoted local part stays quoted"
-assert_str "john doe", Mail::Address.parse("\"john doe\"@example.com").as(Mail::Address).local, "a quoted local part's text"
-assert_str "|\"a\\\"b\"@x.test", addrs(Mail::Address.parse_list("\"a\\\"b\"@x.test")), "a quoted-pair is quoted again"
-assert_str "|john.doe@example.com", addrs(Mail::Address.parse_list("\"john.doe\"@example.com")), "a dot-atom in quotes needs none"
-assert_str "|user@[192.0.2.1]", addrs(Mail::Address.parse_list("user@[192.0.2.1]")), "a domain literal"
-assert_str "|jdoe@one.test", addrs(Mail::Address.parse_list("jdoe@one.test (John Doe)")), "a comment after an address is not its name"
-assert_str "André Pirard|PIRARD@vm1.ulg.ac.be", addrs(Mail::Address.parse_list("=?ISO-8859-1?Q?Andr=E9?= Pirard <PIRARD@vm1.ulg.ac.be>")), "RFC 2047's encoded name"
-assert_str "Jörg Müller|j@x.test", addrs(Mail::Address.parse_list("=?utf-8?q?J=C3=B6rg?= =?utf-8?q?_M=C3=BCller?= <j@x.test>")), "two encoded-words in a name"
-assert_str "Jörg|jörg@bücher.example", addrs(Mail::Address.parse_list("Jörg <jörg@bücher.example>")), "RFC 6532's UTF-8"
+  addrs(address_list("Mary Smith <@node.test:mary@example.net>, , jdoe@test  . example")), "A.6.1 a route, an empty member, obs-domain"
+assert_str "|\"john doe\"@example.com", addrs(address_list("\"john doe\"@example.com")), "a quoted local part stays quoted"
+quoted_parser = MailAddresses.new("\"john doe\"@example.com")
+assert_str "john doe", quoted_parser.single.as(Mail::Address).local, "a quoted local part's text"
+assert_str "|\"a\\\"b\"@x.test", addrs(address_list("\"a\\\"b\"@x.test")), "a quoted-pair is quoted again"
+assert_str "|john.doe@example.com", addrs(address_list("\"john.doe\"@example.com")), "a dot-atom in quotes needs none"
+assert_str "|user@[192.0.2.1]", addrs(address_list("user@[192.0.2.1]")), "a domain literal"
+assert_str "|jdoe@one.test", addrs(address_list("jdoe@one.test (John Doe)")), "a comment after an address is not its name"
+assert_str "André Pirard|PIRARD@vm1.ulg.ac.be", addrs(address_list("=?ISO-8859-1?Q?Andr=E9?= Pirard <PIRARD@vm1.ulg.ac.be>")), "RFC 2047's encoded name"
+assert_str "Jörg Müller|j@x.test", addrs(address_list("=?utf-8?q?J=C3=B6rg?= =?utf-8?q?_M=C3=BCller?= <j@x.test>")), "two encoded-words in a name"
+assert_str "Jörg|jörg@bücher.example", addrs(address_list("Jörg <jörg@bücher.example>")), "RFC 6532's UTF-8"
 assert_true Mail::Address.new("jörg@bücher.example").utf8?, "a UTF-8 address says so"
 assert_true !Mail::Address.new("j@x.test", "Jörg").utf8?, "a UTF-8 name alone does not"
 ["a@", "@b", "a b@c", "<a@b", "\"a@b", "a@b c", "Name", "a@b..c", "A:b@c", "(x"].each do |bad|
-  got = Mail::Address.parse_list(bad)
+  got = address_list(bad)
   assert_true got.is_a?(MailError), "#{bad.inspect} is refused, not #{addrs(got)}"
 end
-assert_str "error: mail: an angle address is not closed with > in \"<a@b\"", addrs(Mail::Address.parse_list("<a@b")), "the refusal names why"
+assert_str "error: mail: an angle address is not closed with > in \"<a@b\"", addrs(address_list("<a@b")), "the refusal names why"
 assert_str "Jörg Müller <j@x.test>", Mail::Address.new("j@x.test", "Jörg Müller").to_s, "to_s shows the name"
 assert_str "\"Doe, John\" <j@x.test>", Mail::Address.new("j@x.test", "Doe, John").to_s, "to_s quotes a name with specials"
 puts "  appendix A's mailboxes, groups, comments and obsolete forms, quoting, UTF-8"
@@ -428,9 +462,15 @@ assert_str "Date: Fri, 21 Nov 1997 09:55:06 -0600\r\nFrom: John Doe <jdoe@machin
            "Content-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: 7bit\r\n\r\n" +
            "This is a message just to say hello.\r\nSo, \"Hello\".", wire, "A.1.1 written"
 assert_true !wire.includes?("hidden"), "Bcc is not written"
-assert_str "mary@example.net,hidden@example.org", msg.recipients.join(","), "Bcc is among the recipients"
+seen = Array(String).new
+seen_text = String::Builder.new(256)
+msg.recipients(seen, seen_text)
+assert_str "mary@example.net,hidden@example.org", seen.join(","), "Bcc is among the recipients"
 msg.cc << Mail::Address.new("mary@example.net")
-assert_str "mary@example.net,hidden@example.org", msg.recipients.join(","), "a recipient is named once"
+seen = Array(String).new
+seen_text = String::Builder.new(256)
+msg.recipients(seen, seen_text)
+assert_str "mary@example.net,hidden@example.org", seen.join(","), "a recipient is named once"
 msg.html = "<p>This is a message just to say hello.</p>"
 msg.attach("hello.txt", "hello\n")
 msg.attach("Grüße und ein sehr langer Dateiname, der nicht in eine Zeile passt.pdf", all)
@@ -500,8 +540,10 @@ assert_true written.includes?("To: Ann Lee <b@x.test>, =?utf-8?q?Zo=C3=AB?= <c@x
 # and Python before 3.14.7 did not.
 assert_true written.includes?("Cc: =?utf-8?q?Ana_Mar=C3=ADa?= <d@x.test>\r\n"), "a short name is one encoded-word"
 assert_true written.includes?("X-Mailer: std/mail\r\n"), "a header of the caller's"
-assert_str "Doe, John \"JD\"|a@x.test", addrs(parsed(written).addresses("From")), "the quoted name comes back"
-assert_str "Ann Lee|b@x.test, Zoë|c@x.test", addrs(parsed(written).addresses("To")), "both names come back"
+from_parser = MailAddresses.new("")
+to_parser = MailAddresses.new("")
+assert_str "Doe, John \"JD\"|a@x.test", addrs(parsed(written).addresses("From", from_parser)), "the quoted name comes back"
+assert_str "Ann Lee|b@x.test, Zoë|c@x.test", addrs(parsed(written).addresses("To", to_parser)), "both names come back"
 puts "  A.1.1 written byte for byte, Bcc unwritten, alternatives, attachments, boundaries from the hash"
 
 puts "== reading"
@@ -562,8 +604,11 @@ assert_str "mail: a multipart/mixed body holds no line --b", refused("Content-Ty
 assert_str "mail: a multipart/mixed body ends before its closing line --b--", refused("Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\n\r\ncut short"), "a multipart cut short"
 prefixed = parsed("Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\n\r\none\r\n--bx\r\n\r\ntwo\r\n--b--\r\n")
 assert_true prefixed.parts.size == 1 && body_of(prefixed.parts[0]) == "one\r\n--bx\r\n\r\ntwo", "a boundary is a whole line, not a prefix"
-deep = "\r\nx"
-40.times { |i| deep = "Content-Type: multipart/mixed; boundary=b#{i}\r\n\r\n--b#{i}\r\n" + deep + "\r\n--b#{i}--\r\n" }
+deep = String.build do |io|
+  40.times { |j| i = 39 - j; io << "Content-Type: multipart/mixed; boundary=b#{i}\r\n\r\n--b#{i}\r\n" }
+  io << "\r\nx"
+  40.times { |i| io << "\r\n--b#{i}--\r\n" }
+end
 assert_str "mail: parts are nested deeper than 32", refused(deep), "nesting is bounded"
 assert_str "", body_of(parsed("Subject: no body")), "a message may have no body"
 assert_str "", body_of(parsed("Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\n\r\n--b--\r\n").parts[0]), "an empty part"
