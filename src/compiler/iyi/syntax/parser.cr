@@ -213,7 +213,156 @@ module Iyi
       next_token_skip_statement_end
 
       nodes = parse_expressions.tap { iyi_check_eof }
+      nodes = ris_spec_section(nodes) if @ris_spec_blocks || @ris_top_tests
       apply_module_header(iyi_check_depth(nodes))
+    end
+
+    # ris: keep a file's spec section in the tree (the formatter, and the
+    # test build of step 3). Off, the section is dropped here, before name
+    # resolution: `ris build`, `run` and `doc` see no block, no helper and
+    # no test-only import (doc/drafts/spec-blocks, 5.6).
+    property ris_keep_spec = false
+
+    @ris_exprs_depth = 0
+    @ris_spec_blocks : Array(SpecBlock)? = nil
+    @ris_top_tests : Array(Location)? = nil
+
+    # A statement of the file's own top level in a `.ri` / `.iyi` file.
+    private def ris_top_level? : Bool
+      @iyi && @filename.is_a?(String) && @ris_exprs_depth == 1 &&
+        @def_nest == 0 && @type_nest == 0 && @fun_nest == 0
+    end
+
+    private def ris_rest_of_line : String
+      text = string
+      from = current_pos
+      stop = text.byte_index(10, from) || text.bytesize
+      text.byte_slice(from, stop - from).rchop('\r')
+    end
+
+    private def parse_ris_statement : ASTNode
+      if ris_top_level? && @token.type.ident?
+        if @token.value == "spec"
+          return parse_ris_spec_block
+        elsif @token.value == "test" && ris_rest_of_line.matches?(/\A[ \t]+"/)
+          (@ris_top_tests ||= [] of Location) << @token.location
+        elsif @token.keyword?(:def) &&
+              ris_rest_of_line.matches?(/\A[ \t]+spec(?=[\s(:;]|\z)/)
+          raise "`spec` starts a spec block; name the def otherwise", @token
+        end
+      end
+      parse_multi_assign
+    end
+
+    # `spec N.M  # label` NEWLINE statements `end` (5.1).
+    private def parse_ris_spec_block : ASTNode
+      location = @token.location
+      source_start = current_pos - "spec".bytesize
+      rest = ris_rest_of_line
+      match = rest.match(/\A[ \t]+(\d+(?:\.\d+)+)[ \t]*(?:#[ \t]*(.*?))?[ \t]*\z/)
+      unless match
+        raise ris_spec_shape_error(rest), @token
+      end
+      clause = match[1]
+      label = match[2]?.presence
+      self.current_pos = current_pos + rest.bytesize
+      next_token
+      skip_statement_end
+      body = parse_expressions
+      check_ident :end
+      end_location = token_end_location
+      source_end = current_pos
+      next_token_skip_space
+
+      blocks = (@ris_spec_blocks ||= [] of SpecBlock)
+      ordinal = blocks.count(&.clause.==(clause))
+      block = SpecBlock.new(clause, body, label, ordinal, source_start,
+        source_end)
+      block.at(location)
+      block.end_location = end_location
+      blocks << block
+      block
+    end
+
+    private def ris_spec_shape_error(rest : String) : String
+      if rest.matches?(/\A[ \t]+"/)
+        "a spec block names a SPEC.md clause: `spec 1.2`; the clause text " \
+        "is its name"
+      elsif rest.matches?(/\A[ \t]+\d+(?:\.\d+)+[ \t]+do\b/)
+        "a spec block takes no `do`: write `spec 1.2` alone on its line, " \
+        "then its lines, then `end`"
+      elsif rest.matches?(/\A[ \t]*(#.*)?\z/)
+        "`spec` starts a spec block and needs a SPEC.md clause: `spec 1.2`"
+      else
+        "`spec` at the start of a top-level line starts a spec block: " \
+        "`spec 1.2`, then its lines, then `end`; only a comment may follow " \
+        "the clause number. Name anything else otherwise"
+      end
+    end
+
+    # The spec section (5.4): from the first block to the end of the file
+    # only spec blocks, `import` lines and `private def` helpers. Dropped
+    # unless `ris_keep_spec`.
+    private def ris_spec_section(nodes : ASTNode) : ASTNode
+      list =
+        case nodes
+        when Expressions then nodes.keyword.none? ? nodes.expressions : [nodes] of ASTNode
+        else                  [nodes] of ASTNode
+        end
+      first = list.index(&.is_a?(SpecBlock))
+      unless first
+        return nodes
+      end
+      if test = @ris_top_tests.try(&.first?)
+        raise "a check names a SPEC clause: write `spec N.M`; add the " \
+              "clause to SPEC.md first if none fits", test
+      end
+      opener = list[first]
+      where = "#{ris_short_file(opener.location)}:#{opener.location.try(&.line_number)}"
+      above = Set(String).new
+      list[0...first].each do |node|
+        node = node.exp if node.is_a?(VisibilityModifier)
+        above << node.name if node.is_a?(Def)
+      end
+      list[first..].each do |node|
+        next if node.is_a?(SpecBlock) || node.is_a?(ImportDecl)
+        if node.is_a?(VisibilityModifier) && node.modifier.private? &&
+           (helper = node.exp).is_a?(Def)
+          if above.includes?(helper.name)
+            raise "the helper `#{helper.name}` would replace the code under " \
+                  "proof; rename it", node.location || opener.location.not_nil!
+          end
+          next
+        end
+        raise "#{ris_describe(node)} comes after the spec block at #{where}; " \
+              "move it above the first `spec`: proofs go at the end of the " \
+              "file", node.location || opener.location.not_nil!
+      end
+      return nodes if @ris_keep_spec
+      Expressions.from(list[0...first])
+    end
+
+    private def ris_short_file(location : Location?) : String
+      file = location.try(&.filename)
+      file.is_a?(String) ? File.basename(file) : "this file"
+    end
+
+    private def ris_describe(node : ASTNode) : String
+      prefix = ""
+      if node.is_a?(VisibilityModifier)
+        prefix = "#{node.modifier.to_s.downcase} "
+        node = node.exp
+      end
+      case node
+      when Def      then "`#{prefix}def #{node.name}`"
+      when ClassDef then "`#{prefix}#{node.struct? ? "struct" : "class"} #{node.name}`"
+      when ModuleDef then "`#{prefix}module #{node.name}`"
+      when EnumDef  then "`#{prefix}enum #{node.name}`"
+      else
+        text = node.to_s.lines.first? || ""
+        text = "#{text[0, 40]}…" if text.size > 40
+        "`#{prefix}#{text}`"
+      end
     end
 
     # iyi: what is left once every top-level expression is read is a
@@ -450,25 +599,30 @@ module Iyi
         return Nop.new
       end
 
-      exp = parse_multi_assign
+      @ris_exprs_depth += 1
+      begin
+        exp = parse_ris_statement
 
-      slash_is_regex!
-      skip_statement_end
-
-      if end_token?
-        return exp
-      end
-
-      exps = [] of ASTNode
-      exps.push exp
-
-      loop do
-        exps << parse_multi_assign
+        slash_is_regex!
         skip_statement_end
-        break if end_token?
-      end
 
-      Expressions.from(exps)
+        if end_token?
+          return exp
+        end
+
+        exps = [] of ASTNode
+        exps.push exp
+
+        loop do
+          exps << parse_ris_statement
+          skip_statement_end
+          break if end_token?
+        end
+
+        Expressions.from(exps)
+      ensure
+        @ris_exprs_depth -= 1
+      end
     end
 
     def parse_multi_assign

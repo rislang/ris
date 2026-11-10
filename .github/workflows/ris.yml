@@ -78,6 +78,11 @@ jobs:
         run: bash test/cli/test_walk.sh
         env:
           IYI: ./bin/ris
+      - name: spec blocks parse, are refused and stripped
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_grammar.sh
+        env:
+          IYI: ./bin/ris
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:
