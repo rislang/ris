@@ -107,9 +107,6 @@ Decide with EGM, then gate:
 
 ## sse.ri and HTTPClient pooling
 
-* test/ris/sse.ri is refused and is not in check.sh: EventParser replaces
-  `@line` and `@data` with a new builder in a round, and keeps `@type` and
-  `@id_buffer` from `SSE.clean`'s scratch. Give them stable storage.
 * HTTPClient's ordinary open/request pooling still needs transport
   storage supplied by its caller. DoH now retains an explicit exchange
   owner and uses HTTP.open_at_into; a request-local Conn cannot be kept

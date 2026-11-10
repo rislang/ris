@@ -131,11 +131,8 @@ end
 # nil until it sets one; `dispatched` the events yielded so far.
 @[OnTape]
 pub class EventParser
-  getter last_event_id : String
   getter retry : Int32?
   getter dispatched : Int64
-  getter id_buffer : String
-  getter type : String
   getter data : String::Builder
   getter line : String::Builder
   getter after_cr : Bool
@@ -143,15 +140,35 @@ pub class EventParser
 
   MAX_RETRY = 2147483647
 
-  def initialize(@last_event_id : String = "")
-    @id_buffer = @last_event_id
-    @type = ""
+  # Each text the parser keeps lives in a builder of its own, emptied
+  # with `clear` and written again: nothing is made per line or event.
+  @last_id : String::Builder
+  @id : String::Builder
+  @kind : String::Builder
+
+  # A stream resumed under a last event ID sets it with `resume`.
+  def initialize
+    @last_id = String::Builder.new
+    @id = String::Builder.new
+    @kind = String::Builder.new
     @data = String::Builder.new
     @line = String::Builder.new
     @after_cr = false
     @first = true
     @retry = nil
     @dispatched = 0_i64
+  end
+
+  def last_event_id : String
+    @last_id.finish
+  end
+
+  def id_buffer : String
+    @id.finish
+  end
+
+  def type : String
+    @kind.finish
   end
 
   def data_buffer : String
@@ -162,13 +179,34 @@ pub class EventParser
     @line.finish
   end
 
+  # The last event ID a resumed stream starts from.
+  def resume(id : String) : Nil
+    @last_id.clear
+    @last_id << id
+    @id.clear
+    @id << id
+  end
+
+  # A new connection to the same source: what the last one left unended
+  # is dropped and `dispatched` counts from zero; the last event ID and
+  # the reconnection time stay.
+  def reconnect : Nil
+    finish
+    @first = true
+    @dispatched = 0_i64
+  end
+
   def restore(id : String, type : String,
               data : String, line : String,
               after_cr : Bool, first : Bool, retry : Int32?,
               dispatched : Int64) : Nil
-    @id_buffer = id
-    @type = type
+    @id.clear
+    @id << id
+    @kind.clear
+    @kind << type
+    @data.clear
     @data << data
+    @line.clear
     @line << line
     @after_cr = after_cr
     @first = first
@@ -194,7 +232,6 @@ pub class EventParser
         if @line.length > 0
           @line << line
           line = @line.finish
-          @line = String::Builder.new
         end
         i = i + 1
         if c == 13_u8
@@ -207,7 +244,12 @@ pub class EventParser
         start = i
         if event = take(line)
           yield event
+          # The block is done with the event, which viewed these bytes.
+          @data.clear
+          @kind.clear
         end
+        # The line viewed the builder's bytes; write it again from empty.
+        @line.clear
       else
         i = i + 1
       end
@@ -218,9 +260,9 @@ pub class EventParser
   # The end of the stream: a line or an event not yet ended is discarded,
   # not dispatched. The last event ID and the reconnection time stay.
   def finish : Nil
-    @line = String::Builder.new
-    @data = String::Builder.new
-    @type = "".as_tape
+    @line.clear
+    @data.clear
+    @kind.clear
     @after_cr = false
   end
 
@@ -248,11 +290,15 @@ pub class EventParser
       end
     end
     if field == "event"
-      @type = value
+      @kind.clear
+      @kind << value
     elsif field == "data"
       @data << value << '\n'
     elsif field == "id"
-      @id_buffer = value unless value.includes?('\0')
+      unless value.includes?('\0')
+        @id.clear
+        @id << value
+      end
     elsif field == "retry"
       if ms = EventParser.digits(value)
         @retry = ms
@@ -264,17 +310,18 @@ pub class EventParser
   # A blank line: the last event ID is the buffer's whether or not an
   # event goes, and an event goes when it has data.
   private def dispatch : Event?
-    @last_event_id = @id_buffer
+    @last_id.clear
+    @last_id << @id.finish
     if @data.length == 0
-      @type = "".as_tape
+      @kind.clear
       return nil
     end
     data = @data.finish
     data = data[0, data.bytesize - 1] if !data.empty? && data[-1] == 10_u8
-    @data = String::Builder.new
-    kind = @type.empty? ? "message".as_tape : @type
-    event = Event.new(kind, data, @last_event_id)
-    @type = "".as_tape
+    # The event views the builders' bytes: `feed` empties them after
+    # the caller's block has had it.
+    kind = @kind.length == 0 ? "message".as_tape : @kind.finish
+    event = Event.new(kind, data, @last_id.finish)
     @dispatched = @dispatched + 1_i64
     event
   end
@@ -337,7 +384,6 @@ pub class EventWriter
 end
 
 pub struct SSE
-
   def self.encode(data : String, event : String? = nil,
                   id : String? = nil,
                   retry : Int32? = nil) : String
@@ -376,7 +422,6 @@ pub struct SSE
     end
     writer << '\n'
   end
-
 
   def self.comment(text : String) : String
     String.build { |w| comment(text, w) }
@@ -537,16 +582,24 @@ pub struct SSE
     raise "SSE: an id cannot hold a line break or a NUL: #{last.inspect}" if HTTP.has_break?(last) || last.includes?("\0")
     delay = retry
     misses = 0
+    # One parser for every connection: its last event ID carries over.
+    parser = EventParser.new
+    parser.resume(last)
     while true
+      last = parser.last_event_id
       # Built anew each turn, not a dup: no storage shared with *headers*.
       sent = Hash(String, String).new
       headers.each { |name, value| sent[name] = value }
       sent["Accept"] = "text/event-stream"
       sent["Cache-Control"] = "no-cache" unless cached
-      sent["Last-Event-ID"] = last if last.bytesize > 0 && !HTTP.control?(last)
-      parser = EventParser.new(last)
+      # A copy: the parser writes its last event ID again as it reads.
+      if last.bytesize > 0 && !HTTP.control?(last)
+        id = ""
+        id << last
+        sent["Last-Event-ID"] = id
+      end
+      parser.reconnect
       outcome = HTTP.open("GET", url, sent) { |response| SSE.follow(response, parser) { |event| yield event } }
-      last = parser.last_event_id
       if ms = parser.retry
         delay = ms
       end

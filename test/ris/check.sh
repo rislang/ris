@@ -272,6 +272,15 @@ else
   echo "FAILED   hash_join_copy: $out"; status=1
 fi
 
+# An SSE parser keeps its text in builders it refills, on the caller's tape.
+out=$("$RIS" run test/ris/sse.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    [ "$out" = 'PASS: sse caller tape and explicit retained copy' ]; then
+  echo 'runs     sse'
+else
+  echo "FAILED   sse: $out"; status=1
+fi
+
 # Empty local collections fix their types at the first store.
 out=$("$RIS" run test/ris/array_infer.ri 2>&1)
 if [ "$?" -eq 0 ] &&
