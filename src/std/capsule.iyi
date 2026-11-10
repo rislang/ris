@@ -110,7 +110,7 @@ pub struct VarInt
 
   # Byte *i* of *value*'s varint of *length* bytes: big-endian, the two
   # high bits of the first naming the length.
-  private def self.byte(value : UInt64, length : Int32, i : Int32) : UInt8
+  protected def self.byte(value : UInt64, length : Int32, i : Int32) : UInt8
     shift = ((length - 1 - i) * 8).to_u64
     b = (value.unsafe_shr(shift) & 0xff_u64).to_u8
     return b unless i == 0
@@ -238,20 +238,15 @@ pub struct HttpDatagram
   #   Quarter Stream ID (i)
   #   HTTP Datagram Payload (..)
   def encode : Bytes
-    qid_bytes = VarInt.encode(@quarter_stream_id)
-    total_size = qid_bytes.size + @payload.size
-    buf = Bytes.new(total_size)
-    i = 0
-    while i < qid_bytes.size
-      buf[i] = qid_bytes[i]
-      i = i + 1
-    end
-    j = 0
-    while j < @payload.size
-      buf[qid_bytes.size + j] = @payload[j]
-      j = j + 1
-    end
-    buf
+    # One call, so the bytes are made in the caller's destination.
+    Bytes.new(VarInt.encoded_size(@quarter_stream_id) + @payload.size) { |i|
+      encoded_byte(i)
+    }
+  end
+
+  private def encoded_byte(i : Int32) : UInt8
+    head = VarInt.encoded_size(@quarter_stream_id)
+    i < head ? VarInt.byte(@quarter_stream_id, head, i) : @payload[i - head]
   end
 
   # Decodes an HTTP Datagram from a byte slice.
@@ -347,34 +342,25 @@ pub struct Capsule
   #   Capsule Length (i)
   #   Capsule Value (..)
   def encode : Bytes
-    type_bytes = VarInt.encode(@capsule_type)
-    len_bytes = VarInt.encode(@value.size.to_u64)
-    total_size = type_bytes.size + len_bytes.size + @value.size
-    buf = Bytes.new(total_size)
+    # One call, so the bytes are made in the caller's destination.
+    Bytes.new(VarInt.encoded_size(@capsule_type) +
+              VarInt.encoded_size(@value.size.to_u64) + @value.size) { |i|
+      encoded_byte(i)
+    }
+  end
 
-    pos = 0
-    i = 0
-    while i < type_bytes.size
-      buf[pos] = type_bytes[i]
-      pos = pos + 1
-      i = i + 1
+  private def encoded_byte(i : Int32) : UInt8
+    type = @capsule_type
+    size = @value.size.to_u64
+    type_end = VarInt.encoded_size(type)
+    head = type_end + VarInt.encoded_size(size)
+    if i < type_end
+      VarInt.byte(type, type_end, i)
+    elsif i < head
+      VarInt.byte(size, head - type_end, i - type_end)
+    else
+      @value[i - head]
     end
-
-    j = 0
-    while j < len_bytes.size
-      buf[pos] = len_bytes[j]
-      pos = pos + 1
-      j = j + 1
-    end
-
-    k = 0
-    while k < @value.size
-      buf[pos] = @value[k]
-      pos = pos + 1
-      k = k + 1
-    end
-
-    buf
   end
 
   # Decodes a single capsule from bytes starting at offset.
@@ -478,9 +464,10 @@ pub struct CapsuleReader
     capsules
   end
 
-  # Decodes capsules and reports both known capsules and the count of skipped unknown types.
-  def self.read_with_skip_count(bytes : Bytes, strict : Bool = false) : {Array(Capsule), Int32}
-    capsules = [] of Capsule
+  # Appends the known capsules to *capsules* and answers how many unknown
+  # ones it skipped.
+  def self.read_with_skip_count(bytes : Bytes, capsules : Array(Capsule),
+                                strict : Bool = false) : Int32
     skipped = 0
     offset = 0
     while offset < bytes.size
@@ -492,7 +479,7 @@ pub struct CapsuleReader
       end
       offset = offset + consumed
     end
-    {capsules, skipped}
+    skipped
   end
 end
 

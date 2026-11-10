@@ -439,16 +439,19 @@ assert_u64 CapsuleType::DATAGRAM, known_caps[0].capsule_type, "known[0] type"
 assert_u64 CapsuleType::CLOSE_WEBTRANSPORT_SESSION, known_caps[1].capsule_type, "known[1] type"
 assert_u64 CapsuleType::DRAIN_WEBTRANSPORT_SESSION, known_caps[2].capsule_type, "known[2] type"
 
-# read_with_skip_count returns known capsules plus exact skip count
-caps_skipped, skip_cnt = CapsuleReader.read_with_skip_count(stream)
+# read_with_skip_count appends the known capsules, answers the skip count
+caps_skipped = [] of Capsule
+skip_cnt = CapsuleReader.read_with_skip_count(stream, caps_skipped)
 assert_i32 3, caps_skipped.size, "read_with_skip_count known count"
 assert_i32 1, skip_cnt, "read_with_skip_count skipped count"
 
-empty_known, empty_skip = CapsuleReader.read_with_skip_count(Bytes.new(0))
+empty_known = [] of Capsule
+empty_skip = CapsuleReader.read_with_skip_count(Bytes.new(0), empty_known)
 assert_i32 0, empty_known.size, "empty stream known count"
 assert_i32 0, empty_skip, "empty stream skip count"
 unk_only = Capsule.new(0x21_u64, Bytes.new(0))
-unk_known, unk_skip = CapsuleReader.read_with_skip_count(unk_only.encode)
+unk_known = [] of Capsule
+unk_skip = CapsuleReader.read_with_skip_count(unk_only.encode, unk_known)
 assert_i32 0, unk_known.size, "all-unknown known count"
 assert_i32 1, unk_skip, "all-unknown skip count"
 puts "  CapsuleReader stream processing and RFC 9297 Section 3.2 extensibility"
