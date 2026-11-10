@@ -107,23 +107,24 @@ Decide with EGM, then gate:
 
 ## sse.ri and HTTPClient pooling
 
-* HTTPClient's ordinary open/request pooling still needs transport
-  storage supplied by its caller. DoH now retains an explicit exchange
-  owner and uses HTTP.open_at_into; a request-local Conn cannot be kept
-  in a longer-lived client's idle list. Today every `HTTP.open` call is
-  refused: `open_by` (http.iyi, `response = Response.new(0)`) makes a
-  RisHttpClientExchange in its own scope ("cannot store a view beyond
-  its owner scope"), so SSE.open is refused too. Repro:
-  `r = HTTP.open("GET", "http://127.0.0.1:1/x") { |resp| resp.status }`.
-  Plan: (1) add `HTTP.open_into(state, method, url, ...)`, the by-name
-  twin of open_at_into, and make `HTTP.open` a caller-side wrapper
-  whose exchange is a local of the caller's round; (2) HTTPClient makes
-  one RisHttpClientExchange per pooled connection in its own scope and
-  keeps `@idle` as indexes into those exchanges, not `{String, Conn}`
-  made per request; a request takes a free exchange and returns it;
-  (3) SSE.open keeps one exchange beside its parser; (4) gate: a run of
-  HTTP.open against a local server, and HTTPClient reusing one
-  connection for two requests (`reused` 1), both in check.sh.
+* HTTPClient's ordinary open/request pooling needs an exchange used for
+  more than one request, and the checker refuses that: a second
+  `open_at_into` (or `open_into`) over one RisHttpClientExchange fails
+  with "cannot shrink tape storage with a live view of
+  Response.@held.@line_values" (via begin_client -> clear), even with a
+  constant block in a def. Repro:
+  `def s(st : RisHttpClientExchange, u : String) : Int32`,
+  `got = HTTP.open_at_into(st, "127.0.0.1", "GET", u) { |r| 1 }`,
+  `got.is_a?(Int32) ? got : -1`, `end`; then
+  `st = RisHttpClientExchange.new(Response.new(0))` and two `s(st, ...)`
+  calls. The exchange's own @response is taken as a live view at the
+  next request's clear: a checker change. After it: HTTPClient owns one
+  exchange per pooled connection with `@idle` as indexes into them, not
+  `{String, Conn}` made per request; SSE.open keeps one exchange beside
+  its parser; gate: two requests over one connection, `reused` 1.
+* Response.stream is refused ("cannot return a value made in this def
+  `stream`'s scratch", SPEC 1.9): the response keeps the writer proc.
+  SSE.stream and every streaming handler are refused with it.
 
 ## Tighten heap_trap
 
