@@ -34,10 +34,17 @@ def assert_str(expected : String, actual : String, msg : String) : Nil
 end
 
 # The archive, or the check that names *label* fails with the sentence.
-def opened(data : String, label : String) : ZipReader
-  got = ZipReader.open(data)
+# The archive *zip* holds loaded, or the check that names *label* fails
+# with the sentence.
+def opened(zip : ZipReader, label : String) : Nil
+  got = zip.load
   raise "ASSERTION FAILED: #{label}: refused with #{got.message.inspect}" if got.is_a?(ZipError)
-  got
+end
+
+# The entry *e* of *zip* opened as a stream, or the check fails.
+def opened(r : ZipEntryReader, label : String) : Nil
+  got = r.open
+  raise "ASSERTION FAILED: #{label} would not open: #{got.message}" if got.is_a?(ZipError)
 end
 
 def content(zip : ZipReader, e : ZipEntry, label : String) : String
@@ -62,8 +69,9 @@ end
 
 # The first error opening the archive and reading every entry answers.
 def first_error(data : String, limit : Int64 = ZipReader::NO_LIMIT) : ZipError?
-  zip = ZipReader.open(data, limit)
-  return zip if zip.is_a?(ZipError)
+  zip = ZipReader.new(data, limit)
+  loaded = zip.load
+  return loaded if loaded.is_a?(ZipError)
   zip.entries.each do |e|
     got = zip.read(e)
     return got if got.is_a?(ZipError)
@@ -231,12 +239,16 @@ mem = Memory.new
 w = ZipWriter.new(mem)
 cases.each { |c| w.add(c[0], c[1], c[2], t0) }
 w.add_directory("only-a-dir", t0)
-w.add("streamed-deflated.txt", Memory.new(text), ZipMethod::Deflated, t0)
-w.add("streamed-stored.bin", Memory.new(binary), ZipMethod::Stored, t0)
-w.add("streamed-empty", Memory.new(""), ZipMethod::Deflated, t0)
+source_1 = Memory.new(text)
+w.add("streamed-deflated.txt", source_1, ZipMethod::Deflated, t0)
+source_2 = Memory.new(binary)
+w.add("streamed-stored.bin", source_2, ZipMethod::Stored, t0)
+source_empty = Memory.new("")
+w.add("streamed-empty", source_empty, ZipMethod::Deflated, t0)
 w.finish("the archive's comment")
 round = mem.to_s
-zip = opened(round, "round trip")
+zip = ZipReader.new(round)
+opened(zip, "round trip")
 assert_true zip.entries.size == cases.size + 4, "every entry listed: #{zip.entries.size}"
 assert_str "the archive's comment", zip.comment, "the comment"
 contents = {} of String => String
@@ -266,25 +278,30 @@ deflated = zip.find("deflated.txt")
 assert_true !deflated.nil? && deflated.method == 8 && deflated.compressed_size < 100000_i64, "deflated is method 8 and smaller"
 assert_true round.byte_index("PK\u0006\u0006").nil?, "no ZIP64 end record where nothing needs it"
 assert_true zip.find("no such").nil?, "find answers nil for a name not there"
-mem = Memory.new
-ZipWriter.new(mem).finish
-empty_archive = mem.to_s
-assert_true empty_archive.bytesize == 22 && opened(empty_archive, "an empty archive").entries.empty?, "an empty archive: the end record alone, no entries"
+mem_2 = Memory.new
+empty_writer = ZipWriter.new(mem_2)
+empty_writer.finish
+empty_archive = mem_2.to_s
+empty_zip = ZipReader.new(empty_archive)
+opened(empty_zip, "an empty archive")
+assert_true empty_archive.bytesize == 22 && empty_zip.entries.empty?, "an empty archive: the end record alone, no entries"
 puts "  #{zip.entries.size} entries, #{round.bytesize} bytes"
 
 puts "== streaming reads"
 zip.entries.each do |e|
   {1, 7, 4096, 65536}.each do |max|
-    r = zip.open(e)
-    raise "ASSERTION FAILED: #{e.name} would not open: #{r.message}" if r.is_a?(ZipError)
+    r = ZipEntryReader.new(zip, e)
+    opened(r, e.name)
     next if max < 4096 && e.size > 20000_i64
     assert_str contents[e.name], drain(r, max, "#{e.name} #{max} a read"), "#{e.name} read #{max} bytes at a time"
     assert_str "", r.read(10).as(String), "#{e.name}: a read after the end answers \"\""
   end
 end
 # Two streams of one archive read in turns.
-a = zip.open(zip.find("deflated.txt").as(ZipEntry)).as(ZipEntryReader)
-b = zip.open(zip.find("binary-stored.bin").as(ZipEntry)).as(ZipEntryReader)
+a = ZipEntryReader.new(zip, zip.find("deflated.txt").as(ZipEntry))
+opened(a, "a")
+b = ZipEntryReader.new(zip, zip.find("binary-stored.bin").as(ZipEntry))
+opened(b, "b")
 ta = String::Builder.new
 tb = String::Builder.new
 while !a.finished? || !b.finished?
@@ -301,7 +318,9 @@ def time_of(t : Time) : String
   w = ZipWriter.new(m)
   w.add("x", "", ZipMethod::Stored, t)
   w.finish
-  stamp(opened(m.to_s, "time").entries[0].modified)
+  zip = ZipReader.new(m.to_s)
+  opened(zip, "time")
+  stamp(zip.entries[0].modified)
 end
 
 assert_str "2024-02-29 13:45:58", time_of(t0), "an even second"
@@ -311,19 +330,23 @@ assert_str "2107-12-31 23:59:58", time_of(Time.utc(2200, 1, 1)), "after 2107 is 
 assert_str "2001-02-03 06:05:06", time_of(Time.utc(2001, 2, 3, 4, 5, 6).in(Location.fixed(7200))), "a time's own wall clock"
 # A date no calendar has, from outside, is the format's first moment.
 bad_date = patched16(patched16(round, central_record(round, 0) + 14, (44 << 9) | (13 << 5) | 1), central_record(round, 0) + 12, 0)
-assert_str "1980-01-01 00:00:00", stamp(opened(bad_date, "month 13").entries[0].modified), "month 13 read as 1980-01-01"
+bad_zip = ZipReader.new(bad_date)
+opened(bad_zip, "month 13")
+assert_str "1980-01-01 00:00:00", stamp(bad_zip.entries[0].modified), "month 13 read as 1980-01-01"
 puts "  two-second steps, 1980 to 2107, the wall clock as written"
 
 puts "== zip64"
-mem = Memory.new
-w = ZipWriter.new(mem, zip64: true)
-w.add("forced-stored.txt", "hello", ZipMethod::Stored, t0)
-w.add("forced-deflated.txt", text, ZipMethod::Deflated, t0)
-w.add("forced-streamed.bin", Memory.new(binary), ZipMethod::Deflated, t0)
-w.add_directory("forced-dir", t0)
-w.finish("zip64 forced")
-forced = mem.to_s
-zip64 = opened(forced, "ZIP64 forced")
+mem_3 = Memory.new
+w_2 = ZipWriter.new(mem_3, zip64: true)
+w_2.add("forced-stored.txt", "hello", ZipMethod::Stored, t0)
+w_2.add("forced-deflated.txt", text, ZipMethod::Deflated, t0)
+source_3 = Memory.new(binary)
+w_2.add("forced-streamed.bin", source_3, ZipMethod::Deflated, t0)
+w_2.add_directory("forced-dir", t0)
+w_2.finish("zip64 forced")
+forced = mem_3.to_s
+zip64 = ZipReader.new(forced)
+opened(zip64, "ZIP64 forced")
 assert_true zip64.entries.size == 4, "ZIP64 forced: four entries"
 zip64.entries.each do |e|
   assert_true e.zip64?, "ZIP64 forced: #{e.name} has the extended field"
@@ -333,16 +356,17 @@ zip64.entries.each do |e|
 end
 assert_true !forced.byte_index("PK\u0006\u0006").nil? && !forced.byte_index("PK\u0006\u0007").nil?, "ZIP64 forced: the end records are written"
 # More entries than 16 bits count: the ZIP64 end records, unasked.
-mem = Memory.new
-w = ZipWriter.new(mem)
+mem_4 = Memory.new
+w_3 = ZipWriter.new(mem_4)
 i = 0
 while i < 70000
-  w.add("e/#{i}", i % 1000 == 0 ? "entry #{i}" : "", ZipMethod::Stored, t0)
+  w_3.add("e/#{i}", i % 1000 == 0 ? "entry #{i}" : "", ZipMethod::Stored, t0)
   i = i + 1
 end
-w.finish
-many = mem.to_s
-manyzip = opened(many, "70000 entries")
+w_3.finish
+many = mem_4.to_s
+manyzip = ZipReader.new(many)
+opened(manyzip, "70000 entries")
 assert_true manyzip.entries.size == 70000, "70000 entries read back through the ZIP64 end record (#{manyzip.entries.size})"
 assert_str "entry 69000", content(manyzip, manyzip.entries[69000], "70000 entries"), "70000 entries: the 69000th"
 assert_true !many.byte_index("PK\u0006\u0006").nil?, "70000 entries: a ZIP64 end record"
@@ -354,12 +378,14 @@ puts "== reading a file"
 path = work + "/out-round.zip"
 File.write(path, round)
 io = File.open(path)
-fzip = ZipReader.open(io)
-raise "ASSERTION FAILED: from a file: #{fzip.message}" if fzip.is_a?(ZipError)
+fzip = ZipReader.new(io)
+opened(fzip, "from a file")
 assert_true fzip.entries.size == zip.entries.size, "from a file: every entry"
 fzip.entries.each { |e| assert_str contents[e.name], content(fzip, e, "from a file"), "from a file: #{e.name}" }
-fa = fzip.open(fzip.find("deflated.txt").as(ZipEntry)).as(ZipEntryReader)
-fb = fzip.open(fzip.find("streamed-stored.bin").as(ZipEntry)).as(ZipEntryReader)
+fa = ZipEntryReader.new(fzip, fzip.find("deflated.txt").as(ZipEntry))
+opened(fa, "fa")
+fb = ZipEntryReader.new(fzip, fzip.find("streamed-stored.bin").as(ZipEntry))
+opened(fb, "fb")
 ta = String::Builder.new
 tb = String::Builder.new
 while !fa.finished? || !fb.finished?
@@ -369,15 +395,16 @@ end
 assert_true ta.to_s == text && tb.to_s == binary, "from a file: two streams read in turns, each seeking its own place"
 io.close
 # Written to a file the same way, and read back.
-io = File.open(work + "/out-file.zip", "w")
-w = ZipWriter.new(io)
-w.add("from-a-file.txt", text, ZipMethod::Deflated, t0)
-w.add("streamed.txt", Memory.new(text), ZipMethod::Deflated, t0)
-w.finish
-io.close
-fzip = ZipReader.open(File.read(work + "/out-file.zip"))
-raise "ASSERTION FAILED: a file written: #{fzip.message}" if fzip.is_a?(ZipError)
-fzip.entries.each { |e| assert_str text, content(fzip, e, "a file written"), "a file written: #{e.name}" }
+io_2 = File.open(work + "/out-file.zip", "w")
+w_4 = ZipWriter.new(io_2)
+w_4.add("from-a-file.txt", text, ZipMethod::Deflated, t0)
+source_4 = Memory.new(text)
+w_4.add("streamed.txt", source_4, ZipMethod::Deflated, t0)
+w_4.finish
+io_2.close
+wzip = ZipReader.new(File.read(work + "/out-file.zip"))
+opened(wzip, "a file written")
+wzip.entries.each { |e| assert_str text, content(wzip, e, "a file written"), "a file written: #{e.name}" }
 puts "  read through seek, written through write"
 
 puts "== refused as a value"
@@ -400,7 +427,8 @@ refused(patched16(round, e0 + 10, 12), "zip: \"stored.txt\": bzip2", "a stored e
 # the second's local header, as a bomb's kernel is shared.
 e1 = central_record(round, 1)
 bomb = patched32(round, e0 + 20, 400_i64)
-assert_true ZipReader.open(bomb).is_a?(ZipError), "overlapping entries refused at open, before any entry is read"
+bomb_zip = ZipReader.new(bomb)
+assert_true bomb_zip.load.is_a?(ZipError), "overlapping entries refused at open, before any entry is read"
 refused(bomb, "\"stored.txt\" and \"deflated.txt\" overlap", "overlapping entries refused")
 refused(patched32(round, e1 + 42, 0_i64), "overlap", "two entries at one offset: overlapping entries refused")
 # A local extra field long enough to push the data over the next header
@@ -417,8 +445,10 @@ flipped = patched(round, 30 + 10 + 3, [0x48])
 refused(flipped, "\"stored.txt\"'s CRC-32 is", "a flipped byte is refused by its CRC-32")
 # And the last piece is not handed out unchecked: one read of the whole
 # entry answers the error, not the bytes.
-fz = opened(flipped, "a flipped byte")
-fr = fz.open(fz.entries[0]).as(ZipEntryReader)
+fz = ZipReader.new(flipped)
+opened(fz, "a flipped byte")
+fr = ZipEntryReader.new(fz, fz.entries[0])
+opened(fr, "fr")
 last_piece = fr.read(65536)
 assert_true last_piece.is_a?(ZipError), "a bad last piece is not handed out"
 assert_true fr.read(1).is_a?(ZipError), "a stream that failed answers its error again"
@@ -445,30 +475,34 @@ puts "  every refusal above is a ZipError naming what is wrong"
 
 puts "== names"
 # Code page 437 when bit 11 is clear: 0x82 is é, 0x81 ü.
-mem = Memory.new
-w = ZipWriter.new(mem)
-w.add("caf_ m_nu.txt", "x", ZipMethod::Stored, t0)
-w.finish
-cp = replaced(replaced(mem.to_s, "caf_", "caf" + byte(0x82)), "m_nu", "m" + byte(0x81) + "nu")
-cpzip = opened(cp, "code page 437")
+mem_5 = Memory.new
+w_5 = ZipWriter.new(mem_5)
+w_5.add("caf_ m_nu.txt", "x", ZipMethod::Stored, t0)
+w_5.finish
+cp = replaced(replaced(mem_5.to_s, "caf_", "caf" + byte(0x82)), "m_nu", "m" + byte(0x81) + "nu")
+cpzip = ZipReader.new(cp)
+opened(cpzip, "code page 437")
 assert_str "café münu.txt", cpzip.entries[0].name, "code page 437 decoded when bit 11 is clear"
 assert_true !cpzip.entries[0].utf8?, "code page 437: no UTF-8 flag"
 # The same bytes with bit 11 set are taken as they are.
-as_utf8 = opened(patched16(cp, central_record(cp, 0) + 8, 0x800), "bit 11").entries[0]
+utf8_zip = ZipReader.new(patched16(cp, central_record(cp, 0) + 8, 0x800))
+opened(utf8_zip, "bit 11")
+as_utf8 = utf8_zip.entries[0]
 assert_true as_utf8.utf8? && as_utf8.name == as_utf8.raw_name && as_utf8.name.bytesize == 13, "with bit 11 the name's bytes are taken as they are"
 puts "  code page 437 and UTF-8"
 
 puts "== extract"
 good = work + "/extracted"
 FileUtils.rm_rf(good)
-mem = Memory.new
-w = ZipWriter.new(mem)
-w.add("top.txt", "top", ZipMethod::Deflated, t0)
-w.add("deep/er/file.txt", text, ZipMethod::Deflated, t0)
-w.add_directory("empty-dir", t0)
-w.add("deep/stored.bin", binary, ZipMethod::Stored, t0)
-w.finish
-ex = opened(mem.to_s, "extract")
+mem_6 = Memory.new
+w_6 = ZipWriter.new(mem_6)
+w_6.add("top.txt", "top", ZipMethod::Deflated, t0)
+w_6.add("deep/er/file.txt", text, ZipMethod::Deflated, t0)
+w_6.add_directory("empty-dir", t0)
+w_6.add("deep/stored.bin", binary, ZipMethod::Stored, t0)
+w_6.finish
+ex = ZipReader.new(mem_6.to_s)
+opened(ex, "extract")
 done = ex.extract(good)
 raise "ASSERTION FAILED: extract: #{done.message}" if done.is_a?(ZipError)
 assert_str "top", File.read(good + "/top.txt"), "extract: top.txt"
@@ -484,13 +518,14 @@ assert_true Dir.exists?(good + "/empty-dir"), "extract: a directory entry"
 }.each do |bad|
   slip_dir = work + "/slip"
   FileUtils.rm_rf(slip_dir)
-  mem = Memory.new
-  w = ZipWriter.new(mem)
-  w.add("first.txt", "written first?", ZipMethod::Stored, t0)
+  slip_mem = Memory.new
+  slip_w = ZipWriter.new(slip_mem)
+  slip_w.add("first.txt", "written first?", ZipMethod::Stored, t0)
   safe = "Z" * bad[0].bytesize
-  w.add(safe, "evil", ZipMethod::Stored, t0)
-  w.finish
-  slip = opened(replaced(mem.to_s, safe, bad[0]), "zip slip")
+  slip_w.add(safe, "evil", ZipMethod::Stored, t0)
+  slip_w.finish
+  slip = ZipReader.new(replaced(slip_mem.to_s, safe, bad[0]))
+  opened(slip, "zip slip")
   got = slip.extract(slip_dir)
   assert_true got.is_a?(ZipError), "zip slip #{bad[0]}: refused"
   if got.is_a?(ZipError)
@@ -502,8 +537,9 @@ end
 # A file whose content fails is not left behind.
 bad_dir = work + "/bad"
 FileUtils.rm_rf(bad_dir)
-fz = opened(flipped, "extract a flipped byte")
-got = fz.extract(bad_dir)
+fz_extract = ZipReader.new(flipped)
+opened(fz_extract, "extract a flipped byte")
+got = fz_extract.extract(bad_dir)
 assert_true got.is_a?(ZipError) && !File.exists?(bad_dir + "/stored.txt"), "extract: a file that fails its check is deleted"
 
 puts "== other methods"
@@ -532,8 +568,8 @@ def every_way(zip : ZipReader, e : ZipEntry, want : String, label : String) : Ni
   assert_true content(zip, e, label) == want, "#{label}: #{e.name} read whole, as written"
   sizes = e.size > 20000_i64 ? [4096, 65536] : [7, 4096]
   sizes.each do |max|
-    r = zip.open(e)
-    raise "ASSERTION FAILED: #{label}: #{e.name} would not open: #{r.message}" if r.is_a?(ZipError)
+    r = ZipEntryReader.new(zip, e)
+    opened(r, "#{label}: #{e.name}")
     assert_true drain(r, max, "#{label}: #{e.name} #{max} a read") == want, "#{label}: #{e.name} read #{max} bytes at a time, as written"
   end
 end
@@ -550,7 +586,8 @@ written_zstd = method_archive(ZipMethod::Zstandard, method_entries, t0, false)
   {"zstd", written_zstd, 93, 63},
 }.each do |m|
   label = m[0] + " written"
-  mz = opened(m[1], label)
+  mz = ZipReader.new(m[1])
+  opened(mz, label)
   assert_true mz.entries.size == method_entries.size, "#{label}: every entry"
   mz.entries.each_with_index do |e, i|
     assert_true e.method == m[2], "#{label}: #{e.name} is method #{m[2]}, not #{e.method}"
@@ -565,7 +602,8 @@ written_zstd = method_archive(ZipMethod::Zstandard, method_entries, t0, false)
 end
 # With ZIP64 the version is still bzip2's, the higher.
 forced_bzip2 = method_archive(ZipMethod::Bzip2, [{"forced.txt", text}], t0, true)
-fbz = opened(forced_bzip2, "bzip2 and ZIP64")
+fbz = ZipReader.new(forced_bzip2)
+opened(fbz, "bzip2 and ZIP64")
 assert_true fbz.entries[0].zip64? && le16(forced_bzip2, central_record(forced_bzip2, 0) + 6) == 46, "bzip2 needs version 4.6 with ZIP64 too"
 assert_true content(fbz, fbz.entries[0], "bzip2 and ZIP64") == text, "bzip2 and ZIP64: the content"
 puts "  bzip2 with ZIP64 forced: version 4.6"
@@ -585,16 +623,16 @@ if !scratch && File.exists?(work + "/index.txt")
     next if name.empty?
     data = File.read(work + "/" + name)
     want = File.read(work + "/" + name[0, name.bytesize - 4] + ".expect")
-    whole = ZipReader.open(data)
-    raise "ASSERTION FAILED: #{name}: refused with #{whole.message.inspect}" if whole.is_a?(ZipError)
+    whole = ZipReader.new(data)
+    opened(whole, name)
     contents = {} of String => String
     whole.entries.each { |e| contents[e.name] = content(whole, e, name) }
     assert_str want, expect_lines(whole, contents), "#{name}: entries as Python read them"
-    io = File.open(work + "/" + name)
-    from_file = ZipReader.open(io)
-    raise "ASSERTION FAILED: #{name} from the file: #{from_file.message.inspect}" if from_file.is_a?(ZipError)
+    io_2 = File.open(work + "/" + name)
+    from_file = ZipReader.new(io_2)
+    opened(from_file, "#{name} from the file")
     from_file.entries.each { |e| assert_str contents[e.name], content(from_file, e, name), "#{name} from the file: #{e.name}" }
-    io.close
+    io_2.close
     puts "  #{name}: #{whole.entries.size} entries"
   end
 
@@ -610,7 +648,8 @@ if !scratch && File.exists?(work + "/index.txt")
     {"py-methods-stream.zip", 0},
   }.each do |pair|
     data = File.read(work + "/" + pair[0])
-    pz = opened(data, pair[0])
+    pz = ZipReader.new(data)
+    opened(pz, pair[0])
     pz.entries.each do |e|
       assert_true pair[1] == 0 || e.method == pair[1], "#{pair[0]}: #{e.name} is method #{pair[1]}, not #{e.method}"
       assert_true e.method != 14 || e.flags & 2 != 0, "#{pair[0]}: #{e.name}: LZMA with its end marker has bit 1"
@@ -626,14 +665,18 @@ if !scratch && File.exists?(work + "/index.txt")
 
   # LZMA's own header and bit 1, on Python's big.txt.
   lz = File.read(work + "/py-lzma.zip")
-  lb = opened(lz, "py-lzma.zip").entries[0]
+  lzip = ZipReader.new(lz)
+  opened(lzip, "py-lzma.zip")
+  lb = lzip.entries[0]
   lat = data_at(lz, lb)
   lcd = central_record(lz, 0)
   no_marker_bit = patched16(lz, lcd + 8, lb.flags - 2)
-  nz = opened(no_marker_bit, "bit 1 clear")
+  nz = ZipReader.new(no_marker_bit)
+  opened(nz, "bit 1 clear")
   assert_true content(nz, nz.entries[0], "an LZMA entry without bit 1") == big_py, "an LZMA entry without bit 1 is read to its size, the marker after it taken"
   wide = patched32(lz, lat + 5, 268435456_i64)
-  wz = opened(wide, "a 256 MiB LZMA dictionary")
+  wz = ZipReader.new(wide)
+  opened(wz, "a 256 MiB LZMA dictionary")
   assert_true content(wz, wz.entries[0], "a 256 MiB LZMA dictionary") == big_py, "a 256 MiB LZMA dictionary is read, past XzReader's 64 MiB default"
   refused(patched16(lz, lat + 2, 6), "\"big.txt\"'s LZMA header gives 6 bytes of properties, where LZMA has 5", "LZMA properties that are not five bytes")
   refused(patched32(lz, lcd + 20, 5_i64), "\"big.txt\"'s LZMA data is 5 bytes, shorter than its 9-byte header", "LZMA data shorter than its header")
@@ -650,7 +693,9 @@ if !scratch && File.exists?(work + "/index.txt")
     {"out-zstd", written_zstd},
   }.each do |pair|
     File.write(work + "/" + pair[0] + ".zip", pair[1])
-    File.write(work + "/" + pair[0] + ".expect", expect_lines(opened(pair[1], pair[0]), nil))
+    out_zip = ZipReader.new(pair[1])
+    opened(out_zip, pair[0])
+    File.write(work + "/" + pair[0] + ".expect", expect_lines(out_zip, nil))
   end
   puts "  out-round, out-zip64, out-many, out-empty, out-bzip2 and out-zstd"
 end

@@ -40,7 +40,7 @@ def found(user : User?) : User
   user
 end
 
-def found(group : Group?) : Group
+def found_group(group : Group?) : Group
   raise "ASSERTION FAILED: a group lookup the check depends on found none" if group.nil?
   group
 end
@@ -225,11 +225,11 @@ def fixture_checks(system : Bool) : Nil
   assert_str "2000,70,71", group_ids_of(bea, system).join(","), "group_ids holds a gid once, primary first"
 
   assert_str "staff|50", show_group(group_by_name("staff", system)), "a group by name"
-  assert_str "ada,spaced", found(group_by_name("staff", system)).members.join(","), "a group's members"
-  assert_str "spaced,ada,root", found(group_by_name("wheel", system)).members.join(","), "a group line with blank space around it is trimmed"
-  assert_str "", found(group_by_name("empty", system)).members.join(","), "a group with no members has none"
-  assert_str "ada", found(group_by_name("trailing", system)).members.join(","), "an empty member name is dropped"
-  assert_str "bea,x:y", found(group_by_name("colon", system)).members.join(","), "a member list is the rest of the line"
+  assert_str "ada,spaced", found_group(group_by_name("staff", system)).members.join(","), "a group's members"
+  assert_str "spaced,ada,root", found_group(group_by_name("wheel", system)).members.join(","), "a group line with blank space around it is trimmed"
+  assert_str "", found_group(group_by_name("empty", system)).members.join(","), "a group with no members has none"
+  assert_str "ada", found_group(group_by_name("trailing", system)).members.join(","), "an empty member name is dropped"
+  assert_str "bea,x:y", found_group(group_by_name("colon", system)).members.join(","), "a member list is the rest of the line"
   assert_str "twice|70", show_group(group_by_id("70", system)), "the first group with an id wins"
   assert_str "nil", show_group(group_by_name("+nisgroup", system)), "a +group line is skipped"
   assert_str "nil", show_group(group_by_name("minus", system)), "a -group line is skipped"
@@ -269,7 +269,7 @@ end
   root = found(User.find_by_id("0"))
   assert_str "0", found(User.find_by_name(root.name)).id, "root found by name is uid 0"
   assert_str fields(root), fields(User.find_by_id("00")), "an id is compared as a number"
-  root_group = found(Group.find_by_id("0"))
+  root_group = found_group(Group.find_by_id("0"))
   assert_str "0", root_group.id, "gid 0 is a group"
   puts "  #{root.name}, home #{root.home}, group #{root_group.name}"
 

@@ -1062,6 +1062,7 @@ pub class ZipWriter
   @at : Int64
   @central : Array(String)
   @central_text = String::Builder.new(4096)
+  @names_text = String::Builder.new(1024)
   @names : Hash(String, Bool)
   @zip64 : Bool
   @finished : Bool
@@ -1223,7 +1224,7 @@ pub class ZipWriter
     raise "ZipWriter: #{name.inspect} is absolute; a name in an archive is relative" if name.starts_with?("/")
     raise "ZipWriter: #{name.inspect} holds a \\; a name in an archive separates with /" if name.includes?("\\")
     raise "ZipWriter: #{name.inspect} is already in the archive" if @names.has_key?(name)
-    @names[name] = true
+    @names[ZipReader.keep(name, @names_text)] = true
   end
 
   private def emit(bytes : String) : Nil
