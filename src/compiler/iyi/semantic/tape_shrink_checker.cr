@@ -429,6 +429,17 @@ class Iyi::TapeShrinkChecker
           site = @store_site
           if site && site.location && !site.same?(node) &&
              (call_at = node.location)
+            # A library's store is the library's to keep: the program's
+            # call is what hands it the short-lived value, so the error
+            # stands there and names the library's line.
+            store_file = site.location.try(&.original_filename) || ""
+            call_file = call_at.original_filename || ""
+            if TapeScopeRuntime.library_file?(store_file) &&
+               !TapeScopeRuntime.library_file?(call_file)
+              node.raise "#{message}\nThis call hands it to a store that " \
+                         "keeps it, at #{File.expand_path(store_file)}:" \
+                         "#{site.location.not_nil!.line_number}"
+            end
             site.raise "#{message}\nThis store runs inside the tape block " \
                        "of the call at " \
                        "#{call_at.original_filename.try { |f| File.expand_path(f) }}:" \

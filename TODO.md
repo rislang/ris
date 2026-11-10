@@ -61,10 +61,6 @@ files; one full check.sh on minitest per finished step, not per fix.
 
 Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
 
-* OptionParser.parse given an `args` shorter-lived than `found` is
-  refused at the append inside std/option_parser, with a generic message:
-  the refusal belongs at the caller's `parse` line
-  (doc/drafts/option-parser/probes/p14d.ri).
 * A yield is judged per def, not per argument: `each_field`'s name is a
   view, its joined value is fresh, and storing either is refused.
 
