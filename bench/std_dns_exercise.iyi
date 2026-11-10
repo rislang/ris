@@ -293,7 +293,7 @@ def serve_zone(dir : String) : Nil
       zone_ends = DnsTapeMessage.read_name(packet, 12)
       next if zone_ends.nil?
       reply = Bytes.new(zone_ends[1] + 4)
-      reply.(reply.size).times { |k_| to_unsafe[k_] = packet.byte_at(k_) }
+      reply.size.times { |k_| reply[k_] = packet.byte_at(k_) }
       reply[2] = reply[2] | 0x80_u8
       reply[3] = 0_u8
       index = 6
@@ -1045,15 +1045,17 @@ group do |g|
     hosts_path = "#{dir}/iyi-dns-exercise-hosts"
     File.write(conf_path, "nameserver 127.0.0.1:#{port}\nsearch test\noptions ndots:1 timeout:1 attempts:1\n")
     File.write(hosts_path, "192.0.2.60 filed.test\n")
-    filed = Resolver.from_files(conf_path, hosts_path)
+    filed = Resolver.new
+    filed.read_files(conf_path, hosts_path)
     same "127.0.0.1:#{port}", filed.nameservers.join(" "), "the configured server"
     same "192.0.2.60", show(filed.resolve("filed.test")), "the configured hosts file"
     same "192.0.2.10", show(filed.resolve("db")), "the configured search list"
-    nowhere = Resolver.from_files("#{dir}/no-such-resolv.conf", "#{dir}/no-such-hosts")
+    nowhere = Resolver.new
+    nowhere.read_files("#{dir}/no-such-resolv.conf", "#{dir}/no-such-hosts")
     check nowhere.nameservers.size > 0, "a missing resolv.conf falls back to the loopback server"
     File.delete(conf_path)
     File.delete(hosts_path)
-    puts "from_files: ok"
+    puts "read_files: ok"
 
     listener = IyiSocket.listen("127.0.0.1", 0)
     connected = IyiSocket.connect("web.test", listener.local_port, resolver)

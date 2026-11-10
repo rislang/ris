@@ -39,15 +39,32 @@ import std/io::{Memory}
 import std/file::{File}
 
 # Every row a reader gives, or the error's message, as one string.
+# Each row is written as it is read: the reader refills it.
 def read_all(r : CSVReader) : String
-  rows = [] of Array(String)
+  io = ""
+  io << "["
+  first = true
   while true
     got = r.next_row
-    return "#{rows.inspect} then #{got.message}" if got.is_a?(CSVError)
-    break unless got
-    rows << got
+    if got.is_a?(CSVError)
+      io << "] then " << got.message
+      break
+    end
+    unless got
+      io << "]"
+      break
+    end
+    io << ", " unless first
+    first = false
+    io << got.inspect
   end
-  rows.inspect
+  io
+end
+
+# The header row as inspected, or the error's message.
+def headers_text(r : CSVReader) : String
+  head = r.headers
+  head.is_a?(CSVError) ? head.message : head.inspect
 end
 
 # The first error a reader answers, "none" if it reads to the end.
@@ -172,17 +189,28 @@ assert_str "parsed [[\"\", \"x\"], [\"a\"]]", csv_refusal("\"\",x\n\"a\"\r\n"), 
 puts "  text after a closing quote and a quote in an unquoted field are refused, with line and column"
 
 puts "\n== reader over a string"
-assert_str "[[\"a b\", \"c\"]]", read_all(CSVReader.new("a b,c")), "a separator ends a bare field, a space does not"
-assert_str "[[\"a\", \"b\"], [\"1\", \"2\"]]", read_all(CSVReader.new("a,b\n1,2\n")), "rows a line at a time"
-assert_str "[[\"a\"], [\"b\"], [\"c\"], [], [\"d\"]]", read_all(CSVReader.new("a\r\nb\rc\n\r\nd")), "a CRLF is one line end, a lone CR and an LF one each"
-assert_str "[[\"x\\r\\ny\", \"q\\\"q\"], [\"\"]]", read_all(CSVReader.new("\"x\r\ny\",\"q\"\"q\"\n\"\"\n")), "a line break inside quotes, a doubled quote, a quoted empty field"
-assert_str "[[\"a\", \"\", \"\"], [\"\", \"b\"]]", read_all(CSVReader.new("a,,\n,b")), "empty fields at either end"
-assert_str "[]", read_all(CSVReader.new("")), "no text, no rows"
-assert_str "[[\"id\", \"x\"]]", read_all(CSVReader.new("\uFEFFid,x")), "a byte order mark read past"
-assert_str "[[\"a,b\", \"it's\"], [\"c\"]]", read_all(CSVReader.new("a,b;'it''s'\nc", separator: ';', quote: '\'')), "a separator and a quote of the caller's"
-assert_str "[[\"a\", \"b c\", \" d \", \"\"], [\"\"]]", read_all(CSVReader.new("  a\t, b c , \" d \" ,\t\n  ", strip: true)), "strip drops trailing spaces and leading ones, not a quoted field's"
-assert_str "[[\"a\", \"b\"], [\" c \"]]", read_all(CSVReader.new("a\tb\n c \n", separator: '\t', strip: false)), "a tab separator"
-assert_str "[[\"a\", \"b\"]]", read_all(CSVReader.new("a\t b", separator: '\t', strip: true)), "a tab separator under strip stays a separator"
+reader_1 = CSVReader.new("a b,c")
+assert_str "[[\"a b\", \"c\"]]", read_all(reader_1), "a separator ends a bare field, a space does not"
+reader_2 = CSVReader.new("a,b\n1,2\n")
+assert_str "[[\"a\", \"b\"], [\"1\", \"2\"]]", read_all(reader_2), "rows a line at a time"
+reader_3 = CSVReader.new("a\r\nb\rc\n\r\nd")
+assert_str "[[\"a\"], [\"b\"], [\"c\"], [], [\"d\"]]", read_all(reader_3), "a CRLF is one line end, a lone CR and an LF one each"
+reader_4 = CSVReader.new("\"x\r\ny\",\"q\"\"q\"\n\"\"\n")
+assert_str "[[\"x\\r\\ny\", \"q\\\"q\"], [\"\"]]", read_all(reader_4), "a line break inside quotes, a doubled quote, a quoted empty field"
+reader_5 = CSVReader.new("a,,\n,b")
+assert_str "[[\"a\", \"\", \"\"], [\"\", \"b\"]]", read_all(reader_5), "empty fields at either end"
+reader_6 = CSVReader.new("")
+assert_str "[]", read_all(reader_6), "no text, no rows"
+reader_7 = CSVReader.new("\uFEFFid,x")
+assert_str "[[\"id\", \"x\"]]", read_all(reader_7), "a byte order mark read past"
+reader_8 = CSVReader.new("a,b;'it''s'\nc", separator: ';', quote: '\'')
+assert_str "[[\"a,b\", \"it's\"], [\"c\"]]", read_all(reader_8), "a separator and a quote of the caller's"
+reader_9 = CSVReader.new("  a\t, b c , \" d \" ,\t\n  ", strip: true)
+assert_str "[[\"a\", \"b c\", \" d \", \"\"], [\"\"]]", read_all(reader_9), "strip drops trailing spaces and leading ones, not a quoted field's"
+reader_10 = CSVReader.new("a\tb\n c \n", separator: '\t', strip: false)
+assert_str "[[\"a\", \"b\"], [\" c \"]]", read_all(reader_10), "a tab separator"
+reader_11 = CSVReader.new("a\t b", separator: '\t', strip: true)
+assert_str "[[\"a\", \"b\"]]", read_all(reader_11), "a tab separator under strip stays a separator"
 puts "  line ends, quotes, empty fields, a mark, a separator and a quote of the caller's, strip"
 
 puts "\n== reader errors are values, with line and column"
@@ -197,26 +225,28 @@ assert_str "csv: the document is UTF-16, by its byte order mark, and is read as 
 sticky = CSVReader.new("a\n\"b\"c\nd\n")
 sticky.next_row
 once = sticky.next_row
+said = once.is_a?(CSVError) ? once.message.copy_to(Program.tape) : "no error"
 twice = sticky.next_row
-assert_true once.is_a?(CSVError) && twice.is_a?(CSVError) && once.message == twice.message, "after an error the reader answers it again"
+assert_true twice.is_a?(CSVError) && twice.message == said, "after an error the reader answers it again"
 puts "  every malformed document an error value, at its line and column"
 
 puts "\n== header access"
 people = CSVReader.new("name,age,name2\r\n\r\nAda,36,x\nBob\n\nCy,7,y,extra\n", headers: true)
-head = people.headers
-assert_str "[\"name\", \"age\", \"name2\"]", head.is_a?(CSVError) ? head.message : head.inspect, "the header row"
+assert_str "[\"name\", \"age\", \"name2\"]", headers_text(people), "the header row"
 seen = [] of String
 failed = people.each do |row|
   seen << "#{row.line}:#{row["name"]}/#{row["age"]}/#{row["age"]?.inspect}/#{row["missing"]?.inspect}/#{row.size}"
 end
 assert_true failed.nil?, "each reads to the end"
 assert_str "[\"3:Ada/36/\\\"36\\\"/nil/3\", \"4:Bob//nil/nil/1\", \"6:Cy/7/\\\"7\\\"/nil/4\"]", seen.inspect, "rows by header name, blank lines passed over"
-dup = CSVReader.new("k,k\n1,2\n", headers: true).next
+dup_reader = CSVReader.new("k,k\n1,2\n", headers: true)
+dup = dup_reader.next
 assert_true !dup.is_a?(CSVError) && !dup.nil? && dup["k"] == "2", "a repeated header name answers its last column, as Python's DictReader"
 strict = CSVReader.new("a,b\n1,2,3\n", headers: true, same_size: true)
 bad = strict.next
 assert_true bad.is_a?(CSVError) && bad.message == "csv: the row at line 2 has 3 fields, and the header has 2", "same_size holds a row to the header"
-no_head = CSVReader.new("1,2").next
+no_head_reader = CSVReader.new("1,2")
+no_head = no_head_reader.next
 assert_true !no_head.is_a?(CSVError) && !no_head.nil? && no_head[1] == "2" && no_head[5]?.nil?, "a row by position"
 puts "  by name, by position, missing names nil, a repeated name, same_size against the header"
 
@@ -236,16 +266,24 @@ rng = Lcg.new(20261015_u64)
   sep, q, all = dialect
   rows = random_rows(rng, 2000)
   text = written(rows, quote_all: all, separator: sep, quote: q, line_end: "\r\n")
-  assert_str rows.inspect, read_all(CSVReader.new(text, separator: sep, quote: q)), "random rows round trip through a string (#{sep.inspect})"
-  assert_str rows.inspect, read_all(CSVReader.new(Memory.new(text), separator: sep, quote: q)), "random rows round trip through a stream (#{sep.inspect})"
-  assert_str rows.inspect, read_all(CSVReader.new(text, separator: sep, quote: q, strip: true)), "written fields survive a strip reader (#{sep.inspect})"
+  reader_12 = CSVReader.new(text, separator: sep, quote: q)
+  assert_str rows.inspect, read_all(reader_12), "random rows round trip through a string (#{sep.inspect})"
+  stream = Memory.new(text)
+  stream_reader = CSVReader.new(stream, sep, q)
+  assert_str rows.inspect, read_all(stream_reader), "random rows round trip through a stream (#{sep.inspect})"
+  reader_13 = CSVReader.new(text, separator: sep, quote: q, strip: true)
+  assert_str rows.inspect, read_all(reader_13), "written fields survive a strip reader (#{sep.inspect})"
 end
 # A CRLF, a doubled quote and a character, each split across the
 # stream's 64 KiB chunks.
 split_crlf = "x" * 65535 + "\r\nb\n"
-assert_str "[#{["x" * 65535].inspect}, [\"b\"]]", read_all(CSVReader.new(Memory.new(split_crlf))), "a CRLF split across chunks is one line end"
+crlf_source = Memory.new(split_crlf)
+reader_14 = CSVReader.new(crlf_source)
+assert_str "[#{["x" * 65535].inspect}, [\"b\"]]", read_all(reader_14), "a CRLF split across chunks is one line end"
 split_quote = "\"" + "y" * 65534 + "\"\"z\"\n"
-assert_str "[#{["y" * 65534 + "\"z"].inspect}]", read_all(CSVReader.new(Memory.new(split_quote))), "a doubled quote split across chunks"
+quote_source = Memory.new(split_quote)
+reader_15 = CSVReader.new(quote_source)
+assert_str "[#{["y" * 65534 + "\"z"].inspect}]", read_all(reader_15), "a doubled quote split across chunks"
 split_char = "a" * 65535 + "ğ\"\n"
 split_source = Memory.new(split_char)
 split_reader = CSVReader.new(split_source)
