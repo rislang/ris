@@ -1756,6 +1756,47 @@ class Iyi::TapeShrinkChecker
     @yields_fresh[id] = scan.found
   end
 
+  # Whether *target* keeps its block's value: `self[key] = yield v`, or
+  # `<<`, push or add of it (Hash#update, put_if_absent). The value
+  # is the block's, made in the caller's block round (SPEC 3.6).
+  @keeps_yield = Hash(UInt64, Bool).new
+
+  def keeps_yield?(target : Def) : Bool
+    @keeps_yield.fetch(target.object_id) do
+      scan = KeptYieldScan.new
+      target.body.accept(scan)
+      @keeps_yield[target.object_id] = scan.found
+    end
+  end
+
+  class KeptYieldScan < Visitor
+    KEEPS = {"[]=", "<<", "push", "unshift", "add", "insert", "upsert"}
+    getter found = false
+
+    def self.yielded?(node : ASTNode?) : Bool
+      case node
+      when Yield       then true
+      when Expressions then yielded?(node.expressions.last?)
+      when If          then yielded?(node.then) || yielded?(node.else)
+      else                  false
+      end
+    end
+
+    def visit(node : Call)
+      @found ||= KEEPS.includes?(node.name) && node.args.any? { |a| self.class.yielded?(a) }
+      true
+    end
+
+    def visit(node : Assign)
+      @found ||= node.target.is_a?(InstanceVar) && self.class.yielded?(node.value)
+      true
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
+  end
+
   def yield_targets(node : Call) : Array(Def)
     @graph.targets(node) || [] of Def
   end
@@ -2997,6 +3038,17 @@ class Iyi::TapeShrinkChecker
           @tape_blocks.pop if explicit
         else
           block_value = loop_value(block.body, outer, kind: "block", fresh_args: fresh_args)
+          # A yielder that keeps the block's value stores it in its
+          # receiver: `h.update(k) { |v| w.downcase }` (SPEC 3.6).
+          if !@text_only && targets.try(&.any? { |t| keeps_yield?(t) })
+            # The value moves down to the scope around the block: a
+            # receiver from outside that scope would outlive it.
+            kept = receiver.roots.flat_map { |r| aliases(r, env) }.uniq
+            made = source_roots(block_value).any? do |r|
+              root_tapes_of(r).try(&.includes?(block.body.object_id))
+            end
+            refuse_fresh_store(kept, node) if made
+          end
           # A program constant's initializer runs on the program's tape:
           # its value is the constant's, made on its owner.
           check_leaving(block.body.object_id, block_value, outer, block.body.type?, block) unless node.program_initializer?

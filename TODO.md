@@ -65,8 +65,6 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
   refused at the append inside std/option_parser, with a generic message:
   the refusal belongs at the caller's `parse` line
   (doc/drafts/option-parser/probes/p14d.ri).
-* `h.update(k) { |v| w.downcase }` builds: Hash keeps the block's value,
-  made in a block round. Any other runtime def keeping a block's value too.
 * A yield is judged per def, not per argument: `each_field`'s name is a
   view, its joined value is fresh, and storing either is refused.
 
