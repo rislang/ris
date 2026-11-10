@@ -132,7 +132,8 @@ class RisH2Handler
     unless config[0].empty?
       tls = TlsServerConfig.from_pem(ris_heap_text(config[0]), ris_heap_text(config[1])).or_panic
       tls.alpn = ["h2", "http/1.1"]
-      tls.client_roots = Certificate.from_pem(ris_heap_text(config[2])).or_panic unless config[2].empty?
+      pem_store_1 = RisCertificateStore.new
+      tls.client_roots = pem_certs(pem_store_1, ris_heap_text(config[2])) unless config[2].empty?
       @tls = tls
     end
   end
@@ -169,11 +170,20 @@ import std/http::{HTTP, HTTPClient, Response, Request, Server, HTTPError, Upgrad
 import std/socket::{IyiSocket, SocketError}
 import std/io
 import std/tls::{TlsConfig, TlsIdentity, TlsServerConfig}
-import std/x509::{Certificate}
+import std/x509::{RisCertificateStore, Certificate}
 import std/file::{File}
 import std/compress::{Gzip}
 import std/zstd::{Zstd}
 import std/time::{Time}
+
+# A PEM text's certificates, kept in *store*; a text that does not read
+# panics with the reason.
+def pem_certs(store : RisCertificateStore, text : String) : Array(Certificate)
+  if problem = store.read_pem(text)
+    raise problem.message
+  end
+  store.kept_certificates
+end
 
 def check(condition : Bool, what : String) : Nil
   raise "ASSERTION FAILED: #{what}" unless condition
@@ -303,7 +313,8 @@ end
 if mode == "close-client"
   if args.size > 2
     roots = TlsConfig.new
-    roots.roots = Certificate.from_pem(File.read(args[2])).or_panic
+    pem_store_2 = RisCertificateStore.new
+    roots.roots = pem_certs(pem_store_2, File.read(args[2]))
     roots.alpn = ["http/1.1"]
     HTTP.tls_config = roots
   end
@@ -318,7 +329,8 @@ end
 if mode == "tls-get"
   base = args[1]
   config = TlsConfig.new
-  config.roots = Certificate.from_pem(File.read(args[2])).or_panic
+  pem_store_3 = RisCertificateStore.new
+  config.roots = pem_certs(pem_store_3, File.read(args[2]))
   config.alpn = args.size > 3 ? args[3].split(',') : ["h2", "http/1.1"]
   HTTP.tls_config = config
   client = HTTPClient.new
@@ -338,7 +350,8 @@ if mode == "whoami"
   base = args[1]
   ["h2,http/1.1", "http/1.1"].each do |alpn|
     config = TlsConfig.new
-    config.roots = Certificate.from_pem(File.read(args[2])).or_panic
+    pem_store_4 = RisCertificateStore.new
+    config.roots = pem_certs(pem_store_4, File.read(args[2]))
     config.alpn = alpn.split(',')
     config.identity = TlsIdentity.from_pem(File.read(args[3]), File.read(args[4])).or_panic if args.size > 4
     HTTP.tls_config = config
@@ -375,7 +388,8 @@ if mode == "fetch"
   base = args[1]
   if args.size > 2
     config = TlsConfig.new
-    config.roots = Certificate.from_pem(File.read(args[2])).or_panic
+    pem_store_5 = RisCertificateStore.new
+    config.roots = pem_certs(pem_store_5, File.read(args[2]))
     config.alpn = ["h2", "http/1.1"]
     HTTP.tls_config = config
   end

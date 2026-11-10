@@ -19,11 +19,20 @@
 #   roots FILE    a PEM bundle, each certificate read and written out:
 #                 `index version ca pathlen keyusage eku dns self`.
 
-import std/x509::{Certificate, X509, X509Error, X509Purpose, SigningKey}
+import std/x509::{RisCertificateStore, Certificate, X509, X509Error, X509Purpose, SigningKey}
 import std/static_array
 import std/time::{Time}
 import std/file::{File}
 import std/curve25519::{Ed25519, Ed25519PublicKey, CurveError}
+
+# A PEM text's certificates, kept in *store*; a text that does not read
+# panics with the reason.
+def pem_certs(store : RisCertificateStore, text : String) : Array(Certificate)
+  if problem = store.read_pem(text)
+    raise problem.message
+  end
+  store.kept_certificates
+end
 
 def check(cond : Bool, label : String) : Nil
   raise "ASSERTION FAILED: #{label}" unless cond
@@ -291,11 +300,14 @@ refused constrained[0, mask_at] + "8708c0000200ff00ff00" + constrained[mask_at +
   "an iPAddress constraint whose mask is not a CIDR prefix", "a name constraint's mask with a hole refused"
 refused "020101", "expected a SEQUENCE", "an INTEGER where a certificate goes refused"
 refused "3003020101", "a Certificate of 1 values", "a SEQUENCE of one value refused"
-read = Certificate.from_pem("comment\n" + ROOT_PEM + "more\n" + ROOT_PEM).or_panic
+pem_store_1 = RisCertificateStore.new
+read = pem_certs(pem_store_1, "comment\n" + ROOT_PEM + "more\n" + ROOT_PEM)
 check read.size == 2 && read[0].raw == b(CERTS[ROOT_INDEX]), "two PEM blocks among other text"
-check Certificate.from_pem(ROOT_PEM.lines.reject { |l| l.starts_with?("-----END") }.join("\n")).is_a?(X509Error), "a PEM block with no END refused"
-check Certificate.from_pem(ROOT_PEM.lines.map { |l| l.starts_with?("MII") ? "M*" + l[2, l.size - 2] : l }.join("\n")).is_a?(X509Error), "a PEM block that is not base64 refused, not a panic"
-check Certificate.from_pem("no certificates").or_panic.empty?, "a text with no blocks reads as none"
+bad_store = RisCertificateStore.new
+check bad_store.read_pem(ROOT_PEM.lines.reject { |l| l.starts_with?("-----END") }.join("\n")).is_a?(X509Error), "a PEM block with no END refused"
+check bad_store.read_pem(ROOT_PEM.lines.map { |l| l.starts_with?("MII") ? "M*" + l[2, l.size - 2] : l }.join("\n")).is_a?(X509Error), "a PEM block that is not base64 refused, not a panic"
+pem_store_2 = RisCertificateStore.new
+check pem_certs(pem_store_2, "no certificates").empty?, "a text with no blocks reads as none"
 
 puts "== Ed25519 (RFC 8410)"
 # Made by Python's cryptography; the malformed ones assembled by hand and
@@ -458,7 +470,8 @@ STACK_PEM = <<-PEM
   EVfzur+OpePLpAcQtq+Km3lRrg==
   -----END CERTIFICATE-----
   PEM
-STACK_CERTS = Certificate.from_pem(STACK_PEM).or_panic
+PEM_STORE_3 = RisCertificateStore.new
+STACK_CERTS = pem_certs(PEM_STORE_3, STACK_PEM)
 STACK_DEPTH = 100
 
 # *depth* frames of a kilobyte array each, then the signature (*chain*

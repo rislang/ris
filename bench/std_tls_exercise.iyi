@@ -38,7 +38,7 @@
 #   config CHAIN KEY    TlsServerConfig.from_pem's answer.
 
 import std/tls::{TlsClient, TlsConfig, TlsEarlyData, TlsEchConfig, TlsEchKey, TlsError, TlsHeldTicket, TlsIdentity, TlsIdentitySource, TlsKeySchedule, TlsMadeUnder, TlsRecordCipher, TlsReplayGuard, TlsServer, TlsServerConfig, TlsSession, TlsTicket, TlsTicketKeys, TlsVersion}
-import std/x509::{Certificate}
+import std/x509::{RisCertificateStore, Certificate}
 import std/time::{Time}
 import std/socket::{IyiSocket, SocketError}
 import std/file::{File}
@@ -47,6 +47,15 @@ import std/hpke::{HpkeSuite, HpkeKem, HpkeKdf, HpkeAead, HpkeSender}
 import std/curve25519::{X25519}
 import std/mlkem::{MlKem768PrivateKey}
 import std/random::{Random}
+
+# A PEM text's certificates, kept in *store*; a text that does not read
+# panics with the reason.
+def pem_certs(store : RisCertificateStore, text : String) : Array(Certificate)
+  if problem = store.read_pem(text)
+    raise problem.message
+  end
+  store.kept_certificates
+end
 
 def check(cond : Bool, label : String) : Nil
   raise "ASSERTION FAILED: #{label}" unless cond
@@ -394,7 +403,8 @@ end
 # A client of the test root, offering h2 by ALPN, under *configs*.
 def ech_client(configs : Array(UInt8)?) : TlsConfig
   config = TlsConfig.new
-  config.roots = Certificate.from_pem(ECH_ROOT_PEM).or_panic
+  pem_store_1 = RisCertificateStore.new
+  config.roots = pem_certs(pem_store_1, ECH_ROOT_PEM)
   config.alpn = ["h2"]
   config.ech_configs = configs
   config
@@ -759,7 +769,8 @@ args = Program.args
 if args.size > 0 && args[0] == "scenarios"
   port = File.read(args[1] + "/port").to_i
   config = TlsConfig.new
-  config.roots = Certificate.from_pem(File.read(args[1] + "/roots.pem")).or_panic
+  pem_store_2 = RisCertificateStore.new
+  config.roots = pem_certs(pem_store_2, File.read(args[1] + "/roots.pem"))
   config.alpn = ["h2", "http/1.1"]
   # Presented where a request names ed25519, and only there.
   config.identity = TlsIdentity.from_pem(File.read(args[1] + "/client.pem"), File.read(args[1] + "/client.key")).or_panic
@@ -915,7 +926,8 @@ end
 
 if args.size > 0 && args[0] == "get"
   config = TlsConfig.new
-  config.roots = Certificate.from_pem(File.read(args[2])).or_panic
+  pem_store_3 = RisCertificateStore.new
+  config.roots = pem_certs(pem_store_3, File.read(args[2]))
   config.alpn = [args[4]] if args.size > 4 && args[4] != "-"
   config.identity = TlsIdentity.from_pem(File.read(args[5]), File.read(args[6])).or_panic if args.size > 6
   config.min_version = TlsVersion::TLS12 if ENV["TLS_MIN_VERSION"]? == "1.2"
@@ -948,7 +960,8 @@ end
 # and the next write carries the no_renegotiation warning before "second".
 if args.size > 0 && args[0] == "renegotiate"
   config = TlsConfig.new
-  config.roots = Certificate.from_pem(File.read(args[2])).or_panic
+  pem_store_4 = RisCertificateStore.new
+  config.roots = pem_certs(pem_store_4, File.read(args[2]))
   config.min_version = TlsVersion::TLS12
   socket = IyiSocket.connect("127.0.0.1", args[1].to_i)
   unless socket.is_a?(IyiSocket)
@@ -976,7 +989,8 @@ end
 # exercise's server ("resumed=..."), and the tickets the session holds.
 if args.size > 0 && args[0] == "resume"
   config = TlsConfig.new
-  config.roots = Certificate.from_pem(File.read(args[2])).or_panic
+  pem_store_5 = RisCertificateStore.new
+  config.roots = pem_certs(pem_store_5, File.read(args[2]))
   config.alpn = [args[4]] if args.size > 4 && args[4] != "-"
   count = args.size > 5 ? args[5].to_i : 2
   # EARLY: given to each connection to send early; "get" is GET / itself.
@@ -1087,7 +1101,8 @@ end
 if args.size > 0 && args[0] == "ech-get"
   port = args[1].to_i
   dir = args[2]
-  roots = Certificate.from_pem(File.read(dir + "/root.pem")).or_panic
+  pem_store_6 = RisCertificateStore.new
+  roots = pem_certs(pem_store_6, File.read(dir + "/root.pem"))
   current = bytes_of(File.read(dir + "/ech_configs"))
   said, _ = ech_get(port, roots, current)
   puts "current: #{said}"
@@ -1229,7 +1244,8 @@ if args.size > 0 && args[0] == "serve"
     config.add_identity(TlsIdentity.from_pem(File.read(args[1] + "/other-chain.pem"), File.read(args[1] + "/other-key.pem")).or_panic)
   end
   if File.file?(args[1] + "/client-roots.pem")
-    config.client_roots = Certificate.from_pem(File.read(args[1] + "/client-roots.pem")).or_panic
+    pem_store_7 = RisCertificateStore.new
+    config.client_roots = pem_certs(pem_store_7, File.read(args[1] + "/client-roots.pem"))
     config.client_required = !File.file?(args[1] + "/client-optional")
   end
   # DIR/sourced: the identity shown is the one `identity_source` answers,
@@ -1854,7 +1870,8 @@ check said == "tls: a ServerHello that does not confirm the ClientHelloInner its
 said, _, retry = ech_pair(ech_server([] of TlsEchKey), ech_client(list))
 check said.ends_with?("(ech_required)") && retry.nil?, "a server with no keys: ech_required, and no retry_configs: #{said}"
 asking = ech_server([key])
-asking.client_roots = Certificate.from_pem(ECH_ROOT_PEM).or_panic
+pem_store_8 = RisCertificateStore.new
+asking.client_roots = pem_certs(pem_store_8, ECH_ROOT_PEM)
 mutual = ech_client(list)
 mutual.identity = TlsIdentity.from_pem(ECH_INNER_CERT_PEM + ECH_ROOT_PEM, ECH_INNER_KEY_PEM).or_panic
 said, served, _ = ech_pair(asking, mutual)
