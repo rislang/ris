@@ -343,7 +343,7 @@ grep -q 'iyi.mod changed, so every test ran' affected_mod.log || {
 grep -q '1 passed' affected_mod.log || {
   echo "the manifest run did not run the test:"; tail -3 affected_mod.log; exit 1;
 }
-(cd app && "$IYI" check --affected iyi.mod) > affected_check.log 2>&1 || {
+(cd app && "$IYI" check types --affected iyi.mod) > affected_check.log 2>&1 || {
   echo "check --affected iyi.mod failed:"; tail -4 affected_check.log; exit 1;
 }
 grep -q 'every module is a consumer' affected_check.log || {
@@ -396,7 +396,7 @@ grep -q 'Warning: `::Codec` is `::IyiWeb::Codec`' onename_old.log || { echo "::C
 (cd onename/app && "$IYI" run app.iyi) > onename_old_app.log 2>&1 && { echo "::Codec built in a consumer"; exit 1; }
 grep -q "Did you mean '::IyiWeb::Codec'" onename_old_app.log || { echo "the consumer's refusal does not name ::IyiWeb::Codec:"; cat onename_old_app.log; exit 1; }
 printf 'import codec\n\nputs ::Codec.shout("fixed")\n' > onename/lib/direct.iyi
-(cd onename/lib && "$IYI" fix direct.iyi) > onename_fix.log 2>&1 || { echo "iyi fix did not end clean:"; cat onename_fix.log; exit 1; }
+(cd onename/lib && "$IYI" check types --fix direct.iyi) > onename_fix.log 2>&1 || { echo "iyi fix did not end clean:"; cat onename_fix.log; exit 1; }
 grep -q '^puts ::IyiWeb::Codec.shout("fixed")$' onename/lib/direct.iyi || { echo "iyi fix did not write ::IyiWeb::Codec:"; cat onename/lib/direct.iyi; exit 1; }
 echo "  ::IyiWeb::Codec in both builds and from artifacts; ::Codec warns in the package, is refused in the consumer, and iyi fix rewrites it"
 

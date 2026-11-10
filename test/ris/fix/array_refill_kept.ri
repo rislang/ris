@@ -1,4 +1,4 @@
-# A refill with content: `clear` would differ, so `ris fix` leaves it.
+# A refill with content: `clear` would differ, so `ris check types --fix` leaves it.
 @[OnTape]
 struct Queue
   @items : Array(Int32)

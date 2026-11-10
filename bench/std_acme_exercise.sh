@@ -403,7 +403,7 @@ else
   echo "  FAIL: iyi doc: $(grep -m1 -E 'Error|BUG' "$WORK/doc.txt")"
   status=1
 fi
-if "$IYI" fmt --check "$REPO/src/std/acme.iyi" "$REPO/src/std/x509.iyi" "$REPO/bench/std_acme_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$IYI" check format "$REPO/src/std/acme.iyi" "$REPO/src/std/x509.iyi" "$REPO/bench/std_acme_exercise.iyi" >"$WORK/format.log" 2>&1; then
   echo "  the module, std/x509 and the exercise are formatted"
 else
   echo "  FAIL: not formatted: $(grep -m1 produced "$WORK/format.log")"

@@ -259,7 +259,7 @@ else
   echo "  FAIL: iyi doc: $(grep -m1 -E 'Error|BUG' "$WORK/doc.txt")"
   status=1
 fi
-if "$IYI" fmt --check "$REPO/src/std/autocert.iyi" "$REPO/src/std/tls.iyi" "$REPO/bench/std_autocert_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$IYI" check format "$REPO/src/std/autocert.iyi" "$REPO/src/std/tls.iyi" "$REPO/bench/std_autocert_exercise.iyi" >"$WORK/format.log" 2>&1; then
   echo "  the module, std/tls and the exercise are formatted"
 else
   echo "  FAIL: not formatted: $(grep -m1 produced "$WORK/format.log")"

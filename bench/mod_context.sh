@@ -96,7 +96,7 @@ module stranger
 
 puts "y"
 EOF
-answer="$(cd "$WORK/affected" && "$IYI" check --affected "$REPO/src/std/text.iyi" --json 2>&1)"
+answer="$(cd "$WORK/affected" && "$IYI" check types --affected "$REPO/src/std/text.iyi" --json 2>&1)"
 case "$answer" in
   *'"consumer.iyi"'*)
     case "$answer" in
@@ -123,7 +123,7 @@ esac
 # no consumer, all compile.
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
-    answer="$(cd "$WORK/affected" && "$IYI" check --affected "\\\\?\\$(cygpath -w "$REPO/src/std/text.iyi")" --json 2>&1)"
+    answer="$(cd "$WORK/affected" && "$IYI" check types --affected "\\\\?\\$(cygpath -w "$REPO/src/std/text.iyi")" --json 2>&1)"
     case "$answer" in
       *'"consumer.iyi"'*) echo "check --affected of a change spelled \\\\?\\ names its consumer" ;;
       *)
@@ -175,7 +175,7 @@ else
     sed -n '1,6p' use.log | sed 's/^/  /'
     status=1
   else
-    if "$IYI" check main.iyi > check.log 2>&1; then
+    if "$IYI" check types main.iyi > check.log 2>&1; then
       echo "check types a file whose dependency is only an artifact"
     else
       echo "FAIL: check refuses a file the build compiles"
@@ -802,7 +802,7 @@ for line in 'pub LIMIT = 5' 'pub macro twice(x)' '  Small = 1' '  Big = 10' '  W
 done
 after_alias="$(grep -A1 -xF 'pub alias Num = Int32 | Float64' whole_doc.txt | sed -n '2p')"
 if [ -z "$absent" ] && [ "$after_alias" != "end" ] && ! grep -q ' $' whole_doc.txt &&
-   grep -qF "#   $hint" whole_ctx.txt && "$IYI" check hint.iyi > hint_check.txt 2>&1; then
+   grep -qF "#   $hint" whole_ctx.txt && "$IYI" check types hint.iyi > hint_check.txt 2>&1; then
   echo "doc and mod context list members, nested types, associated types, constants and macros, and the import line names them"
 else
   echo "FAIL: the surface of app/surf left something out"

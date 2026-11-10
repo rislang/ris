@@ -53,6 +53,13 @@ say "the manifest names the module" $?
 grep -q '^module hello$' app/hello.ri
 say "the file is the root module the name promises" $?
 
+grep -qF 'The work is done when `ris check` passes.' app/AGENTS.md &&
+  grep -qF 'Use `ris check --fix`' app/AGENTS.md
+say "AGENTS.md names ris check and ris check --fix" $?
+(cd app && "$IYI" check) > checked.txt 2>&1
+code=$?
+say "ris check passes on arrival: $(tail -1 checked.txt)" "$code"
+
 (cd app && "$IYI" run hello.ri) > run.txt 2>&1
 say "it runs: $(tail -1 run.txt)" "$([ "$(tail -1 run.txt)" = "hello from hello" ]; echo $?)"
 

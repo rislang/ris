@@ -159,7 +159,7 @@ grep -q 'page.eiy is not a module an import can name, so every test ran' tmpl.tx
 grep -q '"affected_not_imported":\[' prelude.json && grep -Eq '"skipped": ?0' prelude.json ||
   { echo "a changed prelude file discounted the run:"; cat prelude.json; exit 1; }
 printf 'hello <%%= 1 + %%>\n)\n' > page.eiy
-"$IYI" check --affected page.eiy > tmpl_check.txt 2>&1
+"$IYI" check types --affected page.eiy > tmpl_check.txt 2>&1
 [ $? -eq 1 ] && grep -q '^page_test.iyi: ' tmpl_check.txt ||
   { echo "a template that no longer parses broke no consumer:"; cat tmpl_check.txt; exit 1; }
 rm page.eiy page_test.iyi

@@ -3,7 +3,7 @@
 #
 # The LSP is the editor's protocol; MCP is the agent harness's. Every
 # verb this server exposes already exists and already speaks JSON —
-# `check -f json`, `fix --json`, `mod context --json`, `test --json` —
+# `check --json`, `mod context --json`, `test --json`, `doc` —
 # so the server is deliberately a shell: each tool call runs this same
 # binary with those arguments and hands the output back untouched. No
 # second implementation, no drift: what an agent gets over MCP is
@@ -33,10 +33,10 @@ class Iyi::Command
         stdin/stdout, one JSON-RPC message per line. Point an agent
         harness at it; there is nothing to configure.
 
-        Tools: check (front-end verdict with suggested edits), fix
-        (apply them), context (a file's grounding pack), test (run
-        tests, optionally only those an edit can reach), ok (every
-        check and test in one verdict: is the work done).
+        Tools: check (is the work done: one part or all, optionally
+        fixing; types carries the diagnostics with suggested edits),
+        context (a file's grounding pack), test (run tests, optionally
+        only those an edit can reach), doc (a module's surface).
         USAGE
       exit
     end
@@ -144,27 +144,22 @@ class Iyi::Command
     end
   end
 
-  # The catalogue, verbatim JSON: six tools, each one existing verb.
+  # The catalogue, verbatim JSON: five tools, each one existing verb.
   # Schemas are the arguments those verbs already take — nothing here
   # exists only over the wire.
   MCP_TOOLS = <<-JSON
     [
       {
         "name": "check",
-        "description": "Type-check a ris file without producing anything. Returns [] when clean, else the compiler's errors as data: file, line, column, size, message, the SPEC sections cited, and suggested_edit (exact replacement span) when the compiler knows the fix.",
+        "description": "Is the work done? Runs the parts of `ris check`: format, deps (ris.mod and ris.sum), types, unused, test; one part when `part` is given. Returns {ok, steps, failed, output, next, seconds}; the types step carries `diagnostics`, the compiler's errors as data with suggested_edit. fix=true fixes format and deps first; with part=types it applies the compiler's suggested edits instead (then call again without fix to read the diagnostics).",
         "inputSchema": {
           "type": "object",
-          "properties": {"file": {"type": "string", "description": "path to the .ri file"}},
-          "required": ["file"]
-        }
-      },
-      {
-        "name": "fix",
-        "description": "Apply the compiler's own did-you-mean edits to a file, recompiling after each, until clean or an error carries no edit. Returns the edits applied and whether the file ended clean; when the remaining error lives in another file of the program, `cause` names that file and position, and that is the file to call this on next.",
-        "inputSchema": {
-          "type": "object",
-          "properties": {"file": {"type": "string", "description": "path to the .ri file"}},
-          "required": ["file"]
+          "properties": {
+            "part": {"type": "string", "enum": ["format", "deps", "types", "unused", "test"], "description": "one part; all when left out"},
+            "fix": {"type": "boolean", "description": "fix what can be fixed first"},
+            "file": {"type": "string", "description": "a .ri file or directory: every part is narrowed to it (default: the project in the current directory)"},
+            "affected": {"type": "array", "items": {"type": "string"}, "description": "files that changed; types and test check only what they reach"}
+          }
         }
       },
       {
@@ -184,17 +179,6 @@ class Iyi::Command
           "properties": {
             "path": {"type": "string", "description": "directory or test file (default: .)"},
             "affected": {"type": "array", "items": {"type": "string"}, "description": "files that changed; only tests that can reach them run"}
-          }
-        }
-      },
-      {
-        "name": "ok",
-        "description": "Is the work done? Runs fmt --check, mod tidy --check (when ris.mod exists), check, vet and test, fastest first, and stops at the first failure. Returns {ok, steps, failed, output, next}: next names the command that fixes the failing step. Pass affected=[changed files] to check and test only what a change reaches.",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "path": {"type": "string", "description": "project directory or file (default: .)"},
-            "affected": {"type": "array", "items": {"type": "string"}, "description": "files that changed; check and test only what they reach"}
           }
         }
       },
@@ -222,15 +206,24 @@ class Iyi::Command
     args =
       case name
       when "check"
-        return mcp_tool_error(id, "check needs a file") unless file
-        ["check", "-f", "json", file]
-      when "fix"
-        return mcp_tool_error(id, "fix needs a file") unless file
-        ["fix", "--json", file]
+        built = ["check"]
+        if part = arguments.try(&.dig?("part")).try(&.as_s?)
+          return mcp_tool_error(id, "check: part is one of #{CHECK_PARTS.join(", ")}") unless CHECK_PARTS.includes?(part)
+          built << part
+        end
+        built << "--json"
+        built << "--fix" if arguments.try(&.dig?("fix")).try(&.as_bool?)
+        arguments.try(&.dig?("affected")).try(&.as_a?).try &.each do |changed|
+          if path = changed.as_s?
+            built << "--affected" << path
+          end
+        end
+        built << file if file
+        built
       when "context"
         return mcp_tool_error(id, "context needs a file") unless file
         ["mod", "context", "--json", file]
-      when "test", "ok"
+      when "test"
         built = [name, "--json"]
         arguments.try(&.dig?("affected")).try(&.as_a?).try &.each do |changed|
           if path = changed.as_s?
@@ -247,8 +240,8 @@ class Iyi::Command
         ["doc", target]
       else
         # With the catalogue, because a caller that guessed a name wrong
-        # has no other way to learn the six from an error, and the list
-        # is six words long.
+        # has no other way to learn the five from an error, and the list
+        # is five words long.
         return mcp_tool_error(id, "unknown tool: #{name}. This server has #{mcp_tool_names.join(", ")}")
       end
 
@@ -256,12 +249,10 @@ class Iyi::Command
     stderr = IO::Memory.new
     status = Process.run(Process.executable_path.not_nil!, args, output: stdout, error: stderr)
 
-    # `check` answers on stderr (errors are errors) and says nothing when
-    # clean; every other verb answers on stdout. An empty clean check
-    # becomes `[]` so the caller always receives JSON.
+    # Every verb answers on stdout; a refusal before the verb ran (no
+    # such file) is a sentence on stderr.
     text = stdout.to_s
     text = stderr.to_s if text.blank?
-    text = "[]" if text.blank? && name == "check"
     text = "(exit #{status.exit_code}, no output)" if text.blank?
 
     # iyi: `isError` was the constant `false`, so a tool that could not
@@ -287,8 +278,7 @@ class Iyi::Command
       else
         begin
           parsed = JSON.parse(text)
-          frames = parsed.as_a? if name == "check"
-          !frames || frames.empty? || frames.any? { |frame| frame["line"]?.try(&.as_i?) }
+          name == "check" ? !parsed.as_h?.nil? : true
         rescue JSON::ParseException
           false
         end

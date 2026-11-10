@@ -38,22 +38,19 @@ module Iyi
         get          add or move a requirement in ris.mod; -u updates all
         build        build an executable
         run          build and run a program (default)
-        mod          inspect a .iyimod artifact; `mod tidy` fixes ris.mod
+        mod          inspect a .iyimod artifact, a module's context or reach
         doc          print a module's exported surface, or a prelude type's
-        ok           run every check and test: exit 0 means the work is done
+        check        format, deps, types, unused, test: exit 0 means done;
+                     --fix fixes format and deps, `check types FILE` is quick
         test         run every *_test.ri: exit 0 passes, else fails
-        vet          report unreachable code; findings are the exit code
-        check        type-check only; errors are the exit code, -f json data
         heap         census reachable heap sites; --user omits libraries
         unsafe       list the @[Ffi], @[PointerUnsafe] and @[TapeUnsafe] marks
-        fmt          format files in place; --check makes a change fail
-        fix          apply the compiler's did-you-mean edits until clean
         lsp          serve the language over stdio (editors, agents)
         mcp          serve the compiler's verbs as MCP tools over stdio
         daemon       hold the prelude analysed between builds
         env          print environment information
         clear_cache  clear the compiler cache
-        tool         formatter and editor tools, Crystal's
+        tool         editor tools, Crystal's
         version      print the version
         help         print this text
 
@@ -71,7 +68,7 @@ module Iyi
   VERSION = Iyi::Config.iyi_version
 
   DELEGATED = %w(init get build run mod env clear_cache tool daemon test
-    doc lsp vet check unsafe heap fix mcp ok)
+    doc lsp check unsafe heap mcp)
 
   # The ones that belong to Crystal and are still in the binary underneath.
   # Named rather than swallowed, because "unknown command" would be a lie.
@@ -82,15 +79,6 @@ module Iyi
   # says where it went.
   CRYSTAL_ONLY = %w(spec eval)
 
-  # The verb other toolchains spell at the top level, `go fmt` and `zig fmt`
-  # and `crystal tool format`'s own users' `crystal format` habit: `tool
-  # format` under the name people type. It named `tool format` and exited 1,
-  # which answered a request to format with an instruction to retype it.
-  FORMAT_VERBS = %w(fmt format)
-
-  def self.format_options(options : Array(String)) : Array(String)
-    ["tool", "format"] + options[1..]
-  end
 
   # What this language has in place of a Crystal verb it does not carry.
   # The refusal used to end with "run it with the `crystal` binary in this
@@ -137,8 +125,6 @@ module Iyi
         case verb
         when .in?(DELEGATED)
           Iyi::Command.run([verb, "--help"])
-        when .in?(FORMAT_VERBS)
-          Iyi::Command.run(["tool", "format", "--help"])
         when .in?(CRYSTAL_ONLY)
           STDERR.puts other_language_verb_sentence(verb)
           exit 1
@@ -161,8 +147,6 @@ module Iyi
     when .in?(CRYSTAL_ONLY)
       STDERR.puts other_language_verb_sentence(command)
       exit 1
-    when .in?(FORMAT_VERBS)
-      Iyi::Command.run(format_options(options))
     when .in?(DELEGATED)
       Iyi::Command.run(options)
     else

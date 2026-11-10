@@ -182,7 +182,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       inside = ""
       if repositories.size > 1
         above = repositories[1..].map { |prefix| "`#{prefix}`" }.join(" or ")
-        inside = ", or the package the module is inside (#{above}) - `iyi mod tidy` finds which"
+        inside = ", or the package the module is inside (#{above}) - `ris check deps --fix` finds which"
       end
       node.raise "no requirement covers '#{path}'. A dotted path is a " \
                  "package (iyi SPEC III.7); the file that declares one is " \

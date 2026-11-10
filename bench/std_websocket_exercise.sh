@@ -1078,7 +1078,7 @@ else
   echo "  FAIL: iyi doc src/std/websocket.iyi"
   status=1
 fi
-if "$IYI" fmt --check "$REPO/src/std/websocket.iyi" "$REPO/bench/std_websocket_exercise.iyi" > "$WORK/format.log" 2>&1; then
+if "$IYI" check format "$REPO/src/std/websocket.iyi" "$REPO/bench/std_websocket_exercise.iyi" > "$WORK/format.log" 2>&1; then
   echo "  the module and its exercise are formatted"
 else
   echo "  not formatted: $(grep -m1 produced "$WORK/format.log")"

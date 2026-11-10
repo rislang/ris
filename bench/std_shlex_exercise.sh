@@ -332,7 +332,7 @@ else
 fi
 # `iyi fmt`, the formatter of the iyi the gate runs: `bin/crystal` is the
 # bootstrap compiler on darwin's runner, which reads no iyi.
-if "$IYI" fmt --check "$REPO/src/std/shlex.iyi" "$REPO/bench/std_shlex_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$IYI" check format "$REPO/src/std/shlex.iyi" "$REPO/bench/std_shlex_exercise.iyi" >"$WORK/format.log" 2>&1; then
   echo "  the module and its exercise are formatted"
 else
   echo "  not formatted: $(head -3 "$WORK/format.log")"

@@ -507,7 +507,7 @@ else
   echo "  FAIL: iyi doc src/std/compress.iyi"
   status=1
 fi
-if "$IYI" fmt --check "$REPO/src/std/compress.iyi" "$REPO/bench/std_compress_exercise.iyi" > "$WORK/format.log" 2>&1; then
+if "$IYI" check format "$REPO/src/std/compress.iyi" "$REPO/bench/std_compress_exercise.iyi" > "$WORK/format.log" 2>&1; then
   echo "  the module and its exercise are formatted"
 else
   echo "  not formatted: $(grep -m1 produced "$WORK/format.log")"

@@ -188,7 +188,7 @@ case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     checkout="$IYI_CACHE_DIR/mod/example.test/user/libb@v1.0.0"
     cache_spelled() { # cache_spelled <how> <IYI_CACHE_DIR>
-      (cd "$checkout" && IYI_CACHE_DIR="$2" "$IYI" check libb.iyi) > cachecase.log 2>&1 ||
+      (cd "$checkout" && IYI_CACHE_DIR="$2" "$IYI" check types libb.iyi) > cachecase.log 2>&1 ||
         fail "check in the cached libb, IYI_CACHE_DIR in $1, failed: $(cat cachecase.log)"
       if [ -e "$checkout/ris.sum" ]; then
         fail "a check with the cache spelled in $1 wrote ris.sum into the cached libb"
@@ -336,9 +336,9 @@ grep -qU $'^require example.test/user/liba v1.0.0\r$' ris.mod && ! grep -qU $'mo
   fail "the liba line did not move, or a line lost or gained its CR: $(od -c ris.mod | tail -4)"
 printf 'module example.test/user/mixt\nrequire example.test/user/libb v1.0.0\r\n' > ris.mod
 printf 'puts 1\n' > main.iyi
-"$IYI" mod tidy > mixed-tidy.log 2>&1 || { fail "tidy on a mixed manifest failed"; cat mixed-tidy.log; }
+"$IYI" check deps --fix > mixed-tidy.log 2>&1 || { fail "tidy on a mixed manifest failed"; cat mixed-tidy.log; }
 [ -z "$(requires example.test/user/libb)" ] || fail "tidy said '$(cat mixed-tidy.log)' and left libb's line"
-"$IYI" mod tidy --check > mixed-tidy2.log 2>&1 || fail "a tidied mixed manifest was not clean: $(cat mixed-tidy2.log)"
+"$IYI" check deps > mixed-tidy2.log 2>&1 || fail "a tidied mixed manifest was not clean: $(cat mixed-tidy2.log)"
 cd "$WORK/app" || exit 1
 [ "$status" -eq 0 ] && echo "  get moved the one CRLF line among LF ones, and tidy removed one for good"
 
@@ -367,7 +367,7 @@ step "vet reports the program, not the packages it builds from"
 # own and exited 1, which no change to the program could fix.
 printf '\npub def unused_here : Int32\n  1\nend\n' >> "$WORK/liba-local/liba.iyi"
 printf 'import example.test/user/liba::{greeting}\nimport example.test/user/libb::*\n\ndef own_unused : Int32\n  1\nend\n\nputs greeting\n' > "$WORK/rapp/vet.iyi"
-(cd "$WORK/rapp" && "$IYI" vet vet.iyi) > vet.log 2>&1
+(cd "$WORK/rapp" && "$IYI" check unused vet.iyi) > vet.log 2>&1
 vet_code=$?
 if [ "$vet_code" -ne 1 ] || ! grep -q "own_unused" vet.log || grep -q "unused_here\|number" vet.log; then
   fail "vet answered $vet_code, naming the packages' defs or not the program's:"; sed 's/^/    /' vet.log
@@ -452,27 +452,27 @@ printf 'import example.test/user/libc\nputs 1\n' > nested/main.iyi
 "$IYI" build main.iyi -o main > tidy-build.log 2>&1 || { fail "the tidy fixture did not build"; cat tidy-build.log; }
 printf 'example.test/user/liba v1.0.0 s1:0000000000000000000000000000000000000000\n' >> ris.sum
 cp ris.mod ris.mod.before && cp ris.sum ris.sum.before
-"$IYI" mod tidy --check > tidy-check.log 2>&1
+"$IYI" check deps > tidy-check.log 2>&1
 check_status=$?
 [ "$check_status" -eq 1 ] || fail "--check answered $check_status with a change due"
 grep -q "would remove example.test/user/libb v1.0.0: nothing imports it" tidy-check.log || fail "--check did not name the unused line: $(cat tidy-check.log)"
 # Two: the version nothing builds, and libb's, which goes with its line.
 grep -q "would drop 2 ris.sum entries" tidy-check.log || fail "--check did not name the stale sums: $(cat tidy-check.log)"
 cmp -s ris.mod ris.mod.before && cmp -s ris.sum ris.sum.before || fail "--check wrote something"
-"$IYI" mod tidy > tidy1.log 2>&1 || { fail "tidy failed"; cat tidy1.log; }
+"$IYI" check deps --fix > tidy1.log 2>&1 || { fail "tidy failed"; cat tidy1.log; }
 [ -z "$(requires example.test/user/libb)" ] || fail "libb is still required"
 [ "$(requires example.test/user/liba)" = "v1.3.0" ] || fail "liba moved to '$(requires example.test/user/liba)'"
 [ -z "$(requires example.test/user/libc)" ] || fail "the nested module's import was taken for this one's"
 grep -q "v1.0.0" ris.sum && fail "the stale sum entry is still there"
 grep -q "example.test/user/liba v1.3.0 s1:" ris.sum || fail "the sum lost what builds"
-"$IYI" mod tidy --check > tidy-clean.log 2>&1 || fail "a tidy manifest was not clean: $(cat tidy-clean.log)"
+"$IYI" check deps > tidy-clean.log 2>&1 || fail "a tidy manifest was not clean: $(cat tidy-clean.log)"
 grep -q "say what the source imports" tidy-clean.log || fail "a clean tidy did not say so"
 [ "$status" -eq 0 ] && echo "  libb removed, liba kept, the stale sum dropped; --check wrote nothing, then found nothing"
 
 step "mod tidy adds an import's module at the version that builds, and keeps a raising line"
 printf 'import example.test/user/libb::{number}\nputs number\n' > b_test.iyi
 rm main.iyi
-"$IYI" mod tidy > tidy2.log 2>&1 || { fail "tidy failed"; cat tidy2.log; }
+"$IYI" check deps --fix > tidy2.log 2>&1 || { fail "tidy failed"; cat tidy2.log; }
 [ "$(requires example.test/user/libb)" = "v1.0.0" ] || fail "the imported libb was not added: $(cat tidy2.log)"
 # liba is imported by nothing now, and libb asks for v1.1.0: the line
 # naming v1.3.0 is what builds v1.3.0, so it stays and is said.
@@ -482,7 +482,7 @@ grep -q "kept example.test/user/liba v1.3.0: nothing imports it, but without the
 mkdir -p "$WORK/t2" && cd "$WORK/t2" || exit 1
 printf 'module example.test/user/t2\nrequire example.test/user/libb v1.0.0\n' > ris.mod
 printf 'import example.test/user/liba\nputs 1\n' > main.iyi
-"$IYI" mod tidy > tidy3.log 2>&1 || { fail "tidy failed"; cat tidy3.log; }
+"$IYI" check deps --fix > tidy3.log 2>&1 || { fail "tidy failed"; cat tidy3.log; }
 [ "$(requires example.test/user/liba)" = "v1.1.0" ] || fail "liba was added at '$(requires example.test/user/liba)', not the v1.1.0 the graph builds"
 [ -z "$(requires example.test/user/libb)" ] || fail "libb stayed, imported by nothing"
 [ "$status" -eq 0 ] && echo "  libb added; liba's raising line kept; an indirect import required at v1.1.0, the version it builds at"
@@ -490,7 +490,7 @@ printf 'import example.test/user/liba\nputs 1\n' > main.iyi
 step "mod tidy refuses an import no repository provides"
 printf 'import example.test/user/nosuch/thing\nputs 1\n' > missing.iyi
 cp ris.mod ris.mod.before
-"$IYI" mod tidy > tidy4.log 2>&1
+"$IYI" check deps --fix > tidy4.log 2>&1
 if [ $? -eq 0 ] || ! grep -q "no module provides example.test/user/nosuch/thing" tidy4.log; then
   fail "the unprovided import was not refused: $(cat tidy4.log)"
 elif ! cmp -s ris.mod ris.mod.before; then
@@ -513,7 +513,7 @@ grep -q "liba 1.1.0" short2.log || fail "the short-named program ran '$(cat shor
 grep -qx "require example.test/user/liba v1.3.0 as web" ris.mod || fail "get -u lost the short name: $(grep require ris.mod)"
 # Whatever else tidy would do - -u left a sum entry behind - it must not
 # take the line a short name imports for unused.
-"$IYI" mod tidy --check > short4.log 2>&1
+"$IYI" check deps > short4.log 2>&1
 grep -q "remove example.test/user/liba" short4.log && fail "tidy took the short-named line for unused: $(cat short4.log)"
 [ "$status" -eq 0 ] && echo "  get --as wrote it, import web::* built, -u kept it, tidy counted it"
 
@@ -915,9 +915,9 @@ grep -q "'who' is ambiguous here: it is exported by both Pa::Util and Pb::Util" 
 mkdir -p "$WORK/capp3" && cd "$WORK/capp3" || exit 1
 printf 'module example.test/user/capp3\nrequire example.test/user/pa v1.0.0\n' > ris.mod
 printf 'import example.test/user/pa/util\n\nputs Util.who\n' > main.iyi
-"$IYI" check -f json main.iyi > old.json 2>&1
+"$IYI" check types --json main.iyi > old.json 2>&1
 grep -q '"replacement":"Pa::Util"' old.json || fail "the old name got no edit to its new one: $(cat old.json)"
-"$IYI" fix main.iyi > oldfix.log 2>&1 && grep -q "puts Pa::Util.who" main.iyi && [ "$("$IYI" run main.iyi 2>&1)" = "pa" ] ||
+"$IYI" check types --fix main.iyi > oldfix.log 2>&1 && grep -q "puts Pa::Util.who" main.iyi && [ "$("$IYI" run main.iyi 2>&1)" = "pa" ] ||
   fail "iyi fix did not move the old name: $(cat oldfix.log main.iyi)"
 "$IYI" mod context main.iyi > ctx.log 2>&1
 grep -q "^# qualified, the module is Pa::Util" ctx.log || fail "mod context did not say the package module's qualified name: $(head -5 ctx.log)"
@@ -994,10 +994,10 @@ printf 'module greet/greeter\n\nimport example.test/user/liba\n\npub def hello :
 printf 'module greet/greeter_test\n\nimport greet/greeter\n\nassert Greet::Greeter.hello == "greeter says liba 1.1.0", "hello"\n' > greet/greeter_test.iyi
 printf 'import greet/greeter\n\nputs Greet::Greeter.hello\n' > main.iyi
 "$IYI" run main.iyi > sub-run.log 2>&1 && grep -q "greeter says liba 1.1.0" sub-run.log || fail "the entry did not build: $(cat sub-run.log)"
-"$IYI" check greet/greeter.iyi > sub-check.log 2>&1 || fail "check of the module alone: $(cat sub-check.log)"
-(cd greet && "$IYI" check greeter.iyi) > sub-check2.log 2>&1 || fail "check from inside greet/: $(cat sub-check2.log)"
+"$IYI" check types greet/greeter.iyi > sub-check.log 2>&1 || fail "check of the module alone: $(cat sub-check.log)"
+(cd greet && "$IYI" check types greeter.iyi) > sub-check2.log 2>&1 || fail "check from inside greet/: $(cat sub-check2.log)"
 "$IYI" test > sub-test.log 2>&1 && grep -q "^1 passed, 0 failed" sub-test.log || fail "the test beside the module: $(cat sub-test.log)"
-"$IYI" check --affected greet/greeter.iyi > sub-aff.log 2>&1 && grep -q "^3 consumer(s) checked, all compile" sub-aff.log ||
+"$IYI" check types --affected greet/greeter.iyi > sub-aff.log 2>&1 && grep -q "^3 consumer(s) checked, all compile" sub-aff.log ||
   fail "check --affected of the module: $(cat sub-aff.log)"
 "$IYI" mod context greet/greeter.iyi > sub-ctx.log 2>&1 && grep -q "def greeting : String" sub-ctx.log ||
   fail "mod context of the module: $(head -5 sub-ctx.log)"

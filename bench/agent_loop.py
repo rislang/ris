@@ -153,7 +153,7 @@ def main():
     step("fix applies the compiler's own edit",
          fixed["clean"] and [(a["from"], a["to"]) for a in fixed["applied"]] == [("shoutt", "shout")],
          f"applied {fixed['applied']}")
-    proc = run("check", "app.iyi", cwd=work)
+    proc = run("check", "types", "app.iyi", cwd=work)
     step("check confirms clean", proc.returncode == 0, "")
 
     # 4a. the edit that spans a literal rather than a name: a
@@ -209,7 +209,7 @@ def main():
     fixed = json.loads(proc.stdout)
     step("and fixing that file converges",
          fixed["clean"] and [(a["from"], a["to"]) for a in fixed["applied"]] == [("helperr", "helper")]
-         and run("check", "bumps.iyi", cwd=work).returncode == 0,
+         and run("check", "types", "bumps.iyi", cwd=work).returncode == 0,
          f"applied {fixed['applied']}")
     # 4a''. and the remaining error is said. A chain whose last frame is a
     # type's trace - `Int32 trace:` under `undefined method 'abss' for
@@ -251,7 +251,7 @@ def main():
     step("a prelude method, a module function inside an impl, and a pseudo-method are each one edit away",
          proc.returncode == 0 and fixed["clean"]
          and sorted(a["to"] for a in fixed["applied"]) == ["is_a?", "ljust", "shout"]
-         and run("check", "typos.iyi", cwd=work).returncode == 0,
+         and run("check", "types", "typos.iyi", cwd=work).returncode == 0,
          f"applied {[a['to'] for a in fixed.get('applied', [])]}")
 
 
@@ -264,7 +264,7 @@ def main():
         "def f(x : Show) : String\n  x.show\nend\n\n"
         "v = Program.args.size > 10 ? 1 : nil\nputs f(v)\n"
     ))
-    said = run("check", "advice.iyi", cwd=work).stderr
+    said = run("check", "types", "advice.iyi", cwd=work).stderr
     step("a nilable argument to a trait is told to narrow, not to write a union impl",
          "`Nil` does not (iyi SPEC II.1). v can be nil here: narrow it first (`if v`)" in said
          and "impl Show for (Int32 | Nil)" not in said, "")
@@ -328,7 +328,7 @@ def main():
     # 4a'''-nil. Under a nilable `x + 1` the error went on to say the
     # library, whose `Nil` has no `+` either; the narrowing is the answer.
     write("advice_nil.iyi", "x = Program.args.size > 10 ? 1 : nil\nputs x + 1\n")
-    said = run("check", "advice_nil.iyi", cwd=work).stderr
+    said = run("check", "types", "advice_nil.iyi", cwd=work).stderr
     step("a nilable receiver is not sent to the other library",
          "x can be nil here" in said and "small by rule" not in said, "")
     os.remove(os.path.join(work, "advice_nil.iyi"))
@@ -352,14 +352,14 @@ def main():
     step("a run that hits the edit cap is not clean, and says it is capped",
          proc.returncode == 1 and not fixed["clean"] and fixed.get("capped") is True
          and len(fixed["applied"]) == 32 and "valeu32" in fixed["remaining"]
-         and run("check", "capped.iyi", cwd=work).returncode == 1,
+         and run("check", "types", "capped.iyi", cwd=work).returncode == 1,
          f"applied {len(fixed['applied'])}, clean {fixed['clean']}, capped {fixed.get('capped')}")
     proc = run("fix", "--json", "capped.iyi", cwd=work)
     fixed = json.loads(proc.stdout)
     step("and the next run finishes it, clean with no cap",
          proc.returncode == 0 and fixed["clean"] and "capped" not in fixed
          and len(fixed["applied"]) == 8
-         and run("check", "capped.iyi", cwd=work).returncode == 0,
+         and run("check", "types", "capped.iyi", cwd=work).returncode == 0,
          f"applied {len(fixed['applied'])}, clean {fixed['clean']}")
     os.remove(os.path.join(work, "capped.iyi"))
 
@@ -370,7 +370,7 @@ def main():
         "struct Nums\nend\n\n"
         "impl Enumerable for Nums\n  def each(& : Int32 -> Nil) : Nil\n  end\nend\n"
     ))
-    said = run("check", "advice_enum.iyi", cwd=work).stderr
+    said = run("check", "types", "advice_enum.iyi", cwd=work).stderr
     step("`impl Enumerable` without its import names the import",
          "`Enumerable` comes with `import std/enumerable::{Enumerable}`" in said, "")
     os.remove(os.path.join(work, "advice_enum.iyi"))
@@ -384,7 +384,7 @@ def main():
         "pub def go() : Int32\n  shoutt(3)\nend\n\n"
         "pub def shout(n : Int32) : Int32\n  n * 2\nend\n"
     ))
-    proc = run("check", "uncalled.iyi", cwd=work)
+    proc = run("check", "types", "uncalled.iyi", cwd=work)
     step("check types the body nobody calls", proc.returncode == 1,
          "R-2's declared types stand in for the caller")
     proc = run("build", "--no-codegen", "uncalled.iyi", cwd=work)
@@ -401,7 +401,7 @@ def main():
         "def f : Int32\n  \"s\"\nend\n\n"
         "pub struct P\n  private def g : Int32\n    \"s\"\n  end\nend\n"
     ))
-    proc = run("check", "unexported.iyi", cwd=work)
+    proc = run("check", "types", "unexported.iyi", cwd=work)
     step("an unexported def is typed at its definition too",
          proc.returncode == 1 and "must return Int32 but it is returning String" in (proc.stdout + proc.stderr),
          "R-2c is not `pub`'s")
@@ -411,7 +411,7 @@ def main():
         "pub struct P\n  private def g : Int32\n    2\n  end\nend\n"
     ))
     step("and the honest unexported def is clean",
-         run("check", "unexported.iyi", cwd=work).returncode == 0, "")
+         run("check", "types", "unexported.iyi", cwd=work).returncode == 0, "")
 
     # And a script, which has no module header: its top-level defs are
     # the program's, and the program is a module to the compiler, so the
@@ -419,13 +419,13 @@ def main():
     # String` with `x` for a body passed `check` while nothing called it,
     # and the same def below a `module` header was refused.
     write("script.iyi", "def g(x : Int32) : String\n  x\nend\n")
-    proc = run("check", "script.iyi", cwd=work)
+    proc = run("check", "types", "script.iyi", cwd=work)
     step("a script's uncalled top-level def is typed at its definition",
          proc.returncode == 1 and "must return String but it is returning Int32" in (proc.stdout + proc.stderr),
          " ".join((proc.stdout + proc.stderr).strip().splitlines()[-1:]))
     write("script.iyi", "def g(x : Int32) : String\n  x.to_s\nend\n")
     step("and the honest script is clean",
-         run("check", "script.iyi", cwd=work).returncode == 0, "")
+         run("check", "types", "script.iyi", cwd=work).returncode == 0, "")
 
     # And the shapes the probe used to leave to callers: a class method, a
     # parameter with a default, one with an external name, a splat, a
@@ -452,7 +452,7 @@ def main():
     write("shapes.iyi", shapes.replace("\"not an int\"", "1").replace("x.name", "x.name.size")
           .replace("\"default\"", "x").replace("\"external\"", "x").replace("\"splat\"", "xs.size")
           .replace("\"named only\"", "x + y"))
-    proc = run("check", "shapes.iyi", cwd=work)
+    proc = run("check", "types", "shapes.iyi", cwd=work)
     step("and the honest shapes are clean", proc.returncode == 0,
          " ".join((proc.stdout + proc.stderr).strip().splitlines()[-1:]))
 
@@ -492,7 +492,7 @@ def main():
         "  def helper : Int32\n    \"nope\"\n  end\nend\n\n"
         "impl B for X\n  def name : String\n    bogus_method_call(1)\n  end\nend\n"
     ))
-    proc = run("check", "unbuilt.iyi", cwd=work)
+    proc = run("check", "types", "unbuilt.iyi", cwd=work)
     said = proc.stdout + proc.stderr
     step("an unexported type's and an impl's bodies are typed with nothing built",
          proc.returncode == 1
@@ -511,7 +511,7 @@ def main():
         "impl B for X\n  def name : String\n    \"x\"\n  end\nend\n"
     ))
     step("and the honest ones are clean",
-         run("check", "unbuilt.iyi", cwd=work).returncode == 0, "")
+         run("check", "types", "unbuilt.iyi", cwd=work).returncode == 0, "")
 
     # A module-private type behind a generic argument is as private as it
     # is bare: `def g : Array(P)` was refused with "does not export P" while
@@ -523,7 +523,7 @@ def main():
         "def f(p : P) : P\n  p\nend\n\n"
         "def g(n : Int32) : Array(P)\n  [] of P\nend\n"
     ))
-    proc = run("check", "private_generic.iyi", cwd=work)
+    proc = run("check", "types", "private_generic.iyi", cwd=work)
     step("a private type is private the same way bare and as a type argument",
          proc.returncode == 0,
          " ".join((proc.stdout + proc.stderr).strip().splitlines()[-1:]))
@@ -537,7 +537,7 @@ def main():
         "pub trait Sized\n  abstract def size() : Int32\nend\n\n"
         "pub def total(s : Sized) : Int32\n  s.size() + s.length()\nend\n"
     ))
-    proc = run("check", "bounded.iyi", cwd=work)
+    proc = run("check", "types", "bounded.iyi", cwd=work)
     step("a generic body cannot leave its bound",
          proc.returncode == 1 and "IyiDefTypeWitness_" in (proc.stdout + proc.stderr),
          "typed against the trait's witness")
@@ -547,7 +547,7 @@ def main():
         "pub def total(s : Sized) : Int32\n  s.size() * 2\nend\n"
     ))
     step("and the honest generic body is clean",
-         run("check", "bounded.iyi", cwd=work).returncode == 0, "")
+         run("check", "types", "bounded.iyi", cwd=work).returncode == 0, "")
 
     # 4b''. the import wall is per-file, and `pub import` is the one
     # door through it: a module in the program because *somebody else*
@@ -563,14 +563,14 @@ def main():
     ))
     write("declared.iyi", "import lib/facade\nimport lib/inner::*\n\nputs shine()\n")
     step("an import declares the dependency it reaches",
-         run("check", "declared.iyi", cwd=work).returncode == 0,
+         run("check", "types", "declared.iyi", cwd=work).returncode == 0,
          "import lib/inner::* is this file's own edge")
     write("qualified.iyi", "import lib/facade\n\nputs Lib::Inner.shine()\n")
     write("lib/facade.iyi", (
         "module lib/facade\nimport lib/inner\n\n"
         "pub def front() : Int32\n  1\nend\n"
     ))
-    proc = run("check", "qualified.iyi", cwd=work)
+    proc = run("check", "types", "qualified.iyi", cwd=work)
     step("the wall holds for qualified names too",
          proc.returncode == 1 and "not imported here" in (proc.stdout + proc.stderr),
          "Lib::Inner.shine() without an import")
@@ -579,13 +579,13 @@ def main():
         "pub def front() : Int32\n  1\nend\n"
     ))
     step("and pub import opens it",
-         run("check", "qualified.iyi", cwd=work).returncode == 0, "")
+         run("check", "types", "qualified.iyi", cwd=work).returncode == 0, "")
     proc = run("fix", "--json", "uncalled.iyi", cwd=work)
     fixed = json.loads(proc.stdout)
     step("fix converges to check's verdict",
          fixed["clean"] and [(a["from"], a["to"]) for a in fixed["applied"]] == [("shoutt", "shout")],
          f"applied {fixed['applied']}")
-    step("and check agrees", run("check", "uncalled.iyi", cwd=work).returncode == 0, "")
+    step("and check agrees", run("check", "types", "uncalled.iyi", cwd=work).returncode == 0, "")
 
     # 4c. the suggestion pool includes names an import brought into scope —
     # the miss that motivated it: `addd` went unsuggested while `add` sat
@@ -685,7 +685,7 @@ def main():
         "import calc/add::{add}\n\n"
         "puts add(1, 1)\n"
     ))
-    proc = run("check", "--affected", "calc/add.iyi", cwd=work)
+    proc = run("check", "types", "--affected", "calc/add.iyi", cwd=work)
     step("a clean ripple compiles everyone",
          proc.returncode == 0 and "all compile" in proc.stdout, proc.stdout.strip())
     write("calc/add.iyi", (
@@ -693,7 +693,7 @@ def main():
         "# Adds three integers now.\n"
         "pub def add(a : Int32, b : Int32, c : Int32) : Int32\n  a + b + c\nend\n"
     ))
-    proc = run("check", "--affected", "calc/add.iyi", cwd=work)
+    proc = run("check", "types", "--affected", "calc/add.iyi", cwd=work)
     step("a surface break names its consumers",
          proc.returncode == 1 and "broke" in proc.stdout, proc.stdout.splitlines()[-1])
     # And each with its reason: the line was `consumer.iyi: ` and nothing,
@@ -704,7 +704,7 @@ def main():
     # printed, or nothing.
     write("calc/sub.iyi", "module calc/sub\n\npub def sub : Int32\n  1.nope\nend\n")
     write("sub_user.iyi", "module sub_user\n\nimport calc/sub::{sub}\n\nputs sub\n")
-    deep = run("check", "--affected", "calc/sub.iyi", cwd=work)
+    deep = run("check", "types", "--affected", "calc/sub.iyi", cwd=work)
     named += [line for line in deep.stdout.splitlines() if line.startswith("sub_user.iyi:")]
     os.remove(os.path.join(work, "calc", "sub.iyi"))
     os.remove(os.path.join(work, "sub_user.iyi"))
@@ -718,18 +718,18 @@ def main():
         "pub def add(a : Int32, b : Int32) : Int32\n  a + b\nend\n"
     ))
     step("and the repair closes it",
-         run("check", "--affected", "calc/add.iyi", cwd=work).returncode == 0, "")
+         run("check", "types", "--affected", "calc/add.iyi", cwd=work).returncode == 0, "")
     # And a deletion, the one change certain to break every importer. It
     # answered "0 consumer(s) checked, all compile", exit 0, because the
     # closure dropped an import it could not open; an import names a path,
     # and the path outlives the file.
     os.rename(os.path.join(work, "calc/add.iyi"), os.path.join(work, "calc/add.gone"))
-    proc = run("check", "--affected", "calc/add.iyi", cwd=work)
+    proc = run("check", "types", "--affected", "calc/add.iyi", cwd=work)
     step("a deleted module names the importers it breaks",
          proc.returncode == 1 and "consumer.iyi" in proc.stdout
          and "calc/add.iyi is not there" in proc.stdout,
          proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else repr(proc.stderr[:80]))
-    proc = run("check", "--affected", "calc/add.iyi", "--json", cwd=work)
+    proc = run("check", "types", "--affected", "calc/add.iyi", "--json", cwd=work)
     report = json.loads(proc.stdout)
     step("and says so in the data",
          report.get("affected_not_found") == ["calc/add.iyi"]

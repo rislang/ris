@@ -157,9 +157,9 @@ class Iyi::Command
     <<-MD
       # Agents
 
-      The work is done when `#{name} ok` passes. Run it before you say
-      done; use `#{name} check`, `#{name} test --affected FILE` for quick
-      loops.
+      The work is done when `#{name} check` passes. Use `#{name} check --fix`
+      to fix formatting and dependencies first; `#{name} check types` and
+      `#{name} test --affected FILE` for quick loops.
 
       MD
   end
@@ -172,7 +172,7 @@ class Iyi::Command
     module, where NAME is MODULE's last segment (`-` written `_`) - `ris
     init kemal` writes ris.mod and kemal.ri. DIR is where, and the current
     directory when it is left out. Nothing that is already there is
-    overwritten; an AGENTS.md saying `ris ok` decides
+    overwritten; an AGENTS.md saying `ris check` decides
     when the work is done is written unless one is there.
 
     MODULE is the path other projects would import this one by — a URL's

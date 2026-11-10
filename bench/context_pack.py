@@ -203,23 +203,19 @@ def run_task(agent: str, grounding: str):
             )
             if build.returncode == 0:
                 return attempt, sent
-            # The loop AI_FIRST.md §2 describes has `iyi fix` in it: the
+            # The loop AI_FIRST.md §2 describes has `ris check types --fix` in it: the
             # compiler's own suggested edits are applied before a model
             # is asked again, because an agent would run exactly that.
             # Both arms get the step; a program fix converges is green
             # on the round that wrote it, and what fix changed is printed
             # so a win here is a win somebody can read.
             fix = subprocess.run(
-                [str(IYI), "fix", "--json", "main.iyi"],
+                [str(IYI), "check", "types", "--fix", "main.iyi"],
                 capture_output=True, text=True, cwd=workdir,
             )
-            try:
-                fixed = json.loads(fix.stdout)
-            except json.JSONDecodeError:
-                fixed = {"clean": False, "applied": []}
-            if fixed.get("applied"):
-                print(f"  iyi fix applied: {[(a['from'], a['to']) for a in fixed['applied']]}")
-            if fixed.get("clean"):
+            if fix.stdout.strip():
+                print(f"  ris check types --fix: {fix.stdout.strip()}")
+            if fix.returncode == 0:
                 return attempt, sent
             answer = (workdir / "main.iyi").read_text()
             build = subprocess.run(

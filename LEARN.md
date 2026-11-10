@@ -91,18 +91,20 @@ Needs Crystal and LLVM 23. In the clone: `make ris`, then
 
 * `ris init example.com/me/app` writes `ris.mod`, `app.ri` and an
   `AGENTS.md`; `ris get github.com/x/y` adds a requirement.
-* After every edit: `ris check -f json FILE` (errors, with suggested
-  edits), `ris fix FILE`, `ris fmt`, `ris test` (runs every `*_test.ri`;
-  exit 0 passes). A test is a program: `import app::*`, then
-  `exit 1 unless parse_age("7") == 7`.
-* Before you say done: `ris ok`. It runs `fmt --check`, `mod tidy
-  --check`, `check`, `vet` and `test`, stops at the first failure with a
-  `next:` line naming the fix, and exits 0 only when all pass. `--json`
-  gives the verdict as data; `--affected FILE` narrows check and test.
-  check, vet and test run at once; `ris test` and `ris ok` run up to
-  `-j N` tests at once (default `RIS_JOBS`, else the CPU count), and
-  report in file and step order as if run one by one. Each step line
-  shows its wall time and a last line the total (`ok in 22.7s`).
+* After every edit: `ris check types FILE` (errors; `--json` gives
+  them as data with suggested edits), `ris check types --fix FILE`
+  (applies those edits), `ris test --affected FILE` (runs the
+  `*_test.ri` a change reaches; exit 0 passes). A test is a program:
+  `import app::*`, then `exit 1 unless parse_age("7") == 7`.
+* Before you say done: `ris check`. It runs the parts format, deps
+  (ris.mod and ris.sum), types, unused and test: format and deps first,
+  then the rest at once. The first failure shows its output and a
+  `next:` line naming the command that fixes it; exit 0 only when all
+  pass. `ris check --fix` fixes formatting and dependencies first.
+  `ris check PART` runs one part; `--json` gives the verdict as data;
+  `--affected FILE` narrows types and test; `-j N` runs tests at once
+  (default `RIS_JOBS`, else the CPU count). Each part line shows its
+  wall time and a last line the total (`ok in 22.7s`).
 * `ris doc MODULE` prints a module's exported surface: read that, not its
   body. `ris mcp` serves check, fix, context, test and ok as MCP
   tools.

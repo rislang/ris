@@ -21,13 +21,22 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
 * Messages between tasks through RisBoard and Atomic, replacing Channel,
   select and Mutex.
 * iyi's tooling for agents: modules, imports by URL, fast modular
-  rebuilds, `check`, `fix`, `lsp`, `mcp`; `ris init` starts a project.
-* `ris ok`: fmt, mod tidy, check, vet and test in one verdict; exit 0
-  means the work is done, `next:` names the fix. Also an MCP tool, and
-  `ris init` writes an AGENTS.md that says so.
-* `ris test -j N` and `ris ok -j N` use the machine's cores (default
-  `RIS_JOBS`, else the CPU count); `ris ok` runs check, vet and test at
-  once. Output keeps file and step order.
+  rebuilds, `check`, `lsp`, `mcp`; `ris init` starts a project.
+* `ris check`: one verb says whether the work is done. Parts format,
+  deps, types, unused, test; `ris check PART` runs one. `--fix` (`-f`)
+  fixes format and deps first; `ris check types --fix` applies the
+  compiler's suggested edits. `ris init` writes an AGENTS.md that says
+  so; MCP has `check` and `test`.
+* Breaking: `ris ok`, `ris vet`, `ris fmt`, `ris fix`, `ris mod tidy`,
+  `ris tool format` and `ris tool unreachable` are removed; `ris check`
+  replaces them. `ris check FILE` now runs every part for
+  FILE (`ris check types FILE` is the old meaning); `-f json` is
+  refused: `--json` gives steps, the types step carries `diagnostics`.
+  Step names are format, deps, types, unused, test (were fmt, tidy,
+  check, vet, test). MCP's `ok` and `fix` tools are gone.
+* `ris test -j N` and `ris check -j N` use the machine's cores (default
+  `RIS_JOBS`, else the CPU count); types, unused and test run at once.
+  Output keeps file and part order.
 * `ris ok` shows each step's wall time and the total (`ok in 22.7s`);
   `--json` carries them as `seconds`.
 * Runs on Linux x86_64 and aarch64, and macOS arm64 (built from source).

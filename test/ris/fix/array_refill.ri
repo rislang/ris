@@ -1,4 +1,4 @@
-# Crystal-style refill: a new Array per call. `ris fix` writes `clear`.
+# Crystal-style refill: a new Array per call. `ris check types --fix` writes `clear`.
 @[OnTape]
 struct Queue
   @items : Array(Int32)

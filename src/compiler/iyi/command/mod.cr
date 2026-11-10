@@ -17,9 +17,6 @@ class Iyi::Command
     when "context"
       options.shift
       mod_context
-    when "tidy"
-      options.shift
-      mod_tidy
     when "reach"
       options.shift
       mod_reach
@@ -39,9 +36,6 @@ class Iyi::Command
     Usage: #{Command.program_name} mod [subcommand]
 
     Subcommand:
-        tidy [--check]           make ris.mod and ris.sum say what the source
-                                 imports: add what is missing, remove what
-                                 nothing uses, drop sums nothing builds
         reach                    say what every module the build selects
                                  touches outside the language: std modules,
                                  File, C libraries and functions

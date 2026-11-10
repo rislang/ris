@@ -2493,7 +2493,7 @@ else
   echo "FAILED   refill_default_init: $out"
   status=1
 fi
-out=$("$RIS" check test/ris/integer_text_floor.ri 2>&1)
+out=$("$RIS" check types test/ris/integer_text_floor.ri 2>&1)
 if [ $? -ne 0 ]; then
   echo "FAILED   integer_text_floor: $out"
   status=1
@@ -2512,7 +2512,7 @@ done
 
 # A lexer that steps its own offset through tape text is warned, not
 # refused; the same lexer on String::Scanner is not.
-out=$("$RIS" check test/ris/warned/scanner_hint.ri 2>&1)
+out=$("$RIS" check types test/ris/warned/scanner_hint.ri 2>&1)
 if [ $? -eq 0 ] && grep -qF '`@pos` walks tape text by hand' <<<"$out"; then
   echo "warned   scanner_hint"
 else
@@ -2595,15 +2595,15 @@ for kind in field parameter literal; do
 done
 expect text_plain_builder 'only appends and is read back: write `text = ""`'
 expect text_plain_build 'this String.build only appends: write `io = ""`'
-# ris fix applies the compiler's own edits: Crystal-style text becomes ris.
-out=$(f="${TMPDIR:-/tmp}/plain_builder.ri"; cp test/ris/fix/plain_builder.ri "$f" && "$RIS" fix "$f" >/dev/null 2>&1 && diff test/ris/fix/plain_builder.expected "$f" && "$RIS" run "$f" 2>&1)
+# ris check types --fix applies the compiler's own edits: Crystal-style text becomes ris.
+out=$(f="${TMPDIR:-/tmp}/plain_builder.ri"; cp test/ris/fix/plain_builder.ri "$f" && "$RIS" check types --fix "$f" >/dev/null 2>&1 && diff test/ris/fix/plain_builder.expected "$f" && "$RIS" run "$f" 2>&1)
 if [ "$out" = "hello, ris" ]; then echo "runs     fix plain_builder"; else echo "FAILED   fix plain_builder: $out"; status=1; fi
 for rule in plain_build plain_build_inline io_parameter array_refill; do
   result=$(f="${TMPDIR:-/tmp}/fix_$rule.ri";
     cp "test/ris/fix/$rule.ri" "$f" &&
-    "$RIS" fix "$f" >/dev/null 2>&1 &&
+    "$RIS" check types --fix "$f" >/dev/null 2>&1 &&
     diff "test/ris/fix/$rule.expected" "$f" &&
-    "$RIS" fix "$f" >/dev/null 2>&1 &&
+    "$RIS" check types --fix "$f" >/dev/null 2>&1 &&
     diff "test/ris/fix/$rule.expected" "$f" &&
     "$RIS" run "$f" 2>&1)
   if [ "$result" = "hello, ris" ]; then
@@ -2615,7 +2615,7 @@ done
 # fix leaves alone a refill it cannot prove: a new Array that is not empty.
 kept=$(f="${TMPDIR:-/tmp}/fix_array_refill_kept.ri";
   cp test/ris/fix/array_refill_kept.ri "$f" &&
-  { "$RIS" fix "$f" >/dev/null 2>&1; diff -q test/ris/fix/array_refill_kept.ri "$f"; })
+  { "$RIS" check types --fix "$f" >/dev/null 2>&1; diff -q test/ris/fix/array_refill_kept.ri "$f"; })
 if [ "$?" -eq 0 ]; then echo "runs     fix array_refill_kept"; else echo "FAILED   fix array_refill_kept: $kept"; status=1; fi
 out=$("$RIS" run test/ris/text_field_kinds.ri 2>&1)
 if grep -qF 'PASS: text companions only for text fields' <<<"$out"; then echo "runs     text_field_kinds"; else echo "FAILED   text_field_kinds: $out"; status=1; fi

@@ -129,7 +129,7 @@ defers() { # defers <n> <file>: one def, n `defer x += 1` in its scope
 check_ns() {
   local start end
   start=$(date +%s%N)
-  "$IYI" check "$1" > /dev/null
+  "$IYI" check types "$1" > /dev/null
   end=$(date +%s%N)
   echo $((end - start))
 }

@@ -138,7 +138,7 @@ echo "== what a program without the import is told"
 told() { # told <label> <name> <phrase> <program>
   local label="$1" name="$2" phrase="$3" program="$4"
   printf '%s\n' "$program" > "$WORK/$name.iyi"
-  if "$IYI" check "$WORK/$name.iyi" > "$WORK/$name.check" 2>&1; then
+  if "$IYI" check types "$WORK/$name.iyi" > "$WORK/$name.check" 2>&1; then
     echo "  $label: it type-checked without the import"
     status=1
     return

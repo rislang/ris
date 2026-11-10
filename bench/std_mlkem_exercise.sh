@@ -421,7 +421,7 @@ else
   echo "  iyi doc: $(tail -2 "$WORK/doc.txt")"
   status=1
 fi
-if "$IYI" fmt --check "$REPO/src/std/mlkem.iyi" "$REPO/bench/std_mlkem_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$IYI" check format "$REPO/src/std/mlkem.iyi" "$REPO/bench/std_mlkem_exercise.iyi" >"$WORK/format.log" 2>&1; then
   echo "  formatted"
 else
   sed 's/^/  /' "$WORK/format.log" | tail -5

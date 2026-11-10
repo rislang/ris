@@ -424,7 +424,7 @@ else
   echo "  FAIL: iyi doc: $(grep -m1 -E 'Error|BUG' "$WORK/doc.txt")"
   status=1
 fi
-if "$IYI" fmt --check "$REPO/src/std/rsa.iyi" "$REPO/bench/std_rsa_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$IYI" check format "$REPO/src/std/rsa.iyi" "$REPO/bench/std_rsa_exercise.iyi" >"$WORK/format.log" 2>&1; then
   echo "  the module and its exercise are formatted"
 else
   echo "  FAIL: not formatted: $(grep -m1 produced "$WORK/format.log")"

@@ -606,7 +606,7 @@ def traits_disk_and_completion():
     for rel, text, uri in ((os.path.join("app", "shapes.iyi"), shapes, shapes_uri), ("main.iyi", main, main_uri)):
         with open(os.path.join(moved, rel), "w") as f:
             f.write(applied(text, changes.get(uri, [])))
-    checked = subprocess.run([os.path.abspath(IYI), "check", "main.iyi"], cwd=moved, capture_output=True, text=True)
+    checked = subprocess.run([os.path.abspath(IYI), "check", "types", "main.iyi"], cwd=moved, capture_output=True, text=True)
     step("72b", "renaming an impl's method renames the trait's requirement, and the program compiles",
          checked.returncode == 0 and "abstract def surface" in open(os.path.join(moved, "app", "shapes.iyi")).read(),
          (checked.stdout + checked.stderr).strip()[:80] or "check passes")

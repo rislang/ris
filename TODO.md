@@ -175,10 +175,15 @@ Unknown must be refused (SPEC 3.6).
 
 * bench/agent_loop.py fails at step 12 on main (2026-11-10) and no CI
   job runs it (gates_reachable counts it only through a spec comment):
-  fix it and put it in .github/workflows/ris.yml.
+  fix it and put it in .github/workflows/ris.yml. Its `check -f json`
+  and `fix --json` calls still need moving to `check types --json`
+  (diagnostics in the steps object) and `check types --fix`.
 * bench/test_verb.sh fails on main (2026-11-10) at "the discount says
   when it turns itself off": the eiy macro gets the file name
   `::String.view(::String.view("page.eiy"))` and panics `cannot read`.
+* bench/packages_get.sh: 9 FAIL (get/reach/doc/mod context), 31 on main
+  before ris check; bench/verbs_exercise.sh: a reopen of String (now a
+  struct) and `fix printed its edit` (split.iyi already clean).
 
 * Build each bench, group the refusals by message, fix per group (old
   step 5). Known before the new rules: 5.1 task captures (tls server
