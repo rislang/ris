@@ -1,0 +1,16 @@
+module test/sse_open
+
+import std/sse::{SSE}
+
+# SSE.open against test/ris/sse_server.py on the port given: the first
+# connection brings one event and ends, the reconnect sends its id as
+# Last-Event-ID and brings the next, and the block stops after it.
+
+port = Program.args[0]
+count = 0
+got = SSE.open("http://127.0.0.1:#{port}/events", reconnects: 2, retry: 10) do |event|
+  count += 1
+  puts "#{event.event} #{event.id} #{event.data.inspect}"
+  count < 2
+end
+puts got.nil? ? "stopped after #{count}" : "failed: #{got}"
