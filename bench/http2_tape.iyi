@@ -2,7 +2,7 @@
 # Both paths do the same work and retain the same heap results.
 module bench/http2_tape
 
-import std/hpack::{Encoder, Decoder, HeaderField, Huffman, HpackError}
+import std/hpack::{Encoder, Decoder, HeaderField, Huffman, HpackError, TapeHeaders}
 import std/time::{Time}
 
 N = 20000
@@ -14,11 +14,7 @@ fields = [HeaderField.new(":method", "GET"),
           HeaderField.new("x-request", "a fairly long request field", true)]
 encoder = Encoder.new
 wire = encoder.encode(fields)
-wire_text = String.from_bytes(wire.size) do |p|
-  (wire.size).times { |k_| p[k_] = wire.byte_at(k_) }
-end
 huffman = Huffman.encode("a fairly long request field")
-IyiTask.auto = false
 # Warm the static tables and tape spare before recording allocation.
 Huffman.decode(huffman)
 encoder.encode(fields)
@@ -37,18 +33,11 @@ encoder.encode(fields)
       sum = sum + got.bytesize
     else
       # Use a fresh table: the wire block establishes its entries.
-      {% if flag?(:h2_tape) %}
-        tape do
-          view = String.view(wire_text)
-          parsed = Decoder.new.decode(view)
-          raise parsed.message if parsed.is_a?(HpackError)
-          sum = sum + parsed.size
-        end
-      {% else %}
-        got = Decoder.new.decode(wire)
-        raise got.message if got.is_a?(HpackError)
-        sum = sum + got.size
-      {% end %}
+      fresh = Decoder.new
+      parsed = TapeHeaders.new(fresh.capacity(wire))
+      failed = fresh.decode(wire, parsed)
+      raise failed.message if failed
+      sum = sum + parsed.size
     end
   end
   elapsed = Time.monotonic_nanoseconds - started
