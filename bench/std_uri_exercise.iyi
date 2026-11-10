@@ -24,7 +24,8 @@ puts "== hash"
 assert_true URI.parse("http://a/").hash != URI.parse("https://b:8/x?y#z").hash, "two URIs hash apart"
 assert_true URI.parse("http://u:p@h:8/x?y#z").hash == URI.parse("http://u:p@h:8/x?y#z").hash, "equal URIs hash alike"
 texts = (0...16000).map { |i| "http://h/p#{i}" }
-uris = texts.map { |text| URI.parse(text) }
+uris = [] of URI
+texts.each { |text| uris << URI.parse(text).to_uri.copy_to(Program.tape) }
 started = __iyi_monotonic_ns
 by_uri = {} of URI => Int32
 uris.each_with_index { |uri, i| by_uri[uri] = i }
@@ -33,7 +34,7 @@ started = __iyi_monotonic_ns
 by_text = {} of String => Int32
 texts.each_with_index { |text, i| by_text[text] = i }
 texted_ns = __iyi_monotonic_ns - started
-assert_true by_uri.size == 16000 && by_uri[URI.parse("http://h/p4321")]? == 4321, "a table of URIs fills and answers"
+assert_true by_uri.size == 16000 && by_uri[URI.parse("http://h/p4321").to_uri]? == 4321, "a table of URIs fills and answers"
 assert_true keyed_ns <= texted_ns * 20 + 200_000_000_i64, "hash table: 16000 URI keys took #{keyed_ns // 1000000} ms where String keys took #{texted_ns // 1000000} ms"
 puts "  URIs hash as they compare; 16,000 keys within twenty times their texts' time and 200 ms"
 
@@ -71,7 +72,7 @@ puts "  userinfo keeps its sub-delims"
 # getters decode, and what a setter is given is encoded.
 ["http://u%3Btype%3Da@h/", "http://a%2Cb:c%3Dd@h/", "http://é:ü@h/"].each do |text|
   assert_str text, URI.parse(text).to_s, "#{text} round-trips"
-  assert_str text, URI.parse(text).dup.to_s, "#{text} round-trips through dup"
+  assert_str text, URI.parse(text).to_uri.to_s, "#{text} round-trips through a URI"
 end
 escaped = URI.parse("http://u%3Btype%3Da@h/a")
 assert_str "u;type=a", escaped.user.to_s, "the user getter decodes"
