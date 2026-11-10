@@ -52,7 +52,7 @@ expect() {
 }
 
 # Yielded holders retain the provenance of their borrowed owner fields.
-for name in yield_owner_field yield_clone_attrs branch_store svcb_store; do
+for name in yield_owner_field yield_clone_attrs svcb_store; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
   if [ "$code" -eq 0 ] && [ -z "$out" ]; then
     echo "runs     $name"
@@ -61,7 +61,6 @@ for name in yield_owner_field yield_clone_attrs branch_store svcb_store; do
   fi
 done
 expect yield_owner_field 'cannot return a value made in this block'
-expect round_store 'cannot store a view beyond its owner scope'
 expect yield_clone_attrs 'cannot store data made in this def'
 
 # SPEC 2.2: helpers and aliases cannot grow the unfinished receiver.

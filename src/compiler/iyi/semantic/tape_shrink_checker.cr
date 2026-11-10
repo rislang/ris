@@ -2598,15 +2598,16 @@ class Iyi::TapeShrinkChecker
       choice = fresh
       mark = @guards.size
       @guards << {choice, true}
-      # A branch is no scope (SPEC 1.1): what it makes lives as long as
-      # the def, round or block around it.
+      @scopes << node.then.object_id
       @fallthrough = Guards.new
       shrinks_before = @shrinks.size
       a = value(node.then, left)
       leave_branch(node.then, shrinks_before)
       then_after = node.then.is_a?(If) || node.then.is_a?(Expressions) ? @fallthrough : Guards.new
+      @scopes.pop
       @guards.pop(@guards.size - mark)
       @guards << {choice, false}
+      @scopes << node.else.object_id
       @fallthrough = Guards.new
       shrinks_before = @shrinks.size
       levels << IfLevel.new(node, env, left, right, choice, mark, a, then_after, shrinks_before)
@@ -2631,6 +2632,7 @@ class Iyi::TapeShrinkChecker
     choice, mark, a = level.choice, level.mark, level.a
     leave_branch(node.else, level.shrinks_before)
     else_after = node.else.is_a?(If) || node.else.is_a?(Expressions) ? @fallthrough : Guards.new
+    @scopes.pop
     @guards.pop(@guards.size - mark)
     # What follows an If one of whose branches never falls through runs
     # only after the other: its events are on that branch's guard.
