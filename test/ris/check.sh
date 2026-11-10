@@ -86,6 +86,14 @@ else
   echo "FAILED   several_returns_view: $out"; status=1
 fi
 
+# A block appends to an outer String local, which grows in place.
+out=$("$RIS" run test/ris/block_text_append.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'fab <ab> 2 aabb xy' ]; then
+  echo 'runs     block_text_append'
+else
+  echo "FAILED   block_text_append: $out"; status=1
+fi
+
 out=$("$RIS" run test/ris/construct_growth.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = $'2\n1' ]; then
   echo 'runs     construct_growth (grow after new)'

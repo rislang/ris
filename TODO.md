@@ -79,9 +79,6 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
   the receiver in a local. Check it where it is made.
 
 
-* A String local's `<<` is lowered to `__ris_append` unless the local is
-  growing; that result views the argument, so a block appending to an
-  outer String is refused. Lend the local to a builder parameter.
 * A one-call def's value moves down only when it is one fresh flat
   value: a tuple or two locals do not. Bzip2.decompress tags its String
   (a 0 or 1 byte first) to answer bytes or an error in one value.
