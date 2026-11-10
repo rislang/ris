@@ -195,7 +195,9 @@ tls_port = free_port
 plain_port = free_port
 group do |g|
   g.spawn do
-    Server.answer("127.0.0.1", tls_port, 0, TlsHandler, max_connections: 2)
+    # One worker: each has its own ticket keys, so a second connection
+    # resumes only on the worker that sealed its ticket.
+    Server.answer("127.0.0.1", tls_port, 0, TlsHandler, max_connections: 1)
     0
   end
   g.spawn do
@@ -203,7 +205,7 @@ group do |g|
       max_connections: 2)
     0
   end
-  4.times { RisBoard.take(Ready).or_panic }
+  3.times { RisBoard.take(Ready).or_panic }
   store = RisCertificateStore.new
   if problem = store.read_pem(ROOT_PEM)
     raise problem.message
