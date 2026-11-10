@@ -178,16 +178,23 @@ Unknown must be refused (SPEC 3.6).
   configs, udp:274, dns:951, http.iyi:2154 serve's `handle`, sse.iyi:513
   and :543, std_compress's opaque source proc); drop std/gc imports
   from its importers and server_load. 2026-11-10: 70 of 139 benches
-  pass --no-codegen (40 before the group fixes). Left, by first refusal:
-  - a def's or block's result made in its scratch, SPEC 1.9 (box,
-    capsule, deque, benchmark, std, named_tuple, number_format, png, sse,
-    steppable, time, mlkem, semantic_version, runtime; yaml's read_value
+  pass --no-codegen (40 before the group fixes); 77 after the second
+  round (box, capsule, deque, number_format, semantic_version, atomic,
+  udp). Left, by first refusal:
+  - a def's or block's result made in its scratch, SPEC 1.9 (benchmark's
+    IPS Entry class kept in an Array, std's and named_tuple's Hash
+    results, png, sse, steppable, time, mlkem, runtime; yaml's read_value
     of a Hash, which a derived Hash field needs a destination for);
   - block or round data stored past it (big, bzip2, xz, rsa, user,
-    indexable, dir, io, cookie, http_server, ct_timing, socket, process);
-  - procs outliving their tape block (atomic, file, file_utils, udp,
-    router, iterator);
-  - certificates and Times in constants (ocsp, x509), log's @parent;
+    indexable, dir, io, cookie, http_server, ct_timing, socket, process;
+    slice's fresh Slice keys in a Hash);
+  - iterator: to_a's `each { |e| result << e }` of an element a map or
+    each_slice made is an opaque callback;
+  - procs outliving their tape block (file, file_utils: a task takes a
+    local File or path; router);
+  - certificates and Times in constants (ocsp, x509), log's @parent:
+    even `NOW = Time.utc(2026, 6, 1)` is refused at Zone's @name, and a
+    constant RisCertificateStore at its kept certificates;
   - std_tls: from_pem and configs returned from defs; http2_exercise;
   - API drift: hpack (encode answers a String, decode takes
     TapeHeaders), dns (SvcbRecord.parse takes a String), secure_dns
@@ -197,6 +204,11 @@ Unknown must be refused (SPEC 3.6).
     (http, http_stop); views in csv, zip, zstd, tar, compress, netip;
   - number (invalid constant), eiy (its run step).
   std_regex builds but overflows a task's stack at the deepest nesting.
+  A String byte compared with a Char (`host[0] == '['`) is always false
+  and compiles (std/udp had one): refuse UInt8 == Char.
+  Checker hole: `shuffled.map { |s| SemanticVersion.parse(s) }`, where
+  shuffled holds views of another Array's Strings, is refused as a block
+  result made in its scratch (semantic_version maps over indices).
 
 ## 8. Speed
 
