@@ -105,15 +105,16 @@ def tag_line(v : DerValue) : String
 end
 
 def names(value : DerValue) : String
-  parts = [] of String
-  value.sequence.or_panic.each do |rdn|
-    rdn.set.or_panic.each do |atv|
-      pair = atv.sequence.or_panic
-      text = pair[1].string
-      parts << "#{pair[0].oid.or_panic}=#{text.is_a?(Asn1Error) ? "?" : text}"
+  String.build do |parts|
+    value.sequence.or_panic.each do |rdn|
+      rdn.set.or_panic.each do |atv|
+        pair = atv.sequence.or_panic
+        text = pair[1].string
+        parts << "|" unless parts.empty?
+        parts << pair[0].oid.or_panic << "=" << (text.is_a?(Asn1Error) ? "?" : text)
+      end
     end
   end
-  parts.join("|")
 end
 
 args = Program.args
@@ -302,9 +303,9 @@ refused one("170d" + ascii("49123123595aZ")).time, "where a digit goes", "a lett
 refused one("170d" + ascii("491301000000Z")).time, "month 13", "month 13 refused"
 
 puts "== the walk"
-order = [] of String
-Der.walk(one("3008 020101 3003 020102")) { |v, depth| order << "#{depth}:#{v.describe}" }.or_panic
-check order.join(" ") == "0:SEQUENCE constructed 1:INTEGER 1:SEQUENCE constructed 2:INTEGER", "the walk in written order: #{order.join(" ")}"
+order = String::Builder.new
+Der.walk(one("3008 020101 3003 020102")) { |v, depth| order << " " unless order.empty?; order << depth << ":" << v.describe }.or_panic
+check order.to_s == "0:SEQUENCE constructed 1:INTEGER 1:SEQUENCE constructed 2:INTEGER", "the walk in written order: #{order.to_s}"
 fine = Der.parse(nested(Der::MAX_DEPTH + 1)).or_panic
 seen = 0
 Der.walk(fine) { |v, depth| seen += 1 }.or_panic
