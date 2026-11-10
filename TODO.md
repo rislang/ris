@@ -79,11 +79,6 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
   the receiver in a local. Check it where it is made.
 
 
-* The call graph's `fresh?` takes a call's String-or-error union as
-  fresh when any path allocates (an error sentence's interpolation),
-  though every String it answers views the parser (toml's
-  basic_string now writes into the parser's @texts): scalar's
-  `TapeAny.new(basic_string!)` is refused. Narrow by summary.
 * text_grow: `field.take_event(Program.tape)` returns
   `GrowingTextEvent.new(@text).copy_to(owner)`, yet the caller sees the
   event as a live view of `field`'s text, so the later rebind is refused
