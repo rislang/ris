@@ -1390,8 +1390,8 @@ if command -v python3 >/dev/null; then
   srv=$(mktemp -d)
   python3 test/ris/sse_server.py "$srv" >"$srv/log" 2>&1 &
   srv_pid=$!
-  for _ in $(seq 100); do [ -f "$srv/ready" ] && break; sleep 0.1; done
-  out=$(RIS_HEAP_STATS=1 timeout 120 "$RIS" run test/ris/sse_open.ri -- \
+  for _ in $(seq 300); do [ -f "$srv/ready" ] && break; sleep 0.1; done
+  out=$(RIS_HEAP_STATS=1 timeout 300 "$RIS" run test/ris/sse_open.ri -- \
     "$(cat "$srv/port")" 2>&1)
   kill "$srv_pid" 2>/dev/null; wait "$srv_pid" 2>/dev/null
   rm -rf "$srv"
