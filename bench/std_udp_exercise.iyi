@@ -142,7 +142,6 @@ assert_str "somebody", late.receive_datagram.or_panic.text, "the send the refusa
 late.close
 asker.send("nobody")
 sleep(50)
-parked_heard = ""
 # The task captures ports alone; the receive parks here.
 asker_port = asker.local_port
 refused_port = gone_port
@@ -154,9 +153,10 @@ group do |g|
     again.close
     0
   end
-  parked_heard = asker.receive_datagram.or_panic.text
+  heard = asker.receive_datagram.or_panic.text
+  assert_str "reply", heard, "a parked receive passes over a refusal and hears the reply"
+  0
 end
-assert_str "reply", parked_heard, "a parked receive passes over a refusal and hears the reply"
 asker.close
 puts "  a refusal from a peer not there yet is not a panic"
 
@@ -262,31 +262,31 @@ impl Error for SenderFailed
   end
 end
 
-lander = UdpSocket.bind("127.0.0.1", 0)
-lander_port = lander.local_port
-sender = UdpSocket.bind("127.0.0.1", 0)
+# The tasks take the sockets: program data, which no tape block ends.
+LANDER = UdpSocket.bind("127.0.0.1", 0)
+lander_port = LANDER.local_port
+SENDER = UdpSocket.bind("127.0.0.1", 0)
 kept = 0
 rounds = 50
 rounds.times do |round|
   took = false
   group do |g|
+    receiver = g.spawn { LANDER.receive_from(100).is_a?(Cancelled) ? 0 : 1 }
     g.spawn do
-      took = true unless lander.receive_from(100).is_a?(Cancelled)
-      0
-    end
-    g.spawn do
-      sender.send_to("round #{round}", "127.0.0.1", lander_port)
+      SENDER.send_to("round #{round}", "127.0.0.1", lander_port)
       SenderFailed.new
     end
+    took = receiver.value == 1
+    0
   end
   unless took
     sleep(2)
-    took = !lander.receive_from?(100).nil?
+    took = !LANDER.receive_from?(100).nil?
   end
   kept = kept + 1 if took
 end
-lander.close
-sender.close
+LANDER.close
+SENDER.close
 assert_int rounds, kept, "every datagram sent beside a cancelled receive is received or still queued"
 puts "  a cancelled receive loses no datagram"
 
