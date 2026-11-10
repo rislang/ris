@@ -34,11 +34,10 @@ end
 def hex(s : String) : String
   digits = "0123456789abcdef"
   text = ""
-  p = s
   i = 0
   while i < s.bytesize
-    x = p.byte_at(i).to_i32
-    text = text + digits[x >> 4, 1] + digits[x & 15, 1]
+    x = s.byte_at(i).to_i32
+    text << digits[x >> 4, 1] << digits[x & 15, 1]
     i = i + 1
   end
   text
@@ -82,20 +81,27 @@ puts "  two vectors, the masked bit, a non-canonical u, the clamp"
 # 9. The millionth is a release build's only: about 25 seconds there on
 # the machine this was written on, and minutes in a plain build.
 puts "\n== x25519 iterated (rfc 7748 section 5.2)"
-k = b("0900000000000000000000000000000000000000000000000000000000000000")
-u = k
+# k and u are refilled each round: what a round makes ends with it.
+nine = b("0900000000000000000000000000000000000000000000000000000000000000")
+k = Array(UInt8).new(32)
+u = Array(UInt8).new(32)
+nine.each_byte { |byte| k << byte; u << byte }
 iterations = 0
 rounds = {{ flag?(:release) ? 1_000_000 : 1000 }}
 while iterations < rounds
-  r = X25519.shared(k, u).or_panic
-  u = k
-  k = r
+  r = X25519.shared(k.view, u.view).or_panic
+  u.clear
+  k.each { |byte| u << byte }
+  k.clear
+  r.each_byte { |byte| k << byte }
   iterations = iterations + 1
-  assert_str "422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079", hex(k), "rfc 7748 after one iteration" if iterations == 1
-  assert_str "684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51", hex(k), "rfc 7748 after 1,000 iterations" if iterations == 1000
+  assert_str "422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079", hex(r), "rfc 7748 after one iteration" if iterations == 1
+  assert_str "684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51", hex(r), "rfc 7748 after 1,000 iterations" if iterations == 1000
+  {% if flag?(:release) %}
+    assert_str "7c3911e0ab2586fd864497297e575e6f3bc601c0883c30df5f4dd2d24f665424", hex(r), "rfc 7748 after 1,000,000 iterations" if iterations == 1_000_000
+  {% end %}
 end
 {% if flag?(:release) %}
-  assert_str "7c3911e0ab2586fd864497297e575e6f3bc601c0883c30df5f4dd2d24f665424", hex(k), "rfc 7748 after 1,000,000 iterations"
   puts "  1, 1,000 and 1,000,000 iterations"
 {% else %}
   puts "  1 and 1,000 iterations (1,000,000 in a release build)"

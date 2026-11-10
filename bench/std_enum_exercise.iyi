@@ -80,10 +80,10 @@ check(Mode.from_value?(Mode::All.value).nil? && Mode.from_value?(0).to_s == "Non
 check((Mode::Read | Mode::Write).includes?(Mode::Write), "includes? is the question for a bit")
 
 seen = [] of String
-Level.each { |m| seen << m.to_s }
+Level.each { |m| seen << m.to_s.copy_to(Program.tape) }
 check(seen == ["Debug", "Info", "Warn", "Error"], "plain each walks every member in order (#{seen})")
 seen = [] of String
-Mode.each { |m| seen << m.to_s }
+Mode.each { |m| seen << m.to_s.copy_to(Program.tape) }
 check(seen == ["Read", "Write", "Append"], "flags each walks the members, not None or All (#{seen})")
 check(seen == Mode.names, "each agrees with names")
 puts "  valid? = from_value? as a Bool; each walks values; None/All are the compiler's, not members"
