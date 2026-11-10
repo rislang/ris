@@ -2767,6 +2767,14 @@ fi
 expect program_defer_store 'cannot store data made in this def'
 # SPEC 3.6: a struct whose constructor makes its own text holds round data.
 expect round_struct_made 'cannot store data made in this block'
+# A connect's SocketError kept past its round is refused; its socket is not.
+expect socket_error_kept 'cannot store data made in this block'
+out=$("$RIS" build --no-codegen test/ris/socket_kept.ri 2>&1)
+if [ $? -eq 0 ]; then
+  echo 'passes   socket_kept'
+else
+  echo "FAILED   socket_kept: $out"; status=1
+fi
 out=$("$RIS" run test/ris/round_struct_kept.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: round struct kept' ]; then
   echo 'runs     round_struct_kept'

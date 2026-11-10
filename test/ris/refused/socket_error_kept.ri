@@ -1,0 +1,13 @@
+# A connect's SocketError is made in the round: keeping the union past the
+# round keeps its text. Keep only the socket (socket_kept.ri passes).
+module test/ris/refused/socket_error_kept
+
+import std/socket::{IyiSocket, SocketError}
+
+kept = nil.as(IyiSocket | Cancelled | SocketError | Nil)
+2.times do |i|
+  kept = IyiSocket.connect("127.0.0.1", 1 + i)
+end
+if (k = kept).is_a?(SocketError)
+  puts k.reason
+end

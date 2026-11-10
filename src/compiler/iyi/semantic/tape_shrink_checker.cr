@@ -2263,6 +2263,8 @@ class Iyi::TapeShrinkChecker
   end
 
   @handed = Set(UInt64).new
+  # Calls whose made union (a connect's SocketError) is their own root.
+  @made_unions = Set(UInt64).new
 
   # RisBoard.take and poll decode the message onto the running tape, in
   # the scope that takes it: what it holds is made here (SPEC 5.2).
@@ -2293,8 +2295,73 @@ class Iyi::TapeShrinkChecker
     type = type.try(&.remove_typedef)
     return false unless type.is_a?(UnionType)
     # A socket's state is on program storage: its handle outlives any scope.
-    return false if type.union_types.any? { |t| type_name(t.remove_typedef) == "Std::Socket::IyiSocket" }
+    return false if socket_union?(type)
     type.union_types.any? { |t| class_instance?(t.remove_typedef) || tape_struct?(t) }
+  end
+
+  # A type holding a tape struct beside a socket (a SocketError).
+  private def socket_error_type?(type : Type?) : Bool
+    type = type.try(&.remove_typedef)
+    return false unless type
+    members = type.is_a?(UnionType) ? type.union_types : [type]
+    members.any? do |t|
+      type_name(t.remove_typedef) != "Std::Socket::IyiSocket" && tape_struct?(t)
+    end
+  end
+
+  private def socket_union?(type : Type?) : Bool
+    type = type.try(&.remove_typedef)
+    type.is_a?(UnionType) &&
+      type.union_types.any? { |t| type_name(t.remove_typedef) == "Std::Socket::IyiSocket" }
+  end
+
+  # Whether a call answering a socket's union (`IyiSocket | Cancelled |
+  # SocketError`) may answer an error whose text it made: a fresh argument
+  # (`refusal(fd, "connect to #{peer}")`) on the way down its tail calls.
+  # The socket itself is program storage, made nowhere.
+  def socket_error_made?(node : ASTNode, depth = 0) : Bool
+    return false if depth > 12
+    case node
+    when Expressions then node.expressions.last?.try { |e| socket_error_made?(e, depth) } || false
+    when If          then socket_error_made?(node.then, depth) || socket_error_made?(node.else, depth)
+    when Assign      then socket_error_made?(node.value, depth)
+    when Cast, NilableCast then socket_error_made?(node.obj, depth)
+    when Call
+      type = node.type?.try(&.remove_typedef)
+      return false unless socket_error_type?(type)
+      return true if node.args.any? { |arg| fresh_text?(arg, Set(String).new) }
+      @graph.targets(node).try(&.any? { |t| socket_def_error_made?(t, depth + 1) }) || false
+    else
+      false
+    end
+  end
+
+  @socket_errors_made = Hash(UInt64, Bool).new
+
+  private def socket_def_error_made?(target : Def, depth : Int32) : Bool
+    id = target.object_id
+    known = @socket_errors_made[id]?
+    return known unless known.nil?
+    @socket_errors_made[id] = false
+    return false if target.is_a?(External)
+    scan = ReturnScan.new
+    target.body.accept scan
+    made = socket_error_made?(target.body, depth) ||
+           scan.exps.any? { |e| socket_error_made?(e, depth) }
+    @socket_errors_made[id] = made
+  end
+
+  class ReturnScan < Visitor
+    getter exps = [] of ASTNode
+
+    def visit(node : Return)
+      node.exp.try { |e| @exps << e }
+      true
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
   end
 
   @answers_made = Hash(UInt64, Bool).new
@@ -2540,6 +2607,13 @@ class Iyi::TapeShrinkChecker
 
   # What value adds to evaluate's result for *node*.
   private def finish_value(node : ASTNode, result : Value, env : Env) : Value
+    # A connect's union narrowed to its socket (`made.is_a?(IyiSocket)`,
+    # `connect(...)!`) holds no error made here.
+    if !@made_unions.empty? && result.roots.any? { |r| @made_unions.includes?(r) } &&
+       (type = node.type?) && !socket_error_type?(type)
+      result = Value.new(result.roots.reject { |r| @made_unions.includes?(r) },
+        result.views, result.procs, result.unknown_proc)
+    end
     result = tape_text(node, result)
     result = growing_text(node, result, env)
     result = handed_on(node, result)
@@ -3147,6 +3221,7 @@ class Iyi::TapeShrinkChecker
             (@summary_callers[target.object_id] ||= Set(UInt64).new) << caller
           end
           summarized = true
+          made_here = false
           actuals = [receiver] + target.args.map_with_index do |arg, i|
             named[arg.external_name]? || args[i]? || EMPTY
           end
@@ -3185,6 +3260,14 @@ class Iyi::TapeShrinkChecker
           if !@tape_blocks.empty? && node.name != "copy_to" && (@graph.fresh?(node) ||
              (node.type?.try { |t| TapeChecker.possible_string?(t) || tape_struct?(t) } &&
               @graph.allocates?(node)) || made_union?(node))
+            @root_scopes[node.object_id] ||= @scopes.dup
+            note_fresh(node.object_id) unless @root_tapes.has_key?(node.object_id)
+          end
+          # A union the callee made (a SocketError beside the socket) is
+          # this call's value, though a branch's summary answers none.
+          made_here = !@tape_blocks.empty? && socket_union?(node.type?) &&
+                      socket_error_made?(node)
+          if made_here
             @root_scopes[node.object_id] ||= @scopes.dup
             note_fresh(node.object_id) unless @root_tapes.has_key?(node.object_id)
           end
@@ -3263,6 +3346,14 @@ class Iyi::TapeShrinkChecker
             end
           end
           call_result = merge(call_result, translated(summary.result, summary, actuals, node.object_id))
+          if made_here
+            @root_types[node.object_id] ||= node.type
+            @handed << node.object_id
+            @made_unions << node.object_id
+            unless call_result.roots.includes?(node.object_id)
+              call_result = merge(call_result, Value.new([node.object_id], [] of View))
+            end
+          end
         else
           incomplete_result = true
           unless TapeRules.runtime?(@program, target.location)

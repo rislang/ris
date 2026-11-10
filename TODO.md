@@ -37,9 +37,6 @@ Fix a checker hole below only when a cluster hits it.
 
 Unknown must be refused (SPEC 3.6).
 
-* A SocketError in a union with IyiSocket, made in a round and kept, is
-  not refused: a connect's union is exempt for the socket's sake.
-
 * A String local's `<<` is lowered to `__ris_append` unless the local is
   growing; that result views the argument, so a block appending to an
   outer String is refused. Lend the local to a builder parameter.
