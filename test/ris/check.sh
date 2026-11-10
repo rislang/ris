@@ -1013,6 +1013,7 @@ expect class_share 'ClassShareValue is a tape type'
 expect class_finalize "tape class instances cannot finalize"
 expect class_inherited_finalize "tape class instances cannot finalize"
 expect class_escape "is a variable of the code around this tape block"
+expect round_class_outer_store "Copy it with .copy_to(owner)"
 expect struct_field  'Use an @[OnTape] struct for request data'
 expect class_var     "copy it with .copy_to(Program.tape)"
 expect proc_capture  "this block becomes a proc"
