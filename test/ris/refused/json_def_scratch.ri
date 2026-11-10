@@ -1,0 +1,22 @@
+# from_json's document is made in load's scratch; a struct that is not
+# only texts cannot move down out of it (SPEC 1.9).
+import std/json::{serializable}
+import std/json
+
+@[OnTape]
+pub struct Coord
+  getter label : String
+  getter nums : Array(Int32)
+  derive serializable
+end
+
+def load(t : String) : Coord
+  c = Coord.from_json(t)
+  puts c.label
+  c
+end
+
+tape do
+  c = load(%({"label": "a", "nums": [1]}))
+  puts c.nums.size
+end

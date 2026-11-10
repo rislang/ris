@@ -11,7 +11,7 @@ tape do
   tape_head = Server.parse_head("GET / HTTP/1.1\r\nHost: x\r\n\r\n".as_tape, 0, true, Array(Field).new(4))
   raise "delegation" unless tape_head.is_a?(ParsedHead)
   raise "re-export" unless target(tape_head) == "/"
-  params = Params.parse("q=a+b&x=%zz&x=%FF".to_heap)
+  params = Params.parse("q=a+b&x=%zz&x=%FF")
   w = String::Builder.new(128)
   params.to_s(w)
   raise "legacy writer" unless w.finish == "q=a+b&x=%25zz&x=%FF"

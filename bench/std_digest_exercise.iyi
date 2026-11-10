@@ -64,7 +64,7 @@ def chain(algorithm : H.class) : String forall H
   joined = ""
   n = 0
   while n <= 300
-    joined = joined + algorithm.hexdigest("a" * n)
+    joined << algorithm.hexdigest("a" * n)
     n = n + 1
   end
   SHA256.hexdigest(joined)
@@ -108,7 +108,8 @@ puts "  1,280 bytes in growing pieces, against the whole"
 puts "\n== state"
 d = SHA512.new
 d.update("ab")
-copy = d.dup
+copy = SHA512.new
+copy.copy_from(d)
 d.update("x")
 copy.update("c")
 assert_str SHA512.hexdigest("abc"), copy.hexfinal, "a dup goes on from where it was copied"
@@ -181,7 +182,8 @@ x.update("abc")
 assert_true x.read(2000) == whole, "shake reset reads again"
 s3 = SHA3_384.new
 s3.update("ab")
-s3copy = s3.dup
+s3copy = SHA3_384.new
+s3copy.copy_from(s3)
 s3copy.update("c")
 assert_str SHA3_384.hexdigest("abc"), s3copy.hexfinal, "a sha3 dup goes on from where it was copied"
 puts "  reads in pieces against one read, reset and dup"

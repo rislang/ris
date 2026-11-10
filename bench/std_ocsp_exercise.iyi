@@ -35,9 +35,18 @@
 #                   for OpenSSL to judge as well, under the CertID's hash.
 
 import std/ocsp::{OcspResponse, OcspError, OcspCertStatus, OcspHash, OcspCertId, Ocsp, OcspVerdict}
-import std/x509::{Certificate, X509Error}
+import std/x509::{RisCertificateStore, Certificate, X509Error}
 import std/time::{Time}
 import std/file::{File}
+
+# A PEM text's certificates, kept in *store*; a text that does not read
+# panics with the reason.
+def pem_certs(store : RisCertificateStore, text : String) : Array(Certificate)
+  if problem = store.read_pem(text)
+    raise problem.message
+  end
+  store.kept_certificates
+end
 
 def check(cond : Bool, label : String) : Nil
   raise "ASSERTION FAILED: #{label}" unless cond
@@ -71,8 +80,8 @@ def text_of(bytes : Array(UInt8)) : String
   String.from_bytes(bytes.size) { |p| (bytes.size).times { |k_| p[k_] = bytes[k_] } }
 end
 
-def pem_cert(path : String) : Certificate
-  Certificate.from_pem(File.read(path)).or_panic[0]
+def pem_cert(store : RisCertificateStore, path : String) : Certificate
+  pem_certs(store, File.read(path))[0]
 end
 
 NOW = Time.utc(2026, 11, 1)
@@ -282,7 +291,11 @@ if args.size > 1 && args[0] == "judge"
     next if line.strip.empty?
     f = line.strip.split('|')
     now = f[4] == "-" ? Time.utc : Time.unix(f[4].to_i.to_i64)
-    puts "#{f[0]}|#{category(bytes_of(f[1]), pem_cert(f[2]), pem_cert(f[3]), now)}"
+    leaf_store = RisCertificateStore.new
+    issuer_store = RisCertificateStore.new
+    leaf = pem_cert(leaf_store, f[2])
+    issuer = pem_cert(issuer_store, f[3])
+    puts "#{f[0]}|#{category(bytes_of(f[1]), leaf, issuer, now)}"
   end
   exit 0
 end
@@ -336,7 +349,11 @@ end
 if args.size > 5 && args[0] == "request"
   hash = args[3] == "sha256" ? OcspHash::SHA256 : OcspHash::SHA1
   nonce = args[4] == "-" ? nil : b(args[4])
-  File.write(args[5], text_of(Ocsp.request(pem_cert(args[1]), pem_cert(args[2]), hash, nonce)))
+  leaf_store = RisCertificateStore.new
+  issuer_store = RisCertificateStore.new
+  leaf = pem_cert(leaf_store, args[1])
+  issuer = pem_cert(issuer_store, args[2])
+  File.write(args[5], text_of(Ocsp.request(leaf, issuer, hash, nonce)))
   exit 0
 end
 

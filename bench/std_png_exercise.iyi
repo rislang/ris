@@ -247,7 +247,7 @@ def heuristic_holds(png : String, image : Image, label : String) : Array(Int32)
     end
     got = rp.byte_at(y * (n + 1)).to_i32
     assert_true got == best, "the filter heuristic: #{label} row #{y} carries filter #{got} (sum #{got <= 4 ? sums[got] : -1}), where the least sum is filter #{best}'s, #{sums[best]} (sums #{sums})"
-    row = String.from_bytes(n) { |d| d.copy_from(rp + (y * (n + 1) + 1).to_i64, n) }
+    row = rp[y * (n + 1) + 1, n]
     assert_bytes outs[best], row, "the filter heuristic: #{label} row #{y} is filtered as filter #{best} filters it"
     chosen << got
     y = y + 1
@@ -330,7 +330,7 @@ def own_png(w : Int32, h : Int32, depth : Int32, ctype : Int32, interlace : Bool
       rowno = rowno + 1
       raw.write_byte(f.to_u8)
       raw << own_filter(f, row, prev, bpp)
-      prev = row
+      prev = row.copy_to(Program.tape)
       y = y + pass[3]
     end
   end
@@ -349,7 +349,7 @@ def own_pixels(w : Int32, h : Int32, ch : Int32, depth : Int32, seed : UInt32) :
       v = rng.byte.to_i32 if i % 5 == 3
       s << (depth == 16 ? (v << 8) | rng.byte.to_i32 : v & top)
     end
-    list << s
+    list << s.copy_to(Program.tape)
   end
   list
 end
@@ -624,7 +624,7 @@ if gate
     end
     f.texts.each { |t| meta << "text #{t.chunk} #{t.keyword} |#{t.text}|#{t.language}|#{t.translated_keyword}" }
     meta << "skipped #{f.skipped.join(" ")}" unless f.skipped.empty?
-    want_meta = lines[1, lines.size - 1].reject { |l| l.empty? }
+    want_meta = lines[1, lines.size - 1].to_a.reject { |l| l.empty? }
     assert_str want_meta.join("\n"), meta.join("\n"), "python's #{name}: the metadata"
     decoded_count = decoded_count + 1
   end

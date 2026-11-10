@@ -6,6 +6,6 @@ lib LibC4
   fun strlen(s : UInt8*) : UInt64
 end
 
-text = "four".to_heap
+text = "four"
 pointer = text.to_unsafe
 puts LibC4.strlen(pointer)

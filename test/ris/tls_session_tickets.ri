@@ -2,7 +2,8 @@
 import std/int
 import std/env::{ENV}
 import std/time::{Time}
-import std/tls::{TlsConfig, TlsHeldTicket, TlsMadeUnder, TlsSession}
+import std/tls::{RisTlsSessionSlot, TlsConfig, TlsHeldTicket, TlsMadeUnder,
+                 TlsSession}
 import std/x509::{Certificate, X509Error}
 
 # Linux's resident pages and mappings, as in scope_frees.
@@ -209,3 +210,34 @@ else
 end
 
 puts "PASS: certificate DER rebuilt on caller tape and session limits"
+
+# TlsClient's resumption: take_into refills the client's own slot, so
+# resuming many times does not grow program storage.
+def resume(session : TlsSession, config : TlsConfig,
+           slot : RisTlsSessionSlot, count : Int32) : Nil
+  at = 0
+  while at < count
+    keep_certificate(session, config)
+    raise "resumption missed" unless session.take_into("certificate.test",
+                                       443, config, 1_i64, slot)
+    at += 1
+  end
+end
+
+slot = RisTlsSessionSlot.new
+resume(session, config, slot, 10_000)
+rss = resident
+maps = mappings
+resume(session, config, slot, 100_000)
+raise "resumption RSS grew" unless resident - rss < 4_194_304
+raise "resumption mappings grew" unless mappings <= maps
+raise "wrong slot" unless slot.ticket == [42_u8] && slot.alpn_text.nil? &&
+                          slot.host.bytes == "certificate.test"
+ders = 0
+slot.chain_each do |der|
+  raise "wrong slot chain" unless der.to_a == certificate_der
+  ders += 1
+  nil
+end
+raise "wrong slot chain size" unless ders == 1
+puts "PASS: 100000 resumptions into one slot, flat RSS and mappings"

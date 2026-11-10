@@ -3,8 +3,9 @@
 # (one a request's own field, from the tape) and a body. A plain request
 # takes the fast path; a chunked one, an `Expect` and HTTP/1.0 are read as
 # `serve` reads them and handed on alike.
-# A HEAD gets the length and no body, a 204 neither, and `Connection:
-# close` ends the connection after its answer.
+# A HEAD gets the length and no body, one with `length=` that length, a
+# 204 neither, and `Connection: close` ends the connection after its
+# answer. A block header writes its value into the answer's own text.
 module test/ris/answer
 
 import std/socket::{IyiSocket}
@@ -22,12 +23,18 @@ REQUESTS = ("GET /echo?x=1 HTTP/1.1\r\nHost: h\r\nX-Name: mari\r\n\r\n" +
            "POST /echo HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nhello" +
            "POST /echo HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n" +
            "HEAD /echo HTTP/1.1\r\nHost: h\r\n\r\n" +
+           "HEAD /len HTTP/1.1\r\nHost: h\r\n\r\n" +
            "GET /none HTTP/1.1\r\nHost: h\r\n\r\n" +
            "GET /last HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n")
 
 def answer(req : Incoming, res : Outgoing) : Nil
   if req.path == "/none"
     res.status = 204
+    return
+  end
+  if req.path == "/len"
+    res.length = 7_i64
+    res.header("X-Len") { |w| w << "seven, " << 7 }
     return
   end
   res.header("X-Seen", "yes")
@@ -99,6 +106,7 @@ want = "HTTP/1.1 200 OK\r\nX-Seen: yes\r\nX-Echo: mari\r\nContent-Length: 33\r\n
        reply("POST /echo body=hello") +
        reply("POST /echo body=abc") +
        "HTTP/1.1 200 OK\r\nX-Seen: yes\r\nContent-Length: 16\r\nConnection: keep-alive\r\n\r\n" +
+       "HTTP/1.1 200 OK\r\nX-Len: seven, 7\r\nContent-Length: 7\r\nConnection: keep-alive\r\n\r\n" +
        "HTTP/1.1 204 No Content\r\nConnection: keep-alive\r\n\r\n" +
        reply("GET /last body=", true)
 got = received.finish

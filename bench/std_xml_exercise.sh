@@ -463,9 +463,9 @@ PY
   fi
 }
 duplicate_attr='        fail_at(attr_line, attr_col, '
-duplicate_attr+="\"attribute '#{attr_name.to_heap}' \" \\"
+duplicate_attr+="\"attribute '#{attr_name}' \" \\"
 duplicate_attr+=$'\n'
-duplicate_attr+='                                     "given twice on <#{name.to_heap}>")'
+duplicate_attr+='                                     "given twice on <#{name}>")'
 mutate "a repeated attribute accepted" "$duplicate_attr" \
   '        # duplicate attributes accepted' 'given twice'
 mutate "one attribute through two prefixes accepted" \

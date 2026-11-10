@@ -1,0 +1,27 @@
+# A method's store into self's field is checked where it is made: the
+# text comes from a tape block inside another method (SPEC 3.2).
+class Keeper
+  def initialize
+    @last = ""
+  end
+
+  def keep(s : String) : Nil
+    @last = s
+  end
+
+  def run : Nil
+    tape do
+      s = ""
+      s << "abc"
+      keep(s)
+    end
+  end
+
+  def last : String
+    @last
+  end
+end
+
+k = Keeper.new
+k.run
+puts k.last

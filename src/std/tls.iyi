@@ -2409,8 +2409,11 @@ pub class TlsClient < TlsConnection
   # Where this connection's tickets are kept and a resumption's was taken
   # from: the caller's, none when nil.
   @session : TlsSession?
-  # The ticket this ClientHello offers, if it offers one.
-  @offered : TlsHeldTicket? = nil
+  # The ticket this ClientHello offers, if it offers one: the session's
+  # slot copied into the client's own, refilled per handshake, so a
+  # resumption takes no program storage.
+  @offered : RisTlsSessionSlot? = nil
+  @offered_slot : RisTlsSessionSlot
   # With a session, set when the handshake starts: the port the socket is
   # connected to (0 over a unix socket, which has none) and the
   # configuration as it then stood, which the tickets this connection
@@ -2470,6 +2473,8 @@ pub class TlsClient < TlsConnection
     @ech_slot = ech_slot
     made_under = TlsMadeUnder.new(@config)
     @made_under_slot = made_under
+    offered_slot = RisTlsSessionSlot.new
+    @offered_slot = offered_slot
   end
 
   def initialize(host : String, @config : TlsConfig, @session : TlsSession? = nil)
@@ -2495,6 +2500,8 @@ pub class TlsClient < TlsConnection
     @ech_slot = ech_slot
     made_under = TlsMadeUnder.new(@config)
     @made_under_slot = made_under
+    offered_slot = RisTlsSessionSlot.new
+    @offered_slot = offered_slot
   end
 
   def host : String
@@ -2667,15 +2674,15 @@ pub class TlsClient < TlsConnection
       made_under = @made_under_slot
       made_under.configure(@config)
       @made_under = made_under
-      # Made in this def, read after it: the connection keeps a copy.
-      taken = held.take(host, @port, @config, TlsTime.now_ms)
-      @offered = taken ? taken.copy_to(Program.tape) : nil
+      # Refilled in the client's own slot: nothing grows per resumption.
+      slot = @offered_slot
+      @offered = held.take_into(host, @port, @config, TlsTime.now_ms, slot) ? slot : nil
     end
     # Early data goes when the ticket allows that much (section 4.6.1's
     # max_early_data_size), and not otherwise.
     if (data = early_bytes) && (offered = @offered) && !data.empty? && data.size <= offered.max_early_data
       @early_sent = true
-      @early_alpn = offered.alpn
+      @early_alpn = offered.alpn_text
     end
     # X25519MLKEM768's share first, when it is offered, then X25519's: one
     # X25519 key in both, as OpenSSL and Chrome send them, so its ladder
@@ -2858,8 +2865,16 @@ pub class TlsClient < TlsConnection
       end
       psk = offered.psk
       @resumed = true
+      # No Certificate comes on a resumption: the ticket's chain is kept
+      # in this connection's own certificate storage.
+      clear_certificates
+      offered.chain_each do |der|
+        problem = append_certificate(der)
+        return tls_error("a stored certificate: #{problem.message}", TlsAlert::INTERNAL_ERROR) if problem
+        nil
+      end
       @peer_certificates.clear
-      @peer_certificates.concat(offered.peer_certificates)
+      @peer_certificates.concat(kept_certificates)
       @authenticated_ms = offered.authenticated_ms
     end
 
@@ -3316,7 +3331,7 @@ pub class TlsClient < TlsConnection
 
   # The ClientHello offering *offered*'s ticket: its pre_shared_key last,
   # its binder over *prefix* and the ClientHello to its binders.
-  private def psk_hello(offered : TlsHeldTicket, body : Array(UInt8),
+  private def psk_hello(offered : RisTlsSessionSlot, body : Array(UInt8),
                         extensions : Array(UInt8),
                         prefix : Array::View(UInt8)) : Array(UInt8)
     # The ticket's age as this side counts it, from its arrival, added to
@@ -4169,6 +4184,17 @@ pub class TlsSession
     decode(take_slot(host, port, config, now_ms), config)
   end
 
+  # Like `take`, but copy the ticket into *into*, the caller's own slot,
+  # refilled each time: true when one was taken. TlsClient uses it, so
+  # a resumption takes no program storage.
+  def take_into(host : String, port : Int32, config : TlsConfig,
+                now_ms : Int64, into : RisTlsSessionSlot) : Bool
+    slot = take_slot(host, port, config, now_ms)
+    return false unless slot
+    into.copy_from(slot)
+    true
+  end
+
   private def decode(slot : RisTlsSessionSlot?, config : TlsConfig) : TlsHeldTicket?
     slot ? TlsHeldTicket.new(slot, config) : nil
   end
@@ -4225,7 +4251,7 @@ end
 # Fixed storage for one session ticket. Trust objects are program-owned:
 # retain their identities and copy mutable settings into reusable fields.
 # No reference into the connection or its trust snapshot is retained.
-class RisTlsSessionSlot
+pub class RisTlsSessionSlot
   property used : Bool = false
   getter serial : Int64 = 0_i64
   getter ticket : Array(UInt8)
@@ -4322,6 +4348,100 @@ class RisTlsSessionSlot
     @has_ech = !ech.nil?
     ech.each { |byte| @ech_configs << byte } if ech
     @used = true
+  end
+
+  # Refill this slot with *other*'s ticket, in place.
+  def copy_from(other : RisTlsSessionSlot) : Nil
+    @used = false
+    @serial = other.serial
+    @ticket.clear
+    at = 0
+    while at < other.ticket.size
+      @ticket << other.ticket[at]
+      at += 1
+    end
+    @psk.clear
+    at = 0
+    while at < other.psk.size
+      @psk << other.psk[at]
+      at += 1
+    end
+    @host.clear
+    at = 0
+    while at < other.host.size
+      @host << other.host[at]
+      at += 1
+    end
+    @alpn.clear
+    at = 0
+    while at < other.alpn.size
+      @alpn << other.alpn[at]
+      at += 1
+    end
+    @has_alpn = other.has_alpn
+    @chain.clear
+    at = 0
+    while at < other.chain.size
+      @chain << other.chain[at]
+      at += 1
+    end
+    @offsets.clear
+    at = 0
+    while at < other.offsets.size
+      @offsets << other.offsets[at]
+      at += 1
+    end
+    @suite = other.suite
+    @received_ms = other.received_ms
+    @lifetime_ms = other.lifetime_ms
+    @authenticated_ms = other.authenticated_ms
+    @age_add = other.age_add
+    @port = other.port
+    @max_early_data = other.max_early_data
+    @leaf_expires = other.leaf_expires
+    @config_id = other.@config_id
+    @root_values.clear
+    at = 0
+    while at < other.@root_values.size
+      @root_values << other.@root_values[at]
+      at += 1
+    end
+    @root_offsets.clear
+    at = 0
+    while at < other.@root_offsets.size
+      @root_offsets << other.@root_offsets[at]
+      at += 1
+    end
+    @roots_generation = other.@roots_generation
+    @has_roots = other.@has_roots
+    @identity_id = other.@identity_id
+    @now_seconds = other.@now_seconds
+    @now_nanos = other.@now_nanos
+    @min_version = other.@min_version
+    @require_staple = other.@require_staple
+    @ech_configs.clear
+    at = 0
+    while at < other.@ech_configs.size
+      @ech_configs << other.@ech_configs[at]
+      at += 1
+    end
+    @has_ech = other.@has_ech
+    @used = true
+  end
+
+  # The ticket's protocol, nil when it has none.
+  def alpn_text : String?
+    @has_alpn ? @alpn.bytes : nil
+  end
+
+  # Yield each certificate's DER of the chain, leaf first.
+  def chain_each(& : Array::View(UInt8) ->) : Nil
+    at = 0
+    while at + 1 < @offsets.size
+      first = @offsets[at]
+      yield @chain[first, @offsets[at + 1] - first]
+      at += 1
+    end
   end
 
   private def same_roots?(roots : Array(Certificate)) : Bool

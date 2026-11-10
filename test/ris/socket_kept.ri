@@ -1,0 +1,12 @@
+# A connect's socket outlives the round; its SocketError is read in it.
+module test/ris/socket_kept
+
+import std/socket::{IyiSocket, SocketError}
+
+kept = nil.as(IyiSocket?)
+2.times do |i|
+  made = IyiSocket.connect("127.0.0.1", 1 + i)
+  kept = made if made.is_a?(IyiSocket)
+  puts made.reason if made.is_a?(SocketError)
+end
+puts kept.nil?

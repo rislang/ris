@@ -25,7 +25,7 @@ def unused
 end
 
 kept = Kept.new(42)
-text = "value #{kept.value}".to_heap
+text = "value #{kept.value}"
 array = ::Array(Int32).new(2)
 hash = ::Hash(Int32, Int32).new
 set = Set(Int32).new

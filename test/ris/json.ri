@@ -14,7 +14,7 @@ failures = [] of String
 
 
 def check(failures : Array(String), ok : Bool, what : String) : Nil
-  failures << what.to_heap unless ok
+  failures << what.copy_to(Program.tape) unless ok
 end
 
 def heap_doc(b : Builder) : Nil
@@ -80,12 +80,12 @@ bad = [
   %([01]), %([1e999]), %(["\\ud800"]),
   %({"a":1,}), %(tru), %([1.5x]),
   %(["a\nb"]), %({"a":{"b":1,"b":2}}),
-  ("[" * 300).to_heap, %(["\xff"]),
+  ("[" * 300), %(["\xff"]),
 ]
 many = String.build do |io|
-  io << "{".to_heap
-  40.times { |i| io << %("k#{i}":#{i},).to_heap }
-  io << %("k39":0}).to_heap
+  io << "{"
+  40.times { |i| io << %("k#{i}":#{i},) }
+  io << %("k39":0})
 end
 bad << many
 bad.each do |input|
@@ -105,7 +105,7 @@ end
       b.ascii_only = ascii
       heap_doc(b)
     end
-    tape = "".to_heap
+    tape = ""
     tape do
       w = String::Builder.new(16)
       w.append("head:")
@@ -144,7 +144,7 @@ tape do
       JSON.write(w, indent, ascii) { |b| b.value(doc, doc.root) }
       heap = JSON.build(indent) do |b|
         b.ascii_only = ascii
-        JSON.parse(text.to_heap).to_json(b)
+        JSON.parse(text).to_json(b)
       end
       message = "copied alike, indent #{indent.inspect}, ascii #{ascii}"
       check(failures, w.finish == heap, message)

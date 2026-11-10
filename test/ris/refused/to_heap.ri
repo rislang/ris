@@ -1,0 +1,3 @@
+# `to_heap` is gone: the compiler names the copy that replaces it.
+text = "kept"
+puts text.to_heap

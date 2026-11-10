@@ -1140,7 +1140,7 @@ struct Array(T)
   end
 
   protected def __iyi_copy_children(work : RisCopyWork) : Nil
-    {% if T < Array %}
+    {% if T != NoReturn && T < Array %}
       each { |value| value.__iyi_copy_children(work) }
     {% else %}
       {% if T == String %}
@@ -1225,7 +1225,7 @@ struct Array(T)
   # Diagnostic counts include freed slots retained for the next store.
   def __pool_usage : Tuple(Int32, Int32)
     return {0, 0} if (@state + 7_i64).value == 0_u64
-    {% if T < Array %}
+    {% if T != NoReturn && T < Array %}
       pool = Pointer(RisArrayPool({{T.type_vars[0]}})).new(
         (@state + 7_i64).value)
       {pool.value.data.size, pool.value.handles.size}
@@ -1240,7 +1240,7 @@ struct Array(T)
   # Nested elements are fixed handles to runs owned by this container.
   protected def stored(value : T) : T
     return value if (@state + 7_i64).value == 0_u64
-    {% if T < Array %}
+    {% if T != NoReturn && T < Array %}
       pool = Pointer(RisArrayPool({{T.type_vars[0]}})).new(
         (@state + 7_i64).value)
       value.__pool_copy(pool)
@@ -1259,7 +1259,7 @@ struct Array(T)
 
   private def release(value : T) : Nil
     return if (@state + 7_i64).value == 0_u64
-    {% if T < Array %}
+    {% if T != NoReturn && T < Array %}
       value.__release_run
     {% elsif T == String %}
       if (@state + 4_i64).value == 1_u64 ||
@@ -2363,11 +2363,6 @@ struct NamedTuple
 end
 
 class Object
-  # Historical spelling: a deep copy on this tape, never a heap escape.
-  def to_heap
-    Tape.owner_copy(self, RisCurrentTape.new)
-  end
-
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     {% if @type < ::Enum || @type < ::Number || @type == ::Bool || @type == ::Char || @type == ::Symbol || @type == ::Nil %}
       target.value = self
@@ -3861,7 +3856,7 @@ private struct RisArrayPool(T)
   end
 
   def self.children : UInt64
-    {% if T < Array %}
+    {% if T != NoReturn && T < Array %}
       pool = Pointer(RisArrayPool({{T.type_vars[0]}})).new(
         RisRegion.tape_bytes(sizeof(RisArrayPool({{T.type_vars[0]}})).to_u64))
       pool.value = RisArrayPool({{T.type_vars[0]}}).new

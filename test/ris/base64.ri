@@ -15,7 +15,7 @@ tape do
   Base64.urlsafe_encode("?", w)
   exit 3 unless w.finish == "prefix:Zm9vbarPw=="
   exit 4 unless Base64.encode("").empty?
-  kept = encoded.to_heap
+  kept = encoded.copy_to(Program.tape)
 end
 exit 5 unless Base64.decode(kept) == "\u0000hello café\u00ff"
 exit 6 unless Base64.encode("foobar") == "Zm9vYmFy"

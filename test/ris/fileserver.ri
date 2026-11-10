@@ -1,0 +1,221 @@
+# `FileServer.serve` behind `Server.answer` over loopback: every answer
+# the module promises, pipelined on one connection and compared with one
+# expected text. The lines are copied into each `Outgoing`, the file is
+# read into its body, a HEAD states its length, and the cap's 500 logs.
+module test/ris/fileserver
+
+import std/socket::{IyiSocket}
+import std/http::{HTTP, Server, Incoming, Outgoing}
+import std/fileserver::{FileServer}
+import std/file::{File}
+import std/dir::{Dir}
+import std/time::{Time}
+import std/log::{Log, RisMemoryBackend, Severity}
+import std/random::{Random}
+
+# Every byte until the peer closes, into the caller's *writer*.
+def read_to_close(socket : IyiSocket, writer : String::Builder) : Nil
+  while true
+    got = socket.read(writer, 65536).or_panic
+    break if got == 0
+  end
+end
+
+ROOT = Dir.tempdir + "/ris_fileserver_" + Random::Secure.hex(6)
+TEXT = "text/plain; charset=utf-8"
+
+struct Ready
+end
+
+struct Handler
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    FileServer.serve(ROOT, req, res, max: 1000_i64)
+  end
+end
+
+# One request, into *q*.
+def ask(q : String::Builder, method : String, path : String,
+        extra : String = "") : Nil
+  q << method << " " << path << " HTTP/1.1\r\nHost: h\r\n" << extra << "\r\n"
+end
+
+# One expected answer, into *w*: a 304 has no Content-Length, a HEAD
+# states *length* and sends no body.
+def answer(w : String::Builder, status : String, lines : String,
+           body : String, length : Int32 = -1, close : Bool = false) : Nil
+  w << "HTTP/1.1 " << status << "\r\n" << lines
+  unless status.starts_with?("304")
+    w << "Content-Length: " << (length < 0 ? body.bytesize : length) << "\r\n"
+  end
+  w << "Connection: " << (close ? "close" : "keep-alive") << "\r\n\r\n"
+  w << body
+end
+
+# The ETag of *path*, as serve makes it.
+def tag(path : String) : String
+  info = File.info?(ROOT + path)
+  raise "no #{path}" unless info
+  "\"" + HTTP.hex_text(info.modification_time) + "-" +
+    HTTP.hex_text(info.size) + "\""
+end
+
+# The validators of *path*, as serve writes them.
+def validators(path : String) : String
+  info = File.info?(ROOT + path)
+  raise "no #{path}" unless info
+  "Last-Modified: " + Time.unix(info.modification_time).to_rfc1123 +
+    "\r\nETag: " + tag(path) + "\r\nAccept-Ranges: bytes\r\n"
+end
+
+Dir.mkdir_p(ROOT + "/sub")
+Dir.mkdir_p(ROOT + "/nodir")
+File.write(ROOT + "/a.txt", "hello world")
+File.write(ROOT + "/sub/index.html", "<p>i</p>")
+File.write(ROOT + "/empty.txt", "")
+File.write(ROOT + "/big.bin", "x" * 2000)
+
+backend = RisMemoryBackend.on_program
+Log.setup(Severity::Info, backend)
+
+a = validators("/a.txt")
+a_full = a + "Content-Type: " + TEXT + "\r\n"
+a_tag = tag("/a.txt")
+big = validators("/big.bin")
+q = String::Builder.new(8192)
+w = String::Builder.new(16384)
+plain = "Content-Type: " + TEXT + "\r\n"
+not_found = "not found\n"
+
+# 1, 2: GET and HEAD.
+ask(q, "GET", "/a.txt")
+answer(w, "200 OK", a_full, "hello world")
+ask(q, "HEAD", "/a.txt")
+answer(w, "200 OK", a_full, "", 11)
+# 3: If-None-Match.
+ask(q, "GET", "/a.txt", "If-None-Match: " + a_tag + "\r\n")
+answer(w, "304 Not Modified", a, "")
+ask(q, "GET", "/a.txt", "If-None-Match: W/" + a_tag + "\r\n")
+answer(w, "304 Not Modified", a, "")
+ask(q, "GET", "/a.txt", "If-None-Match: *\r\n")
+answer(w, "304 Not Modified", a, "")
+ask(q, "GET", "/a.txt", "If-None-Match: \"other\"\r\n")
+answer(w, "200 OK", a_full, "hello world")
+# 4: If-Modified-Since in the three forms, then the past.
+ask(q, "GET", "/a.txt", "If-Modified-Since: Fri, 01 Jan 2100 00:00:00 GMT\r\n")
+answer(w, "304 Not Modified", a, "")
+ask(q, "GET", "/a.txt", "If-Modified-Since: Friday, 01-Jan-60 00:00:00 GMT\r\n")
+answer(w, "304 Not Modified", a, "")
+ask(q, "GET", "/a.txt", "If-Modified-Since: Fri Jan  1 00:00:00 2100\r\n")
+answer(w, "304 Not Modified", a, "")
+ask(q, "GET", "/a.txt", "If-Modified-Since: Thu, 01 Jan 1970 00:00:00 GMT\r\n")
+answer(w, "200 OK", a_full, "hello world")
+# 5: invalid dates are ignored.
+ask(q, "GET", "/a.txt", "If-Modified-Since: Fri, 32 Jan 2100 00:00:00 GMT\r\n")
+answer(w, "200 OK", a_full, "hello world")
+ask(q, "GET", "/a.txt", "If-Modified-Since: garbage\r\n")
+answer(w, "200 OK", a_full, "hello world")
+# 6-9: ranges.
+ask(q, "GET", "/a.txt", "Range: bytes=2-4\r\n")
+answer(w, "206 Partial Content", a_full + "Content-Range: bytes 2-4/11\r\n",
+  "llo")
+ask(q, "GET", "/a.txt", "Range: bytes=-3\r\n")
+answer(w, "206 Partial Content", a_full + "Content-Range: bytes 8-10/11\r\n",
+  "rld")
+ask(q, "GET", "/a.txt", "Range: bytes=99-\r\n")
+answer(w, "416 Range Not Satisfiable",
+  "Content-Range: bytes */11\r\n" + plain, "range not satisfiable\n")
+ask(q, "GET", "/a.txt", "Range: bytes=0-1,3-4\r\n")
+answer(w, "200 OK", a_full, "hello world")
+# 10: If-Range.
+ask(q, "GET", "/a.txt", "If-Range: " + a_tag + "\r\nRange: bytes=2-4\r\n")
+answer(w, "206 Partial Content", a_full + "Content-Range: bytes 2-4/11\r\n",
+  "llo")
+ask(q, "GET", "/a.txt", "If-Range: \"other\"\r\nRange: bytes=2-4\r\n")
+answer(w, "200 OK", a_full, "hello world")
+# 11: ranges are for GET.
+ask(q, "HEAD", "/a.txt", "Range: bytes=2-4\r\n")
+answer(w, "200 OK", a_full, "", 11)
+# 12-14: directories.
+ask(q, "GET", "/sub?q=1")
+answer(w, "301 Moved Permanently", "Location: /sub/?q=1\r\n", "")
+ask(q, "GET", "/sub/")
+answer(w, "200 OK", validators("/sub/index.html") +
+  "Content-Type: text/html; charset=utf-8\r\n", "<p>i</p>")
+ask(q, "GET", "/nodir/")
+answer(w, "404 Not Found", plain, not_found)
+# 15: paths that would leave the root.
+ask(q, "GET", "/../a.txt")
+answer(w, "404 Not Found", plain, not_found)
+ask(q, "GET", "/a%00.txt")
+answer(w, "404 Not Found", plain, not_found)
+ask(q, "GET", "/a%5c.txt")
+answer(w, "404 Not Found", plain, not_found)
+# 16: another method.
+ask(q, "POST", "/a.txt", "Content-Length: 0\r\n")
+answer(w, "405 Method Not Allowed", "Allow: GET, HEAD\r\n" + plain,
+  "method not allowed\n")
+# 17: an empty file.
+ask(q, "GET", "/empty.txt")
+answer(w, "200 OK", validators("/empty.txt") + plain, "")
+# 18: over max. A HEAD writes the same 500 and the server drops its body.
+ask(q, "GET", "/big.bin")
+answer(w, "500 Internal Server Error", plain, "file too large to serve\n")
+ask(q, "HEAD", "/big.bin")
+answer(w, "500 Internal Server Error", plain, "", 24)
+ask(q, "GET", "/big.bin", "If-None-Match: *\r\n")
+answer(w, "304 Not Modified", big, "")
+ask(q, "GET", "/big.bin", "Range: bytes=0-9\r\n")
+answer(w, "206 Partial Content", big +
+  "Content-Type: application/octet-stream\r\n" +
+  "Content-Range: bytes 0-9/2000\r\n", "xxxxxxxxxx")
+# The last closes the connection.
+ask(q, "GET", "/a.txt", "Connection: close\r\n")
+answer(w, "200 OK", a_full, "hello world", -1, true)
+
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
+received = String::Builder.new(65536)
+group do |g|
+  g.spawn do
+    Server.answer("127.0.0.1", port, 0, Handler, max_connections: 1)
+    0
+  end
+  RisBoard.take(Ready).or_panic
+  client = IyiSocket.connect("127.0.0.1", port).or_panic
+  client.write(q.finish).or_panic
+  read_to_close(client, received)
+  client.close
+  g.cancel_children
+end
+
+got = received.finish
+want = w.finish
+warned = 0
+backend.output.each do |line|
+  if line.includes?("fileserver: answer over max") &&
+     line.includes?("/big.bin ") && line.includes?("bytes=2000")
+    warned = warned + 1
+  end
+end
+files = Array(String){"/a.txt", "/sub/index.html", "/empty.txt", "/big.bin"}
+files.each do |name|
+  File.delete(ROOT + name)
+end
+Dir.delete(ROOT + "/sub")
+Dir.delete(ROOT + "/nodir")
+Dir.delete(ROOT)
+if got != want
+  puts "FAILED:\n#{got.inspect}\nwanted\n#{want.inspect}"
+elsif warned != 2
+  puts "FAILED: #{warned} over-max warnings, wanted 2"
+else
+  puts "PASS: files answered into Outgoing"
+end

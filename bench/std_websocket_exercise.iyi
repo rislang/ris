@@ -16,7 +16,6 @@ module bench/std_websocket_exercise
 # one another's lifecycle messages. Stop gives the response time to flush.
 # These exercises still use std's legacy String APIs and assertions.
 # Board messages themselves own copied tape text; this is the heap adapter.
-@[TapeToHeap]
 def ris_heap_text(value : String) : String
   value.to_s
 end
@@ -233,8 +232,17 @@ import std/compress::{Deflater, Inflater, Envelope}
 import std/http::{HTTP, HTTPClient, Request, Response, Server, HTTPError, TlsStream}
 import std/socket::{IyiSocket, SocketError}
 import std/tls::{TlsConfig, TlsServerConfig}
-import std/x509::{Certificate}
+import std/x509::{RisCertificateStore, Certificate}
 import std/file::{File}
+
+# A PEM text's certificates, kept in *store*; a text that does not read
+# panics with the reason.
+def pem_certs(store : RisCertificateStore, text : String) : Array(Certificate)
+  if problem = store.read_pem(text)
+    raise problem.message
+  end
+  store.kept_certificates
+end
 
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -800,7 +808,8 @@ def connect(port : String, roots : String?) : Nil
   client = nil.as(HTTPClient?)
   if roots
     config = TlsConfig.new
-    config.roots = Certificate.from_pem(File.read(roots)).or_panic
+    pem_store_1 = RisCertificateStore.new
+    config.roots = pem_certs(pem_store_1, File.read(roots))
     client = HTTPClient.new(tls: config)
     url = "wss://localhost:#{port}/chat?x=1"
   end

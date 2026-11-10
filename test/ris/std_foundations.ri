@@ -66,7 +66,7 @@ top = String.new("12345678")
 previous = top
 top << "x"
 assert top == "12345678x" && previous == "12345678"
-assert old.to_heap == old
+assert old == old
 assert "abc".dup == "abc"
 assert "a".<=>("b") < 0
 assert "\xFF".chars[0].ord == 0xFFFD

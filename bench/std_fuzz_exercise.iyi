@@ -79,7 +79,7 @@ import std/int
 
 import std/random::{Random}
 import std/asn1::{Der, DerValue, DerClass, Asn1Error}
-import std/x509::{Certificate, X509, X509Error, X509Purpose}
+import std/x509::{RisCertificateStore, Certificate, X509, X509Error, X509Purpose}
 import std/tls::{TlsClient, TlsConfig, TlsError, TlsIdentity, TlsKeySchedule, TlsRecordCipher, TlsServer, TlsServerConfig, TlsVersion}
 import std/http::{HTTP, HTTPError, HTTPClient, Server, Request, Response, Multipart, BodyReader}
 import std/slice::{Bytes}
@@ -816,9 +816,11 @@ def run_pem(input : Array(UInt8)) : String
   X509.pem(t, "PRIVATE KEY")
   Certificate.pem_blocks(t)
   TlsIdentity.from_pem(t, t)
-  read = Certificate.from_pem(t)
-  return refused(read) if read.is_a?(X509Error)
-  "read #{read.size}"
+  store = RisCertificateStore.new
+  if problem = store.read_pem(t)
+    return refused(problem)
+  end
+  "read #{store.kept_certificates.size}"
 end
 
 SIGNED = bytes_of("what a CertificateVerify signs, near enough")

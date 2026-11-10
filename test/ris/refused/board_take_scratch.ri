@@ -1,0 +1,24 @@
+# RisBoard.take decodes its message in the taking def's scratch: a def
+# that answers it after other work would copy it out (SPEC 1.9).
+@[OnTape]
+struct Msg
+  getter text : String
+  getter nums : Array(Int32)
+
+  def initialize(@text : String, @nums : Array(Int32))
+  end
+end
+
+def read_msg : Msg
+  got = RisBoard.take(Msg)
+  raise "cancelled" unless got.is_a?(Msg)
+  got
+end
+
+nums = Array(Int32).new(2)
+nums << 1
+RisBoard.post(Msg.new("hello", nums))
+tape do
+  m = read_msg
+  puts m.nums.size
+end

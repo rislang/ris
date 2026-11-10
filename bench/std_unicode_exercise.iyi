@@ -22,9 +22,14 @@ if Program.args.size > 0 && Program.args[0] == "graphemes"
   while line = STDIN.read_line(chomp: true)
     text = String.build { |io| line.split(' ').each { |number| io << number.to_i.chr } }
     clusters = text.graphemes.map do |cluster|
-      points = [] of String
-      cluster.each_char { |char| points << char.ord.to_s }
-      points.join(" ")
+      String.build do |io|
+        first = true
+        cluster.each_char do |char|
+          io << ' ' unless first
+          io << char.ord
+          first = false
+        end
+      end
     end
     puts clusters.join("|")
   end

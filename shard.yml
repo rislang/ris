@@ -1,21 +1,20 @@
-name: iyi
-version: 0.19.1
+name: ris
+version: 0.1.0
 
 authors:
+  - Priit Tark
   - Serdar Dogruyol
   - Crystal Core Team <crystal@manas.tech>
 
 description: |
-  A language built for Developer & Agentic Experience, Portability,
-  Performance, and Efficiency. A module is the unit of compilation and is
-  compiled against its dependencies' declarations, never their bodies.
-  Compatible with Crystal and its own language. The compiler is built on
-  Crystal's and is Apache 2.0 with it.
+  ris: rubyist in stack memory with agents. A Ruby-like language whose data
+  lives on tape memory, with no GC, built on iyi (src/IYI_VERSION), a fork
+  of Crystal (src/VERSION). The compiler is Apache 2.0 with Crystal's.
 
 crystal: ">= 1.13.0"
 
 license: Apache-2.0 WITH Swift-exception
 
-repository: https://github.com/iyilang/iyi
-homepage: https://github.com/iyilang/iyi
-documentation: https://github.com/iyilang/iyi/blob/master/SPEC.md
+repository: https://github.com/rislang/ris
+homepage: https://github.com/rislang/ris
+documentation: https://github.com/rislang/ris/blob/main/SPEC.md

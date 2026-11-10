@@ -31,7 +31,16 @@ import std/socket::{DnsUpstream, IyiSocket, Resolver, SocketError}
 import std/tls::{TlsConfig, TlsEchKey, TlsError, TlsIdentity, TlsIdentitySource, TlsServer, TlsServerConfig}
 import std/dns::{DnsError, DnsTapeMessage, DnsTapeRecord}
 import std/udp::{UdpSocket}
-import std/x509::{Certificate}
+import std/x509::{RisCertificateStore, Certificate}
+
+# A PEM text's certificates, kept in *store*; a text that does not read
+# panics with the reason.
+def pem_certs(store : RisCertificateStore, text : String) : Array(Certificate)
+  if problem = store.read_pem(text)
+    raise problem.message
+  end
+  store.kept_certificates
+end
 
 # bench/std_tls_exercise.iyi's ECH test PKI: a root, inner.test's leaf and
 # public.test's, Ed25519, valid from 2025 to 9999. The keys guard nothing
@@ -346,7 +355,8 @@ ports = [{other_port, "OTHER"}, {dead_port, "DEAD"}, {port, "PORT"}, {dns.local_
 plain = Resolver.new(["127.0.0.1:#{dns.local_port}"], timeout_ms: 2000, attempts: 1)
 encrypted = Resolver.new([] of String, timeout_ms: 2000, attempts: 1).encrypted(LocalUpstream.new(zone).as(DnsUpstream))
 base = TlsConfig.new
-base.roots = Certificate.from_pem(ROOT_PEM).or_panic
+pem_store_1 = RisCertificateStore.new
+base.roots = pem_certs(pem_store_1, ROOT_PEM)
 base.alpn = ["http/1.1", "h2"]
 origin = "https://inner.test:#{port}/"
 # The origin's port is not 443, so its records are asked for at

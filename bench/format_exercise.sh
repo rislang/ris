@@ -204,7 +204,7 @@ prove_fails "%g fixed from %f's places" no_g_digits "precision must be at most 4
 
 # 10. An Int128's `%p` asked of its digits as a string again: 65_i128 in quotes.
 prove_fails "an Int128's %p asked of its digits again" no_wide_text "format: Int128 text and code point" \
-  "s/verb == 'p' ? val\.inspect\.as_tape : integer_text(val, 10)/verb == 'p' ? integer_text(val, 10).to_heap.inspect.as_tape : integer_text(val, 10)/"
+  "s/verb == 'p' ? val\.inspect\.as_tape : integer_text(val, 10)/verb == 'p' ? integer_text(val, 10).inspect.as_tape : integer_text(val, 10)/"
 
 echo
 if [ "$status" -eq 0 ]; then

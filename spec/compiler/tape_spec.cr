@@ -30,7 +30,7 @@ describe "ris tape text" do
   end
 
   it "requires an explicit heap copy for typed arguments" do
-    expect_raises(Iyi::TypeException, /\.to_heap/) do
+    expect_raises(Iyi::TypeException, /copy_to\(owner\)/) do
       tape_compile(<<-'CODE')
         def text(value : String) : String
           value
@@ -87,7 +87,7 @@ describe "ris tape text" do
       def text(value : String) : String
         value
       end
-      text("literal".to_heap)
+      text("literal")
       CODE
   end
 
@@ -96,7 +96,7 @@ describe "ris tape text" do
       class Kept
         @text : String
         def initialize
-          @text = "number #{42}".to_heap
+          @text = "number #{42}"
         end
       end
       Kept.new
@@ -154,7 +154,7 @@ describe "ris tape text" do
         def choose(text : String) : String
           text
         end
-        heap = "abc".to_heap + "d".to_heap
+        heap = "abc" + "d"
         width(heap)
         width(text: heap)
         result : String = choose(heap)
@@ -169,7 +169,7 @@ describe "ris tape text" do
           text ? text.size : 0
         end
         def choose(text : Str?, n : Int64) : String?
-          "wrong overload".to_heap
+          "wrong overload"
         end
         def choose(text : String?, n : Int64) : String?
           text
@@ -177,13 +177,13 @@ describe "ris tape text" do
         def optional(text : String, present : Bool) : String?
           present ? text : nil
         end
-        present = optional("abc".to_heap, true)
-        absent = optional("abc".to_heap, false)
+        present = optional("abc", true)
+        absent = optional("abc", false)
         width(present)
         width(absent)
         width(text: present)
         width(text: absent)
-        width("abc".to_heap)
+        width("abc")
         result : String? = choose(present, 1)
         result = choose(text: absent, n: 1)
         CODE
@@ -210,7 +210,7 @@ describe "ris tape text" do
         def optional(text : String?) : String?
           text
         end
-        view : Str? = optional("abc".to_heap)
+        view : Str? = optional("abc")
         CODE
     end
   end
@@ -218,7 +218,7 @@ describe "ris tape text" do
   it "does not borrow String assignments" do
     expect_raises(Iyi::TypeException) do
       tape_compile(<<-'CODE')
-        heap = "abc".to_heap + "d"
+        heap = "abc" + "d"
         view : Str = heap
         CODE
     end
@@ -440,5 +440,134 @@ describe "ris recursive store summaries" do
         puts p.pipe(0)
         CODE
     end
+  end
+end
+
+# How many of the `next`s in the round of the loop counting *counter* have
+# a scope reset right before them, and how many there are in all.
+private class RoundExits < Iyi::Visitor
+  getter nexts = 0
+  getter resets = 0
+
+  def initialize(@counter : String)
+  end
+
+  def visit(node : Iyi::While)
+    cond = node.cond
+    names = [] of String
+    cond.accept(NameFinder.new(names))
+    return true unless names.includes?(@counter)
+    count node.body
+    false
+  end
+
+  def visit(node : Iyi::ASTNode)
+    true
+  end
+
+  private def count(node : Iyi::ASTNode)
+    case node
+    when Iyi::While, Iyi::Block, Iyi::Def
+      return
+    when Iyi::Next
+      @nexts += 1
+    when Iyi::Expressions
+      node.expressions.each_with_index do |exp, i|
+        if exp.is_a?(Iyi::Next) && i > 0 &&
+           (reset = node.expressions[i - 1]).is_a?(Iyi::Call) &&
+           reset.name == "__iyi_scope_reset"
+          @resets += 1
+        end
+      end
+    end
+    node.accept_children(Children.new(self))
+  end
+
+  protected def count_child(node : Iyi::ASTNode)
+    count node
+  end
+
+  private class Children < Iyi::Visitor
+    def initialize(@owner : RoundExits)
+    end
+
+    def visit(node : Iyi::ASTNode)
+      @owner.count_child node
+      false
+    end
+  end
+
+  private class NameFinder < Iyi::Visitor
+    def initialize(@names : Array(String))
+    end
+
+    def visit(node : Iyi::Var)
+      @names << node.name
+      true
+    end
+
+    def visit(node : Iyi::ASTNode)
+      true
+    end
+  end
+end
+
+private def round_exits(code : String, counter : String) : {Int32, Int32}
+  result = tape_compile(code)
+  visitor = RoundExits.new(counter)
+  result.node.accept visitor
+  {visitor.nexts, visitor.resets}
+end
+
+describe "ris round exits" do
+  # TapeScopeChecker#clean_exits: the round allocates, so its mark stays;
+  # nothing before this `next` can have put data on the tape, so its reset
+  # is dropped.
+  it "drops the reset of a `next` that follows no allocation" do
+    exits = round_exits(<<-'CODE', "clean")
+      clean = 0
+      total = 0
+      while clean < 10
+        clean += 1
+        next if clean.odd?
+        text = "n#{clean}"
+        total += text.size
+      end
+      puts total
+      CODE
+    exits.should eq({1, 0})
+  end
+
+  it "keeps the reset of a `next` after an allocation" do
+    exits = round_exits(<<-'CODE', "dirty")
+      dirty = 0
+      total = 0
+      while dirty < 10
+        dirty += 1
+        text = "n#{dirty}"
+        total += text.size
+        next if dirty.odd?
+        total += 1
+      end
+      puts total
+      CODE
+    exits.should eq({1, 1})
+  end
+
+  # Only sequences, branches and assignments to a local are followed: an
+  # exit inside a call's argument keeps its reset.
+  it "keeps the reset of a `next` nested in another node" do
+    exits = round_exits(<<-'CODE', "nested")
+      nested = 0
+      total = 0
+      while nested < 10
+        nested += 1
+        total += (nested.odd? ? next : 1) + 0
+        text = "n#{nested}"
+        total += text.size
+      end
+      puts total
+      CODE
+    exits.should eq({1, 1})
   end
 end

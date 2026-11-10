@@ -1486,6 +1486,11 @@ pub class BodyWriter
     @written
   end
 
+  # Whether a write has failed: every write after it answers that failure.
+  def failed? : Bool
+    @fault_kind != 0
+  end
+
   def write(text : String) : Nil | Cancelled | SocketError
     return fault_now unless @fault_kind == 0
     raise "BodyWriter: a write after the body's end" if @done
@@ -1805,9 +1810,11 @@ pub class Response
   def reason : String
     @held.client_fields ? @held.notes.finish[@client_reason_at, @client_reason_size] : @reason
   end
+
   def headers : Hash(String, String)
     @held.headers
   end
+
   # The values of each field on more than one line, by its name in
   # `headers`, one entry a line.
   @body : String
@@ -1932,11 +1939,42 @@ pub class Response
     @decoded = false
   end
 
-  # A response whose body the block writes as it goes, chunked.
-  def self.stream(status : Int32, headers : Hash(String, String) = {} of String => String, &writer : BodyWriter -> Nil) : Response
-    response = Response.new(status, "", headers)
-    response.writer = writer
-    response
+  # A response whose body the block writes as it goes, chunked. A
+  # *content_type* given is the stream's own: *headers* naming one is
+  # refused. A *cache_control* given is sent unless *headers* names its
+  # own. std/sse's are `text/event-stream` and `no-cache`.
+  def self.stream(status : Int32, headers : Hash(String, String) = {} of String => String, content_type : String? = nil, cache_control : String? = nil, &writer : BodyWriter -> Nil) : Response
+    Response.new(status, headers, content_type, cache_control, writer)
+  end
+
+  # A response whose body *writer* writes as it goes: `Response.stream`'s.
+  # The headers are a copy made here, so the answer holds nothing of its
+  # caller's scratch.
+  def initialize(@status : Int32, headers : Hash(String, String), content_type : String?, cache_control : String?, writer : BodyWriter -> Nil)
+    sent = Hash(String, String).new
+    cached = false
+    headers.each do |name, value|
+      if HTTP.same_name?(name, "Content-Type") && (type = content_type)
+        raise "Response.stream: Content-Type is the stream's own, #{type}"
+      end
+      cached = true if HTTP.same_name?(name, "Cache-Control")
+      sent[name] = value
+    end
+    if type = content_type
+      sent["Content-Type"] = type
+    end
+    if cache = cache_control
+      sent["Cache-Control"] = cache unless cached
+    end
+    held = RisHttpResponseBody.new(sent)
+    @held = held
+    @reason = HTTP.reason_for(@status)
+    @body = ""
+    @source = nil
+    @writer = writer
+    @reader = nil
+    @url = nil
+    @decoded = false
   end
 
   # A 101 Switching Protocols with *headers* (`Upgrade` and the
@@ -1968,8 +2006,8 @@ pub class Response
   # what it keeps of the connection.
   def self.upgrade(headers : Hash(String, String), &takeover : (IyiSocket | TlsStream, String, Response) -> Nil) : Response
     {% raise "Response.upgrade takes no block: return Response.upgrade(headers)\n" +
-      "and give the handler take_over(socket, leftover, response),\n" +
-      "which the server calls with the connection after the 101." %}
+             "and give the handler take_over(socket, leftover, response),\n" +
+             "which the server calls with the connection after the 101." %}
   end
 
   protected def writer=(writer : Proc(BodyWriter, Nil)) : Proc(BodyWriter, Nil)
@@ -2211,23 +2249,29 @@ struct RequestHead
 end
 
 # The answer `Server.answer`'s block writes: a status, 200 until set, up
-# to `LINES` header lines, and its body, written into `body`. The lines
-# go in slots made at their final size, so the body's writer is the one
-# value that grows. The server adds `Content-Length` and `Connection`,
-# and refuses the block's own.
+# to `LINES` header lines, and its body, written into `body`. Each line is
+# copied into the answer's own text, so a value made in the block's def
+# need not outlive it; `header(name) { |w| ... }` writes a computed value
+# there directly. `length=` states the length of an answer to HEAD, which
+# sends no body. The server adds `Content-Length` and `Connection`, and
+# refuses the block's own.
 @[OnTape]
 pub struct Outgoing
   LINES = 32
 
-  # The status and the number of lines.
+  # The status, the number of lines, 1 while a header block runs, and
+  # the length `length=` set or -1. An @[OnTape] struct is passed by
+  # value: a field a method changes is a slot the copies share.
   @state : Array(Int32)
-  @lines : Array(Field)
+  # Each line's name and value, as spans of @text.
+  @spans : Array(String::Span)
+  @text : String::Builder
   getter body : String::Builder
 
   def initialize
-    @state = Array(Int32).new(2) { |i| i == 0 ? 200 : 0 }
-    none = "".as_tape
-    @lines = Array(Field).new(LINES) { Field.new(none, none) }
+    @state = Array(Int32).new(4) { |i| i == 0 ? 200 : (i == 3 ? -1 : 0) }
+    @spans = Array(String::Span).new(LINES * 2) { String::Span.new(0, 0) }
+    @text = String::Builder.new(1024)
     @body = String::Builder.new
   end
 
@@ -2240,26 +2284,76 @@ pub struct Outgoing
     @state[0] = code
   end
 
-  # A header line, checked as `format_response` checks one: a name that is
-  # a token, a value with no line break or control character, and none of
-  # the lines the server writes itself.
+  # A header line, copied into this answer's own text and checked as
+  # `format_response` checks one: a name that is a token, a value with
+  # no line break or control character, and none of the lines the server
+  # writes itself.
   def header(name : String, value : String) : Nil
-    value = value.as_tape
-    Server.check_line(name, value)
+    header(name) { |w| w << value }
+  end
+
+  # A header line whose value the block writes into the answer's own
+  # text, checked as `header(name, value)` checks one. A header written
+  # inside the block raises: its bytes would land in this value.
+  def header(name : String, & : String::Builder -> Nil) : Nil
+    raise "HTTP: a header inside a header block" if @state[2] == 1
+    count = @state[1]
+    raise "HTTP: more than #{LINES} header lines" if count == LINES
     if HTTP.same_name?(name, "Content-Length") || HTTP.same_name?(name, "Connection") || HTTP.same_name?(name, "Transfer-Encoding")
       raise "HTTP: #{name} is the server's own line"
     end
-    count = @state[1]
-    raise "HTTP: more than #{LINES} header lines" if count == LINES
-    @lines[count] = Field.new(name.as_tape, value.as_tape)
+    @state[2] = 1
+    named = @text.append_span(name)
+    from = @text.length
+    yield @text
+    value = String::Span.new(from, @text.length - from)
+    # A refused line's bytes stay in @text unreferenced and the raise
+    # ends the request; cutting @text back is refused while a view lives.
+    why = Outgoing.refusal(@text.to_s, named, value)
+    if why > 0
+      raise "HTTP: not a header name: #{name.inspect}" if why == 1
+      raise "HTTP: header #{name} contains a line break" if why == 2
+      raise "HTTP: header #{name} contains a control character"
+    end
+    @spans[count * 2] = named
+    @spans[count * 2 + 1] = value
     @state[1] = count + 1
+    @state[2] = 0
   end
 
-  # Each header line the block wrote, in order.
+  # 0 for a good line, else what is wrong: 1 the name, 2 a line break,
+  # 3 a control character (`Server.check_line`'s rules).
+  protected def self.refusal(text : String, named : String::Span,
+                             value : String::Span) : Int32
+    return 1 unless HTTP.token?(text[named])
+    return 2 if HTTP.has_break?(text[value])
+    return 3 if HTTP.control?(text[value])
+    0
+  end
+
+  # The Content-Length of an answer to HEAD, which sends no body. Unless
+  # the answer is to HEAD, it must equal the body's bytes, or writing the
+  # head raises.
+  def length=(count : Int64) : Int64
+    unless count >= 0_i64 && count <= 2147483647_i64
+      raise "HTTP: not a length: #{count}"
+    end
+    @state[3] = count.to_i32
+    count
+  end
+
+  # The Content-Length `format_head` writes: the one set, else the body's.
+  def length : Int64
+    given = @state[3]
+    given < 0 ? @body.length.to_i64 : given.to_i64
+  end
+
+  # Each header line the block wrote, in order, viewing the answer's text.
   def each_line(& : Field -> Nil) : Nil
+    text = @text.to_s
     i = 0
     while i < @state[1]
-      yield @lines[i]
+      yield Field.new(text[@spans[i * 2]], text[@spans[i * 2 + 1]])
       i = i + 1
     end
   end
@@ -2270,6 +2364,7 @@ end
 @[OnTape]
 struct RisHttpStartFailure
   getter error : SocketError
+
   def initialize(@error)
   end
 end
@@ -2294,9 +2389,9 @@ pub struct Server
   #   Server.answer("0.0.0.0", 3000, 0, Handler)
   def self.answer(listener : IyiSocket, &answerer : Incoming, Outgoing -> Nil) : Nil
     {% raise "Server.answer refuses an open socket.\n" +
-      "Use Server.answer(host, port, config, Handler), with\n" +
-      "Handler.new(config) and Handler#call(Incoming, Outgoing).\n" +
-      "Cancel its enclosing group to stop." %}
+             "Use Server.answer(host, port, config, Handler), with\n" +
+             "Handler.new(config) and Handler#call(Incoming, Outgoing).\n" +
+             "Cancel its enclosing group to stop." %}
   end
 
   # Each worker constructs Handler.new with its own checked config copy.
@@ -2416,7 +2511,9 @@ pub struct Server
   end
 
   # The tape response's wire head, shared by measurement and serving.
-  def self.format_head(res : Outgoing, close : Bool) : String
+  # Unless *head*, a length set with `length=` must be the body's.
+  def self.format_head(res : Outgoing, close : Bool,
+                       head : Bool = false) : String
     status = res.status
     raise "HTTP: not a status: #{status}" unless status >= 100 && status <= 999
     w = String::Builder.new
@@ -2433,8 +2530,13 @@ pub struct Server
     end
     bodiless = (status >= 100 && status < 200) || status == 204 || status == 304
     unless bodiless
+      given = res.length
+      if !head && given != res.body.length.to_i64
+        raise "HTTP: length= #{given} with a body of #{res.body.length} " +
+              "bytes; length= is for a HEAD answer"
+      end
       w << "Content-Length: "
-      w.append_int(res.body.length)
+      w.append_int(given)
       w << "\r\n"
     end
     w << (close ? "Connection: close\r\n\r\n" : "Connection: keep-alive\r\n\r\n")
@@ -2442,7 +2544,7 @@ pub struct Server
   end
 
   def self.format_response(res : Outgoing, head : Bool, close : Bool) : String
-    top = format_head(res, close)
+    top = format_head(res, close, head)
     head || HTTP.bodiless?(res.status) ? top : top + res.body.finish
   end
 
@@ -2452,7 +2554,7 @@ pub struct Server
     res = Outgoing.new
     answerer.call(req, res)
     body = res.body.finish
-    top = format_head(res, close)
+    top = format_head(res, close, HTTP.same_name?(req.method, "HEAD"))
     bodiless = HTTP.bodiless?(res.status)
     method = req.method
     sends = !bodiless && !HTTP.same_name?(method, "HEAD")
@@ -2469,8 +2571,8 @@ pub struct Server
 
   macro parse_head(bytes, from, complete)
     {% raise "Server.parse_head(bytes, from, complete) takes the fields'\n" +
-      "Array too: Server.parse_head(bytes, 0, true, fields), with\n" +
-      "fields = Array(Field).new(16) on the caller's tape." %}
+             "Array too: Server.parse_head(bytes, 0, true, fields), with\n" +
+             "fields = Array(Field).new(16) on the caller's tape." %}
   end
 
   # A header line an answer writes, checked: a name that is a token, a
@@ -2517,6 +2619,7 @@ pub struct Server
     MAX_CONNECTIONS = 1024
   {% end %}
   REQUEST_TIMEOUT = 300000
+
   # Serve on N independent SO_REUSEPORT listeners. Each accepting task
   # serves its own connection through keep-alive and closes it before its
   # next accept. Cancel the enclosing group to stop accepting, cancel
@@ -2600,9 +2703,9 @@ pub struct Server
                  max_connections : Int32 = MAX_CONNECTIONS,
                  &handler : Request -> Response) : Nil
     {% raise "Server.serve refuses an open socket or captured handler.\n" +
-      "Use Server.serve(host, port, config, Handler), with\n" +
-      "Handler.new(config), Handler#call(Request), and optional\n" +
-      "Handler#tls_config. Cancel its enclosing group to stop." %}
+             "Use Server.serve(host, port, config, Handler), with\n" +
+             "Handler.new(config), Handler#call(Request), and optional\n" +
+             "Handler#tls_config. Cancel its enclosing group to stop." %}
   end
 
   @[TaskClosureUnsafe("serve joins supervisors before releasing packed config")]
@@ -2929,7 +3032,8 @@ pub struct Server
       conn.no_deadline
       return false unless id
       headers = {} of String => String
-      parts = h2.request_head(id, headers)
+      texts = String::Builder.new(1024)
+      parts = h2.request_head(id, headers, texts)
       if parts.nil?
         h2.done(id)
         return true
@@ -3168,8 +3272,8 @@ pub struct Server
   # caller testing is_a?(ParsedHead) compiled and always failed.
   macro parse_head(text)
     {% raise "Server.parse_head(text) is gone: call\n" +
-      "Server.parse_head(bytes, 0, true, fields), which answers\n" +
-      "ParsedHead | HeadError | Nil, its fields views into bytes." %}
+             "Server.parse_head(bytes, 0, true, fields), which answers\n" +
+             "ParsedHead | HeadError | Nil, its fields views into bytes." %}
   end
 
   # A request's head - the text before its blank line - read and checked,
@@ -3745,11 +3849,18 @@ pub class HTTPClient
     @bound = bound
   end
 
-  # The machine's resolver, read afresh: what a connection by name uses
-  # where the client has no `resolver` of its own.
+  # The machine's resolver as `read_system` last read it: what a
+  # connection by name uses where the client has no `resolver` of its own.
   def system_resolver : Resolver
-    @system.read_system
     @system
+  end
+
+  # The machine's resolver read afresh, once a request, before
+  # `HTTP.open_by_into`'s loop of connections and redirects: refilled in
+  # that loop, the text a lookup views would be cleared under a later
+  # round, as the checker sees it.
+  protected def read_system : Nil
+    @system.read_system
   end
 
   # Connections this client has opened, and requests sent over one it
@@ -3905,8 +4016,8 @@ pub class HTTPClient
   # connections are taken under (`https_current`). The origin's
   # configurations from under another *base* go.
   protected def https_config(origin : String, base : TlsConfig,
-                         ech : Array::View(UInt8)?,
-                         alpn : Array::View(String)) : TlsConfig
+                             ech : Array::View(UInt8)?,
+                             alpn : Array::View(String)) : TlsConfig
     found = nil.as(HttpsBound?)
     count = 0
     @bound.each do |held|
@@ -4426,6 +4537,17 @@ pub struct HTTP
     open_by(ByName.new, method, url, headers, body, redirects, jar, decompress, client, timeout_ms, route) { |response| yield response }
   end
 
+  # `open` over an exchange its caller keeps: a caller that opens again
+  # and again (a stream that reconnects, a client) reuses its storage,
+  # and an error may view it as long as the caller keeps it.
+  def self.open_into(state : RisHttpClientExchange, method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", redirects : Int32 = 10, jar : CookieStore? = nil, decompress : Bool = true, client : HTTPClient? = nil, timeout_ms : Int32 = 0, proxy : String? = nil, &block : Response -> R) : R | Cancelled | SocketError | HTTPError forall R
+    raise "HTTP: a timeout of #{timeout_ms} ms" if timeout_ms < 0
+    route = ProxyRoute.of(proxy)
+    return route if route.is_a?(HTTPError)
+    open_by_into(state, ByName.new, method, url, headers, body, redirects,
+      jar, decompress, client, timeout_ms, route) { |response| yield response }
+  end
+
   # `open` to *address*, an IPv4 or IPv6 address, for the URL's host:
   # nothing is looked up, no HTTPS records are asked for and no proxy is
   # taken, so a caller that a lookup could reach again - std/secure_dns's
@@ -4461,8 +4583,11 @@ pub struct HTTP
   private def self.open_by(dialer : D, method : String, url : String, headers : Hash(String, String), body : String | IyiIO, redirects : Int32, jar : CookieStore?, decompress : Bool, client : HTTPClient?, timeout_ms : Int32, route : ProxyRoute?, &block : Response -> R) : R | Cancelled | SocketError | HTTPError forall D, R
     response = Response.new(0)
     state = RisHttpClientExchange.new(response)
-    open_by_into(state, dialer, method, url, headers, body, redirects,
+    got = open_by_into(state, dialer, method, url, headers, body, redirects,
       jar, decompress, client, timeout_ms, route) { |answer| yield answer }
+    # The answer may view the exchange, which ends with this def: answer
+    # a copy of it instead.
+    got.copy_to(RisCurrentTape.new)
   end
 
   private def self.open_by_into(state : RisHttpClientExchange, dialer : D, method : String, url : String, headers : Hash(String, String), body : String | IyiIO, redirects : Int32, jar : CookieStore?, decompress : Bool, client : HTTPClient?, timeout_ms : Int32, route : ProxyRoute?, &block : Response -> R) : R | Cancelled | SocketError | HTTPError forall D, R
@@ -4554,7 +4679,7 @@ pub struct HTTP
   macro upgrade(*args, **options)
     {% raise "HTTP.upgrade returns no owner: declare up = Upgraded.new,
 " +
-      "then up.connect(url, protocol, headers, ...)." %}
+             "then up.connect(url, protocol, headers, ...)." %}
   end
 
   def self.upgrade_into(upgraded : Upgraded, state : RisHttpClientExchange, url : String, protocol : String, headers : Hash(String, String) = {} of String => String, timeout_ms : Int32 = 0, proxy : String? = nil, client : HTTPClient? = nil) : Nil | Cancelled | SocketError | HTTPError
@@ -4700,6 +4825,7 @@ pub struct HTTP
     upgrade_config.now = under.now
     upgrade_config.identity = under.identity
     recorded = dialer.records? && secure && route.nil? && upgrade.nil? && !client.nil? && client.use_https_records
+    client.read_system if recorded && client && client.resolver.nil?
     connection_slot = state.conn
     tls_slot = state.tls
     tls_stream = state.stream
@@ -5251,7 +5377,7 @@ pub struct HTTP
   # Nil when the connection ends before a byte of one, which on a kept
   # connection is the server having closed it while it waited.
   def self.read_head_into(state : RisHttpClientExchange,
-                                  text : String) : HTTPError?
+                          text : String) : HTTPError?
     lines = split_crlf(text)
     return HTTPError.new("empty response") if lines.empty?
     parsed = status_line(lines[0])
@@ -5331,7 +5457,7 @@ pub struct HTTP
   # How an answer's body is framed (RFC 9112 §6.3): none for a HEAD, a
   # 1xx, a 204 or a 304; chunks; a length; or the connection's close.
   private def self.framing_kind(status : Int32, fields : Hash(String, String),
-                               head : Bool) : Tuple(Int32, Int64) | HTTPError
+                                head : Bool) : Tuple(Int32, Int64) | HTTPError
     return {BodyReader::EMPTY, 0_i64} if head || bodiless?(status) || status == 101
     if te = header_in(fields, "Transfer-Encoding")
       if refused = coding_refused(te)
@@ -7529,8 +7655,10 @@ class H2Connection
   # The request stream *id* carries, its body to be read as it comes; nil
   # when its head is not one (it has been reset already).
   # Stream *id*'s request head: its method, path and query, its fields
-  # put into *headers*, the caller's; nil when it has none.
-  def request_head(id : Int32, headers : Hash(String, String)) : {String, String, String?}?
+  # put into *headers*, the caller's; nil when it has none. A field on
+  # several lines is joined into *texts*, the caller's builder.
+  def request_head(id : Int32, headers : Hash(String, String),
+                   texts : String::Builder) : {String, String, String?}?
     s = @streams[id]?
     return nil unless s
     fields = s.fields
@@ -7545,7 +7673,7 @@ class H2Connection
       when ":authority" then authority = f.value
       when ":scheme"    then nil
       else
-        H2Connection.join(headers, f.name, f.value)
+        H2Connection.join(headers, f.name, f.value, texts)
       end
     end
     if host = authority
@@ -8032,12 +8160,18 @@ class H2Connection
 
   # *value* added to the field *name*: a second line joined to the first
   # as HTTP/1.1 joins them, cookies with "; " (§8.2.3).
-  def self.join(headers : Hash(String, String), name : String, value : String) : Nil
+  # *value* under *name*, after a value already there; the joined text
+  # is written into *texts*, the caller's, so it outlives this call.
+  def self.join(headers : Hash(String, String), name : String,
+                value : String, texts : String::Builder) : Nil
     if had = headers[name]?
-      headers[name] = had + (name == "cookie" ? "; " : ", ") + value
+      from = texts.bytesize
+      texts << had << (name == "cookie" ? "; " : ", ") << value
+      headers[name] = texts.finish[from, texts.bytesize - from]
     else
       headers[name] = value
     end
+    nil
   end
 
   def self.field(fields : Std::Hpack::TapeHeaders,

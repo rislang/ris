@@ -1,0 +1,9 @@
+# A module's top level grows a String local in place, as a def does: one
+# started from a literal and appended to in a block (SPEC 1.5).
+module test/ris/module_text_growth
+
+text = "head:"
+100.times { |i| text << "ab" }
+count = ""
+3.times { |i| count << i }
+puts "#{text.bytesize} #{count}"

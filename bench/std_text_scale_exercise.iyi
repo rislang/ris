@@ -76,7 +76,7 @@ check(numbered.starts_with?("0,1,2,") && numbered.ends_with?(",#{count - 1}"), "
 rows = [] of Array(String)
 i = 0
 while i < count // 4
-  rows << [unit, "a,b", "c", "d"]
+  rows << [unit, "a,b", "c", "d"].copy_to(Program.tape)
   i = i + 1
 end
 table = CSV.build(rows)

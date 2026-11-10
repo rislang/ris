@@ -9,8 +9,8 @@ literal_cursor = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 literal = "static"
 raise "literal used tape storage" unless literal_cursor ==
   IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
-# to_heap copies onto the current tape: a marked migration site.
-heap_literal = "static".to_heap
+# A literal is a String on the current tape already.
+heap_literal = "static"
 raise "static retention type" unless heap_literal.is_a?(String)
 puts typeof("static")
 raise "literal allocated" unless "static".is_a?(String)
@@ -18,11 +18,11 @@ before = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 format_size(42)
 raise "def kept interpolation" unless before ==
   IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
-case "key".to_heap
+case "key"
 when "key" then nil
 else raise "case comparison failed"
 end
-# The to_heap above copied "key" onto this tape; the loop starts here.
+# The loop starts here.
 before = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 i = 0
 while i < 1_000_000

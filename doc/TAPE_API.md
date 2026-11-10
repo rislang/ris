@@ -25,9 +25,9 @@ end
 
 Text is bytes: `text[0]` is a UInt8. Strings have `split`, `index`,
 `starts_with?`, `to_i?`; arrays `map`, `select`, `each`, `join(writer)`.
-Retain with `copy_to(owner)`; `to_heap` is a historical spelling of a copy
-on the current tape. A def builds its result in its caller's scope (SPEC
-1.5); a result that would have to be copied out is refused (SPEC 1.9).
+Retain with `copy_to(owner)`. A def builds its result in its caller's
+scope (SPEC 1.5); a result that would have to be copied out is refused
+(SPEC 1.9).
 A String's `to_unsafe` is refused, save as a `lib` fun's direct argument in
 an `@[Ffi]` module.
 

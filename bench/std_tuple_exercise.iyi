@@ -93,7 +93,7 @@ assert_true quoted.has_key?(:"x y") && !quoted.has_key?(:x), "has_key? with quot
 assert_str "{\"text/plain\", 1, 2}", quoted.values.to_s, "values with quoted keys"
 assert_true quoted.keys.size == 3 && quoted.keys[0] == :"content-type", "keys with quoted keys"
 walked = [] of String
-quoted.each { |k, v| walked << "#{k}=#{v}" }
+quoted.each { |k, v| walked << "#{k}=#{v}".copy_to(Program.tape) }
 assert_str "content-type=text/plain x y=1 plain=2", walked.join(" "), "each with quoted keys"
 assert_str "{\"1a\": 1, \"_\": 2, a_1: 3}", {"1a": 1, "_": 2, a_1: 3}.to_s, "to_s quotes a leading digit and a lone _"
 puts "  quoted keys print, compare, walk and answer"

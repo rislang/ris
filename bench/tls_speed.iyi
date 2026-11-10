@@ -9,11 +9,20 @@ module tls_speed
 # Each prints one line, `<what> <suite> <MB/s>`.
 
 import std/tls::{TlsClient, TlsConfig, TlsError, TlsServer, TlsServerConfig}
-import std/x509::{Certificate}
+import std/x509::{RisCertificateStore, Certificate}
 import std/socket::{IyiSocket}
 import std/aead::{AesGcm, ChaCha20Poly1305}
 import std/file::{File}
 import std/time::{Time}
+
+# A PEM text's certificates, kept in *store*; a text that does not read
+# panics with the reason.
+def pem_certs(store : RisCertificateStore, text : String) : Array(Certificate)
+  if problem = store.read_pem(text)
+    raise problem.message
+  end
+  store.kept_certificates
+end
 
 def seconds : Float64
   Time.monotonic_nanoseconds.to_f64 / 1e9
@@ -48,7 +57,8 @@ if mode == "cipher"
   puts "open TLS_CHACHA20_POLY1305_SHA256 #{rate(total, start)}"
 elsif mode == "pull"
   config = TlsConfig.new
-  config.roots = Certificate.from_pem(File.read(args[2])).or_panic
+  pem_store_1 = RisCertificateStore.new
+  config.roots = pem_certs(pem_store_1, File.read(args[2]))
   socket = IyiSocket.connect("127.0.0.1", args[1].to_i)
   raise "no connection" unless socket.is_a?(IyiSocket)
   conn = TlsClient.over(socket, "localhost", config).or_panic

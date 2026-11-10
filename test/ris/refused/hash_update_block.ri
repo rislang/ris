@@ -1,0 +1,8 @@
+# Hash#update keeps its block's value, made in a loop round (SPEC 3.6).
+h = Hash(String, String).new
+h["a"] = "x"
+w = "ABC"
+3.times do |i|
+  h.update("a") { |v| "#{w}#{i}" }
+end
+puts h["a"]

@@ -1,0 +1,33 @@
+# A class instance handed to a def that clears its storage: a view of it
+# the caller kept is live across the clear and is refused. (Reusing the
+# instance itself is not: test/ris/http_pool.ri reuses an exchange.)
+class Holder
+  getter bytes : String::Builder
+
+  def initialize
+    @bytes = String::Builder.new(16)
+    @bytes << "abc"
+  end
+
+  def head : String
+    @bytes.finish
+  end
+
+  def refill : Nil
+    @bytes.clear
+    @bytes << "def"
+  end
+end
+
+def refill(holder : Holder) : Int32
+  holder.refill
+  1
+end
+
+def run
+  holder = Holder.new
+  kept = holder.head
+  refill(holder)
+  puts kept
+end
+tape { run }

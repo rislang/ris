@@ -1,0 +1,28 @@
+# A class instance made in a round and stored into an outer object through
+# a method is refused, inside a tape block and in a def's rounds alike.
+class RoundItem
+  getter v : Int32
+
+  def initialize(@v : Int32)
+  end
+end
+
+class RoundGroup
+  def initialize
+    @items = [] of RoundItem
+  end
+
+  def add(item : RoundItem) : Nil
+    @items << item
+  end
+end
+
+def fill(group : RoundGroup) : Nil
+  3.times { |i| group.add(RoundItem.new(i)) }
+end
+
+group = RoundGroup.new
+tape do
+  3.times { |i| group.add(RoundItem.new(i)) }
+end
+fill(group)
