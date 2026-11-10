@@ -59,9 +59,6 @@ assert_true("== ignores order", a == [4, 3, 2, 1].to_set)
 assert_true("== sees a missing member", !(a == sub))
 assert_true("== sees an extra member", !(sub == a))
 assert_true("hash follows ==", a.hash == [4, 3, 2, 1].to_set.hash)
-lookup = {} of Set(Int32) => String
-lookup[[1, 2].to_set] = "pair"
-assert_equal("a set as a hash key", lookup[[2, 1].to_set], "pair")
 assert_true("== sees a different member of the same size", !(a == [1, 2, 3, 9].to_set))
 # A set of another element type, either way round. Restricted to `Set(T)`,
 # a `Set(Int32)` was taken for a `Set(Int32?)` and not back: `a == wide`

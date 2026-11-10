@@ -56,17 +56,20 @@ struct ::Set(T)
   # hands on.
   def self.new(a : Set(A), b : Set(B), kind : Int32) : Set(T) forall A, B
     result = new
+    # `&` makes a Set(T) of a wider *b*: its kinds never add b's members,
+    # but each branch compiles for it, so b's are cast to T, which a
+    # union's T always covers.
     case kind
     when SET_COPY
       a.each { |v| result.add(v) }
     when SET_UNION
       a.each { |v| result.add(v) }
-      b.each { |v| result.add(v) }
+      b.each { |v| result.add(v.as(T)) }
     when SET_BOTH
       a.each { |v| result.add(v) if b.has_member?(v) }
     else
       a.each { |v| result.add(v) unless b.has_member?(v) }
-      b.each { |v| result.add(v) unless a.has_member?(v) }
+      b.each { |v| result.add(v.as(T)) unless a.has_member?(v) }
     end
     result
   end
