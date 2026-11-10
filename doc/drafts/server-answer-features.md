@@ -235,14 +235,12 @@ New tests in test/ris/, each under `check.sh`:
 
 Then the whole port set moves and passes as before.
 
-## Open question for the user
+## Decision on the open question
 
-1. Router, Acme and Autocert are public std API on `Request`/
-   `Response`. This draft replaces their server-side forms in 0.1.0
-   (a breaking change, nothing kept beside it). The alternative is to
-   keep them one release with `Server.serve`. Recommended: replace now
-   (AGENTS.md: a dropped form is removed, not kept beside its
-   replacement).
+The user decided (2026-11-10): Router, Acme and Autocert's server
+side move to `Incoming`/`Outgoing` in 0.1.0. The old `Request`/
+`Response` server forms and `Server.serve` are removed; nothing is
+kept beside them (AGENTS.md: a dropped form is removed).
 
 ## Review map (first EGM round)
 
