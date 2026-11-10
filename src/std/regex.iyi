@@ -396,9 +396,9 @@ pub struct Regex
       found
     end
 
-    # What each named group matched, nil for one that took no part.
-    def named_captures : Hash(String, String?)
-      found = {} of String => String?
+    # What each named group matched, nil for one that took no part, into
+    # the caller's *found*.
+    def named_captures(found : Hash(String, String?)) : Nil
       n = 1
       while n < size
         if name = @regex.group_name(n)
@@ -406,7 +406,6 @@ pub struct Regex
         end
         n = n + 1
       end
-      found
     end
 
     # Every group, the whole match first.
@@ -457,38 +456,41 @@ pub struct Regex
     # `String#sub` and `gsub` are given. A group that took no part is
     # empty; a name the pattern does not have panics.
     def expand(replacement : String) : String
+      String.build(replacement.bytesize) { |io| expand(replacement, io) }
+    end
+
+    # *replacement* expanded, written into *io*.
+    def expand(replacement : String, io : String::Builder) : Nil
       src = replacement
       n = replacement.bytesize
-      String.build(n) do |io|
-        i = 0
-        while i < n
-          b = src[i]
-          if b == 92_u8 && i + 1 < n
-            c = src[i + 1]
-            if c == 92_u8
-              io.write_byte(92_u8)
-              i = i + 2
-              next
-            elsif c >= 48_u8 && c <= 57_u8
-              io << (self[(c - 48_u8).to_i32]? || "")
-              i = i + 2
-              next
-            elsif c == 107_u8 && i + 2 < n && src[i + 2] == 60_u8
-              close = i + 3
-              while close < n && src[close] != 62_u8
-                close = close + 1
-              end
-              raise "regex: '\\k<' with no '>' in the replacement #{replacement.inspect}" if close >= n
-              name = replacement[i + 3, close - i - 3]
-              raise "regex: the replacement #{replacement.inspect} names a group /#{@regex.source}/ does not have" unless @regex.group_index(name)
-              io << (self[name]? || "")
-              i = close + 1
-              next
+      i = 0
+      while i < n
+        b = src[i]
+        if b == 92_u8 && i + 1 < n
+          c = src[i + 1]
+          if c == 92_u8
+            io.write_byte(92_u8)
+            i = i + 2
+            next
+          elsif c >= 48_u8 && c <= 57_u8
+            io << (self[(c - 48_u8).to_i32]? || "")
+            i = i + 2
+            next
+          elsif c == 107_u8 && i + 2 < n && src[i + 2] == 60_u8
+            close = i + 3
+            while close < n && src[close] != 62_u8
+              close = close + 1
             end
+            raise "regex: '\\k<' with no '>' in the replacement #{replacement.inspect}" if close >= n
+            name = replacement[i + 3, close - i - 3]
+            raise "regex: the replacement #{replacement.inspect} names a group /#{@regex.source}/ does not have" unless @regex.group_index(name)
+            io << (self[name]? || "")
+            i = close + 1
+            next
           end
-          io.write_byte(b)
-          i = i + 1
         end
+        io.write_byte(b)
+        i = i + 1
       end
     end
 
@@ -547,22 +549,25 @@ pub struct Regex
   # escaped, so `Regex.compile(Regex.escape(text))` matches *text* and
   # nothing else - with `x` too, whose whitespace and `#` are escaped.
   def self.escape(text : String) : String
+    String.build(text.bytesize) { |io| escape(text, io) }
+  end
+
+  # *text* escaped, written into *io*.
+  def self.escape(text : String, io : String::Builder) : Nil
     special = " .\\+*?[^]$(){}=!<>|:-#/\t\n\v\f\r"
-    String.build(text.bytesize) do |io|
-      i = 0
-      while i < text.bytesize
-        b = text.byte_at(i)
-        j = 0
-        while j < special.bytesize
-          if b == special.byte_at(j)
-            io.write_byte(92_u8)
-            break
-          end
-          j = j + 1
+    i = 0
+    while i < text.bytesize
+      b = text.byte_at(i)
+      j = 0
+      while j < special.bytesize
+        if b == special.byte_at(j)
+          io.write_byte(92_u8)
+          break
         end
-        io.write_byte(b)
-        i = i + 1
+        j = j + 1
       end
+      io.write_byte(b)
+      i = i + 1
     end
   end
 
@@ -571,27 +576,31 @@ pub struct Regex
   # The groups of every pattern after the first are numbered after the
   # groups before them.
   def self.union(patterns : Array(T)) : Regex forall T
-    parts = [] of String
-    patterns.each { |pattern| parts << union_part(pattern) }
-    compile(parts.join("|"))
+    compile(String.build do |io|
+      patterns.each_with_index do |pattern, i|
+        io << '|' if i > 0
+        union_part(pattern, io)
+      end
+    end)
   end
 
   def self.union(*patterns : String | Regex) : Regex
-    parts = [] of String
-    i = 0
-    while i < patterns.size
-      parts << union_part(patterns[i])
-      i = i + 1
-    end
-    compile(parts.join("|"))
+    compile(String.build do |io|
+      i = 0
+      while i < patterns.size
+        io << '|' if i > 0
+        union_part(patterns[i], io)
+        i = i + 1
+      end
+    end)
   end
 
-  private def self.union_part(pattern : Regex) : String
-    pattern.to_s
+  private def self.union_part(pattern : Regex, io : String::Builder) : Nil
+    io << pattern.to_s
   end
 
-  private def self.union_part(pattern : String) : String
-    escape(pattern)
+  private def self.union_part(pattern : String, io : String::Builder) : Nil
+    escape(pattern, io)
   end
 
   # The pattern as written, the other library's `Regex#source`: what a
@@ -611,9 +620,8 @@ pub struct Regex
     @names.size - 1
   end
 
-  # Each named group's number and name.
-  def name_table : Hash(Int32, String)
-    table = {} of Int32 => String
+  # Each named group's number and name, into the caller's *table*.
+  def name_table(table : Hash(Int32, String)) : Nil
     n = 1
     while n < @names.size
       if name = @names[n]
@@ -621,7 +629,6 @@ pub struct Regex
       end
       n = n + 1
     end
-    table
   end
 
   # The name of group *n*, or nil for an unnamed group or one the pattern
@@ -2334,7 +2341,15 @@ struct ::String
 
   def gsub(pattern : Std::Regex::Regex, replacement : String) : String
     return pattern.replace(self, replacement) unless replacement.includes?("\\")
-    gsub(pattern) { |text, match| match.expand(replacement) }
+    last = 0
+    io = ""
+    pattern.each_match(self) do |match|
+      io << self[last, match.byte_begin(0) - last]
+      match.expand(replacement, io)
+      last = match.byte_end(0)
+    end
+    io << self[last, bytesize - last]
+    io
   end
 
   def gsub(pattern : Std::Regex::Regex, & : String, Std::Regex::Regex::MatchData -> String) : String
@@ -2343,7 +2358,8 @@ struct ::String
     pattern.each_match(self) do |match|
       head = match.byte_begin(0)
       io << self[last, head - last]
-      io << yield match[0], match
+      piece = yield match[0], match
+      io << piece
       last = match.byte_end(0)
     end
     io << self[last, bytesize - last]
@@ -2356,14 +2372,8 @@ struct ::String
     pattern.replace(self) { |match| table[match]? || "" }
   end
 
-  def scan(pattern : Std::Regex::Regex) : Array(Std::Regex::Regex::MatchData)
-    found = [] of Std::Regex::Regex::MatchData
-    pattern.each_match(self) { |match| found << match }
-    found
-  end
-
   def scan(pattern : Std::Regex::Regex, & : Std::Regex::Regex::MatchData -> Nil) : String
-    pattern.each_match(self) { |match| yield match }
+    pattern.each_match(self) { |match| yield match; nil }
     self
   end
 
