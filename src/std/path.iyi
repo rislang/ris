@@ -607,9 +607,13 @@ pub struct Path
   end
 
   def join(parts : Array(String)) : Path
-    current = self
-    parts.each { |part| current = current.join(part) }
-    current
+    join_from(parts, 0)
+  end
+
+  # Each join's name moves down to the next; the last is the answer.
+  protected def join_from(parts : Array(String), index : Int32) : Path
+    return self if index >= parts.size
+    join(parts[index]).join_from(parts, index + 1)
   end
 
   def /(part : String | Path) : Path
