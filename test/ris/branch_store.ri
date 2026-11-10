@@ -1,0 +1,35 @@
+# A branch is no scope (SPEC 1.1): an object made under an `if` in
+# initialize lives as long as initialize, so it may be pushed into the
+# instance's Array. test/ris/refused/round_store.ri makes it in a loop
+# round, which frees it, and is refused.
+
+class Item
+  @buf : String::Builder
+
+  def initialize
+    @buf = String::Builder.new(16)
+  end
+end
+
+class Owner
+  @items : Array(Item)
+
+  def initialize(n : Int32)
+    items = Array(Item).new(4)
+    if n > 0
+      item = Item.new
+      items << item
+    else
+      other = Item.new
+      items << other
+    end
+    @items = items
+  end
+
+  def size : Int32
+    @items.size
+  end
+end
+
+owner = Owner.new(1)
+raise "branch_store: #{owner.size} items" unless owner.size == 1

@@ -1,0 +1,26 @@
+# A loop round frees what it makes (SPEC 1.1): an object made in a round
+# and pushed into an Array that outlives the round escapes.
+# test/ris/branch_store.ri makes it under an `if` instead, and passes.
+
+class Item
+  @buf : String::Builder
+
+  def initialize
+    @buf = String::Builder.new(16)
+  end
+end
+
+class Owner
+  @items : Array(Item)
+
+  def initialize(n : Int32)
+    items = Array(Item).new(4)
+    n.times do
+      item = Item.new
+      items << item
+    end
+    @items = items
+  end
+end
+
+owner = Owner.new(1)
