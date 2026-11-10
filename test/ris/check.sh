@@ -204,6 +204,7 @@ expect class_alias_held_view 'cannot shrink tape storage'
 expect class_alias_field_view 'cannot shrink tape storage'
 expect class_receiver_borrow 'cannot shrink tape storage'
 expect class_receiver_view 'cannot shrink tape storage'
+expect class_argument_view 'cannot shrink tape storage'
 expect tape_block_program_store 'cannot store request tape data'
 expect copied_root_shrink 'cannot shrink tape storage'
 expect copied_field_return 'cannot return a value made in this def'
@@ -1377,6 +1378,7 @@ fi
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/http_open.ri 2>&1)
 want='/one 211
 /two 200
+/three 200
 refused true
 ris heap: 0 allocations, 0 bytes'
 if [ "$out" = "$want" ]; then

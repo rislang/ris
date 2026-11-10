@@ -107,21 +107,13 @@ Decide with EGM, then gate:
 
 ## sse.ri and HTTPClient pooling
 
-* HTTPClient's ordinary open/request pooling needs an exchange used for
-  more than one request, and the checker refuses that: a second
-  `open_at_into` (or `open_into`) over one RisHttpClientExchange fails
-  with "cannot shrink tape storage with a live view of
-  Response.@held.@line_values" (via begin_client -> clear), even with a
-  constant block in a def. Repro:
-  `def s(st : RisHttpClientExchange, u : String) : Int32`,
-  `got = HTTP.open_at_into(st, "127.0.0.1", "GET", u) { |r| 1 }`,
-  `got.is_a?(Int32) ? got : -1`, `end`; then
-  `st = RisHttpClientExchange.new(Response.new(0))` and two `s(st, ...)`
-  calls. The exchange's own @response is taken as a live view at the
-  next request's clear: a checker change. After it: HTTPClient owns one
-  exchange per pooled connection with `@idle` as indexes into them, not
-  `{String, Conn}` made per request; SSE.open keeps one exchange beside
-  its parser; gate: two requests over one connection, `reused` 1.
+* HTTPClient pooling: HTTPClient owns one exchange per pooled
+  connection with `@idle` as indexes into them, not `{String, Conn}`
+  made per request; SSE.open keeps one exchange beside its parser; gate:
+  two requests over one connection, `reused` 1. First blocker: the
+  HTTPS-records path (`connect_by_records`, `records_handshake`) makes
+  and answers a TlsClient ("cannot return an owner from a def"): fill
+  the exchange's own `tls` slot, as the plain path does.
 
 ## Tighten heap_trap
 

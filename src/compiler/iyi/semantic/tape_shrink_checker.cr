@@ -3155,7 +3155,22 @@ class Iyi::TapeShrinkChecker
         end
       end
       use(consumed, node)
-      args.each { |arg| use(arg, node) }
+      # A class instance passed to a summarized call is consumed the same
+      # way: what its own fields hold is the callee's to order against its
+      # shrinks (an exchange that clears its last answer for the next).
+      # A view the caller keeps elsewhere is still used where it is read.
+      args.each_with_index do |arg, i|
+        if summarized && !@text_only && !arg.roots.empty? &&
+           (arg_type = one_class(node.args[i]?.try(&.type?))) &&
+           class_instance?(arg_type)
+          held = env.slots.compact_map { |key, contents| contents.views if contains_root?(arg.roots, key) }.flatten
+          remaining = arg.views.reject do |borrow|
+            held.includes?(borrow) || contains_root?(arg.roots, borrow.root)
+          end
+          arg = Value.new(arg.roots, remaining, arg.procs, arg.unknown_proc)
+        end
+        use(arg, node)
+      end
       derived = receiver
       # A builder's `<<` copies its argument and answers the builder: the
       # chained result views no argument storage.

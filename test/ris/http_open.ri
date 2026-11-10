@@ -5,7 +5,8 @@ import std/http::{Server, Request, Response, HTTP, HTTPError, RisHttpClientExcha
 
 # HTTP.open over loopback: its exchange lives in open's own scope, and an
 # error it answers is a copy the caller can read. HTTP.open_into reads
-# over an exchange the caller keeps.
+# over an exchange the caller keeps, twice: the second request refills
+# what the first left in it.
 
 struct Listening
 end
@@ -49,6 +50,7 @@ group do |g|
   puts got.is_a?(Int32) ? "/one #{got}" : "open failed"
   state = RisHttpClientExchange.new(Response.new(0))
   puts "/two #{status_of(state, port, "/two")}"
+  puts "/three #{status_of(state, port, "/three")}"
   failed = HTTP.open("GET", "http://127.0.0.1:#{gone}/") { |response| response.status }
   puts failed.is_a?(SocketError) ? "refused #{failed.message.bytesize > 0}" : "no error"
   g.cancel_children
