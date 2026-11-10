@@ -774,6 +774,12 @@ web through site. Step 6 builds it.
    gate: a panicking block's `tmp` (the `defer` covers it).
 5. Test-only imports (5.6). Gate: a block importing std/dir runs; the
    binary names no std/dir symbol; a cyclic test import is refused.
+   Done (test/cli/spec_blocks_imports.sh). Steps 2-4 already dropped
+   the section from build, .iyimod and doc. `ris test` refuses the
+   cycle before the build, which would only say "import cycle".
+   `--affected` did not count the section: the closure parse dropped
+   it, and it probed only `.iyi`, so no `.ri` module was reached at
+   all; the entry is now parsed with its section and `.ri` comes first.
 6. `ris spec` on blocks, spec.lock, B2 (5.10, 5.14); AGENTS.md and
    spec-cli text. Gate: a block covers its clause; editing the clause
    fails `ris check spec`; `ris spec ack` clears it even with a stale

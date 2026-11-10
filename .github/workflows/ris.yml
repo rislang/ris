@@ -93,6 +93,11 @@ jobs:
         run: bash test/cli/spec_blocks_program.sh
         env:
           IYI: ./bin/ris
+      - name: spec blocks have test-only imports
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_imports.sh
+        env:
+          IYI: ./bin/ris
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:

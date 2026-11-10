@@ -464,6 +464,11 @@ class Iyi::Command
       return {File.join(checkout, "#{inner}.iyi"), inner}
     end
 
+    # ris: `.ri` first, as a build resolves (`SemanticVisitor`); only
+    # `.iyi` was probed, so `test --affected x.ri` reached no closure.
+    if ri = mod_context_ri(entry_dir, written)
+      return {ri, written}
+    end
     local = File.join(entry_dir, "#{written}.iyi")
     return {local, written} if File.file?(local)
 
@@ -473,6 +478,9 @@ class Iyi::Command
     # answered "does not resolve" - exit 0 - about the module the same
     # file builds against.
     if header_root && header_root != entry_dir
+      if ri = mod_context_ri(header_root, written)
+        return {ri, written}
+      end
       rooted = Iyi.native_path(File.join(header_root, "#{written}.iyi"))
       return {rooted, written} if File.file?(rooted)
     end
@@ -490,10 +498,18 @@ class Iyi::Command
     # path it would have had: `check --affected app/lib.iyi` finds the
     # importers a deletion breaks by that name.
     IyiPath.default_paths.each do |entry|
+      if ri = mod_context_ri(entry, written)
+        return {ri, written}
+      end
       candidate = File.join(entry, "#{written}.iyi")
       return {candidate, written} if File.file?(candidate)
     end
 
     {local, written}
+  end
+
+  private def mod_context_ri(root : String, written : String) : String?
+    candidate = Iyi.native_path(File.join(root, "#{written}.ri"))
+    candidate if File.file?(candidate)
   end
 end

@@ -327,7 +327,9 @@ class Iyi::Command
     entry_dir = closure_root_of(entry)
     table = Mod::Installer.table_for(entry_dir)
     closure = Set(String).new
-    entry_imports = test_imports_of(entry)
+    # ris: the entry's spec section too: its test-only imports (5.6) are
+    # in the test program, so a change to one is a change under it.
+    entry_imports = test_imports_of(entry, keep_spec: true)
     return nil unless entry_imports
     closure << entry
     queue = entry_imports.map do |written|
@@ -344,14 +346,46 @@ class Iyi::Command
     closure
   end
 
-  private def test_imports_of(path : String) : Array(String)?
+  private def test_imports_of(path : String, keep_spec = false) : Array(String)?
     parser = Parser.new(File.read(path))
     parser.filename = path
+    parser.ris_keep_spec = keep_spec
     nodes = parser.parse
     imports = [] of String
     mod_context_collect(nodes, imports)
     imports.uniq!
   rescue CodeError | IO::Error
+    nil
+  end
+
+  # ris: a test-only import (5.6) of a module that imports *file* back:
+  # the proof belongs in that module. The refusal, or nil.
+  private def spec_import_cycle(file : String) : String?
+    entry = File.expand_path(file)
+    entry_dir = closure_root_of(entry)
+    table = Mod::Installer.table_for(entry_dir)
+    plain = test_imports_of(entry) || return
+    section = (test_imports_of(entry, keep_spec: true) || return) - plain
+    key = Iyi.file_key(entry)
+    section.each do |written|
+      named, _ = mod_context_names(written, entry_dir, table)
+      start = File.expand_path(named)
+      seen = Set(String).new
+      queue = [start]
+      while path = queue.pop?
+        next unless seen.add?(path)
+        if Iyi.file_key(path) == key
+          own = File.basename(entry).rchop(".ri").rchop(".iyi")
+          other = written.rpartition('/')[2]
+          return "the proof of #{own} imports #{other}, which imports " \
+                 "#{own}; prove it in #{File.basename(start)}"
+        end
+        (test_imports_of(path) || [] of String).each do |next_written|
+          next_named, _ = mod_context_names(next_written, entry_dir, table)
+          queue << File.expand_path(next_named)
+        end
+      end
+    end
     nil
   end
 
@@ -415,6 +449,10 @@ class Iyi::Command
     # first as `ris build` builds it.
     plain = spec && spec_program_file?(file) ? File.tempname("ris-program", {{ flag?(:win32) ? ".exe" : nil }}) : nil
     begin
+      if spec && (cycle = spec_import_cycle(file))
+        output << cycle << '\n'
+        return {file: file, status: "does not build", seconds: elapsed(started), output: output.to_s, blocks: blocks}
+      end
       if plain
         built = Process.run(Process.executable_path.not_nil!, ["build", file, "-o", plain],
           output: output, error: output)
