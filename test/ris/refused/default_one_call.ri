@@ -1,3 +1,4 @@
+# spec: 3.7@64779b1c
 # SPEC 3.7: a one-call def's untyped class default is made at the call,
 # in the cycle def's scratch, and stored past it.
 class C

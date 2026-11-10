@@ -1,0 +1,5 @@
+# spec: 4.3@85d5df52
+# SPEC 4.3 has no test that names it. Find the gate that proves it
+# (test/ris/check.sh, test/cli/) and tag it `# spec: 4.3@85d5df52`, or write
+# one; then delete this file.
+todo "4.3 untested: Fatal errors skip user cleanup. Signals are std/signal's"

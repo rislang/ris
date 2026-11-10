@@ -1,3 +1,4 @@
+# spec: 3.4@0e0ecf49
 # A value's own to_s, called by the runtime's interpolation, is checked
 # as any def is (SPEC 3.4): each round's text is freed with the round,
 # so storing it into the outer Array is refused.

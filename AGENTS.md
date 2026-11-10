@@ -39,6 +39,10 @@ ris is iyi plus Goose's tape memory. These rules are for every agent.
 * The rules: [SPEC.md](SPEC.md), ris's specification. Other languages
   are in [ris-bench](https://github.com/rislang/ris-bench), which keeps a
   copy of `samples/ris/respond.ri`: change both in one go.
+* A test proving a SPEC clause names it in its first comment lines,
+  `# spec: N.M@VERSION`; after reviewing it run `ris spec ack N.M`. A
+  clause not kept yet has a test ending in `todo "reason"` under
+  test/spec/. `ris check spec` fails on stale tags and untested clauses.
 
 ## A library works on the caller's tape
 

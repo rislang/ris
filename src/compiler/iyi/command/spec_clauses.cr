@@ -1,0 +1,718 @@
+# ris: `ris spec` — the spec's clauses and the tests that prove them
+# (SPEC 6.7-6.9; design: doc/drafts/spec-cli/spec-cli.md).
+#
+#     ris spec              # one line per clause: status and tests
+#     ris spec 1 / 1.3      # one chapter or clause, for an agent's context
+#     ris spec ack 1.3      # tags naming 1.3 take its current version
+#     ris spec todo         # every todo test
+#
+# A clause is `* N.M text` under `## N. Title`; its version is the first 8
+# hex digits of SHA-256 of its whitespace-normalised text. A test file
+# under the root's test/ names clauses in its leading comment block:
+# `# spec: 1.3@a4f20c19`. No regex: the compiler links no pcre (spec.cr's
+# note, iyi SPEC III.10), and the grammar is small enough by hand.
+require "json"
+
+class Iyi::Command
+  private SPEC_EXTENSIONS = {".ri", ".iyi", ".cr", ".sh", ".py"}
+
+  private class SpecError < Exception
+  end
+
+  private record SpecClause, number : String, major : Int32, minor : Int32,
+    text : String, version : String
+
+  # One scanned test file: the clauses it names (version nil when it
+  # names one without), whether it said `none`, and its todo reason.
+  private class SpecTest
+    getter path : String
+    getter items = [] of {String, String?}
+    property none : String? = nil
+    property tagged = false
+    property todo : String? = nil
+
+    def initialize(@path : String)
+    end
+
+    def names?(number : String) : Bool
+      items.any? { |item| item[0] == number }
+    end
+  end
+
+  private record SpecEntry, heading : String, versions : Array(String)
+
+  private def spec_command
+    case options.first?
+    when "--help", "-h"
+      puts spec_usage
+      exit
+    when "ack"
+      options.shift
+      spec_ack
+    when "todo"
+      options.shift
+      spec_todo
+    end
+    json = false
+    target = nil
+    while option = options.shift?
+      case option
+      when "--json" then json = true
+      when .starts_with?('-')
+        abort! "spec: unknown flag #{option}. `#{Command.program_name} spec --help` lists them", :USAGE_ERROR
+      else
+        abort! "spec: one clause or chapter at a time, not '#{option}' after #{target}", :USAGE_ERROR if target
+        abort! "spec: '#{option}' is no clause number: write N or N.M", :USAGE_ERROR unless spec_number?(option, chapter_ok: true)
+        target = option
+      end
+    end
+    root, clauses, tests = spec_load_or_abort
+    if target
+      spec_show(root, clauses, tests, target, json)
+    else
+      spec_report(clauses, tests, json)
+    end
+    exit
+  end
+
+  # --- loading -------------------------------------------------------------
+
+  private def spec_load_or_abort : {String, Array(SpecClause), Array(SpecTest)}
+    root = spec_root || abort!("spec: no SPEC.md here: none in the root (the nearest directory with ris.mod or " \
+                               "iyi.mod) nor in the current directory", :USAGE_ERROR)
+    begin
+      {root, spec_clauses(root), spec_tests(root)}
+    rescue ex : SpecError
+      abort! "spec: #{ex.message}", :FAILURE
+    end
+  end
+
+  # The nearest directory holding ris.mod or iyi.mod, else the current one
+  # when it holds a spec (ris's own repository has no manifest).
+  private def spec_root : String?
+    dir = Dir.current
+    loop do
+      return dir if {"ris.mod", "iyi.mod"}.any? { |name| File.file?(File.join(dir, name)) }
+      parent = File.dirname(dir)
+      break if parent == dir
+      dir = parent
+    end
+    here = Dir.current
+    spec_present?(here) ? here : nil
+  end
+
+  private def spec_present?(root : String) : Bool
+    File.file?(File.join(root, "SPEC.md")) || Dir.exists?(File.join(root, "spec"))
+  end
+
+  private def spec_files(root : String) : Array(String)
+    single = File.join(root, "SPEC.md")
+    dir = File.join(root, "spec")
+    has_dir = Dir.exists?(dir) && Dir.children(dir).any?(&.ends_with?(".md"))
+    if File.file?(single) && has_dir
+      raise SpecError.new("both SPEC.md and spec/*.md are here; keep one (a split spec is spec/N-name.md)")
+    end
+    return [single] if File.file?(single)
+    return [] of String unless has_dir
+    Dir.children(dir).select(&.ends_with?(".md")).sort_by! do |name|
+      digits = name.each_char.take_while(&.ascii_number?).join
+      {digits.to_i? || Int32::MAX, name}
+    end.map { |name| File.join(dir, name) }
+  end
+
+  private def spec_clauses(root : String) : Array(SpecClause)
+    clauses = [] of SpecClause
+    seen = Set(String).new
+    spec_files(root).each do |file|
+      shown = ::Path[file].relative_to(root).to_s
+      chapter = nil
+      current = nil
+      lines = File.read_lines(file)
+      flush = ->(entry : {String, Int32, Int32, Array(String)}?) do
+        if entry
+          text = entry[3].join(" ").split.join(" ")
+          clauses << SpecClause.new(entry[0], entry[1], entry[2], text, spec_version(text))
+        end
+      end
+      lines.each_with_index do |line, index|
+        if line.starts_with?("## ")
+          flush.call(current)
+          current = nil
+          rest = line[3..]
+          digits = rest.each_char.take_while(&.ascii_number?).join
+          chapter = digits.empty? || rest[digits.size]? != '.' ? nil : digits.to_i
+          next
+        end
+        if line.starts_with?("* ") && (number = spec_clause_number(line))
+          flush.call(current)
+          current = nil
+          major, minor = number.split('.').map(&.to_i)
+          unless chapter
+            raise SpecError.new("#{shown}:#{index + 1}: clause #{number} is under no `## N. Title` heading")
+          end
+          unless major == chapter
+            raise SpecError.new("#{shown}:#{index + 1}: clause #{number} is under chapter #{chapter}'s heading; " \
+                                "a clause goes under the heading of its own chapter")
+          end
+          unless seen.add?(number)
+            raise SpecError.new("#{shown}:#{index + 1}: clause #{number} is written twice; a new clause takes the " \
+                                "next free number")
+          end
+          current = {number, major, minor, [line[(2 + number.size)..]]}
+          next
+        end
+        if (entry = current) && !line.blank? && line[0].whitespace?
+          entry[3] << line
+        else
+          flush.call(current)
+          current = nil
+        end
+      end
+      flush.call(current)
+    end
+    clauses.sort_by! { |clause| {clause.major, clause.minor} }
+  end
+
+  # `* 1.3 text` -> "1.3"; nil when the bullet holds no clause number.
+  private def spec_clause_number(line : String) : String?
+    rest = line[2..]
+    word = rest.split(' ', 2).first
+    return nil unless spec_number?(word, chapter_ok: false)
+    return nil unless rest.size > word.size && rest[word.size] == ' '
+    word
+  end
+
+  private def spec_number?(word : String, chapter_ok : Bool) : Bool
+    parts = word.split('.')
+    return false unless parts.size == 2 || (chapter_ok && parts.size == 1)
+    parts.all? { |part| !part.empty? && part.each_char.all?(&.ascii_number?) }
+  end
+
+  private def spec_version(text : String) : String
+    SpecSha256.hexdigest(text.to_slice)[0, 8]
+  end
+
+  private def spec_tests(root : String) : Array(SpecTest)
+    found = [] of String
+    dir = File.join(root, "test")
+    spec_walk(dir, found) if Dir.exists?(dir)
+    found.sort!.map { |file| spec_read_test(root, file) }
+  end
+
+  private def spec_walk(dir : String, found : Array(String)) : Nil
+    Dir.children(dir).each do |child|
+      next if child.starts_with?('.')
+      path = File.join(dir, child)
+      if File.symlink?(path)
+        next
+      elsif Dir.exists?(path)
+        spec_walk(path, found)
+      elsif SPEC_EXTENSIONS.includes?(File.extname(child))
+        found << path
+      end
+    end
+  end
+
+  private def spec_read_test(root : String, file : String) : SpecTest
+    shown = ::Path[file].relative_to(root).to_s
+    test = SpecTest.new(shown)
+    lines = begin
+      File.read_lines(file)
+    rescue IO::Error
+      [] of String
+    end
+    spec_leading_block(lines).each do |index|
+      if rest = spec_tag_rest(lines[index])
+        test.tagged = true
+        spec_parse_tag(test, rest, "#{shown}:#{index + 1}")
+      end
+    end
+    unless test.tagged
+      lines.each do |line|
+        stripped = line.lstrip
+        next unless stripped.starts_with?('#')
+        spec_prose_numbers(stripped).each do |number|
+          test.items << {number, nil} unless test.names?(number)
+        end
+      end
+    end
+    if file.ends_with?(".ri") || file.ends_with?(".iyi")
+      lines.each do |line|
+        if reason = spec_todo_reason(line)
+          test.todo = reason
+          break
+        end
+      end
+    end
+    test
+  end
+
+  # The indexes of the leading comment block: after a `#!` line and blank
+  # lines, the consecutive lines starting with `#`.
+  private def spec_leading_block(lines : Array(String)) : Array(Int32)
+    index = 0
+    index += 1 if lines.first?.try(&.starts_with?("#!"))
+    while index < lines.size && lines[index].blank?
+      index += 1
+    end
+    block = [] of Int32
+    while index < lines.size && lines[index].lstrip.starts_with?('#')
+      block << index
+      index += 1
+    end
+    block
+  end
+
+  # What follows `# spec:` on a tag line, or nil when it is no tag line.
+  private def spec_tag_rest(line : String) : String?
+    stripped = line.lstrip
+    return nil unless stripped.starts_with?('#')
+    body = stripped[1..].lstrip
+    return nil unless body.starts_with?("spec:")
+    body[5..].strip
+  end
+
+  private def spec_parse_tag(test : SpecTest, rest : String, site : String) : Nil
+    if rest.starts_with?("none")
+      reason = rest[4..].strip
+      unless reason.size > 2 && reason.starts_with?('(') && reason.ends_with?(')') && test.items.empty?
+        raise SpecError.new("#{site}: `# spec: none` takes a reason in parentheses and stands alone: " \
+                            "`# spec: none (implementation test: why)`")
+      end
+      test.none = reason[1..-2].strip
+      return
+    end
+    if test.none
+      raise SpecError.new("#{site}: this file said `# spec: none`; a test naming clauses drops that line")
+    end
+    rest.split(',').each do |raw|
+      item = raw.strip
+      number, at, version = item.partition('@')
+      ok = spec_number?(number, chapter_ok: false) &&
+           (at.empty? || (version.size == 8 && version.each_char.all? { |c| c.ascii_number? || c.in?('a'..'f') }))
+      unless ok
+        raise SpecError.new("#{site}: `# spec:` takes N.M@VERSION items (VERSION: 8 hex digits, `#{Command.program_name} " \
+                            "spec ack N.M` writes it) or none (reason), not '#{item}'")
+      end
+      test.items << {number, at.empty? ? nil : version}
+    end
+  end
+
+  # Every `SPEC N.M` in a comment, not `iyi SPEC N.M` nor `SPEC N.M.K`.
+  private def spec_prose_numbers(text : String) : Array(String)
+    numbers = [] of String
+    from = 0
+    while at = text.index("SPEC ", from)
+      from = at + 5
+      next if at > 0 && text[at - 1].ascii_alphanumeric?
+      next if at >= 4 && text[(at - 4)...at] == "iyi "
+      major = text[from..].each_char.take_while(&.ascii_number?).join
+      next if major.empty? || text[from + major.size]? != '.'
+      after = from + major.size + 1
+      minor = text[after..].each_char.take_while(&.ascii_number?).join
+      next if minor.empty?
+      tail = after + minor.size
+      next if text[tail]?.try(&.ascii_alphanumeric?)
+      next if text[tail]? == '.' && text[tail + 1]?.try(&.ascii_number?)
+      numbers << "#{major}.#{minor}"
+    end
+    numbers
+  end
+
+  # `todo "reason"` or `todo("reason")` at a line's start.
+  private def spec_todo_reason(line : String) : String?
+    stripped = line.lstrip
+    return nil unless stripped.starts_with?("todo")
+    rest = stripped[4..].lstrip.lstrip('(').lstrip
+    return nil unless rest.starts_with?('"')
+    close = rest.rindex('"')
+    return nil unless close && close > 0
+    rest[1...close]
+  end
+
+  private def spec_changelog(root : String) : Array(SpecEntry)
+    file = File.join(root, "SPEC_CHANGELOG.md")
+    return [] of SpecEntry unless File.file?(file)
+    entries = [] of SpecEntry
+    heading = nil
+    versions = [] of String
+    File.each_line(file) do |line|
+      if line.starts_with?("## ") && spec_dated?(line[3..])
+        entries << SpecEntry.new(heading, versions) if heading
+        heading = line[3..].strip
+        versions = [] of String
+      end
+      spec_version_tokens(line, versions) if heading
+    end
+    entries << SpecEntry.new(heading, versions) if heading
+    entries
+  end
+
+  private def spec_dated?(text : String) : Bool
+    text.size >= 10 && text[4] == '-' && text[7] == '-' &&
+      {0, 1, 2, 3, 5, 6, 8, 9}.all? { |i| text[i].ascii_number? }
+  end
+
+  # Each `N.M@hhhhhhhh` in *line*, as "N.M@hhhhhhhh".
+  private def spec_version_tokens(line : String, into : Array(String)) : Nil
+    from = 0
+    while at = line.index('@', from)
+      from = at + 1
+      start = at
+      while start > 0 && (line[start - 1].ascii_number? || line[start - 1] == '.')
+        start -= 1
+      end
+      number = line[start...at]
+      next unless spec_number?(number, chapter_ok: false)
+      version = line[(at + 1)..].each_char.take_while { |c| c.ascii_number? || c.in?('a'..'f') }.join
+      next unless version.size == 8
+      into << "#{number}@#{version}"
+    end
+  end
+
+  # --- reports -------------------------------------------------------------
+
+  # A clause's files and status, worst first.
+  private def spec_status(clause : SpecClause, tests : Array(SpecTest)) : {String, Array(SpecTest)}
+    files = tests.select(&.names?(clause.number))
+    versions = files.flat_map { |test| test.items.select { |item| item[0] == clause.number }.map(&.[1]) }
+    status =
+      if versions.any? { |version| version && version != clause.version }
+        "to review"
+      elsif files.empty?
+        "uncovered"
+      elsif versions.any?(&.nil?)
+        "unversioned"
+      elsif files.all?(&.todo)
+        "todo"
+      else
+        "ok"
+      end
+    {status, files}
+  end
+
+  private SPEC_STATUSES = ["ok", "todo", "to review", "uncovered", "unversioned"]
+
+  private def spec_report(clauses : Array(SpecClause), tests : Array(SpecTest), json : Bool) : Nil
+    rows = clauses.map { |clause| {clause, *spec_status(clause, tests)} }
+    counts = SPEC_STATUSES.to_h { |status| {status, rows.count { |row| row[1] == status }} }
+    tagged = tests.count { |test| !test.items.empty? || test.none }
+    untagged = tests.select { |test| test.items.empty? && test.none.nil? }
+    if json
+      JSON.build(STDOUT) do |builder|
+        builder.object do
+          builder.field "clauses" do
+            builder.array do
+              rows.each do |clause, status, files|
+                builder.object do
+                  builder.field "number", clause.number
+                  builder.field "version", clause.version
+                  builder.field "status", status
+                  builder.field "text", clause.text
+                  builder.field "files" { spec_files_json(builder, clause, files) }
+                end
+              end
+            end
+          end
+          builder.field "untagged" { builder.array { untagged.each { |test| builder.scalar test.path } } }
+          builder.field "counts" do
+            builder.object do
+              counts.each { |status, count| builder.field status, count }
+              builder.field "tagged_files", tagged
+              builder.field "untagged_files", untagged.size
+            end
+          end
+        end
+      end
+      puts
+      return
+    end
+    rows.each do |clause, status, files|
+      head = "#{clause.number.ljust(6)}#{status.ljust(12)}#{files.size.to_s.rjust(3)}  "
+      room = 80 - head.size
+      words = clause.text.size > room ? clause.text[0, room - 1] + "…" : clause.text
+      puts head + words
+    end
+    puts spec_summary(clauses.size, counts, tagged, untagged.size)
+  end
+
+  private def spec_summary(total : Int32, counts : Hash(String, Int32), tagged : Int32, untagged : Int32) : String
+    "#{total} clauses: #{counts["ok"]} ok, #{counts["todo"]} todo, #{counts["to review"]} to review, " \
+    "#{counts["uncovered"]} uncovered, #{counts["unversioned"]} unversioned; " \
+    "#{tagged} tagged files, #{untagged} untagged"
+  end
+
+  private def spec_files_json(builder : JSON::Builder, clause : SpecClause, files : Array(SpecTest)) : Nil
+    builder.array do
+      files.each do |test|
+        builder.object do
+          builder.field "file", test.path
+          builder.field "version", test.items.find { |item| item[0] == clause.number }.try(&.[1])
+          builder.field "todo", test.todo
+          builder.field "own", test.items.size == 1
+        end
+      end
+    end
+  end
+
+  private def spec_show(root : String, clauses : Array(SpecClause), tests : Array(SpecTest),
+                        target : String, json : Bool) : Nil
+    chosen = clauses.select { |clause| clause.number == target || clause.major.to_s == target }
+    if chosen.empty?
+      abort! "spec: #{target} is no clause or chapter of the spec; `#{Command.program_name} spec` lists them", :USAGE_ERROR
+    end
+    entries = spec_changelog(root)
+    if json
+      JSON.build(STDOUT) do |builder|
+        builder.object do
+          builder.field "clauses" do
+            builder.array do
+              chosen.each do |clause|
+                status, files = spec_status(clause, tests)
+                builder.object do
+                  builder.field "number", clause.number
+                  builder.field "version", clause.version
+                  builder.field "status", status
+                  builder.field "text", clause.text
+                  builder.field "history" do
+                    builder.array do
+                      spec_history(entries, clause).each { |entry| builder.scalar entry.heading }
+                    end
+                  end
+                  builder.field "files" { spec_files_json(builder, clause, files) }
+                end
+              end
+            end
+          end
+        end
+      end
+      puts
+      return
+    end
+    chosen.each_with_index do |clause, index|
+      puts if index > 0
+      status, files = spec_status(clause, tests)
+      puts "#{clause.number}@#{clause.version} #{clause.text}"
+      puts "  status: #{status}"
+      spec_history(entries, clause).each { |entry| puts "  changelog: #{entry.heading}" }
+      files.each do |test|
+        version = test.items.find { |item| item[0] == clause.number }.try(&.[1])
+        state = version.nil? ? "unversioned" : version == clause.version ? "current" : "to review (#{version})"
+        kind = test.items.size == 1 ? "own" : "shared"
+        todo = test.todo ? ", todo: #{test.todo}" : ""
+        puts "  test: #{test.path} (#{kind}, #{state}#{todo})"
+      end
+    end
+  end
+
+  private def spec_history(entries : Array(SpecEntry), clause : SpecClause) : Array(SpecEntry)
+    entries.select { |entry| entry.versions.any?(&.starts_with?("#{clause.number}@")) }
+  end
+
+  # `ris spec ack N[.M]`: every tag item naming the clause takes its
+  # current version; a prose-only file citing it gets a tag line naming
+  # every clause its prose names, so nothing it named is dropped.
+  private def spec_ack : NoReturn
+    target = options.shift?
+    unless target && spec_number?(target, chapter_ok: true) && options.empty?
+      abort! "spec ack takes one clause or chapter: `#{Command.program_name} spec ack 1.3` or `ack 1`", :USAGE_ERROR
+    end
+    root, clauses, tests = spec_load_or_abort
+    chosen = clauses.select { |clause| clause.number == target || clause.major.to_s == target }
+    if chosen.empty?
+      abort! "spec ack: #{target} is no clause or chapter of the spec; `#{Command.program_name} spec` lists them", :USAGE_ERROR
+    end
+    current = chosen.to_h { |clause| {clause.number, clause.version} }
+    written = 0
+    tests.each do |test|
+      next unless test.items.any? { |item| current[item[0]]? && item[1] != current[item[0]] }
+      path = File.join(root, test.path)
+      lines = File.read_lines(path, chomp: false)
+      items = test.items.map { |item| current[item[0]]? ? "#{item[0]}@#{current[item[0]]}" : (item[1] ? "#{item[0]}@#{item[1]}" : item[0]) }
+      if test.tagged
+        tag_lines = spec_leading_block(lines.map(&.chomp)).select { |index| spec_tag_rest(lines[index]) }
+        first = tag_lines.first
+        indent = lines[first][0, lines[first].size - lines[first].lstrip.size]
+        tag_lines.reverse_each { |index| lines.delete_at(index) unless index == first }
+        lines[first] = "#{indent}# spec: #{items.join(", ")}\n"
+      else
+        at = lines.first?.try(&.starts_with?("#!")) ? 1 : 0
+        lines.insert(at, "# spec: #{items.join(", ")}\n")
+      end
+      File.write(path, lines.join)
+      puts "acked #{test.path}: #{items.join(", ")}"
+      written += 1
+    end
+    puts "#{written} file#{written == 1 ? "" : "s"} acked for #{target}"
+    exit
+  end
+
+  # `ris check spec` (SPEC 6.8): every failure with its next command,
+  # then the counts. Unversioned and untagged files are reported only.
+  private def spec_check : NoReturn
+    name = Command.program_name
+    root, clauses, tests = spec_load_or_abort
+    by_number = clauses.to_h { |clause| {clause.number, clause} }
+    recorded = spec_changelog(root).flat_map(&.versions).to_set
+    failures = [] of {String, String}
+    tests.each do |test|
+      next unless test.tagged
+      test.items.each do |number, _|
+        next if by_number[number]?
+        failures << {"#{test.path} names #{number}, which is no clause of the spec",
+                     "name a clause `#{name} spec` lists, or drop #{number} from the tag"}
+      end
+    end
+    clauses.each do |clause|
+      status, files = spec_status(clause, tests)
+      files.each do |test|
+        test.items.each do |number, version|
+          next unless number == clause.number && version && version != clause.version
+          failures << {"#{clause.number}: #{test.path} tag holds #{version}, clause is now #{clause.version}",
+                       "review the test against `#{name} spec #{clause.number}`, then `#{name} spec ack #{clause.number}`"}
+        end
+      end
+      unless recorded.includes?("#{clause.number}@#{clause.version}")
+        failures << {"#{clause.number}: no SPEC_CHANGELOG.md entry records #{clause.number}@#{clause.version}",
+                     "add `## #{Time.local.to_s("%Y-%m-%d")} · #{clause.number}@#{clause.version}` to SPEC_CHANGELOG.md with the reason"}
+      end
+      if status == "uncovered"
+        failures << {"#{clause.number}: no test names it",
+                     "write a test tagged `# spec: #{clause.number}@#{clause.version}` (`todo \"reason\"` until it passes)"}
+      end
+    end
+    failures.each do |failure, step|
+      puts failure
+      puts "  next: #{step}"
+    end
+    counts = SPEC_STATUSES.to_h { |status| {status, clauses.count { |clause| spec_status(clause, tests)[0] == status }} }
+    tagged = tests.count { |test| !test.items.empty? || test.none }
+    puts spec_summary(clauses.size, counts, tagged, tests.size - tagged)
+    exit failures.empty? ? 0 : 1
+  end
+
+  # `ris spec todo`: the promises not kept yet, one todo test a line.
+  private def spec_todo : NoReturn
+    json = false
+    while option = options.shift?
+      abort! "spec todo takes only --json, not '#{option}'", :USAGE_ERROR unless option == "--json"
+      json = true
+    end
+    _root, _clauses, tests = spec_load_or_abort
+    todos = tests.select(&.todo)
+    if json
+      JSON.build(STDOUT) do |builder|
+        builder.object do
+          builder.field "todo" do
+            builder.array do
+              todos.each do |test|
+                builder.object do
+                  builder.field "clauses" { builder.array { test.items.each { |item| builder.scalar item[0] } } }
+                  builder.field "file", test.path
+                  builder.field "reason", test.todo
+                end
+              end
+            end
+          end
+        end
+      end
+      puts
+    else
+      todos.each do |test|
+        clauses = test.items.empty? ? "-" : test.items.map(&.[0]).join(",")
+        puts "#{clauses.ljust(10)}#{test.path}: #{test.todo}"
+      end
+      puts "#{todos.size} todo test#{todos.size == 1 ? "" : "s"}"
+    end
+    exit
+  end
+
+  private def spec_usage : String
+    name = Command.program_name
+    <<-USAGE
+      Usage: #{name} spec [N | N.M] [--json]
+             #{name} spec ack N[.M]
+             #{name} spec todo [--json]
+
+      Link the spec's clauses (SPEC.md or spec/*.md at the root) to the
+      tests under test/ that name them with `# spec: N.M@VERSION`.
+
+          (none)     one line per clause: status, test files, first words;
+                     then the counts. Status: ok, todo, to review,
+                     uncovered, unversioned
+          N, N.M     that chapter or clause: text, version, changelog
+                     entries, the tests naming it
+          ack N[.M]  after reviewing the tests: tags naming the clause
+                     take its current version
+          todo       every todo test: clause, file, reason
+
+      `#{name} check spec` fails on a stale tag, a tag naming no clause,
+      a version no SPEC_CHANGELOG.md entry records and an untested clause.
+      USAGE
+  end
+end
+
+# SHA-256 (FIPS 180-4), for clause versions: the compiler links no
+# OpenSSL, and Crystal::Digest has only MD5 and SHA1.
+module Iyi::SpecSha256
+  K = [
+    0x428a2f98_u32, 0x71374491_u32, 0xb5c0fbcf_u32, 0xe9b5dba5_u32, 0x3956c25b_u32, 0x59f111f1_u32,
+    0x923f82a4_u32, 0xab1c5ed5_u32, 0xd807aa98_u32, 0x12835b01_u32, 0x243185be_u32, 0x550c7dc3_u32,
+    0x72be5d74_u32, 0x80deb1fe_u32, 0x9bdc06a7_u32, 0xc19bf174_u32, 0xe49b69c1_u32, 0xefbe4786_u32,
+    0x0fc19dc6_u32, 0x240ca1cc_u32, 0x2de92c6f_u32, 0x4a7484aa_u32, 0x5cb0a9dc_u32, 0x76f988da_u32,
+    0x983e5152_u32, 0xa831c66d_u32, 0xb00327c8_u32, 0xbf597fc7_u32, 0xc6e00bf3_u32, 0xd5a79147_u32,
+    0x06ca6351_u32, 0x14292967_u32, 0x27b70a85_u32, 0x2e1b2138_u32, 0x4d2c6dfc_u32, 0x53380d13_u32,
+    0x650a7354_u32, 0x766a0abb_u32, 0x81c2c92e_u32, 0x92722c85_u32, 0xa2bfe8a1_u32, 0xa81a664b_u32,
+    0xc24b8b70_u32, 0xc76c51a3_u32, 0xd192e819_u32, 0xd6990624_u32, 0xf40e3585_u32, 0x106aa070_u32,
+    0x19a4c116_u32, 0x1e376c08_u32, 0x2748774c_u32, 0x34b0bcb5_u32, 0x391c0cb3_u32, 0x4ed8aa4a_u32,
+    0x5b9cca4f_u32, 0x682e6ff3_u32, 0x748f82ee_u32, 0x78a5636f_u32, 0x84c87814_u32, 0x8cc70208_u32,
+    0x90befffa_u32, 0xa4506ceb_u32, 0xbef9a3f7_u32, 0xc67178f2_u32,
+  ]
+
+  def self.hexdigest(data : Bytes) : String
+    h = [0x6a09e667_u32, 0xbb67ae85_u32, 0x3c6ef372_u32, 0xa54ff53a_u32,
+         0x510e527f_u32, 0x9b05688c_u32, 0x1f83d9ab_u32, 0x5be0cd19_u32]
+    message = Bytes.new(((data.size + 9 + 63) // 64) * 64)
+    data.copy_to(message)
+    message[data.size] = 0x80_u8
+    bits = data.size.to_u64 * 8
+    8.times { |i| message[message.size - 1 - i] = (bits >> (8 * i)).to_u8! }
+    w = Array(UInt32).new(64, 0_u32)
+    (message.size // 64).times do |block|
+      base = block * 64
+      16.times do |i|
+        o = base + i * 4
+        w[i] = (message[o].to_u32 << 24) | (message[o + 1].to_u32 << 16) | (message[o + 2].to_u32 << 8) | message[o + 3].to_u32
+      end
+      (16...64).each do |i|
+        s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3)
+        s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10)
+        w[i] = w[i - 16] &+ s0 &+ w[i - 7] &+ s1
+      end
+      a, b, c, d, e, f, g, hh = h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]
+      64.times do |i|
+        s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)
+        ch = (e & f) ^ (~e & g)
+        t1 = hh &+ s1 &+ ch &+ K[i] &+ w[i]
+        s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)
+        maj = (a & b) ^ (a & c) ^ (b & c)
+        t2 = s0 &+ maj
+        hh = g
+        g = f
+        f = e
+        e = d &+ t1
+        d = c
+        c = b
+        b = a
+        a = t1 &+ t2
+      end
+      h[0] &+= a; h[1] &+= b; h[2] &+= c; h[3] &+= d
+      h[4] &+= e; h[5] &+= f; h[6] &+= g; h[7] &+= hh
+    end
+    h.join { |word| word.to_s(16).rjust(8, '0') }
+  end
+
+  private def self.rotr(x : UInt32, n : Int32) : UInt32
+    (x >> n) | (x << (32 - n))
+  end
+end

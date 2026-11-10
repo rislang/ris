@@ -4,7 +4,7 @@
     IYI=./bin/ris python3 test/cli/check_verb.py
 
 Runs the real binary on scratch projects and asserts: a clean project
-is green with five part lines in fixed order; the no-manifest case
+is green with six part lines in fixed order; the no-manifest case
 skips deps; a check error beats a failing test; `--fix` fixes a
 misformatted file and an extra ris.sum entry, then passes; `-f` equals
 `--fix`; `--fix` on a clean project writes no file; `check types
@@ -22,7 +22,7 @@ import sys
 import tempfile
 
 IYI = os.path.abspath(os.environ.get("IYI", "./bin/ris"))
-PARTS = ["format", "deps", "types", "unused", "test"]
+PARTS = ["format", "deps", "spec", "types", "unused", "test"]
 AGENTS_TEXT = ("The work is done when `ris check` passes. Use `ris check "
                "--fix` to fix formatting and dependencies first; `ris check "
                "types` and `ris test --affected FILE` for quick loops.")
@@ -84,7 +84,7 @@ def main():
 
     proc = run("check", cwd=root)
     lines = proc.stdout.splitlines()
-    step("clean project green, five part lines in order",
+    step("clean project green, six part lines in order",
          proc.returncode == 0 and order(proc.stdout) == PARTS
          and re.fullmatch(r"ok in \d+\.\ds", lines[-1]), proc.stdout)
     step("each run part line ends in its time",
@@ -178,7 +178,7 @@ def main():
     proc = run("check", "-j", "4", cwd=par)
     step("a check error and a failing test: types is the failure",
          proc.returncode == 1 and "types  FAIL" in proc.stdout
-         and order(proc.stdout)[:3] == ["format", "deps", "types"]
+         and order(proc.stdout)[:4] == ["format", "deps", "spec", "types"]
          and all(ln.endswith("stopped") for ln in part_lines(proc.stdout)
                  if ln.startswith(("unused", "test")))
          and "next: ris check types --fix" in proc.stdout, proc.stdout)

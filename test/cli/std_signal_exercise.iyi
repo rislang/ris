@@ -1,3 +1,4 @@
+# spec: 5.1@610b0d22
 # Exercises `std/signal`.
 #
 #     ./bin/iyi run test/cli/std_signal_exercise.iyi

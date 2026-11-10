@@ -1,3 +1,4 @@
+# spec: 3.7@64779b1c
 # SPEC 3.7: a class default is made in the cycle def, as at the call.
 class C
   def initialize(@n : Int32 = 0)

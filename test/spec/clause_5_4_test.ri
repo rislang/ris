@@ -1,0 +1,5 @@
+# spec: 5.4@49240f11
+# SPEC 5.4 has no test that names it. Find the gate that proves it
+# (test/ris/check.sh, test/cli/) and tag it `# spec: 5.4@49240f11`, or write
+# one; then delete this file.
+todo "5.4 untested: APIs expose String, builders, Array and tape structs"

@@ -4,6 +4,38 @@ Every change to SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one. Entries before 2026-10-31 name the file by its old name, TAPE_SPEC.md.
 
+## 2026-11-10 · 6.7@dfe294f2, 6.8@e818aa3e, 6.9@889c99fe
+
+* Was: no tool read the clause numbers tests cite in prose, so a clause
+  could have no test, a test could cite a missing clause, and a changed
+  clause kept its old tests counting. Crystal's `ris spec` verb ran
+  Crystal specs no ris program has.
+* Now: 6.7 `ris spec` links clauses to tests by a versioned tag; 6.8
+  `ris check spec` fails on stale, dangling, unrecorded and untested
+  clauses; 6.9 `todo "reason"` is a test's third outcome (exit 77) and
+  `ris init` writes a spec. From now on a heading names the versions an
+  entry records (`## DATE · N.M@VERSION`), which `ris check spec` reads.
+* Why: green should mean "what was promised is done", not "nothing
+  broke" (blog-demo failed on its first run with `ris check` green).
+  Design and EGM review: doc/drafts/spec-cli/ (spec-cli.md,
+  consolidated_review_report.md, decisions.md).
+
+## 2026-11-10 · baseline: every clause's version before `ris spec`
+
+* Now: no clause changes. `ris check spec` asks every clause's current
+  version to be recorded in an entry (SPEC 6.8); this entry records the
+  text each clause had when the check arrived:
+  1.1@fdc7907b, 1.2@08914ecc, 1.3@04f780a4, 1.4@6085c194, 1.5@9935f4c7,
+  1.6@ab909135, 1.7@1e464b38, 1.8@2ae483dc, 1.9@3f448e8c, 2.1@fb4782c0,
+  2.2@67a6a6f1, 2.3@91ca936c, 3.1@7e5647c9, 3.2@9533bb9c, 3.3@a4f6b9c5,
+  3.4@0e0ecf49, 3.5@4513f7df, 3.6@47d91b08, 3.7@64779b1c, 4.1@06dec80c,
+  4.2@4385229b, 4.3@85d5df52, 5.1@610b0d22, 5.2@25c4e885, 5.3@35cd0356,
+  5.4@49240f11, 5.6@b5b47fbd, 6.1@6ab8268c, 6.2@f3b9d15b, 6.3@4ddcbf0b,
+  6.4@5ba1ad49, 6.5@3293e333, 6.6@ca5f6a2f, 7.1@e54681fa, 7.2@d367aea4,
+  7.3@1ce159dc, 7.4@1c850287, 7.5@c5126ebb, 7.6@ae052fb8.
+* Why: the reasons for these texts are in the older entries below, which
+  predate versions. Design: doc/drafts/spec-cli/.
+
 ## 2026-11-04: macOS arm64 is a target; its HTTP serves one connection
 
 * Was: 7.1 allowed Linux x86_64 and aarch64 only.

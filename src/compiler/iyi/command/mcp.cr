@@ -151,11 +151,11 @@ class Iyi::Command
     [
       {
         "name": "check",
-        "description": "Is the work done? Runs the parts of `ris check`: format, deps (ris.mod and ris.sum), types, unused, test; one part when `part` is given. Returns {ok, steps, failed, output, next, seconds}; the types step carries `diagnostics`, the compiler's errors as data with suggested_edit. fix=true fixes format and deps first; with part=types it applies the compiler's suggested edits instead (then call again without fix to read the diagnostics).",
+        "description": "Is the work done? Runs the parts of `ris check`: format, deps (ris.mod and ris.sum), spec (SPEC.md's clauses and the tests naming them), types, unused, test; one part when `part` is given. Returns {ok, steps, failed, output, next, seconds}; the types step carries `diagnostics`, the compiler's errors as data with suggested_edit. fix=true fixes format and deps first; with part=types it applies the compiler's suggested edits instead (then call again without fix to read the diagnostics).",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "part": {"type": "string", "enum": ["format", "deps", "types", "unused", "test"], "description": "one part; all when left out"},
+            "part": {"type": "string", "enum": ["format", "deps", "spec", "types", "unused", "test"], "description": "one part; all when left out"},
             "fix": {"type": "boolean", "description": "fix what can be fixed first"},
             "file": {"type": "string", "description": "a .ri file or directory: every part is narrowed to it (default: the project in the current directory)"},
             "affected": {"type": "array", "items": {"type": "string"}, "description": "files that changed; types and test check only what they reach"}

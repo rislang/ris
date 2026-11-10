@@ -175,7 +175,7 @@ class Iyi::Command
       # An empty selection is a verdict, not an error: nothing that runs
       # any changed file exists, so there is nothing to re-run.
       if as_json
-        puts %({"tests": [], "passed": 0, "failed": 0, "skipped": #{skipped}})
+        puts %({"tests": [], "passed": 0, "failed": 0, "todo": 0, "skipped": #{skipped}})
       else
         puts "0 to run, #{skipped} skipped: no test's imports reach the change"
       end
@@ -183,7 +183,9 @@ class Iyi::Command
     end
 
     results = run_tests(files, timeout, jobs)
-    failed = results.count { |result| result[:status] != "pass" }
+    # ris: exit 77 is todo (SPEC 6.9), neither pass nor fail.
+    todos = results.count { |result| result[:status] == "todo" }
+    failed = results.count { |result| !result[:status].in?("pass", "todo") }
 
     if as_json
       JSON.build(STDOUT) do |json|
@@ -200,8 +202,9 @@ class Iyi::Command
               end
             end
           end
-          json.field "passed", results.size - failed
+          json.field "passed", results.size - failed - todos
           json.field "failed", failed
+          json.field "todo", todos
           json.field "skipped", skipped
           # The caller asked for a selective run and did not get one. In
           # data, because the caller that passes `--affected` is usually a
@@ -242,8 +245,9 @@ class Iyi::Command
         puts "#{discount_off.join(", ")} is not there, so every test ran: " \
              "a file that is gone cannot be proven untouched by anything"
       end
-      tail = skipped.zero? ? "" : ", #{skipped} skipped"
-      puts "#{results.size - failed} passed, #{failed} failed#{tail}" + (failed.zero? ? "" : " — a failing test prints above")
+      tail = todos.zero? ? "" : ", #{todos} todo"
+      tail += skipped.zero? ? "" : ", #{skipped} skipped"
+      puts "#{results.size - failed - todos} passed, #{failed} failed#{tail}" + (failed.zero? ? "" : " — a failing test prints above")
     end
 
     exit 1 unless failed.zero?
@@ -382,12 +386,13 @@ class Iyi::Command
       spawn { done.send(process.wait) }
       select
       when status = done.receive
-        verdict = status.success? ? "pass" : "fail"
+        todo = status.exit_reason.normal? && status.exit_code == 77
+        verdict = status.success? ? "pass" : todo ? "todo" : "fail"
         # A test the kernel killed printed "fail" and nothing under it -
         # the one failure with no evidence of its own, and the one an
         # infinite recursion produces. The death is the evidence.
         evidence = output.to_s
-        unless status.success? || status.exit_reason.normal?
+        unless status.success? || todo || status.exit_reason.normal?
           evidence += "\n" unless evidence.empty? || evidence.ends_with?('\n')
           evidence += Command.death_sentence(status) + "\n"
         end
@@ -476,8 +481,10 @@ class Iyi::Command
     Usage: #{Command.program_name} test [--json] [-j N] [--timeout SECONDS] [--affected FILE]... [paths]
 
     Runs every `*_test.ri` and `*_test.iyi` under the given paths (default:
-    `.`). A test is a plain program: exit 0 is a pass, anything else is a
-    failure that prints its own evidence. `--json` reports the run as data.
+    `.`). A test is a plain program: exit 0 is a pass, exit 77 (`todo
+    "reason"`) is todo, anything else is a failure that prints its own
+    evidence. Only failures make the exit non-zero. `--json` reports the
+    run as data.
 
     `--affected FILE` (repeatable) runs only the tests whose transitive
     import closure contains a named file — name every file you changed.

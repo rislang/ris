@@ -1,0 +1,5 @@
+# spec: 1.6@ab909135
+# SPEC 1.6 has no test that names it. Find the gate that proves it
+# (test/ris/check.sh, test/cli/) and tag it `# spec: 1.6@ab909135`, or write
+# one; then delete this file.
+todo "1.6 untested: Text literals are static String views; interpolation builds"

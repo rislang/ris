@@ -237,6 +237,25 @@ section; a removed one leaves its number unused.
 * 6.6 RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste,
   copies, and results moved down to a caller's boundary.
   check.sh tests exit, panic, cancel, exhaustion.
+* 6.7 `ris spec` links the spec's clauses to the tests that prove them.
+  The spec is SPEC.md or spec/*.md (both is an error) at the root: the
+  nearest directory holding ris.mod or iyi.mod, else the current one. A
+  clause is `* N.M text` under `## N. Title`, continued by indented
+  lines; its version is the first 8 hex digits of SHA-256 of its text
+  with each whitespace run one space. A file under the root's test/
+  names clauses in its leading `#` comment block (`# spec: 1.3@a4f20c19`
+  or `# spec: none (reason)`); with no tag line, a `# ... SPEC 1.3`
+  comment names 1.3 without a version.
+* 6.8 `ris check spec` fails on a spec or tag that does not parse, a tag
+  naming no clause, a tag whose version is not the clause's current one
+  (until `ris spec ack N.M` rewrites it), a version no SPEC_CHANGELOG.md
+  entry records, and a clause no test names. Each failure names the
+  command that comes next.
+* 6.9 `todo "reason"` ends a test with exit code 77: `ris test` reports it
+  as todo, neither pass nor fail, and exits 0 when the rest pass. A
+  clause named only by todo tests passes `ris check spec`; `ris spec
+  todo` lists them. `ris init` writes SPEC.md with one clause,
+  SPEC_CHANGELOG.md recording it and a todo test naming it.
 
 ## 7. Types, memory and Ruby syntax (doc/TAPE_TYPES.md; Goose §1.2, §3.7)
 

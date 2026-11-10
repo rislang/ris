@@ -1,0 +1,5 @@
+# spec: 7.6@ae052fb8
+# SPEC 7.6 has no test that names it. Find the gate that proves it
+# (test/ris/check.sh, test/cli/) and tag it `# spec: 7.6@ae052fb8`, or write
+# one; then delete this file.
+todo "7.6 untested: Any other store of a tape value into"

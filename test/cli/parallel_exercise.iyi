@@ -1,3 +1,4 @@
+# spec: 5.2@25c4e885
 # Tasks across cores, exercised: iyi SPEC III.4.13, built.
 #
 #   ./bin/iyi run test/cli/parallel_exercise.iyi                  # every property

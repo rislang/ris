@@ -68,6 +68,11 @@ jobs:
         run: python3 test/cli/check_verb.py
         env:
           IYI: ./bin/ris
+      - name: ris spec
+        if: matrix.shard == 'heap'
+        run: python3 test/cli/spec_verb.py
+        env:
+          IYI: ./bin/ris
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:

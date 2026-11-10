@@ -34,6 +34,13 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   refused: `--json` gives steps, the types step carries `diagnostics`.
   Step names are format, deps, types, unused, test (were fmt, tidy,
   check, vet, test). MCP's `ok` and `fix` tools are gone.
+* `ris spec` links SPEC.md's numbered clauses to the tests naming them
+  (`# spec: N.M@VERSION`); `ris spec ack` takes a reviewed clause's
+  new version, `ris spec todo` lists open promises. `ris check spec`
+  fails on stale or unknown tags and untested clauses (SPEC 6.7-6.9).
+  `todo "reason"` ends a test with exit 77: `ris test` counts it as
+  todo. `ris init` writes SPEC.md, SPEC_CHANGELOG.md and a todo test.
+* Breaking: Crystal's `ris spec` (spec runner) is gone.
 * `ris test -j N` and `ris check -j N` use the machine's cores (default
   `RIS_JOBS`, else the CPU count); types, unused and test run at once.
   Output keeps file and part order.

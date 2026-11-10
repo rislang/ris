@@ -1,3 +1,4 @@
+# spec: 5.1@610b0d22
 # Sockets: runtime verification exercise.
 #
 #   ./bin/iyi run test/cli/socket_exercise.iyi

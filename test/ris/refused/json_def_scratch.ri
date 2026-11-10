@@ -1,3 +1,4 @@
+# spec: 1.9@3f448e8c
 # from_json's document is made in load's scratch; a struct that is not
 # only texts cannot move down out of it (SPEC 1.9).
 import std/json::{serializable}

@@ -1,3 +1,4 @@
+# spec: 2.1@fb4782c0
 module test/ris/allowed
 
 import std/int

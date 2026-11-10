@@ -54,14 +54,14 @@ class Iyi::Command
         doc                      print a module's exported surface, docs included
         build                    build an executable
         clear_cache              clear the compiler cache
-        check                    format, deps, types, unused, test: exit 0 means the work is done
+        check                    format, deps, spec, types, unused, test: exit 0 means the work is done
         env                      print Crystal environment information
         eval                     eval code from args or standard input
         mod                      inspect a .iyimod module artifact
         lsp                      serve the language over stdio (editors, agents)
         mcp                      serve the compiler's verbs as MCP tools over stdio (agents)
         run (default)            build and run program
-        spec                     build and run specs (in spec directory)
+        spec                     the spec's clauses and the tests naming them
         test                     run every *_test.iyi: exit 0 passes, anything else fails
         unsafe                   list @[Ffi], @[PointerUnsafe] and @[TapeUnsafe] marks
         tool                     run a tool
@@ -151,9 +151,11 @@ class Iyi::Command
       else
         run_command(single_file: false)
       end
-    when "spec/".starts_with?(command)
+    when command == "spec"
+      # Exact: the clauses and their tests (SPEC 6.7). Crystal's `spec`
+      # verb, and its `s`/`sp` prefixes, are gone.
       options.shift
-      spec
+      spec_command
     when command == "doc"
       # Exact: `d` would be ambiguous with `daemon` and `deps`.
       options.shift

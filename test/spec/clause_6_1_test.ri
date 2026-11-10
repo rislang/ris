@@ -1,0 +1,5 @@
+# spec: 6.1@6ab8268c
+# SPEC 6.1 has no test that names it. Find the gate that proves it
+# (test/ris/check.sh, test/cli/) and tag it `# spec: 6.1@6ab8268c`, or write
+# one; then delete this file.
+todo "6.1 untested: Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale"

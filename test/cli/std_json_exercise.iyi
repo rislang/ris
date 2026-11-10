@@ -1,3 +1,4 @@
+# spec: 1.1@fdc7907b
 # Exercises `std/json`: `JSON.parse` / `parse?`, `Any`, `PullParser`,
 # `Builder`, `JSON.build`, `JSON.to_json` / `from_json` and the `ToJSON` trait.
 #

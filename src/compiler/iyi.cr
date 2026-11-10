@@ -34,15 +34,16 @@ module Iyi
     Usage: ris [command] [switches] [program file] [--] [arguments]
 
     Command:
-        init         write a new project: ris.mod and its root module
+        init         write a project: ris.mod, root module, SPEC.md, a todo test
         get          add or move a requirement in ris.mod; -u updates all
         build        build an executable
         run          build and run a program (default)
         mod          inspect a .iyimod artifact, a module's context or reach
         doc          print a module's exported surface, or a prelude type's
-        check        format, deps, types, unused, test: exit 0 means done;
+        check        format, deps, spec, types, unused, test: exit 0 = done;
                      --fix fixes format and deps, `check types FILE` is quick
         test         run every *_test.ri: exit 0 passes, else fails
+        spec         the spec's clauses and the tests that name them
         heap         census reachable heap sites; --user omits libraries
         unsafe       list the @[Ffi], @[PointerUnsafe] and @[TapeUnsafe] marks
         lsp          serve the language over stdio (editors, agents)
@@ -68,7 +69,7 @@ module Iyi
   VERSION = Iyi::Config.iyi_version
 
   DELEGATED = %w(init get build run mod env clear_cache tool daemon test
-    doc lsp check unsafe heap mcp)
+    doc lsp check unsafe heap mcp spec)
 
   # The ones that belong to Crystal and are still in the binary underneath.
   # Named rather than swallowed, because "unknown command" would be a lie.
@@ -77,7 +78,7 @@ module Iyi
   # Crystal's prelude and Crystal's rules, and `iyi eval 'require "json"'`
   # worked. A command that answers in another language is worse than one that
   # says where it went.
-  CRYSTAL_ONLY = %w(spec eval)
+  CRYSTAL_ONLY = %w(eval)
 
 
   # What this language has in place of a Crystal verb it does not carry.
@@ -88,7 +89,6 @@ module Iyi
   def self.other_language_verb_sentence(verb : String) : String
     instead =
       case verb
-      when "spec" then "a test is a `*_test.iyi` program that exits 0 when it passes, and `iyi test` runs them (iyi SPEC III.8)"
       when "eval" then "write the line to a file and `iyi run` it; there is no evaluator to hand a string to"
       else             "nothing here stands in for it"
       end

@@ -107,6 +107,20 @@ class Iyi::Command
       puts "wrote #{Iyi.relative_filename(agents)}"
     end
 
+    # ris: the promises (SPEC 6.9): one clause, the entry recording its
+    # version and a todo test naming it, so `ris check` is green and the
+    # first task is on the list. A SPEC.md already here is the project's
+    # own: then none of the three is written.
+    unless File.exists?(File.join(directory, "SPEC.md"))
+      iyi_init_spec(name).each do |file, text|
+        path = File.join(directory, file)
+        next if File.exists?(path)
+        Dir.mkdir_p(File.dirname(path))
+        File.write(path, text)
+        puts "wrote #{Iyi.relative_filename(path)}"
+      end
+    end
+
     # Two lines, not one joined with `&&`: Windows PowerShell 5.1 refuses
     # `&&` ("not a valid statement separator"), and no one separator means
     # the same in cmd, PowerShell and a POSIX shell. None when it is this
@@ -152,6 +166,43 @@ class Iyi::Command
     }
   end
 
+  private def iyi_init_spec(name : String) : Array({String, String})
+    program = Command.program_name
+    clause = "Running #{name}.ri prints `hello from #{name}`."
+    version = "1.1@#{spec_version(clause)}"
+    [
+      {"SPEC.md", <<-MD},
+        # #{name} specification
+
+        What #{name} promises, as numbered clauses. A test names the clauses
+        it proves in its first comment lines: `# spec: N.M@VERSION`. A new
+        clause goes last in its chapter; a removed one leaves its number
+        unused. `#{program} spec` shows each clause and its tests.
+
+        ## 1. Start
+        * 1.1 #{clause}
+
+        MD
+      {"SPEC_CHANGELOG.md", <<-MD},
+        # SPEC.md changelog
+
+        Every change to SPEC.md gets an entry here, newest first: a heading
+        `## DATE · N.M@VERSION` naming each clause version it records, then
+        the reason. `#{program} check spec` asks for one per version.
+
+        ## #{Time.local.to_s("%Y-%m-%d")} · #{version}
+
+        * 1.1: the project's first promise, written by `#{program} init`.
+
+        MD
+      {File.join("test", "#{name}_test.ri"), <<-RI},
+        # spec: #{version}
+        todo "run #{name}.ri and check that it prints `hello from #{name}`"
+
+        RI
+    ]
+  end
+
   private def iyi_init_agents : String
     name = Command.program_name
     <<-MD
@@ -160,6 +211,11 @@ class Iyi::Command
       The work is done when `#{name} check` passes. Use `#{name} check --fix`
       to fix formatting and dependencies first; `#{name} check types` and
       `#{name} test --affected FILE` for quick loops.
+
+      SPEC.md holds what the program promises. Name the clause a test
+      proves in its first lines, `# spec: N.M`, then run `#{name} spec ack
+      N.M`; a promise not kept yet is a test ending in `todo "reason"`.
+      `#{name} spec todo` lists the open ones.
 
       MD
   end
@@ -173,7 +229,9 @@ class Iyi::Command
     init kemal` writes ris.mod and kemal.ri. DIR is where, and the current
     directory when it is left out. Nothing that is already there is
     overwritten; an AGENTS.md saying `ris check` decides
-    when the work is done is written unless one is there.
+    when the work is done is written unless one is there, and so are
+    SPEC.md (one clause), SPEC_CHANGELOG.md and test/NAME_test.ri, a todo
+    test naming the clause, unless a SPEC.md is there.
 
     MODULE is the path other projects would import this one by — a URL's
     path half, `example.com/me/hello` — or a bare name like `hello` for a

@@ -1,0 +1,5 @@
+# spec: 6.2@f3b9d15b
+# SPEC 6.2 has no test that names it. Find the gate that proves it
+# (test/ris/check.sh, test/cli/) and tag it `# spec: 6.2@f3b9d15b`, or write
+# one; then delete this file.
+todo "6.2 untested: Free keeps memory; reset obeys shrink rules. Run"

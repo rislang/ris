@@ -1,3 +1,4 @@
+# spec: 5.2@25c4e885, 5.3@35cd0356
 # Exercises iyi SPEC III.4 concurrency runtime on Windows x86_64, Linux, and Darwin.
 #
 # Properties asserted:

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# spec: 5.1@610b0d22
 # Sockets, driven. Runs the socket exercise plain and optimised,
 # checks each phase reached its expected output, tests connection refusal,
 # and proves each check can fail via patched copies of the prelude.

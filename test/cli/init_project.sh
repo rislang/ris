@@ -46,8 +46,15 @@ cd "$WORK" || exit 1
 "$IYI" init example.com/me/hello app > init.txt 2>&1
 say "init writes a project and says what it wrote" \
   "$([ $? -eq 0 ] && grep -qE 'wrote app[/\\]hello.ri' init.txt && grep -q 'run hello.ri' init.txt; echo $?)"
-say "three files and no more: AGENTS.md, ris.mod and hello.ri" \
-  "$([ "$(ls app | sort | tr '\n' ' ')" = "AGENTS.md hello.ri ris.mod " ]; echo $?)"
+say "AGENTS.md, SPEC.md, SPEC_CHANGELOG.md, ris.mod, hello.ri, test/" \
+  "$([ "$(ls app | LC_ALL=C sort | tr '\n' ' ')" = "AGENTS.md SPEC.md SPEC_CHANGELOG.md hello.ri ris.mod test " ]; echo $?)"
+grep -q '^\* 1\.1 Running hello.ri prints `hello from hello`\.$' app/SPEC.md &&
+  grep -q '^# spec: 1\.1@[0-9a-f]\{8\}$' app/test/hello_test.ri &&
+  grep -q '^todo "' app/test/hello_test.ri
+say "SPEC.md has one clause and a todo test names it (SPEC 6.9)" $?
+(cd app && "$IYI" spec todo) > todo.txt 2>&1
+say "ris spec todo lists it: $(tail -1 todo.txt)" \
+  "$(grep -q 'test/hello_test.ri' todo.txt && [ "$(tail -1 todo.txt)" = "1 todo test" ]; echo $?)"
 grep -q '^module example.com/me/hello$' app/ris.mod
 say "the manifest names the module" $?
 grep -q '^module hello$' app/hello.ri
@@ -71,10 +78,10 @@ printf 'import example.com/me/hello\n' > user/main.ri
 say "a consumer's import of the package reads it" "$([ "$(tail -1 use.txt)" = "hello from hello" ]; echo $?)"
 
 # ── nothing written twice ────────────────────────────────────────────────
-before="$(cat app/ris.mod app/hello.ri | cksum)"
+before="$(cat app/ris.mod app/hello.ri app/SPEC.md app/test/hello_test.ri | cksum)"
 "$IYI" init example.com/me/hello app > again.txt 2>&1
 rc=$?
-after="$(cat app/ris.mod app/hello.ri | cksum)"
+after="$(cat app/ris.mod app/hello.ri app/SPEC.md app/test/hello_test.ri | cksum)"
 say "a second init is refused by name" \
   "$([ $rc -ne 0 ] && grep -q 'already has `ris.mod`' again.txt; echo $?)"
 say "and changes not one byte" "$([ "$before" = "$after" ]; echo $?)"
@@ -98,8 +105,8 @@ say "a directory with ; or \$ in its name is one word to cd" \
 
 # ── the name, the current directory, and the refusals ────────────────────
 mkdir -p here && (cd here && "$IYI" init kemal) > here.txt 2>&1
-say "init kemal writes AGENTS.md, ris.mod and kemal.ri into the current directory" \
-  "$([ "$(ls here | sort | tr '\n' ' ')" = "AGENTS.md kemal.ri ris.mod " ] && grep -q '^module kemal$' here/ris.mod; echo $?)"
+say "init kemal writes its files into the current directory" \
+  "$([ "$(ls here | LC_ALL=C sort | tr '\n' ' ')" = "AGENTS.md SPEC.md SPEC_CHANGELOG.md kemal.ri ris.mod test " ] && grep -q '^module kemal$' here/ris.mod; echo $?)"
 "$IYI" init github.com/me/iyi-web dash > dash.txt 2>&1
 say "a repository name with - is a module name with _" \
   "$([ -f dash/iyi_web.ri ] && grep -q '^module iyi_web$' dash/iyi_web.ri; echo $?)"
@@ -134,7 +141,7 @@ say "--help is init's own usage" "$(head -1 help.txt | grep -q '^Usage: .* init 
 "$IYI" help > top.txt 2>&1
 init_line="$(grep -m1 '^ *init ' top.txt)"
 say "iyi help's init line names what init writes, and nothing it does not" \
-  "$(echo "$init_line" | grep -q 'ris.mod' && ! echo "$init_line" | grep -qE 'main\.iyi|test'; echo $?)"
+  "$(echo "$init_line" | grep -q 'ris.mod' && echo "$init_line" | grep -q 'SPEC.md' && ! echo "$init_line" | grep -qE 'main\.iyi'; echo $?)"
 
 echo
 if [ "$status" -eq 0 ]; then

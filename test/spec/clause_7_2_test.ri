@@ -1,0 +1,5 @@
+# spec: 7.2@d367aea4
+# SPEC 7.2 has no test that names it. Find the gate that proves it
+# (test/ris/check.sh, test/cli/) and tag it `# spec: 7.2@d367aea4`, or write
+# one; then delete this file.
+todo "7.2 untested: The data types are String, Array, Hash and"

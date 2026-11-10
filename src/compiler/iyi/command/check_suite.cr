@@ -1,10 +1,10 @@
 # ris: `ris check` — one verb that says whether the work is done.
 #
-# `ris check PART` runs one part in this process: format, deps, types,
-# unused or test, each an existing verb's verdict. Bare `ris check` runs
+# `ris check PART` runs one part in this process: format, deps, spec,
+# types, unused or test, each an existing verb's verdict. Bare `ris check` runs
 # every part by spawning the public `ris check PART ...` forms: every verb
 # ends in `exit`, so running one in this process would end the run at the
-# first part. format and deps run first, in order; types, unused and test
+# first part. format, deps and spec run first, in order; types, unused and test
 # then run at once. The report shows the first failure in this fixed order
 # and names the command that fixes it.
 #
@@ -16,7 +16,7 @@ class Iyi::Command
   OK_STEP_WIDTH = 7
   OK_TIME_WIDTH = 11
 
-  CHECK_PARTS = %w(format deps types unused test)
+  CHECK_PARTS = %w(format deps spec types unused test)
 
   private record OkStep, name : String, runs : Array(Array(String)),
     next_hint : String
@@ -89,6 +89,12 @@ class Iyi::Command
       elsif !{"ris.mod", "iyi.mod"}.any? { |m| File.file?(m) }
         "no ris.mod here"
       end
+    when "spec"
+      if !paths.empty?
+        "a PATH was given"
+      elsif !(root = spec_root) || !spec_present?(root)
+        "no SPEC.md"
+      end
     when "types"
       "nothing to check" if affected.empty? && ok_targets(paths).empty?
     when "unused"
@@ -115,6 +121,8 @@ class Iyi::Command
     when "deps"
       options.replace(fix ? [] of String : ["--check"])
       mod_tidy
+    when "spec"
+      spec_check
     when "types"
       if fix
         # A named file or directory is fixed as given: fix.cr walks one.
@@ -219,6 +227,7 @@ class Iyi::Command
     again = "then run #{name} check#{shown} again"
     case part
     when "format", "deps" then "#{name} check --fix#{shown}"
+    when "spec"           then "fix what the lines above name (#{name} spec lists the clauses), #{again}"
     when "types"          then "#{name} check types --fix#{shown}"
     when "unused"         then "use or remove the unreachable methods named above, #{again}"
     else                       "fix the failing test, #{again}"
@@ -241,7 +250,7 @@ class Iyi::Command
         args.concat(["-j", jobs]) if jobs
         args.concat(affected_flags)
       end
-      args.concat(paths) unless part == "deps"
+      args.concat(paths) unless part.in?("deps", "spec")
       runs = check_skip(part, paths, affected) ? [] of Array(String) : [args]
       OkStep.new(part, runs, check_next_hint(part, paths))
     end
@@ -253,14 +262,14 @@ class Iyi::Command
     started = Time.instant
     output = ""
 
-    # format and deps run first, in order; types, unused and test then run
+    # format, deps and spec run first, in order; types, unused and test run
     # at once. The lines and the failure shown are those of the first
     # failing step in this order, as if the steps ran one by one.
     runners = steps.map { |step| OkRunner.new(step, exe) }
     serial = true
     runners.each do |runner|
       next if runner.step.runs.empty?
-      serial = false unless {"format", "deps"}.includes?(runner.step.name)
+      serial = false unless {"format", "deps", "spec"}.includes?(runner.step.name)
       if serial
         runner.run
         break unless runner.passed?
@@ -501,12 +510,14 @@ class Iyi::Command
           format   the .ri files are formatted
           deps     ris.mod and ris.sum match the imports (only with no
                    PATH and a ris.mod in the current directory)
+          spec     the spec's clauses and their tests agree (SPEC 6.8;
+                   only with no PATH and a SPEC.md)
           types    each target type-checks: the manifest's root module,
                    else every non-test .ri file, or the files named
           unused   no method of a target is unreachable
           test     every *_test.ri passes
 
-      With no PART every part runs: format and deps first, then types,
+      With no PART every part runs: format, deps and spec first, then types,
       unused and test at once. One line per part with its wall time,
       in this order; `skip` when it has nothing to do, `stopped` when
       an earlier failure killed it. The first failure shows its output
