@@ -79,6 +79,36 @@ spec blocks work.
 
 D10. Later work is listed in section 9, not designed here.
 
+D11 (was Q1). The spec section starts at the first `spec N.M` block;
+there is no bare `spec` line. A test-only import goes after the first
+block (5.4).
+
+D12 (was Q2). v1 has `blog.run(args, stdin:)` and `blog.file(path,
+text)` (5.7). A text check in a spec block uses the existing `=~` with
+a Regex (std/regex); the suggested form is `%r{...}`, so HTML needs no
+escaped `/` (the lexer already reads `%r` with `{`, `(`, `[`, `<` or
+`|`: lexer.cr, delimiter_state_for_percent_literal). There is no `~`,
+and examples do not use `includes?`. A failing `=~` line prints the
+pattern and the text (5.2).
+
+D13 (was Q3). No special refusal for `x = a == b`. An assignment line
+is never an assertion, and the type check already refuses most such
+lines. A spec block with no assertion line is an error: "spec 1.2 at
+post.ri:19 checks nothing; add a line that is a Bool" (5.2).
+
+D14 (was Q4). One rule lives in one clause; other clauses refer to it
+by number. blog-demo gets `1.5 A post needs a title and some text.`
+(proved in post.ri), and 3.4 becomes `A post that is not valid (1.5)
+is refused with 422; nothing is written.` (proved in site.ri). The
+planned AGENTS.md text says so (5.13).
+
+D15. A block may carry its clause text as a comment:
+`spec 1.5  # A post needs a title and some text.` The tools keep it:
+`ris check --fix` writes or refreshes it from SPEC.md, and `ris check`
+fails on a stale one. It is optional, but when present must match
+(5.15). It is a label, not a review: `ris spec ack` is still needed
+after a clause changes.
+
 ## 3. Goals and non-goals
 
 Goals: a clause is proved next to the code that keeps it, private defs
@@ -100,13 +130,14 @@ matcher library beyond what section 8 asks; no result cache; no
     * 1.2 A title with no letters or digits gives the slug `post`.
     * 1.3 A post keeps its slug when its title changes.
     * 1.4 Two posts never share a slug; the second gets `-2`.
+    * 1.5 A post needs a title and some text.
     ## 3. Site
-    * 3.4 A post with an empty title is refused.
-    * 3.5 A refused post answers HTTP 422 with the reason in the body.
+    * 3.4 A post that is not valid (1.5) is refused with 422; nothing
+      is written.
     * 3.6 The front page lists posts, newest first.
 
-(Q4 asks to split today's 3.4, which mixes the model rule and the
-HTTP answer; the excerpt shows the split.)
+The rule for a valid post lives only in 1.5; 3.4 refers to it by
+number (D14).
 
 ### 4.2 End of post.ri
 
@@ -118,12 +149,13 @@ HTTP answer; the excerpt shows the split.)
       def self.slugify(title : String) : String
         ...
       end
-      def self.create(store : Store, title : String) : Post | Refusal
+      def self.create(store : Store, title : String,
+                      text : String) : Post | Refusal
         ...
       end
     end
 
-    spec 1.1
+    spec 1.1  # A post's slug is its title in lower case, words joined…
       Post.slugify("Tere Öö") == "tere-öö"
       Post.slugify("  two   words ") == "two-words"
     end
@@ -135,16 +167,17 @@ HTTP answer; the excerpt shows the split.)
 
     spec 1.4
       store = Store.new
-      Post.create(store, hello).as(Post).slug == "hello"
-      Post.create(store, hello).as(Post).slug == "hello-2"
+      Post.create(store, hello, "a").as(Post).slug == "hello"
+      Post.create(store, hello, "b").as(Post).slug == "hello-2"
+    end
+
+    spec 1.5  # A post needs a title and some text.
+      Post.create(Store.new, "", "text").is_a?(Refusal)
+      Post.create(Store.new, "   ", "text").is_a?(Refusal)
+      Post.create(Store.new, "Hello", "").is_a?(Refusal)
     end
 
     spec 3.4
-      Post.create(Store.new, "").is_a?(Refusal)
-      Post.create(Store.new, "   ").is_a?(Refusal)
-    end
-
-    spec 3.5
       todo "the model has no HTTP; site.ri proves it"
     end
 
@@ -152,9 +185,9 @@ HTTP answer; the excerpt shows the split.)
       "Hello"
     end
 
-`spec 3.5` here is only to show `todo`; 3.5 is proved in site.ri and
+`spec 3.4` here is only to show `todo`; 3.4 is proved in site.ri and
 blog.ri. A clause with one real block is covered even beside a todo
-block (5.14).
+block (5.14). The 1.1 comment is cut at a word to fit 80 columns (D15).
 
 ### 4.3 End of site.ri
 
@@ -163,10 +196,12 @@ block (5.14).
     import post
     ...
 
-    spec 3.5
-      answer = Site.handle(Request.post("/posts", "title="))
+    spec 3.4  # A post that is not valid (1.5) is refused with 422; nothing…
+      store = Store.new
+      answer = Site.new(store).handle(Request.post("/posts", "title="))
       answer.status_code == 422
-      answer.body.includes?("title")
+      answer.body =~ %r{<p class="error">[^<]*title}
+      store.empty?
     end
 
 ### 4.4 End of blog.ri (a program)
@@ -176,13 +211,13 @@ block (5.14).
     import site
     run(Site.new, port: ENV["PORT"].to_i)
 
-    spec 3.5
+    spec 3.4
       blog.post("/posts", form: {"title" => ""}).status_code == 422
     end
 
     spec 3.6
-      blog.post("/posts", form: {"title" => "Old"})
-      blog.post("/posts", form: {"title" => "New"})
+      blog.post("/posts", form: {"title" => "Old", "text" => "a"})
+      blog.post("/posts", form: {"title" => "New", "text" => "b"})
       page = blog.get("/").body
       page.index("New").not_nil! < page.index("Old").not_nil!
     end
@@ -204,9 +239,9 @@ directory, and waits until the port accepts. `blog.get` and
     1.2     covered     post.ri:19
     1.3     uncovered
     1.4     covered     post.ri:24
-    3.4     covered     post.ri:30
-    3.5     covered     site.ri:41, blog.ri:6
-            todo        post.ri:35
+    1.5     covered     post.ri:30
+    3.4     covered     site.ri:41, blog.ri:6
+            todo        post.ri:36
     3.6     covered     blog.ri:10
 
 `ris test` runs the blocks and gives pass, broken or todo:
@@ -214,7 +249,7 @@ directory, and waits until the port accepts. `blog.get` and
     $ ris test
     ok   1.1 post.ri:14  A post's slug is its title in lower ...
     FAIL 1.2 post.ri:19  A title with no letters or digits ...
-    TODO 3.5 post.ri:35  the model has no HTTP; site.ri proves it
+    TODO 3.4 post.ri:36  the model has no HTTP; site.ri proves it
     ...
     3 modules, 8 blocks: 6 ok, 1 broken, 1 todo
 
@@ -237,7 +272,8 @@ A spec block is a top-level declaration of exactly this shape:
     end
 
 - N.M is a clause number literal: digits, a dot, digits (also N.M.K
-  if SPEC.md nests). Nothing else may follow it on the line.
+  if SPEC.md nests). Nothing else may follow it on the line but a
+  comment, the clause text's label (D15, 5.15).
 - `spec` at the start of a top-level line is reserved for this form.
   Any other shape there is an error with the fix:
   `spec "text"` ("a spec block names a SPEC.md clause: `spec 1.2`;
@@ -281,8 +317,16 @@ panic.
   becomes an assertion too; write `_ = set.add?(x)` to drop it. When
   such a line fails the message names the fix: "line 12 is a Bool, so
   it is checked; write `_ = ...` to run it without checking".
-- An assignment at the top level is not an assertion, even of a Bool
-  (`ok = x > 1`). See Q3 for `a.b = c == d`.
+- An assignment at the top level is never an assertion, even of a
+  Bool (`ok = x > 1`); there is no special refusal for `a.b = c == d`
+  (D13): the type check already refuses most such lines.
+- A text check is `text =~ %r{...}` (D12). `String#=~` returns
+  `Int32?`, not Bool, so a top-level `a =~ b` line with a Regex on
+  either side is an assertion as its own form: it is lowered to
+  `__ris_spec_match(a, b, TEXT, FILE, LINE)`, which fails when the
+  match is nil and prints the pattern and the text.
+- A block with no assertion line and no `todo` is refused (D13):
+  "spec 1.2 at post.ri:19 checks nothing; add a line that is a Bool".
 
 ### 5.3 todo
 
@@ -303,7 +347,7 @@ count.
 ### 5.4 Place: the spec section
 
 The first `spec` block starts the file's spec section; it runs to the
-end of the file (Q1 asks whether a bare `spec` line should open it).
+end of the file (D11; there is no bare `spec` line).
 The section may hold only spec blocks, `import` lines (test-only,
 5.6) and `private def` helpers.
 
@@ -377,9 +421,14 @@ For a file with top-level code and spec blocks, `ris test FILE`:
   returned; a non-2xx answer is not a failure by itself.
 - `stdout : String`, `stderr : String`: what the process has written
   so far.
-- CLI programs: `run` (Q2) would start the binary with arguments and
-  stdin, wait for exit and return stdout, stderr and status; no port
-  wait. Not in the design until Q2 is answered.
+- `file(path : String, text : String)`: writes *text* to *path* under
+  the block's temp directory (parents made). Only before first use;
+  after start it breaks the block with the same fix as `env`.
+- `run(args = [] of String, stdin : String = "") : RisRun`: for CLI
+  programs; starts the binary with *args* and *stdin* in the temp
+  directory, waits for exit (the block's timeout applies) and returns
+  `stdout`, `stderr` and `status : Int32`. No port wait. Each `run`
+  is a new process; `env` and `file` apply to it.
 - At the block's end the harness sends SIGTERM, waits 2 s, then
   SIGKILL, and removes the temp directory. A block that never uses the
   handle starts nothing.
@@ -393,7 +442,7 @@ A local, parameter or helper named like the module is refused in the
 spec section: "`blog` is the running program in a spec block; rename
 the local".
 
-Section 8 (Q2) asks about `blog.file` and `blog.run(args, stdin:)`.
+`file` and `run` are in v1 (D12).
 
 ### 5.8 The test program and verdicts
 
@@ -498,8 +547,9 @@ Instead init writes no test/. demo.ri ends with:
 
 and init writes spec.lock with 1.1's line. AGENTS.md's text and the
 usage text (init.cr:223-234) teach spec blocks instead of tags.
-SPEC.md and SPEC_CHANGELOG.md are unchanged. If Q2 adds `run`, the
-block becomes `demo.run.stdout == "hello from demo\n"`.
+SPEC.md and SPEC_CHANGELOG.md are unchanged. With `run` in v1 (D12)
+and step 7 after step 4, init writes a real check instead of the
+todo: `demo.run.stdout == "hello from demo\n"`.
 
 ### 5.12 Tools
 
@@ -511,11 +561,14 @@ block becomes `demo.run.stdout == "hello from demo\n"`.
 
 ### 5.13 SPEC and upstream
 
-SPEC.md gets clauses for 5.1 to 5.12 and 5.14 with a SPEC_CHANGELOG
+SPEC.md gets clauses for 5.1 to 5.12, 5.14 and 5.15 with a SPEC_CHANGELOG
 entry naming this folder. AGENTS.md (its `# spec: N.M@VERSION` and
 test/spec/ rule) and spec-cli's tag sections (6.7 to 6.9) are
 rewritten for spec blocks in step 6. Spec blocks do not need tape:
 list them in UPSTREAM.md for iyi.
+
+The planned AGENTS.md text also gains (D14): "A rule lives in one
+clause; other clauses refer to it by number."
 
 ### 5.14 Clause states
 
@@ -530,10 +583,31 @@ today's names (SPEC_STATUSES, spec_clauses.cr:394):
 Pass, broken and todo outcomes come only from `ris test`. `ris check`
 runs both, so a covered clause with a broken block still fails it.
 
+### 5.15 The clause label
+
+A block's line may end in a comment holding the clause text (D15):
+
+    spec 1.5  # A post needs a title and some text.
+
+The label is optional; when present it must match SPEC.md. The clause
+text is whitespace-collapsed as for the hash (5.10). If the line would
+pass 80 columns, the text is cut at the last whole word that fits and
+ends in `…`; a label matches when it equals that cut form.
+
+- `ris check --fix` writes a missing label and refreshes a stale one.
+- `ris check` (its spec step) fails on a stale label: "the label of
+  spec 1.5 at post.ri:30 differs from SPEC.md; run `ris check --fix`".
+  A block without a label passes.
+- A label is not a review. Refreshing it does not touch spec.lock:
+  after a clause changes, `ris spec ack N.M` is still needed (5.10).
+
+Step 6 builds it, beside spec.lock: both read the clause text.
+
 ## 6. Steps, each with a gate in test/cli/
 
-1. Shared walk (5.9), B1. Gate: a failing test under lib/ and one in
-   a dot dir; `ris test` passes.
+1. Shared walk (5.9), B1. Gate (test/cli/test_walk.sh): a failing
+   test under lib/, mods/ and a dot dir; `ris test` passes and runs
+   only the root one.
 2. Grammar, place, strip (5.1, 5.4, 5.6 strip only), formatter, doc.
    Gate: `ris build` binary has no block's string; each refused shape
    gives its message; format leaves a block unchanged; doc omits it.
@@ -552,8 +626,12 @@ runs both, so a covered clause with a broken block still fails it.
    fails `ris check spec`; `ris spec ack` clears it even with a stale
    old `@V` tag on the clause; an orphan lock line fails; after
    `ris spec ack --from-tags` ris's own `ris check spec` is green.
+   Also the clause label (5.15): `ris check --fix` writes and
+   refreshes it; a stale label fails `ris check`; a long clause is
+   cut at a word with `…` within 80 columns; a fresh label alone
+   does not clear "to review".
 7. `ris init` (5.11). Gate: `ris init demo`, then `ris check` is
-   green with 1.1 todo, and no test/ exists.
+   green with 1.1 covered by `demo.run` (D12), and no test/ exists.
 8. Remove `test "x" do` (D9) once ris's own test/ is moved. Gate:
    `ris check` green with test/ holding only test/cli/ and test/speed/.
 
@@ -569,24 +647,7 @@ runs both, so a covered clause with a broken block still fails it.
 
 ## 8. Open questions for the user
 
-- Q1. How the spec section starts: at the first `spec N.M` block, or a
-  bare `spec` line that opens it, so test-only imports and helpers sit
-  clearly below it. Recommendation: the first `spec N.M` block; a
-  test-only import goes after the first block. One less form.
-- Q2. First-version extras: `a ~ b` (contains a String or matches a
-  Regex, prints both on failure); `blog.file(path, text)` to seed the
-  temp directory before start;
-  `blog.run(args = [] of String, stdin = "")` returning stdout, stderr
-  and exit status for CLI programs. Recommendation: `run` in v1, so
-  init's demo gets a real check, not a todo; `~` and `file` later
-  (`includes?` and a helper writing into the temp dir do the job).
-- Q3. Refuse a spec line that is an assignment and a comparison at
-  once (`post.title = "A" == "A"` assigns true, checks nothing).
-  Recommendation: refuse, with the fix "write the assignment, then
-  `post.title == \"A\"` on its own line".
-- Q4. blog-demo's clause 3.4 mixes a model rule and HTTP 422.
-  Recommendation: split it into 3.4 (refused) and 3.5 (422 answer), as
-  4.1 shows.
+None: Q1 to Q4 were answered as D11 to D14.
 
 ## 9. Follow-up, not this draft
 

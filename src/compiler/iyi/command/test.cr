@@ -98,15 +98,11 @@ class Iyi::Command
       # path at all means the working directory on purpose; "" is not that.
       abort! "test takes paths, and '' is not one (no path at all runs the working directory)", :USAGE_ERROR if path.empty?
       if File.directory?(path)
-        # The pattern is built in posix form because a backslash is an escape
-        # character in a glob, not a separator: `C:\dir\**\*_test.iyi` matched
-        # nothing, so `iyi test` in a directory of tests found no tests.
-        # The extension in any case, so that `x_test.IYI` is refused below
-        # rather than walked past: "no *_test.iyi found" in a directory of
-        # one test (`Lexer.iyi_miscased?`).
-        Dir.glob(Iyi.glob_root(path).join("**", "*_test.[iI][yY][iI]")) { |file| files << file }
-        # ris: and its own `.ri` tests.
-        Dir.glob(Iyi.glob_root(path).join("**", "*_test.[rR][iI]")) { |file| files << file }
+        # ris: one walk (project_walk.cr) that skips lib/, mods/ and dot
+        # directories; a glob ran the tests under lib/ (bug B1). The suffix
+        # matches in any case, so `x_test.IYI` is refused below rather than
+        # walked past (`Lexer.iyi_miscased?`).
+        project_walk(path, files) { |name| test_program_name?(name) }
       elsif File.file?(path)
         # As stored: `X_TEST.IYI` typed on Windows for `x_test.iyi` is it.
         files << Lexer.stored_name(path)
