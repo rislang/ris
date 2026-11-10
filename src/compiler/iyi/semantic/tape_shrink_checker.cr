@@ -2820,8 +2820,9 @@ class Iyi::TapeShrinkChecker
       # be copied, so forwarding the original is conservative. The global
       # wrapper must not turn an implicit self into a result dependency.
       if node.global? && node.name == TapeScopeChecker::RESULT &&
-         !@text_only && flat_result?(node.type?)
-        # A flat result (a String, an Array, a union of them) moves down
+         !@text_only && node.type?.try(&.remove_typedef).is_a?(UnionType) &&
+         flat_result?(node.type?)
+        # A flat union result (a String or an Array member) moves down
         # whole: it is the value handed in, which a def with several
         # returns answers as one with a single call does (SPEC 1.9).
         return args.last? || EMPTY
