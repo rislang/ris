@@ -79,9 +79,6 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
   the receiver in a local. Check it where it is made.
 
 
-* A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
-  is refused: the block frees its scratch before the task copy takes
-  the value. Copy the value at the boundary before the reset.
 * The call graph's `fresh?` takes a call's String-or-error union as
   fresh when any path allocates (an error sentence's interpolation),
   though every String it answers views the parser (toml's
