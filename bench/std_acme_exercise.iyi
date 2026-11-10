@@ -76,7 +76,7 @@ module RisExerciseServer
     raise "stop queue full" unless RisBoard.post(RisStop(H).new)
   end
 
-  def self.serve(port : Int32, config : C, handler : H.class,
+  def self.answer(port : Int32, config : C, handler : H.class,
                  stream_bodies : Bool = false, compress : Bool = false,
                  timeout_ms : Int32 = 60000,
                  request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
@@ -88,7 +88,7 @@ module RisExerciseServer
       pool.spawn do
         copied = RisBoard.take(RisConfig(C, H))
         unless copied.is_a?(Cancelled)
-          Server.serve("127.0.0.1", port, copied.value, handler,
+          Server.answer("127.0.0.1", port, copied.value, handler,
             stream_bodies: stream_bodies, compress: compress,
             timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
             max_connections: max_connections)
@@ -311,11 +311,18 @@ class RisAcmeScriptHandler
     @tls
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     response = @script.answer(req)
     @script.publish
-    response
+    res.status = response.status
+    response.headers.each { |name, value| res.header(name, value) }
+    res.body << response.body
   end
+end
+
+# A request for http-01's *token* by *method*.
+def challenge(method : String, token : String) : Incoming
+  Incoming.new(method, "/.well-known/acme-challenge/#{token}", nil, Array(Field).new, "")
 end
 
 class RisAcmeChallengeHandler
@@ -329,7 +336,7 @@ class RisAcmeChallengeHandler
     RisExerciseServer.ready(RisAcmeChallengeHandler)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     loop do
       got = RisBoard.poll(RisAcmeChallenge)
       break if got.is_a?(Cancelled)
@@ -337,7 +344,9 @@ class RisAcmeChallengeHandler
       break unless update
       @responder.add(ris_heap_text(update.token), ris_heap_text(update.authorization))
     end
-    @responder.answer(req) || Response.new(404, "not a challenge")
+    return if @responder.answer(req, res)
+    res.status = 404
+    res.body << "not a challenge"
   end
 end
 
@@ -351,7 +360,7 @@ import std/p256::{P256PrivateKey}
 import std/p384::{P384PrivateKey}
 import std/curve25519::{Ed25519PublicKey}
 import std/asn1::{Der, DerValue, Asn1Error}
-import std/http::{HTTP, HTTPClient, Request, Response, Server}
+import std/http::{HTTP, HTTPClient, Incoming, Outgoing, Field, Response, Server}
 import std/socket::{IyiSocket}
 import std/tls::{TlsServer, TlsServerConfig, TlsConfig, TlsError}
 import std/json::{JSON, Any}
@@ -613,17 +622,16 @@ def pure_checks : Nil
   puts "\n== http-01's responder, dns-01's name, Retry-After"
   responder = AcmeHttp01.new
   responder.add("tok-1", "tok-1.thumb")
-  none = {} of String => String
-  hit = responder.answer(Request.new("GET", "/.well-known/acme-challenge/tok-1", nil, none, ""))
-  check !hit.nil? && hit.status == 200 && hit.body == "tok-1.thumb", "http-01: a held token is answered with its key authorization"
-  miss = responder.answer(Request.new("GET", "/.well-known/acme-challenge/tok-2", nil, none, ""))
-  check !miss.nil? && miss.status == 404, "http-01: a token not held is 404"
-  check responder.answer(Request.new("GET", "/index.html", nil, none, "")).nil?, "http-01: another path is the server's own"
-  posted = responder.answer(Request.new("POST", "/.well-known/acme-challenge/tok-1", nil, none, ""))
-  check !posted.nil? && posted.status == 405, "http-01: a POST is 405"
+  hit = Outgoing.new
+  check responder.answer(challenge("GET", "tok-1"), hit) && hit.status == 200 && hit.body.to_s == "tok-1.thumb", "http-01: a held token is answered with its key authorization"
+  miss = Outgoing.new
+  check responder.answer(challenge("GET", "tok-2"), miss) && miss.status == 404, "http-01: a token not held is 404"
+  check !responder.answer(Incoming.new("GET", "/index.html", nil, Array(Field).new, ""), Outgoing.new), "http-01: another path is the server's own"
+  posted = Outgoing.new
+  check responder.answer(challenge("POST", "tok-1"), posted) && posted.status == 405, "http-01: a POST is 405"
   responder.remove("tok-1")
-  gone = responder.answer(Request.new("GET", "/.well-known/acme-challenge/tok-1", nil, none, ""))
-  check !gone.nil? && gone.status == 404, "http-01: a token removed is 404"
+  gone = Outgoing.new
+  check responder.answer(challenge("GET", "tok-1"), gone) && gone.status == 404, "http-01: a token removed is 404"
   check AcmeClient.dns_name("*.iyi-acme.example") == "_acme-challenge.iyi-acme.example", "dns-01: a wildcard's TXT goes under its base domain"
   # A whole second: an HTTP-date has no fraction of one.
   now = Time.unix(Time.utc.to_unix)
@@ -742,7 +750,7 @@ class Script
 
   # The JWS in *req* checked - its nonce, url, jwk or kid, and ES256
   # signature - or the problem it is answered with.
-  def verify(req : Request, need_jwk : Bool) : Signed | Response
+  def verify(req : Incoming, need_jwk : Bool) : Signed | Response
     fields = JSON.parse(req.body).as_h
     head = fields["protected"].as_s
     body = fields["payload"].as_s
@@ -796,7 +804,7 @@ class Script
     "{\"status\":\"#{status}\",\"identifier\":{\"type\":\"dns\",\"value\":\"#{NAMES[n]}\"},\"challenges\":[#{challenge}]}"
   end
 
-  def answer(req : Request) : Response
+  def answer(req : Incoming) : Response
     @requests = @requests + 1
     path = req.path
     if path == "/dir"
@@ -1107,7 +1115,7 @@ def scripted_checks : Nil
   base = "https://localhost:#{listener}"
   group do |g|
     g.spawn do
-      RisExerciseServer.serve(listener, {base.as_tape, pem.as_tape}, RisAcmeScriptHandler, max_connections: 1)
+      RisExerciseServer.answer(listener, {base.as_tape, pem.as_tape}, RisAcmeScriptHandler, max_connections: 1)
       0
     end
     RisExerciseServer.wait(RisAcmeScriptHandler)
@@ -1241,7 +1249,7 @@ def pebble(args : Array(String)) : Nil
   retries = 0
   group do |g|
     g.spawn do
-      RisExerciseServer.serve(http_port, 0, RisAcmeChallengeHandler, max_connections: 1)
+      RisExerciseServer.answer(http_port, 0, RisAcmeChallengeHandler, max_connections: 1)
       0
     end
     RisExerciseServer.wait(RisAcmeChallengeHandler)

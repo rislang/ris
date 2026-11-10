@@ -14,7 +14,7 @@ back.
 
 * Explain a bare `out` in an argument as FFI syntax and suggest `output`
   for a local name; point at `out`, not the following token. Gate:
-  compiler parser specs for iyi and ris source.
+  compiler parser tests for iyi and ris source.
 
 * Tuple#< compares members lexicographically, then equal-prefix lengths,
   so Array#sort_by accepts tuple keys. Gate: trial/tuple_order.ri.
@@ -32,7 +32,7 @@ back.
 
 * ris removed iyi's Crystal program compatibility mode, shard binding
   commands and tree migration command, including their options, samples,
-  fixtures, specs and documentation. There is no transition path. Resolve
+  fixtures, tests and documentation. There is no transition path. Resolve
   future iyi merge conflicts by deleting these features. Artifact format
   v60 drops the old library selector byte and refuses older artifacts.
   The default installer ships ris and its prelude, without the Crystal
@@ -61,7 +61,7 @@ back.
   are Nil for Done, TimedOut or Cancelled. `value` still reads the result.
 
 * Migration bang rewrites: narrow the optional definition-name capture
-  before checking or removing its bang suffix in the compiler spec build.
+  before checking or removing its bang suffix in the compiler test build.
 
 * Channel: waking a receiver does not release a buffered slot, so the
   ring never grows; a full send parks and a receive refills its slot.
@@ -90,7 +90,7 @@ back.
 
 * Cleanup reads current receivers; recursive panic and task caps are fatal.
   Fault dispositions use stack storage; signal flags survive a full pipe.
-* CLI env specs: clear inherited `IYI_CACHE_DIR` when checking the Crystal
+* CLI env tests: clear inherited `IYI_CACHE_DIR` when checking the Crystal
   fallback, and check that iyi's variable wins when both are set.
 * Refuse integer `/` directly in interpolation or before `to_s`, naming
   `//` and `a.to_f / b`. Tape interpolation stays in ris.
@@ -146,7 +146,7 @@ back.
   written on web (2026-10-17).
 * `String#[]` indexes bytes while `size` counts characters: at least say
   so in the docs and in a hint; a decision for iyi.
-* `-Dgc_none` by default (`017ec91d3`): building `compiler_spec --release`
+* `-Dgc_none` by default (`017ec91d3`): building `compiler_test --release`
   passed 59GB, `Killed`. ris keeps bdw-gc; `gc_none=1` opts out.
 * `editors/vim`: named arguments and keys (`user_id: x`, `{id: 1}`) as
   Ruby's symbols, `iyiNamedArgument`, with its tests.

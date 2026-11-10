@@ -1152,7 +1152,7 @@ fi
 echo
 echo "== TLS resumption: an HTTPClient's tickets (bench/std_http_resume.iyi)"
 # A second connection to an origin resumes by a ticket the first was sent:
-# std/http's own server says so (`Request#tls_resumed?`), and so does
+# std/http's own server says so (`Incoming#tls_resumed?`), and so does
 # OpenSSL's s_server, whose -www page reads "Reused, TLSv1.3" as the tls
 # gate reads it. Whom a ticket goes to is read from what the server did
 # with the ClientHello and from the ClientHello's own bytes: three of the
@@ -2310,7 +2310,7 @@ fi
 
 echo
 echo "== HTTPS: the server over std/tls (Ed25519 and P-256 certificates, ALPN h2 and http/1.1)"
-# `Server.serve(tls:)`: the exercise's server behind TlsServer, asked by
+# `Server.answer` over TLS: the exercise's server behind TlsServer, asked by
 # the iyi client over h2 and over http/1.1, curl both ways, Node's client
 # (100 GETs and 20 uploads at once under a 1000-byte window), Python
 # reading an HTTP/1.0 answer to the end - which must close with
@@ -2480,7 +2480,7 @@ fi
 
 echo
 echo "== HTTPS: the server's connection cap and request deadline"
-# `Server.serve(tls:, max_connections: 2, timeout_ms: 3000,
+# `Server.answer(max_connections: 2, timeout_ms: 3000, a tls_config,
 # request_timeout_ms: 5000)` (http2_exercise's serve-guarded, the P-256
 # leaf) against slow clients written here over Python's ssl. Two
 # connections hold both places and a third is queued, not refused: its
@@ -2775,29 +2775,34 @@ PY
 cat > "$WORK/proxy_origin.iyi" <<'IYI'
 module main
 
-import std/http::{HTTP, Server, Response, Request, TlsStream}
+import std/http::{HTTP, Server, Incoming, Outgoing, TlsStream}
 import std/websocket::{WebSocket, Message}
 import std/socket::{IyiSocket}
 import std/tls::{TlsServerConfig}
 import std/file::{File}
 
-def told(req : Request) : Response
-  return talked(req) if req.path == "/ws"
-  Response.new(200, "#{req.method} #{req.path} #{req.query || "-"} #{req.version} host=#{req.header("Host")} proxy-auth=#{req.header("Proxy-Authorization") || "-"} length=#{req.body.bytesize}")
+def told(req : Incoming, res : Outgoing) : Nil
+  return talked(req, res) if req.path == "/ws"
+  res.body << req.method << " " << req.path << " " << (req.query || "-") <<
+    " " << req.version << " host=" << req.header("Host") << " proxy-auth=" <<
+    (req.header("Proxy-Authorization") || "-") << " length=" <<
+    req.body.bytesize
 end
 
 # A WebSocket that says what its handshake carried, echoes one message,
 # and waits for the client's close. What it says rides on the 101: the
 # connection runs after the request's tape.
-def talked(req : Request) : Response
-  answer = WebSocket.upgrade(req)
-  answer.headers["X-Said"] = "#{req.version} host=#{req.header("Host")} proxy-auth=#{req.header("Proxy-Authorization") || "-"}"
-  answer
+def talked(req : Incoming, res : Outgoing) : Nil
+  res.header("X-Said") do |w|
+    w << req.version << " host=" << req.header("Host") << " proxy-auth=" <<
+      (req.header("Proxy-Authorization") || "-")
+  end
+  WebSocket.upgrade(req, res)
 end
 
-def talk(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
-  WebSocket.serve(socket, leftover, response) do |ws|
-    ws.send(response.header("X-Said") || "")
+def talk(socket : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
+  WebSocket.serve(socket, leftover, res) do |ws|
+    ws.send(res.header("X-Said") || "")
     got = ws.receive
     ws.send("echo " + got.data) if got.is_a?(Message)
     ws.receive
@@ -2813,11 +2818,11 @@ class PlainOrigin
   def listening(port : Int32) : Nil
     raise "ready queue full" unless RisBoard.post(OriginReady.new)
   end
-  def call(req : Request) : Response
-    told(req)
+  def call(req : Incoming, res : Outgoing) : Nil
+    told(req, res)
   end
-  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
-    talk(socket, leftover, response)
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
+    talk(socket, leftover, res)
   end
 end
 
@@ -2845,13 +2850,13 @@ chain = Program.args[1]
 key = Program.args[2]
 group do |g|
   g.spawn do
-    Server.serve("127.0.0.1", plain, 0, PlainOrigin,
+    Server.answer("127.0.0.1", plain, 0, PlainOrigin,
       max_connections: 8)
     0
   end
   g.spawn do
     config = {File.read(chain).as_tape, File.read(key).as_tape}
-    Server.serve("127.0.0.1", secure, config, SecureOrigin,
+    Server.answer("127.0.0.1", secure, config, SecureOrigin,
       max_connections: 8)
     0
   end

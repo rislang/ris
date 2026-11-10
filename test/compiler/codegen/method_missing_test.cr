@@ -1,0 +1,434 @@
+require "../../test_helper"
+
+describe "Code gen: method_missing" do
+  it "does method_missing macro without args" do
+    run(<<-CODE).to_i.should eq(1)
+      class Foo
+        def foo_something
+          1
+        end
+
+        macro method_missing(call)
+          {{call.name.id}}_something
+        end
+      end
+
+      Foo.new.foo
+      CODE
+  end
+
+  it "does method_missing macro with args" do
+    run(<<-CODE).to_i.should eq(6)
+      class Foo
+        macro method_missing(call)
+          {{call.args.join(" &+ ").id}}
+        end
+      end
+
+      Foo.new.foo(1, 2, 3)
+      CODE
+  end
+
+  it "does method_missing macro with block" do
+    run(<<-CODE).to_i.should eq(6)
+      class Foo
+        def foo_something
+          yield 1
+          yield 2
+          yield 3
+        end
+
+        macro method_missing(call)
+          {{call.name.id}}_something {{call.block}}
+        end
+      end
+
+      a = 0
+      Foo.new.foo do |x|
+        a &+= x
+      end
+      a
+      CODE
+  end
+
+  it "does method_missing macro with block but not using it" do
+    run(<<-CODE).to_i.should eq(3)
+      class Foo
+        def foo_something
+          1 &+ 2
+        end
+
+        macro method_missing(call)
+          {{call.name.id}}_something {{call.block}}
+        end
+      end
+
+      Foo.new.foo
+      CODE
+  end
+
+  it "does method_missing macro with virtual type (1)" do
+    run(<<-CODE).to_string.should eq("Foococo")
+      class Foo
+        macro method_missing(call)
+          "{{@type.name.id}}{{call.name.id}}"
+        end
+      end
+
+      class Bar < Foo
+      end
+
+      foo = Foo.new || Bar.new
+      foo.coco
+      CODE
+  end
+
+  it "does method_missing macro with virtual type (2)" do
+    run(<<-CODE).to_string.should eq("Barcoco")
+      class Foo
+        macro method_missing(call)
+          "{{@type.name.id}}{{call.name.id}}"
+        end
+      end
+
+      class Bar < Foo
+      end
+
+      foo = Bar.new || Foo.new
+      foo.coco
+      CODE
+  end
+
+  it "does method_missing macro with virtual type (3)" do
+    run(<<-CODE).to_i.should eq(1)
+      class Foo
+        def lala
+          1
+        end
+
+        macro method_missing(call)
+          2
+        end
+      end
+
+      class Bar < Foo
+      end
+
+      foo = Bar.new || Foo.new
+      foo.lala
+      CODE
+  end
+
+  it "does method_missing macro with virtual type (4)" do
+    run(<<-CODE).to_i.should eq(2)
+      class Foo
+        macro method_missing(call)
+          1
+        end
+      end
+
+      class Bar < Foo
+        macro method_missing(call)
+          2
+        end
+      end
+
+      foo = Bar.new || Foo.new
+      foo.lala
+      CODE
+  end
+
+  it "does method_missing macro with virtual type (5)" do
+    run(<<-CODE).to_i.should eq(3)
+      class Foo
+        macro method_missing(call)
+          1
+        end
+      end
+
+      class Bar < Foo
+        macro method_missing(call)
+          2
+        end
+      end
+
+      class Baz < Bar
+        macro method_missing(call)
+          3
+        end
+      end
+
+      foo = Baz.new || Bar.new || Foo.new
+      foo.lala
+      CODE
+  end
+
+  it "does method_missing macro with virtual type (6)" do
+    run(<<-CODE).to_i.should eq(2)
+      abstract class Foo
+      end
+
+      class Bar < Foo
+        macro method_missing(call)
+          2
+        end
+      end
+
+      class Baz < Bar
+        def lala
+          3
+        end
+      end
+
+      foo = Bar.new || Baz.new
+      foo.lala
+      CODE
+  end
+
+  it "does method_missing macro with virtual type (7)" do
+    run(<<-CODE).to_i.should eq(3)
+      abstract class Foo
+      end
+
+      class Bar < Foo
+        macro method_missing(call)
+          2
+        end
+      end
+
+      class Baz < Bar
+        def lala
+          3
+        end
+      end
+
+      foo = Baz.new || Bar.new
+      foo.lala
+      CODE
+  end
+
+  it "does method_missing macro with virtual type (8)" do
+    run(<<-CODE).to_string.should eq("Bar")
+      class Foo
+        macro method_missing(call)
+          {{@type.name.stringify}}
+        end
+      end
+
+      class Bar < Foo
+      end
+
+      foo = Foo.new
+      foo.coco
+
+      bar = Bar.new
+      bar.coco
+      CODE
+  end
+
+  it "does method_missing macro with module involved" do
+    run(<<-CODE).to_i.should eq(1)
+      module Moo
+        def lala
+          1
+        end
+      end
+
+      class Foo
+        include Moo
+
+        macro method_missing(call)
+          2
+        end
+      end
+
+      Foo.new.lala
+      CODE
+  end
+
+  it "does method_missing macro with top level method involved" do
+    run(<<-CODE).to_i.should eq(1)
+      def lala
+        1
+      end
+
+      class Foo
+        macro method_missing(call)
+          2
+        end
+
+        def bar
+          lala
+        end
+      end
+
+      foo = Foo.new
+      foo.bar
+      CODE
+  end
+
+  it "does method_missing macro with included module" do
+    run(<<-CODE).to_string.should eq("Foo")
+      module Moo
+        macro method_missing(call)
+          {{@type.name.stringify}}
+        end
+      end
+
+      class Foo
+        include Moo
+      end
+
+      Foo.new.coco
+      CODE
+  end
+
+  it "does method_missing with assignment (bug)" do
+    run(<<-CODE).to_i.should eq(1)
+      class Foo
+        macro method_missing(call)
+          x = {{call.args[0]}}
+          x
+        end
+      end
+
+      foo = Foo.new
+      foo.bar(1)
+      CODE
+  end
+
+  it "does method_missing with assignment (2) (bug)" do
+    run(<<-CODE).to_i.should eq(1)
+      struct Nil
+        def to_i!
+          0
+        end
+      end
+
+      class Foo
+        @x : Int32?
+
+        macro method_missing(call)
+          @x = {{call.args[0]}}
+          @x
+        end
+      end
+
+      foo = Foo.new
+      foo.bar(1).to_i!
+      CODE
+  end
+
+  it "does method_missing macro without args (with call)" do
+    run(<<-CODE).to_i.should eq(1)
+      class Foo
+        def foo_something
+          1
+        end
+
+        macro method_missing(call)
+          {{call.name.id}}_something
+        end
+      end
+
+      Foo.new.foo
+      CODE
+  end
+
+  it "does method_missing macro with args (with call)" do
+    run(<<-CODE).to_i.should eq(6)
+      class Foo
+        macro method_missing(call)
+          {{call.args.join(" &+ ").id}}
+        end
+      end
+
+      Foo.new.foo(1, 2, 3)
+      CODE
+  end
+
+  it "forwards" do
+    run(<<-CODE).to_i.should eq(6)
+      class Wrapped
+        def foo(x, y, z)
+          x &+ y &+ z
+        end
+      end
+
+      class Foo
+        def initialize(@wrapped : Wrapped)
+        end
+
+        macro method_missing(call)
+          @wrapped.{{call}}
+        end
+      end
+
+      Foo.new(Wrapped.new).foo(1, 2, 3)
+      CODE
+  end
+
+  it "does method_missing generating method" do
+    run(<<-CODE).to_string.should eq("bar")
+      class Foo
+        macro method_missing(call)
+          def {{call.name}}
+            {{call.name.stringify}}
+          end
+        end
+      end
+
+      Foo.new.bar
+      CODE
+  end
+
+  it "works with named arguments (#3654)" do
+    run(<<-CODE).to_i.should eq(3)
+      class A
+        macro method_missing(call)
+          {{call.named_args[0].value}} &+
+            {{call.named_args[1].value}}
+        end
+      end
+
+      a = A.new
+      a.b(x: 1, y: 2)
+      CODE
+  end
+
+  it "works with named arguments that aren't legal variable names (#10381)" do
+    run(<<-CODE).to_i.should eq(3)
+      class A
+        macro method_missing(call)
+          {{call.named_args[0].value}} &+
+            {{call.named_args[1].value}}
+        end
+      end
+
+      a = A.new
+      a.b("@x": 1, Y: 2)
+      CODE
+  end
+
+  it "finds method_missing with 'with ... yield'" do
+    run(<<-CODE).to_i.should eq(10)
+      class Foo
+        def initialize(@x : Int32)
+        end
+
+        macro method_missing(call)
+          @{{call.name.id}}
+        end
+      end
+
+      def bar
+        foo = Foo.new(10)
+        with foo yield
+      end
+
+      bar do
+        x
+      end
+      CODE
+  end
+end

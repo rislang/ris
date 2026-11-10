@@ -28,7 +28,7 @@ import std/autocert::{Autocert, AutocertConfig, AutocertView,
   AutocertDirCache, AutocertError, RisAutocertHeld}
 import std/x509::{Certificate, SigningKey, X509Error}
 import std/ecdsa::{EcdsaPublicKey, EcdsaCurve}
-import std/http::{HTTP, Request, Response, Server}
+import std/http::{HTTP, Incoming, Outgoing, Field, Response, Server}
 import std/socket::{IyiSocket}
 import std/tls::{TlsConfig, TlsError, TlsIdentity, TlsVersion, TlsAlert, TlsServer, TlsClient, TlsServerConfig}
 import std/file::{File}
@@ -90,9 +90,9 @@ class AutocertBenchHandler
     File.write(@ready, "ready\n") unless @ready.empty?
   end
 
-  def call(request : Request) : Response
-    @view.answer(request) || Response.new(200,
-      "orders #{@view.orders} renewals #{@view.renewals}\n")
+  def call(req : Incoming, res : Outgoing) : Nil
+    return if @view.answer(req, res)
+    res.body << "orders " << @view.orders << " renewals " << @view.renewals << "\n"
   end
 end
 
@@ -235,10 +235,10 @@ def local_checks(dir : String) : Nil
       "a challenge certificate is shown under acme-tls/1 alone, not to a client offering #{offered.join(", ")}"
   end
   check alpn.identity_for("other.autocert.example", ["acme-tls/1"]).is_a?(TlsError), "acme-tls/1 for a name with no challenge up is refused"
-  none = {} of String => String
-  answered = alpn.answer(Request.new("GET", "/.well-known/acme-challenge/tok-1", nil, none, ""))
-  check !answered.nil? && answered.status == 200 && answered.body == "tok-1.thumbprint", "http-01's token answered on port 80 with its key authorization"
-  check alpn.answer(Request.new("GET", "/", nil, none, "")).nil?, "another path on port 80 is the program's own"
+  challenge = Outgoing.new
+  answered = alpn.answer(Incoming.new("GET", "/.well-known/acme-challenge/tok-1", nil, Array(Field).new, ""), challenge)
+  check answered && challenge.status == 200 && challenge.body.to_s == "tok-1.thumbprint", "http-01's token answered on port 80 with its key authorization"
+  check !alpn.answer(Incoming.new("GET", "/", nil, Array(Field).new, ""), Outgoing.new), "another path on port 80 is the program's own"
   alpn.remove_challenge(name, "tok-1")
   check alpn.identity_for(name, ["acme-tls/1"]).is_a?(TlsError), "a challenge taken down is no longer shown"
   config = TlsServerConfig.new(alpn.placeholder)
@@ -387,7 +387,7 @@ def challenge_serve(dir : String) : Nil
   File.write("#{dir}/port", listener.local_port.to_s)
   port = listener.local_port
   listener.close
-  Server.serve("127.0.0.1", port,
+  Server.answer("127.0.0.1", port,
     {manager.config, true, "".as_tape}, AutocertBenchHandler)
 end
 
@@ -420,12 +420,12 @@ def serve(args : Array(String)) : Nil
     g.spawn do
       settings = RisBoard.take(AutocertBenchServer)
       unless settings.is_a?(Cancelled)
-        Server.serve("127.0.0.1", settings.port,
+        Server.answer("127.0.0.1", settings.port,
           {settings.config, false, "".as_tape}, AutocertBenchHandler)
       end
       0
     end
-    Server.serve("127.0.0.1", tls_port,
+    Server.answer("127.0.0.1", tls_port,
       {config, true, ready.as_tape}, AutocertBenchHandler)
     0
   end

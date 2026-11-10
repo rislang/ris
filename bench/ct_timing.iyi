@@ -249,7 +249,7 @@ if args.empty?
   # machines are too noisy for a threshold): Welch's t against Python's
   # `statistics` on fixed samples, then every target run once over 40
   # measurements with no bound on its |t|. The RSA target signs with the
-  # 2048-bit key under spec/std/data/openssl.
+  # 2048-bit key under test/std/data/openssl.
   times = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64, 2_i64, 4_i64, 6_i64, 8_i64, 10_i64]
   classes = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1]
   t = welch(times, classes, 10_i64)
@@ -267,7 +267,7 @@ if args.empty?
   t = welch(times, classes, 200_i64)
   raise "welch: two shifted sequences of 500 give #{t}, where Python's statistics make -8.989272971434428" unless near(t, -8.989272971434428)
   puts "  Welch's t as Python's statistics computes it on six fixed samples"
-  pem = __DIR__ + "/../spec/std/data/openssl/openssl.key"
+  pem = __DIR__ + "/../test/std/data/openssl/openssl.key"
   TARGETS.each do |target|
     t, sink = measure(target, 40, pem)
     raise "#{target}: |t| is #{t}" unless t >= 0.0 && t < 1.0e300

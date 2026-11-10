@@ -15,6 +15,9 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   `@[PointerUnsafe("…")]`, `@[TapeUnsafe]`); `ris unsafe` lists them.
 * std on the caller's tape: HTTP server and head parser, JSON, time and
   HTTP dates, FileServer; Slim templates via github.com/domify/slim.
+* One HTTP server entry, `Server.answer`: a handler's `call(req :
+  Incoming, res : Outgoing)` over TLS, HTTP/2, compression, streamed
+  bodies and upgrades; `Server.serve` and `Request` are gone.
 * Messages between tasks through RisBoard and Atomic, replacing Channel,
   select and Mutex.
 * iyi's tooling for agents: modules, imports by URL, fast modular

@@ -9,7 +9,7 @@
 # With no arguments it runs std/http's own TLS server on four listeners
 # and the client against them in one program, under the test PKI below;
 # each answer is "resumed=yes" or "resumed=no", as the server's
-# `Request#tls_resumed?` says. Three of the listeners share one
+# `Incoming#tls_resumed?` says. Three of the listeners share one
 # `TlsServerConfig`, and with it the keys its tickets are sealed under, so
 # a ticket one origin sent would be taken by another: the server resuming
 # is what proves a ticket was offered. The fourth sends eight tickets a
@@ -77,7 +77,7 @@ module RisExerciseServer
     raise "stop queue full" unless RisBoard.post(RisStop(H).new)
   end
 
-  def self.serve(port : Int32, config : C, handler : H.class,
+  def self.answer(port : Int32, config : C, handler : H.class,
                  stream_bodies : Bool = false, compress : Bool = false,
                  timeout_ms : Int32 = 60000,
                  request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
@@ -89,7 +89,7 @@ module RisExerciseServer
       pool.spawn do
         copied = RisBoard.take(RisConfig(C, H))
         unless copied.is_a?(Cancelled)
-          Server.serve("127.0.0.1", port, copied.value, handler,
+          Server.answer("127.0.0.1", port, copied.value, handler,
             stream_bodies: stream_bodies, compress: compress,
             timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
             max_connections: max_connections)
@@ -129,9 +129,9 @@ class RisResume0Handler
     @tls
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisResume0Handler) if req.path == "/stop"
-    answer(req)
+    answer(req, res)
   end
 end
 
@@ -151,9 +151,9 @@ class RisResume1Handler
     @tls
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisResume1Handler) if req.path == "/stop"
-    answer(req)
+    answer(req, res)
   end
 end
 
@@ -173,9 +173,9 @@ class RisResume2Handler
     @tls
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisResume2Handler) if req.path == "/stop"
-    answer(req)
+    answer(req, res)
   end
 end
 
@@ -195,9 +195,9 @@ class RisResume3Handler
     @tls
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisResume3Handler) if req.path == "/stop"
-    answer(req)
+    answer(req, res)
   end
 end
 
@@ -216,13 +216,13 @@ class RisResumePeerHandler
     @tls
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisResumePeerHandler) if req.path == "/quit"
-    answer(req)
+    answer(req, res)
   end
 end
 
-import std/http::{HTTP, HTTPClient, HTTPError, Request, Response, Server}
+import std/http::{HTTP, HTTPClient, HTTPError, Incoming, Outgoing, Response, Server}
 import std/socket::{IyiSocket, SocketError}
 import std/tls::{TlsClient, TlsConfig, TlsError, TlsServerConfig, TlsSession}
 import std/x509::{RisCertificateStore, Certificate}
@@ -297,8 +297,8 @@ def page(got : Response | HTTPError | SocketError | Cancelled) : String
   "neither: #{body.size} bytes"
 end
 
-def answer(req : Request) : Response
-  Response.new(200, req.tls_resumed? ? "resumed=yes" : "resumed=no")
+def answer(req : Incoming, res : Outgoing) : Nil
+  res.body << (req.tls_resumed? ? "resumed=yes" : "resumed=no")
 end
 
 def median(samples : Array(Int64)) : String
@@ -351,22 +351,22 @@ if mode.empty?
   failed = 0
   group do |g|
     g.spawn do
-      RisExerciseServer.serve(port0, 2, RisResume0Handler, max_connections: 1)
+      RisExerciseServer.answer(port0, 2, RisResume0Handler, max_connections: 1)
       0
     end
     RisExerciseServer.wait(RisResume0Handler)
     g.spawn do
-      RisExerciseServer.serve(port1, 2, RisResume1Handler, max_connections: 1)
+      RisExerciseServer.answer(port1, 2, RisResume1Handler, max_connections: 1)
       0
     end
     RisExerciseServer.wait(RisResume1Handler)
     g.spawn do
-      RisExerciseServer.serve(port2, 2, RisResume2Handler, max_connections: 1)
+      RisExerciseServer.answer(port2, 2, RisResume2Handler, max_connections: 1)
       0
     end
     RisExerciseServer.wait(RisResume2Handler)
     g.spawn do
-      RisExerciseServer.serve(port3, 8, RisResume3Handler, max_connections: 1)
+      RisExerciseServer.answer(port3, 8, RisResume3Handler, max_connections: 1)
       0
     end
     RisExerciseServer.wait(RisResume3Handler)
@@ -486,7 +486,7 @@ end
 
 if mode == "serve"
   listener = RisExerciseServer.port
-  RisExerciseServer.serve(listener, {File.read(args[2]).as_tape, File.read(args[3]).as_tape}, RisResumePeerHandler, max_connections: 1, port_file: args[1])
+  RisExerciseServer.answer(listener, {File.read(args[2]).as_tape, File.read(args[3]).as_tape}, RisResumePeerHandler, max_connections: 1, port_file: args[1])
   exit 0
 end
 

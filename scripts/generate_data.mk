@@ -1,7 +1,7 @@
 
 ## Run all data generators
 ##   $ make -f scripts/generate_data.mk
-## Generate time zone database for stdlib specs
+## Generate time zone database for stdlib tests
 ##   $ make zoneinfo -f scripts/generate_data.mk
 
 TZDB_VERSION := 2025c
@@ -14,7 +14,7 @@ endif
 
 .PHONY: all
 all: zoneinfo ## Run all generators
-	$(BIN_CRYSTAL) run scripts/generate_grapheme_break_specs.cr
+	$(BIN_CRYSTAL) run scripts/generate_grapheme_break_tests.cr
 	$(BIN_CRYSTAL) run scripts/generate_grapheme_properties.cr
 	$(BIN_CRYSTAL) run scripts/generate_ssl_server_defaults.cr
 	$(BIN_CRYSTAL) run scripts/generate_unicode_data.cr
@@ -22,13 +22,13 @@ all: zoneinfo ## Run all generators
 	$(BIN_CRYSTAL) run scripts/generate_html_entities.cr
 
 .PHONY: zoneinfo
-zoneinfo: spec/std/data/zoneinfo.zip ## Generate time zone database for stdlib specs
+zoneinfo: test/std/data/zoneinfo.zip ## Generate time zone database for stdlib tests
 
-spec/std/data/zoneinfo.zip:
+test/std/data/zoneinfo.zip:
 	wget -O- https://data.iana.org/time-zones/tzdb-latest.tar.lz | tar -x --lzip
 	$(MAKE) -C 'tzdb-$(TZDB_VERSION)' zones REDO=posix_only DESTDIR=stage TZDIR=/ ZFLAGS='-b fat'
-	rm -f spec/std/data/zoneinfo.zip
-	cd 'tzdb-$(TZDB_VERSION)/stage' && zip -0 -r ../../spec/std/data/zoneinfo.zip .
+	rm -f test/std/data/zoneinfo.zip
+	cd 'tzdb-$(TZDB_VERSION)/stage' && zip -0 -r ../../test/std/data/zoneinfo.zip .
 
 .PHONY: help
 help: ## Show this help

@@ -21,7 +21,7 @@
 /man/
 
 # Spec artifacts
-/spec/manual/dwarf/
+/test/manual/dwarf/
 
 # CI
 /coverage/
@@ -51,9 +51,9 @@ __pycache__/
 # The compiler's local cache when IYI_CACHE_DIR is unset.
 /.iyi/
 
-# ris: scripts/spec-par.sh
-/spec-out/
-/spec-build.log
+# ris: scripts/test-par.sh
+/test-out/
+/test-build.log
 
 # ris: the bench scripts' work directories, so the probes they write are
 # std's exercises under bench/ (FfiBoundaryChecker).

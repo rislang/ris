@@ -1,0 +1,199 @@
+# Upgrades and std's handlers on `Server.answer`: an echo over the
+# handler's `take_over`, a WebSocket over TLS (`wss://`, driven with
+# TlsClient), and an ACME http-01 challenge answered before the
+# handler's own answer. (Router's patterns are refused by the tape checks
+# today, at Pattern.parse, so Router is not served here.)
+module test/ris/answer_upgrade
+
+import std/http::{HTTP, Server, Incoming, Outgoing, Response, TlsStream}
+import std/socket::{IyiSocket}
+import std/tls::{TlsClient, TlsConfig, TlsServerConfig, TlsIdentity, TlsError}
+import std/x509::{RisCertificateStore}
+import std/websocket::{WebSocket, Message}
+import std/acme::{AcmeHttp01}
+
+struct Ready
+end
+
+# A test PKI (bench/std_http_resume.iyi's): Ed25519, valid to 9999. The
+# leaf's key guards nothing but this test.
+LEAF_PEM = "-----BEGIN CERTIFICATE-----\n" \
+           "MIIBQzCB9qADAgECAgEDMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
+           "dDAgFw0yNTAxMDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1OVowFDESMBAGA1UEAwwJ\n" \
+           "bG9jYWxob3N0MCowBQYDK2VwAyEAOeskudtTVi76JObK6QHqJy6M7PaEu/aLlC5H\n" \
+           "B5OLks+jZjBkMBQGA1UdEQQNMAuCCWxvY2FsaG9zdDAMBgNVHRMBAf8EAjAAMB0G\n" \
+           "A1UdDgQWBBQN8ZJay/U7zf07disj78hKukvGAjAfBgNVHSMEGDAWgBSNjkTWVhBs\n" \
+           "a874Ao2cPFX4w4saajAFBgMrZXADQQAcAgj9qe58GnzceRkYfxyfNHxmqWOgDJkn\n" \
+           "b3rO1pz+8OCRioO1P+BhFa1FR/FMHSH9bOFEKfXfy3Nwr+y+GkMM\n" \
+           "-----END CERTIFICATE-----\n"
+ROOT_PEM = "-----BEGIN CERTIFICATE-----\n" \
+           "MIIBJDCB16ADAgECAgEBMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
+           "dDAgFw0yNTAxMDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1OVowGTEXMBUGA1UEAwwO\n" \
+           "aXlpIGJlbmNoIHJvb3QwKjAFBgMrZXADIQCQIEeX9suXr4DL8DiLdBUfoWaJU+Hv\n" \
+           "7JhN3IpqspsuOqNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYw\n" \
+           "HQYDVR0OBBYEFI2ORNZWEGxrzvgCjZw8VfjDixpqMAUGAytlcANBAFEfpUf437+b\n" \
+           "PwJvPGD/gB0zIegp6+3cJzF42Tx6Hj8tIJgdtXVKA58EXmitGetqb788+xoJ49My\n" \
+           "4Wc3L1uxxAI=\n" \
+           "-----END CERTIFICATE-----\n"
+KEY_PEM = "-----BEGIN PRIVATE KEY-----\n" \
+          "MC4CAQAwBQYDK2VwBCIEIOYKs3OzEJYJ/j+ZQYLoAU929MQeanF9kupAR9HpeHJ8\n" \
+          "-----END PRIVATE KEY-----\n"
+
+class PlainHandler
+  @acme : AcmeHttp01
+
+  def initialize(config : Int32)
+    acme = AcmeHttp01.new
+    acme.add("tok", "tok.print")
+    @acme = acme
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    if req.path == "/echo"
+      res.header("Upgrade", "echo")
+      res.upgrade
+      return
+    end
+    return if @acme.answer(req, res)
+    res.status = 404
+    res.body << "not found"
+  end
+
+  # The bytes after the request, then each read, sent back until the
+  # client closes.
+  def take_over(socket, leftover : String, res : Outgoing) : Nil
+    socket.write("#{res.header("Upgrade")}:#{leftover}")
+    while true
+      piece = socket.read(1024)
+      break unless piece.is_a?(String) && !piece.empty?
+      socket.write(piece)
+    end
+  end
+end
+
+class TlsHandler
+  getter tls_config : TlsServerConfig
+
+  def initialize(config : Int32)
+    identity = TlsIdentity.new(LEAF_PEM + ROOT_PEM, KEY_PEM)
+    raise identity.error.as(TlsError).message if identity.error
+    server = TlsServerConfig.new(identity)
+    @tls_config = server
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    WebSocket.upgrade(req, res, deflate: false)
+  end
+
+  def take_over(socket, leftover : String, res : Outgoing) : Nil
+    WebSocket.serve(socket, leftover, res) do |ws|
+      got = ws.receive
+      ws.send("echo #{got.data}") if got.is_a?(Message)
+      nil
+    end
+  end
+end
+
+def free_port : Int32
+  probe = IyiSocket.listen(0)
+  port = probe.local_port
+  probe.close
+  port
+end
+
+# Status, body and Allow of a request to *path*.
+def ask(port : Int32, method : String, path : String) : String
+  got = HTTP.request(method, "http://127.0.0.1:#{port}#{path}", redirects: 0)
+  return "failed" unless got.is_a?(Response)
+  "#{method} #{path}: #{got.status} #{got.body.strip} #{got.header("Allow")}".strip
+end
+
+# The echo: upgrade with bytes sent after the head, then one more write.
+def echo(port : Int32) : String
+  socket = IyiSocket.connect("127.0.0.1", port).or_panic
+  socket.read_timeout_ms = 5000
+  socket.write("GET /echo HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\n" +
+    "Connection: Upgrade\r\n\r\nearly").or_panic
+  got = ""
+  until got.includes?("echo:early")
+    piece = socket.read(1024).or_panic
+    break if piece.empty?
+    got << piece
+  end
+  socket.write("late").or_panic
+  until got.includes?("late")
+    more = socket.read(1024).or_panic
+    break if more.empty?
+    got << more
+  end
+  socket.close
+  "#{got[0, 12]} #{got.includes?("Upgrade: echo")} #{got.ends_with?("echo:earlylate")}"
+end
+
+# A WebSocket text message "hi" over TLS, and the server's answer.
+def wss(port : Int32, config : TlsConfig) : String
+  tls = TlsClient.new("localhost", config)
+  if problem = tls.connect(port)
+    return problem.message
+  end
+  tls.write("GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n" +
+    "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
+    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+  got = ""
+  until got.includes?("\r\n\r\n")
+    piece = tls.read
+    break if piece.is_a?(TlsError) || piece.empty?
+    got << piece
+  end
+  at = got.index("\r\n\r\n") || 0
+  status = got[0, 12]
+  accept = got.includes?("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+  # A masked text frame, mask 0: the payload as it is.
+  tls.write("\x81\x82\x00\x00\x00\x00hi")
+  frame = got[at + 4, got.bytesize - at - 4]
+  until frame.bytesize >= 2 && frame.bytesize >= 2 + frame.byte_at(1).to_i32
+    more = tls.read
+    break if more.is_a?(TlsError) || more.empty?
+    frame << more
+  end
+  tls.close
+  text = frame.bytesize > 2 ? frame[2, frame.byte_at(1).to_i32] : ""
+  "#{status} #{accept} #{text}"
+end
+
+plain_port = free_port
+tls_port = free_port
+group do |g|
+  g.spawn do
+    Server.answer("127.0.0.1", plain_port, 0, PlainHandler,
+      max_connections: 2)
+    0
+  end
+  g.spawn do
+    Server.answer("127.0.0.1", tls_port, 0, TlsHandler, max_connections: 2)
+    0
+  end
+  4.times { RisBoard.take(Ready).or_panic }
+  puts echo(plain_port)
+  puts ask(plain_port, "GET", "/nothing")
+  puts ask(plain_port, "POST", "/.well-known/acme-challenge/tok")
+  puts ask(plain_port, "GET", "/.well-known/acme-challenge/tok")
+  puts ask(plain_port, "GET", "/.well-known/acme-challenge/other")
+  store = RisCertificateStore.new
+  if problem = store.read_pem(ROOT_PEM)
+    raise problem.message
+  end
+  config = TlsConfig.new
+  config.roots = store.kept_certificates
+  config.alpn = ["http/1.1"]
+  puts wss(tls_port, config)
+  g.cancel_children
+end

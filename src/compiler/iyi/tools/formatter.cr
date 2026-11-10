@@ -4693,7 +4693,7 @@ module Iyi
       # an exported alias in it. Every declaration `pub` takes needs its own
       # line like this one, and three of them - `import`, `enum`,
       # `annotation` - were missing it when
-      # `spec/compiler/formatter/iyi_formatter_spec.cr` was made to hold the
+      # `test/compiler/formatter/iyi_formatter_test.cr` was made to hold the
       # parser's list: that spec is what catches the next one.
       write_keyword :pub, " " if node.responds_to?(:exported?) && node.exported?
       write_keyword keyword, " "

@@ -80,21 +80,21 @@ def generated_project_lines() -> int:
 # The spec files that exist because of iyi's own rules, named rather than
 # globbed. A glob for "iyi" in the path is the obvious measure and it is wrong:
 # the namespace rename moved a dozen of Crystal's tool specs under
-# `spec/compiler/iyi/`, and counting those claims Crystal's testing as iyi's.
-# `iyi_path_spec.cr`, `iyi-daemon_spec.cr` and `iyi/tools/unreachable_spec.cr`
+# `test/compiler/iyi/`, and counting those claims Crystal's testing as iyi's.
+# `iyi_path_test.cr`, `iyi-daemon_test.cr` and `iyi/tools/unreachable_test.cr`
 # are the same trap wearing an iyi name: each is a Crystal spec that was renamed.
 #
 # A missing file raises rather than counting short, because a rename that this
 # list does not follow would otherwise report a smaller number as though the
 # specs had shrunk.
 IYI_SPECS = (
-    "spec/compiler/iyimod_spec.cr",             # the artifact format
-    "spec/compiler/iyi_import_spec.cr",         # the import path
-    "spec/compiler/iyi_derive_spec.cr",         # derive, R-5
-    "spec/compiler/semantic/iyi_spec.cr",       # iyi's own semantics
-    "spec/compiler/iyi/rx_spec.cr",             # the engine, differential
-    "spec/compiler/formatter/iyi_formatter_spec.cr",  # `pub`, which Crystal has no word for
-    "spec/compiler/object_header_spec.cr",      # the collector's header, GC_DESIGN.md Stage 1
+    "test/compiler/iyimod_test.cr",             # the artifact format
+    "test/compiler/iyi_import_test.cr",         # the import path
+    "test/compiler/iyi_derive_test.cr",         # derive, R-5
+    "test/compiler/semantic/iyi_test.cr",       # iyi's own semantics
+    "test/compiler/iyi/rx_test.cr",             # the engine, differential
+    "test/compiler/formatter/iyi_formatter_test.cr",  # `pub`, which Crystal has no word for
+    "test/compiler/object_header_test.cr",      # the collector's header, GC_DESIGN.md Stage 1
 )
 
 

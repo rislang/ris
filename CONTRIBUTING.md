@@ -19,11 +19,11 @@ make ris LLVM_CONFIG=/path/to/llvm-23/bin/llvm-config
 
 `./bin/ris` is the ris entry point. Internals retain iyi's names to make
 upstream merges manageable. `./bin/crystal` runs the inherited Crystal
-compiler and specs.
+compiler and tests.
 
 ## Check the change
 
-Run the relevant program or spec first. For tape rules, add an accepted
+Run the relevant program or test first. For tape rules, add an accepted
 example in `test/ris/` and a rejected example in `test/ris/refused/` when
 applicable; each refusal must name the safe replacement.
 
@@ -45,14 +45,14 @@ bin/minitest-check log
 Use the same helper in agent tasks so one saved command permission covers
 the workflow. It uses the existing `ssh minitest` connection.
 
-For compiler or inherited runtime changes, run the relevant Crystal specs;
-`make compiler_spec`, `make primitives_spec` and `make std_spec` run the
+For compiler or inherited runtime changes, run the relevant Crystal tests;
+`make compiler_test`, `make primitives_test` and `make std_test` run the
 broader suites. Check formatting of changed Crystal files with
 `./bin/crystal tool format --check PATH`.
 
 CI (`.github/workflows/ris.yml`) builds ris from a clean checkout with
 Crystal 1.21 and LLVM 23, then runs `test/ris/check.sh` on x86_64 and aarch64
-and `make std_spec`. `.github/workflows/ris-macos.yml` runs check.sh on macOS
+and `make std_test`. `.github/workflows/ris-macos.yml` runs check.sh on macOS
 arm64, without the checks in its `RIS_CHECK_SKIP`.
 
 ## Design and review

@@ -1,0 +1,88 @@
+# `Server.answer(compress: true)`: a whole body goes zstd or gzip by the
+# client's `Accept-Encoding`, none under `COMPRESS_FROM`, a stream gzip,
+# and a handler's own `Content-Encoding` is kept, the body as written.
+# Each gzip body is decoded by the client back to what was written.
+module test/ris/answer_compress
+
+import std/socket::{IyiSocket}
+import std/http::{HTTP, Server, Incoming, Outgoing, Response}
+import std/compress::{Gzip}
+
+struct Ready
+end
+
+TEXT = "compressible text, " * 120
+
+struct Handler
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.header("Content-Type", "text/plain")
+    case req.path
+    when "/small"
+      res.body << "short"
+    when "/stream"
+      res.stream do |w|
+        w.write(TEXT[0, 1000])
+        w.write(TEXT[1000, TEXT.bytesize - 1000])
+      end
+    when "/own"
+      res.header("Content-Encoding", "identity")
+      res.body << TEXT
+    else
+      res.body << TEXT
+    end
+  end
+end
+
+def free_port : Int32
+  probe = IyiSocket.listen(0)
+  port = probe.local_port
+  probe.close
+  port
+end
+
+# What came for *path* asked with *accept*: the coding, the Vary line,
+# and whether the body decoded to what the handler wrote.
+def line(port : Int32, path : String, accept : String) : Nil
+  url = "http://127.0.0.1:#{port}#{path}"
+  raw = HTTP.request("GET", url, {"Accept-Encoding" => accept}, decompress: false).or_panic
+  written = path == "/small" ? "short" : TEXT
+  coding = raw.header("Content-Encoding") || "none"
+  vary = raw.header("Vary") || "-"
+  smaller = raw.body.bytesize < written.bytesize
+  same = raw.body == written
+  if coding == "gzip"
+    same = Gzip.decompress(raw.body) == written
+  elsif coding == "zstd"
+    # Zstd.decompress is refused by the view check today: the frame's
+    # magic number stands in for the decode.
+    b = raw.body
+    same = b.bytesize > 4 && b.byte_at(0) == 0x28 && b.byte_at(1) == 0xB5 &&
+           b.byte_at(2) == 0x2F && b.byte_at(3) == 0xFD
+  end
+  puts "#{path} #{accept}: #{coding} vary=#{vary} smaller=#{smaller} " +
+       "same=#{same}"
+end
+
+port = free_port
+group do |g|
+  g.spawn do
+    Server.answer("127.0.0.1", port, 0, Handler, compress: true,
+      max_connections: 2)
+    0
+  end
+  2.times { RisBoard.take(Ready).or_panic }
+  line(port, "/big", "gzip")
+  line(port, "/big", "zstd, gzip")
+  line(port, "/big", "gzip;q=1, zstd;q=0.5")
+  line(port, "/small", "gzip, zstd")
+  line(port, "/stream", "zstd, gzip")
+  line(port, "/own", "gzip, zstd")
+  g.cancel_children
+end

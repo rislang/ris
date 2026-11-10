@@ -6,7 +6,7 @@
 # That deletion is the whole test. R-1 says a consumer compiles against a
 # module's declarations and never its source, and the only way to be sure of it
 # is to take the source away and see whether the build still produces a program
-# that behaves. `spec/compiler/iyimod_spec.cr` checks the same property on small
+# that behaves. `test/compiler/iyimod_test.cr` checks the same property on small
 # programs written for it; this checks it on the samples, which were written to
 # document the language rather than to pass this.
 #

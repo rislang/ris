@@ -3,7 +3,7 @@
 import std/autocert::{Autocert, AutocertConfig, AutocertView,
   AutocertOrder, AutocertDirCache, AutocertError}
 import std/file::{File}
-import std/http::{Request}
+import std/http::{Incoming, Outgoing, Field}
 import std/text
 import std/indexable
 import std/tls::{TlsIdentity, TlsError, TlsServerConfig}
@@ -293,12 +293,13 @@ group do |readers|
     tls = TlsServerConfig.new(worker.placeholder)
     worker.tls_config(tls)
     challenge = worker.identity_for("localhost", ["acme-tls/1"])
-    request = Request.new("GET", "/.well-known/acme-challenge/token",
-      nil, ::Hash(String, String).new, "")
-    answer = worker.answer(request)
+    request = Incoming.new("GET", "/.well-known/acme-challenge/token",
+      nil, Array(Field).new, "")
+    res = Outgoing.new
+    answered = worker.answer(request, res)
     tls.alpn.includes?("acme-tls/1") &&
-      challenge.is_a?(TlsIdentity) && answer && answer.status == 200 &&
-      answer.body == "token.thumbprint"
+      challenge.is_a?(TlsIdentity) && answered && res.status == 200 &&
+      res.body.to_s == "token.thumbprint"
   end
   raise "challenge broadcast" unless task.value == true
 end
