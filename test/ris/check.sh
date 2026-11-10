@@ -52,7 +52,7 @@ expect() {
 }
 
 # Yielded holders retain the provenance of their borrowed owner fields.
-for name in yield_owner_field yield_clone_attrs branch_store; do
+for name in yield_owner_field yield_clone_attrs branch_store svcb_store; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
   if [ "$code" -eq 0 ] && [ -z "$out" ]; then
     echo "runs     $name"

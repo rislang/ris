@@ -4243,10 +4243,10 @@ pub class Resolver
       choices = 0
       index = 0
       while index < found.size
-        record = into.parse(found[index], owner)
+        malformed = into.parse(found[index], owner)
         index = index + 1
-        return record.about(host, label) if record.is_a?(DnsError)
-        if record.alias?
+        return malformed.about(host, label) if malformed
+        if into.records[into.records.size - 1].alias?
           choices = choices + 1
           # One of them, at random (section 2.4.2): each new one replaces
           # the held one with chance 1 in how many there have been.
