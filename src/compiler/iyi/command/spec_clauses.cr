@@ -75,6 +75,27 @@ class Iyi::Command
     exit
   end
 
+  # ris: `build --spec`: the clauses a spec block may name are ROOT's
+  # (doc/drafts/spec-blocks, 5.1). No spec there: the block's refusal
+  # names the file to create.
+  private def ris_spec_setup(compiler : Compiler) : Nil
+    compiler.ris_spec = true
+    root = spec_root
+    unless root
+      compiler.ris_spec_file = File.join(Dir.current, "SPEC.md")
+      return
+    end
+    files = spec_files(root)
+    compiler.ris_spec_file = files.size == 1 ? Iyi.relative_filename(files[0]) : "spec/*.md"
+    if files.empty?
+      compiler.ris_spec_file = Iyi.relative_filename(File.join(root, "SPEC.md"))
+      return
+    end
+    compiler.ris_spec_clauses = spec_clauses(root).map(&.number).to_set
+  rescue ex : SpecError
+    abort! "build --spec: #{ex.message}", :FAILURE
+  end
+
   # --- loading -------------------------------------------------------------
 
   private def spec_load_or_abort : {String, Array(SpecClause), Array(SpecTest)}

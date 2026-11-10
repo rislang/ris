@@ -338,8 +338,223 @@ module Iyi
               "move it above the first `spec`: proofs go at the end of the " \
               "file", node.location || opener.location.not_nil!
       end
+      ris_check_todo(list, first)
+      return ris_lower_spec(list, first) if @ris_spec_main
       return nodes if @ris_keep_spec
       Expressions.from(list[0...first])
+    end
+
+    # ris: `build --spec` (step 3): lower the spec section into a test
+    # program (5.2, 5.3, 5.8). Set by the compiler for the entry file only.
+    property ris_spec_main = false
+    # The clause numbers of ROOT's spec; nil when ROOT has none.
+    property ris_spec_clauses : Set(String)? = nil
+    # The spec file to name in a refusal: ROOT/SPEC.md.
+    property ris_spec_file = "SPEC.md"
+
+    private RIS_SPEC_COMPARISONS = {"==", "!=", "<", "<=", ">", ">="}
+
+    private def ris_block_statements(block : SpecBlock) : Array(ASTNode)
+      case body = block.body
+      when Nop         then [] of ASTNode
+      when Expressions then body.expressions
+      else                  [body] of ASTNode
+      end
+    end
+
+    private def ris_todo_call?(node : ASTNode) : Bool
+      node.is_a?(Call) && node.obj.nil? && node.name == "todo"
+    end
+
+    # `todo "reason"` only as a block's last top-level line (5.3).
+    private def ris_check_todo(list : Array(ASTNode), first : Int32) : Nil
+      finder = RisTodoFinder.new
+      list.each do |node|
+        if node.is_a?(SpecBlock)
+          statements = ris_block_statements(node)
+          statements.each_with_index do |statement, index|
+            if ris_todo_call?(statement)
+              if later = statements[index + 1]?
+                raise "nothing runs after `todo`; move it to the end of the " \
+                      "block", later.location || statement.location.not_nil!
+              end
+              statement.as(Call).args.each(&.accept(finder))
+            else
+              statement.accept(finder)
+            end
+          end
+        else
+          node.accept(finder)
+        end
+        if found = finder.found
+          raise "`todo` marks an unproved clause; put it in a `spec N.M` " \
+                "block", found.location || node.location.not_nil!
+        end
+      end
+    end
+
+    private class RisTodoFinder < Visitor
+      getter found : Call? = nil
+
+      def visit(node : Call)
+        if node.obj.nil? && node.name == "todo"
+          @found ||= node
+        end
+        true
+      end
+
+      def visit(node : SpecBlock)
+        false
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
+    private def ris_spec_text(node : ASTNode) : String
+      start = node.location.try(&.line_number) || 1
+      stop = node.end_location.try(&.line_number) || start
+      lines = (@ris_source_lines ||= string.lines)
+      (start..stop).map { |number| lines[number - 1]?.try(&.strip) || "" }
+        .join(" ")
+    end
+
+    @ris_source_lines : Array(String)? = nil
+
+    private def ris_spec_runtime(name : String, args : Array(ASTNode),
+                                 at : ASTNode) : ASTNode
+      Call.new(Path.global(["RisSpecRun"]).at(at), name, args).at(at)
+    end
+
+    private def ris_lower_spec(list : Array(ASTNode), first : Int32) : ASTNode
+      file = (name = @filename).is_a?(String) ? Iyi.relative_filename(name) : "?"
+      kept = list[0...first].dup
+      main = [] of ASTNode
+      temp = 0
+      list[first..].each do |node|
+        unless node.is_a?(SpecBlock)
+          kept << node
+          next
+        end
+        block = node
+        where = "spec #{block.clause} at #{file}:#{block.location.try(&.line_number)}"
+        ris_check_clause(block)
+        index = main.size
+        body = [] of ASTNode
+        typed = [] of ASTNode
+        typed_lines = [] of Int32
+        asserts = 0
+        has_todo = false
+        ris_block_statements(block).each do |statement|
+          line = statement.location.try(&.line_number) || 0
+          text = StringLiteral.new(ris_spec_text(statement))
+          site = [text, StringLiteral.new(file), NumberLiteral.new(line.to_s)] of ASTNode
+          case statement
+          when Assign, OpAssign, MultiAssign, TypeDeclaration
+            body << statement
+          when Call
+            if ris_todo_call?(statement)
+              has_todo = true
+              body << ris_spec_runtime("todo", statement.args, statement)
+            elsif (left = statement.obj) && statement.args.size == 1 &&
+                  !statement.block && !statement.named_args &&
+                  RIS_SPEC_COMPARISONS.includes?(statement.name)
+              typed << TypeOf.new([statement.clone] of ASTNode).at(statement)
+              typed_lines << line
+              asserts += 1
+              temp += 1
+              l = "__ris_l#{temp}"
+              r = "__ris_r#{temp}"
+              body << Assign.new(Var.new(l).at(left), left).at(left)
+              right = statement.args[0]
+              body << Assign.new(Var.new(r).at(right), right).at(right)
+              compared = Call.new(Var.new(l).at(statement), statement.name,
+                [Var.new(r).at(statement)] of ASTNode).at(statement)
+              body << ris_spec_runtime("compare",
+                [compared, Var.new(l).at(statement), Var.new(r).at(statement)] of ASTNode + site,
+                statement)
+            elsif (left = statement.obj) && statement.args.size == 1 &&
+                  !statement.block && statement.name == "=~"
+              asserts += 1
+              body << ris_spec_runtime("match",
+                [left, statement.args[0]] of ASTNode + site, statement)
+            else
+              typed << TypeOf.new([statement.clone] of ASTNode).at(statement)
+              typed_lines << line
+              body << ris_spec_runtime("line",
+                [statement] of ASTNode + site + [BoolLiteral.new(true)] of ASTNode,
+                statement)
+            end
+          else
+            typed << TypeOf.new([statement.clone] of ASTNode).at(statement)
+            typed_lines << line
+            body << ris_spec_runtime("line",
+              [statement] of ASTNode + site + [BoolLiteral.new(false)] of ASTNode,
+              statement)
+          end
+        end
+        if typed.empty? && asserts == 0 && !has_todo
+          raise "#{where} checks nothing; add a line that is a Bool", block.location.not_nil!
+        end
+        unless typed.empty?
+          check = "__ris_spec_check_#{index}"
+          kept << ris_spec_check_def(check, where, typed_lines,
+            asserts == 0 && !has_todo)
+          tuple = Generic.new(Path.global(["Tuple"]).at(block), typed).at(block)
+          call = Call.new(nil, check, [tuple] of ASTNode).at(block)
+          if has_todo
+            body.insert(body.size - 1, call)
+          else
+            body << call
+          end
+        end
+        runner = "__ris_spec_block_#{index}"
+        definition = Def.new(runner, [] of Arg, Expressions.from(body)).at(block)
+        kept << VisibilityModifier.new(Visibility::Private, definition).at(block)
+        start = [StringLiteral.new(block.clause), NumberLiteral.new(block.ordinal.to_s),
+                 StringLiteral.new(file),
+                 NumberLiteral.new((block.location.try(&.line_number) || 0).to_s)] of ASTNode
+        run = Call.new(Path.global(["RisSpecRun"]).at(block), "block", start,
+          Block.new(body: Call.new(nil, runner).at(block)).at(block)).at(block)
+        main << run
+      end
+      main << ris_spec_runtime("finish", [] of ASTNode, list[first])
+      Expressions.from(kept + main)
+    end
+
+    # A refusal needs the types, so it is a macro in a generic def the
+    # block calls with a Tuple of its candidate lines' types (5.2).
+    private def ris_spec_check_def(name : String, where : String,
+                                   lines : Array(Int32), needs_bool : Bool) : ASTNode
+      text = String.build do |io|
+        io << "private def " << name << "(t : T.class) forall T\n"
+        lines.each_with_index do |line, index|
+          io << "  {% if T.type_vars[" << index << "].union? && T.type_vars[" << index
+          io << "].union_types.includes?(Bool) %}{% raise \"" << where << ": line " << line
+          io << " may be nil; write `x == true`\" %}{% end %}\n"
+        end
+        if needs_bool
+          io << "  {% unless T.type_vars.includes?(Bool) %}{% raise \"" << where
+          io << " checks nothing; add a line that is a Bool\" %}{% end %}\n"
+        end
+        io << "end\n"
+      end
+      parser = Parser.new(text)
+      parser.parse
+    end
+
+    private def ris_check_clause(block : SpecBlock) : Nil
+      clauses = @ris_spec_clauses
+      if clauses.nil?
+        raise "no clause #{block.clause}: there is no spec at this project's " \
+              "root; create #{@ris_spec_file} with clause #{block.clause} first",
+          block.location.not_nil!
+      end
+      unless clauses.includes?(block.clause)
+        raise "no clause #{block.clause} in #{@ris_spec_file}; add it there " \
+              "first, or name the clause this proves", block.location.not_nil!
+      end
     end
 
     private def ris_short_file(location : Location?) : String

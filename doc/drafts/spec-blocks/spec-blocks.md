@@ -328,6 +328,14 @@ panic.
 - A block with no assertion line and no `todo` is refused (D13):
   "spec 1.2 at post.ri:19 checks nothing; add a line that is a Bool".
 
+As built (step 3): the parser lowers the section before typing, since a
+pass after typing would need a second typing of the rewritten lines.
+Each candidate line becomes a call to `RisSpecRun` (testing.iyi, in the
+prelude; unused code is not linked) whose overloads check only a Bool;
+a generic def per block receives `Tuple(typeof(line)...)` and its macro
+raises the `Bool?` and "checks nothing" refusals. Same rules, same
+messages; a `Bool?` refusal also names the block.
+
 ### 5.3 todo
 
 `todo "reason"` is valid only as a top-level statement of a spec block

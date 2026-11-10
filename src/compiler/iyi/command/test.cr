@@ -37,6 +37,12 @@ class Iyi::Command
   # Windows, and did not in the next.
   private MAX_TEST_WAIT = (Int64::MAX // 10_000_000 - 1).to_f
 
+  # One run: a test program, or (ris) a module built with `build --spec`,
+  # whose blocks are the JSON lines it wrote (doc/drafts/spec-blocks, 5.8);
+  # `blocks` is nil for a test program.
+  private alias TestResult = {file: String, status: String, seconds: Float64,
+                              output: String, blocks: Array(JSON::Any)?}
+
   private def test
     as_json = false
     timeout = 60.0
@@ -103,6 +109,13 @@ class Iyi::Command
         # matches in any case, so `x_test.IYI` is refused below rather than
         # walked past (`Lexer.iyi_miscased?`).
         project_walk(path, files) { |name| test_program_name?(name) }
+        # ris: and every module whose file holds spec blocks (5.9).
+        candidates = [] of String
+        project_walk(path, candidates) do |name|
+          lower = name.downcase
+          !test_program_name?(name) && (lower.ends_with?(".ri") || lower.ends_with?(".iyi"))
+        end
+        candidates.each { |file| files << file if spec_module?(file) }
       elsif File.file?(path)
         # As stored: `X_TEST.IYI` typed on Windows for `x_test.iyi` is it.
         files << Lexer.stored_name(path)
@@ -119,7 +132,7 @@ class Iyi::Command
     end
 
     if files.empty?
-      abort! "no *_test.ri or *_test.iyi found. A test is a plain iyi program that exits non-zero to fail", :USAGE_ERROR
+      abort! "no spec blocks, *_test.ri or *_test.iyi found. A proof is a `spec N.M` block at the end of a module", :USAGE_ERROR
     end
 
     skipped = 0
@@ -194,6 +207,11 @@ class Iyi::Command
                   json.field "status", result[:status]
                   json.field "seconds", result[:seconds]
                   json.field "output", result[:output] unless result[:output].empty?
+                  if blocks = result[:blocks]
+                    json.field "blocks" do
+                      json.array { blocks.each(&.to_json(json)) }
+                    end
+                  end
                 end
               end
             end
@@ -225,6 +243,11 @@ class Iyi::Command
       STDOUT.puts
     else
       results.each do |result|
+        if blocks = result[:blocks]
+          # ris: one line per block, its failed lines under it (5.8).
+          blocks.each { |block| print_spec_block(block) }
+          next if blocks.size > 0 && result[:status].in?("pass", "todo", "fail")
+        end
         next if result[:status] == "pass"
         STDOUT << result[:file] << ": " << result[:status] << '\n'
         result[:output].each_line { |line| STDOUT << "  " << line << '\n' }
@@ -241,9 +264,27 @@ class Iyi::Command
         puts "#{discount_off.join(", ")} is not there, so every test ran: " \
              "a file that is gone cannot be proven untouched by anything"
       end
-      tail = todos.zero? ? "" : ", #{todos} todo"
-      tail += skipped.zero? ? "" : ", #{skipped} skipped"
-      puts "#{results.size - failed - todos} passed, #{failed} failed#{tail}" + (failed.zero? ? "" : " — a failing test prints above")
+      modules = results.select(&.[:blocks])
+      programs = results.reject(&.[:blocks])
+      parts = [] of String
+      unless modules.empty?
+        blocks = modules.flat_map { |result| result[:blocks].not_nil! }
+        count = ->(status : String) { blocks.count { |block| block["status"]?.try(&.as_s?) == status } }
+        unbuilt = modules.count { |result| !result[:status].in?("pass", "todo", "fail") }
+        part = "#{modules.size} module#{modules.size == 1 ? "" : "s"}, #{blocks.size} blocks: " \
+               "#{count.call("ok")} ok, #{count.call("broken")} broken, #{count.call("todo")} todo"
+        part += ", #{unbuilt} not run" unless unbuilt.zero?
+        parts << part
+      end
+      unless programs.empty?
+        p_todos = programs.count { |result| result[:status] == "todo" }
+        p_failed = programs.count { |result| !result[:status].in?("pass", "todo") }
+        tail = p_todos.zero? ? "" : ", #{p_todos} todo"
+        parts << "#{programs.size - p_failed - p_todos} passed, #{p_failed} failed#{tail}"
+      end
+      line = parts.join("; ")
+      line += ", #{skipped} skipped" unless skipped.zero?
+      puts line + (failed.zero? ? "" : " — a failing test prints above")
     end
 
     exit 1 unless failed.zero?
@@ -338,7 +379,7 @@ class Iyi::Command
   # on which test ended first.
   private def run_tests(files : Array(String), deadline : Float64, jobs : Int32)
     return files.map { |file| run_one_test(file, deadline) } if jobs <= 1 || files.size <= 1
-    results = Array({file: String, status: String, seconds: Float64, output: String}?).new(files.size, nil)
+    results = Array(TestResult?).new(files.size, nil)
     next_index = 0
     finished = ::Channel(Nil).new
     workers = Math.min(jobs, files.size)
@@ -356,9 +397,14 @@ class Iyi::Command
     results.map(&.not_nil!)
   end
 
-  private def run_one_test(file : String, deadline : Float64) : {file: String, status: String, seconds: Float64, output: String}
+  private def run_one_test(file : String, deadline : Float64) : TestResult
     started = Time.instant
     output = IO::Memory.new
+    # ris: a module with spec blocks, not a test program: built with
+    # `build --spec`, its blocks read from the JSON lines it writes (5.8).
+    spec = !test_program_name?(File.basename(file))
+    stdout = spec ? IO::Memory.new : output
+    blocks = spec ? [] of JSON::Any : nil
 
     # With the executable's extension, which `build -o` appends to a name
     # that has none: without it the delete below asked for a name nothing
@@ -368,14 +414,15 @@ class Iyi::Command
     begin
       build_status = Process.run(
         Process.executable_path.not_nil!,
-        ["build", file, "-o", binary],
+        spec ? ["build", "--spec", file, "-o", binary] : ["build", file, "-o", binary],
         output: output, error: output,
       )
       unless build_status.success?
-        return {file: file, status: "does not build", seconds: elapsed(started), output: output.to_s}
+        return {file: file, status: "does not build", seconds: elapsed(started), output: output.to_s, blocks: blocks}
       end
 
-      process = Process.new(binary, output: output, error: output)
+      env = spec ? {"RIS_SPEC_JSON" => "1"} : nil
+      process = Process.new(binary, env: env, output: stdout, error: output)
       tree = TestTree.new(process)
       running = tree
       done = ::Channel(Process::Status).new
@@ -387,12 +434,13 @@ class Iyi::Command
         # A test the kernel killed printed "fail" and nothing under it -
         # the one failure with no evidence of its own, and the one an
         # infinite recursion produces. The death is the evidence.
+        spec_blocks(stdout, output, blocks) if blocks
         evidence = output.to_s
         unless status.success? || todo || status.exit_reason.normal?
           evidence += "\n" unless evidence.empty? || evidence.ends_with?('\n')
           evidence += Command.death_sentence(status) + "\n"
         end
-        {file: file, status: verdict, seconds: elapsed(started), output: status.success? ? "" : evidence}
+        {file: file, status: verdict, seconds: elapsed(started), output: status.success? ? "" : evidence, blocks: blocks}
       when timeout(deadline.seconds)
         # The test and whatever it started: its output is copied through
         # a pipe, and `wait` waits for that pipe's end, which a child the
@@ -402,7 +450,8 @@ class Iyi::Command
         # child never ends hung `iyi test` for good.
         tree.terminate
         done.receive
-        {file: file, status: "hung: killed at #{deadline}s", seconds: elapsed(started), output: output.to_s}
+        spec_blocks(stdout, output, blocks) if blocks
+        {file: file, status: "hung: killed at #{deadline}s", seconds: elapsed(started), output: output.to_s, blocks: blocks}
       end
     ensure
       running.try &.close
@@ -414,6 +463,46 @@ class Iyi::Command
       {% elsif flag?(:darwin) %}
         File.delete?("#{binary}.dwarf")
       {% end %}
+    end
+  end
+
+  # ris: whether *file* holds a spec section: a line that starts `spec N`
+  # (5.9; `build --spec` then parses it and refuses a wrong shape).
+  private def spec_module?(file : String) : Bool
+    File.each_line(file) do |line|
+      return true if line.starts_with?("spec ") && line[5]?.try(&.ascii_number?)
+    end
+    false
+  rescue File::Error
+    false
+  end
+
+  # The JSON lines a spec build wrote, one per block; any other line the
+  # program printed goes to its output.
+  private def spec_blocks(stdout : IO::Memory, output : IO::Memory, blocks : Array(JSON::Any)) : Nil
+    stdout.to_s.each_line do |line|
+      if line.starts_with?("{\"clause\":")
+        begin
+          blocks << JSON.parse(line)
+          next
+        rescue JSON::ParseException
+        end
+      end
+      output << line << '\n'
+    end
+  end
+
+  # `ok|BROKEN|todo  spec N.M  file:line`, then each failure (5.2).
+  private def print_spec_block(block : JSON::Any) : Nil
+    status = block["status"]?.try(&.as_s?) || "?"
+    word = status == "broken" ? "BROKEN" : status
+    STDOUT << word << "  spec " << block["clause"]? << "  " << block["file"]? << ':' << block["line"]?
+    if status == "todo" && (reason = block["reason"]?.try(&.as_s?))
+      STDOUT << "  " << reason
+    end
+    STDOUT << '\n'
+    block["failures"]?.try(&.as_a?).try &.each do |failure|
+      failure.as_s.each_line { |line| STDOUT << "  " << line << '\n' }
     end
   end
 

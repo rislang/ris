@@ -83,6 +83,11 @@ jobs:
         run: bash test/cli/spec_blocks_grammar.sh
         env:
           IYI: ./bin/ris
+      - name: spec blocks run as a module test program
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_run.sh
+        env:
+          IYI: ./bin/ris
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:
