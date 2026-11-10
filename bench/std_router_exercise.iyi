@@ -46,7 +46,7 @@ module RisExerciseServer
     raise "stop queue full" unless RisBoard.post(RisStop(H).new)
   end
 
-  def self.serve(port : Int32, config : C, handler : H.class,
+  def self.answer(port : Int32, config : C, handler : H.class,
                  stream_bodies : Bool = false, compress : Bool = false,
                  timeout_ms : Int32 = 60000,
                  request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
@@ -58,7 +58,7 @@ module RisExerciseServer
       pool.spawn do
         copied = RisBoard.take(RisConfig(C, H))
         unless copied.is_a?(Cancelled)
-          Server.serve("127.0.0.1", port, copied.value, handler,
+          Server.answer("127.0.0.1", port, copied.value, handler,
             stream_bodies: stream_bodies, compress: compress,
             timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
             max_connections: max_connections)
@@ -87,13 +87,13 @@ class RisRouter1Handler
 
   def initialize(config)
     @router = Router.new
-    @router.handle("GET /users/{id}") { |_, params| Response.new(200, "user " + params["id"]) }
-    @router.handle("POST /users/{id}") { |req, params| Response.new(201, "posted " + params["id"] + ": " + req.body) }
-    @router.handle("/static/") { |req, _| Response.new(200, "static " + req.path) }
-    @router.handle("GET /{$}") { |_, _| Response.new(200, "home") }
-    @router.handle("GET /stop") do |_, _|
+    @router.handle("GET /users/{id}") { |_, res, params| res.body << "user " << params["id"] }
+    @router.handle("POST /users/{id}") { |req, res, params| res.status = 201; res.body << "posted " << params["id"] << ": " << req.body }
+    @router.handle("/static/") { |req, res, _| res.body << "static " << req.path }
+    @router.handle("GET /{$}") { |_, res, _| res.body << "home" }
+    @router.handle("GET /stop") do |_, res, _|
       RisExerciseServer.stop(RisRouter1Handler)
-      Response.new(200, "bye")
+      res.body << "bye"
     end
   end
 
@@ -101,8 +101,8 @@ class RisRouter1Handler
     RisExerciseServer.ready(RisRouter1Handler)
   end
 
-  def call(req) : Response
-    @router.call(req)
+  def call(req : Incoming, res : Outgoing) : Nil
+    @router.call(req, res)
   end
 end
 
@@ -111,11 +111,11 @@ class RisRouter2Handler
 
   def initialize(config)
     @router = Router.new
-    @router.handle("GET /users/{id}") { |_, params| Response.new(200, "user " + params["id"]) }
-    @router.handle("/static/") { |req, _| Response.new(200, "static " + req.path) }
-    @router.handle("GET /stop") do |_, _|
+    @router.handle("GET /users/{id}") { |_, res, params| res.body << "user " << params["id"] }
+    @router.handle("/static/") { |req, res, _| res.body << "static " << req.path }
+    @router.handle("GET /stop") do |_, res, _|
       RisExerciseServer.stop(RisRouter2Handler)
-      Response.new(200, "bye")
+      res.body << "bye"
     end
   end
 
@@ -123,8 +123,8 @@ class RisRouter2Handler
     RisExerciseServer.ready(RisRouter2Handler)
   end
 
-  def call(req) : Response
-    @router.call(req)
+  def call(req : Incoming, res : Outgoing) : Nil
+    @router.call(req, res)
   end
 end
 
@@ -137,7 +137,7 @@ def assert_str(expected : String, actual : String, msg : String) : Nil
 end
 
 import std/router::{Router, Pattern, RouterError}
-import std/http::{HTTP, Request, Response, Server}
+import std/http::{HTTP, Incoming, Outgoing, Field, Response, Server}
 import std/socket::{IyiSocket}
 
 # What `work` answers, or "refused: <why>" when it panics: run as a task,
@@ -160,9 +160,9 @@ end
 # A handler that answers with its pattern and the wildcards it was handed,
 # sorted by name: `GET /users/{id}|id=42`.
 def add(router : Router, pattern : String) : Nil
-  router.handle(pattern) do |_, params|
+  router.handle(pattern) do |_, res, params|
     names = params.keys.sorted
-    Response.new(200, pattern + "|" + names.map { |name| name + "=" + params[name] }.join(","))
+    res.body << pattern << "|" << names.map { |name| name + "=" + params[name] }.join(",")
   end
 end
 
@@ -183,9 +183,12 @@ def describe(router : Router, method : String, host : String, target : String) :
     path = target[0, q]
     query = target[q + 1, target.bytesize - q - 1]
   end
-  got = router.call(Request.new(method, path, query, {"Host" => host}, ""))
+  fields = Array(Field).new(1)
+  fields << Field.new("Host", host)
+  got = Outgoing.new
+  router.call(Incoming.new(method, path, query, fields, ""), got)
   case got.status
-  when 200                     then got.body
+  when 200                     then got.body.to_s
   when 301, 302, 303, 307, 308 then got.status.to_s + " " + (got.header("Location") || "")
   when 405                     then "405 " + (got.header("Allow") || "")
   else                              got.status.to_s
@@ -425,7 +428,7 @@ if args.size > 0 && args[0] == "table"
 end
 if args.size > 0 && args[0] == "serve"
   serving = RisExerciseServer.port
-  RisExerciseServer.serve(serving, 0, RisRouter1Handler, print_port: true)
+  RisExerciseServer.answer(serving, 0, RisRouter1Handler, print_port: true)
   __iyi_exit(0)
 end
 
@@ -495,7 +498,7 @@ assert_str "refused: Router: \"/index.html\" conflicts with \"GET /\": it matche
 assert_str "registered", answer { router_of(["/images/", "/images/thumbnails/", "example.com/", "/"]); "registered" }, "patterns that do not conflict are taken"
 late = answer do
   router = router_of(["/"])
-  router.call(Request.new("GET", "/", nil, {"Host" => "x"}, ""))
+  router.call(Incoming.new("GET", "/", nil, Array(Field).new, ""), Outgoing.new)
   add(router, "/late")
   "registered"
 end
@@ -529,7 +532,7 @@ listener = RisExerciseServer.port
 base = "http://127.0.0.1:#{listener}"
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(listener, 0, RisRouter2Handler)
+    RisExerciseServer.answer(listener, 0, RisRouter2Handler)
     0
   end
   RisExerciseServer.wait(RisRouter2Handler)

@@ -114,8 +114,8 @@ refuses "data that is not UTF-8" data_bytes 'SSE: the data is not UTF-8' \
   'w.send("a" + String.new(1) { |p| p[0] = 0xFF_u8 })'
 refuses "a comment that is not UTF-8" comment_bytes 'SSE: a comment is not UTF-8' \
   'w.comment(String.new(1) { |p| p[0] = 0xC0_u8 })'
-refuses "a stream's own Content-Type" stream_type "Response.stream: Content-Type is the stream's own, text/event-stream" \
-  'SSE.stream({"content-type" => "text/plain"}) { |events| nil }'
+refuses "a stream's own Content-Type" stream_type "SSE: Content-Type is the stream's own, text/event-stream" \
+  'res = Std::Http::Outgoing.new; res.header("content-type", "text/plain"); SSE.stream(res) { |events| nil }'
 refuses "a client's own Last-Event-ID" open_header "SSE: Last-Event-ID is the stream's own header; the last event ID is last_event_id:" \
   'SSE.open("http://127.0.0.1:9/", {"Last-Event-ID" => "3"}) { |e| true }'
 refuses "a last_event_id with a line break" open_id 'SSE: an id cannot hold a line break or a NUL: "a\nb"' \

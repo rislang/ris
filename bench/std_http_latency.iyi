@@ -77,7 +77,7 @@ module RisExerciseServer
     raise "stop queue full" unless RisBoard.post(RisStop(H).new)
   end
 
-  def self.serve(port : Int32, config : C, handler : H.class,
+  def self.answer(port : Int32, config : C, handler : H.class,
                  stream_bodies : Bool = false, compress : Bool = false,
                  timeout_ms : Int32 = 60000,
                  request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
@@ -89,7 +89,7 @@ module RisExerciseServer
       pool.spawn do
         copied = RisBoard.take(RisConfig(C, H))
         unless copied.is_a?(Cancelled)
-          Server.serve("127.0.0.1", port, copied.value, handler,
+          Server.answer("127.0.0.1", port, copied.value, handler,
             stream_bodies: stream_bodies, compress: compress,
             timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
             max_connections: max_connections)
@@ -129,9 +129,9 @@ class RisLatency1Handler
     RisExerciseServer.ready(RisLatency1Handler)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisLatency1Handler) if req.path == "/stop"
-    answer(req.path)
+    answer(req.path, res)
   end
 end
 
@@ -150,9 +150,9 @@ class RisLatency2Handler
     @tls
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisLatency2Handler) if req.path == "/stop"
-    answer(req.path)
+    answer(req.path, res)
   end
 end
 
@@ -171,9 +171,9 @@ class RisLatency3Handler
     @tls
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisLatency3Handler) if req.path == "/quit"
-    Response.new(200, "ok")
+    res.body << "ok"
   end
 end
 
@@ -185,13 +185,13 @@ class RisLatency4Handler
     RisExerciseServer.ready(RisLatency4Handler)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisLatency4Handler) if req.path == "/stop"
-    answer(req.path)
+    answer(req.path, res)
   end
 end
 
-import std/http::{HTTP, HTTPClient, Response, Server}
+import std/http::{HTTP, HTTPClient, Response, Server, Incoming, Outgoing}
 import std/socket::{IyiSocket}
 import std/tls::{TlsClient, TlsConfig, TlsError, TlsServerConfig}
 import std/x509::{RisCertificateStore, Certificate}
@@ -249,11 +249,13 @@ end
 # a write of its own. On a kept connection, past the start where the
 # kernel acknowledges at once, the chunk behind the head waited under
 # Nagle for the client's delayed ACK.
-def answer(path : String) : Response
-  return Response.new(200, "ok") unless path == "/stream"
-  Response.stream(200) do |w|
+def answer(path : String, res : Outgoing) : Nil
+  unless path == "/stream"
+    res.body << "ok"
+    return
+  end
+  res.stream do |w|
     w.write("ok")
-    nil
   end
 end
 
@@ -316,12 +318,12 @@ if mode == "self" || mode == "once"
   tls = RisExerciseServer.port
   group do |g|
     g.spawn do
-      RisExerciseServer.serve(plain, 0, RisLatency1Handler)
+      RisExerciseServer.answer(plain, 0, RisLatency1Handler)
       0
     end
     RisExerciseServer.wait(RisLatency1Handler)
     g.spawn do
-      RisExerciseServer.serve(tls, {chain.as_tape, key.as_tape}, RisLatency2Handler)
+      RisExerciseServer.answer(tls, {chain.as_tape, key.as_tape}, RisLatency2Handler)
       0
     end
     RisExerciseServer.wait(RisLatency2Handler)
@@ -354,7 +356,7 @@ end
 
 if mode == "serve"
   listener = RisExerciseServer.port
-  RisExerciseServer.serve(listener, {args[2].as_tape, args[3].as_tape}, RisLatency3Handler, port_file: args[1])
+  RisExerciseServer.answer(listener, {args[2].as_tape, args[3].as_tape}, RisLatency3Handler, port_file: args[1])
   exit 0
 end
 
@@ -384,7 +386,7 @@ puts "nodelay: TCP_NODELAY set on the connected and the accepted socket, and cle
 streamed = [] of Int64
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(served, 0, RisLatency4Handler)
+    RisExerciseServer.answer(served, 0, RisLatency4Handler)
     0
   end
   RisExerciseServer.wait(RisLatency4Handler)

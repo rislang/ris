@@ -50,7 +50,7 @@ module RisExerciseServer
     raise "stop queue full" unless RisBoard.post(RisStop(H).new)
   end
 
-  def self.serve(port : Int32, config : C, handler : H.class,
+  def self.answer(port : Int32, config : C, handler : H.class,
                  stream_bodies : Bool = false, compress : Bool = false,
                  timeout_ms : Int32 = 60000,
                  request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
@@ -62,7 +62,7 @@ module RisExerciseServer
       pool.spawn do
         copied = RisBoard.take(RisConfig(C, H))
         unless copied.is_a?(Cancelled)
-          Server.serve("127.0.0.1", port, copied.value, handler,
+          Server.answer("127.0.0.1", port, copied.value, handler,
             stream_bodies: stream_bodies, compress: compress,
             timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
             max_connections: max_connections)
@@ -105,12 +105,13 @@ class RisSse1Handler
     RisExerciseServer.ready(RisSse1Handler)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/stop"
       RisExerciseServer.stop(RisSse1Handler)
-      return Response.new(200, "bye")
+      res.body << "bye"
+      return
     end
-    @routes.answer(req)
+    @routes.answer(req, res)
   end
 end
 
@@ -125,12 +126,13 @@ class RisSse2Handler
     RisExerciseServer.ready(RisSse2Handler)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/stop"
       RisExerciseServer.stop(RisSse2Handler)
-      return Response.new(200, "bye")
+      res.body << "bye"
+      return
     end
-    @routes.answer(req)
+    @routes.answer(req, res)
   end
 end
 
@@ -143,7 +145,7 @@ def assert_str(expected : String, actual : String, msg : String) : Nil
 end
 
 import std/sse::{SSE, SSEError, Event, EventParser, EventWriter}
-import std/http::{HTTP, HTTPError, Request, Response, Server}
+import std/http::{HTTP, HTTPError, Incoming, Outgoing, Response, Server}
 import std/socket::{IyiSocket, SocketError}
 
 def bytes(list : Array(Int32)) : String
@@ -333,14 +335,16 @@ class Routes
     @ticks_gone = false
   end
 
-  def answer(req : Request) : Response
+  def answer(req : Incoming, res : Outgoing) : Nil
     case req.path
     when "/events"
-      SSE.stream { |events| feed_events(events) }
+      SSE.stream(res) { |events| feed_events(events) }
     when "/headers"
-      SSE.stream({"Cache-Control" => "no-transform", "X-Accel-Buffering" => "no"}) { |events| events.send("x") }
+      res.header("Cache-Control", "no-transform")
+      res.header("X-Accel-Buffering", "no")
+      SSE.stream(res) { |events| events.send("x") }
     when "/ticks"
-      SSE.stream do |events|
+      SSE.stream(res) do |events|
         n = 0
         while !events.gone? && n < 2000
           events.send("tick #{n}", id: n.to_s)
@@ -360,14 +364,15 @@ class Routes
           end
         end
       end
-      Response.new(200, @ticks_end < 0 ? "running" : "ended #{@ticks_gone} #{@ticks_end}")
+      res.body << (@ticks_end < 0 ? "running" : "ended #{@ticks_gone} #{@ticks_end}")
     when "/resume"
       from = (req.header("Last-Event-ID") || "0").to_i
-      SSE.stream do |events|
+      SSE.stream(res) do |events|
         [1, 2, 3].each { |k| events.send("after #{from}", id: (from + k).to_s) }
       end
     else
-      Response.new(404, "no\n")
+      res.status = 404
+      res.body << "no\n"
     end
   end
 end
@@ -378,7 +383,7 @@ args = Program.args
 if args.size > 0 && args[0] == "serve"
   serving = RisExerciseServer.port
   routes = Routes.new
-  RisExerciseServer.serve(serving, 0, RisSse1Handler, print_port: true)
+  RisExerciseServer.answer(serving, 0, RisSse1Handler, print_port: true)
   __iyi_exit(0)
 end
 
@@ -508,7 +513,7 @@ base = "http://127.0.0.1:#{listener}"
 ticks_written = 0
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(listener, 0, RisSse2Handler)
+    RisExerciseServer.answer(listener, 0, RisSse2Handler)
     0
   end
   RisExerciseServer.wait(RisSse2Handler)
