@@ -88,10 +88,6 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
   the method's scope; the same store is refused at a caller that holds
   the receiver in a local. Check it where it is made.
 
-* A multi-expression def answering RisBoard.take's non-flat message
-  can lose its decoded payloads when its scratch ends, unrefused
-  (autocert's reader_settings). Attribute decoded data to its receiving
-  scope; the one-call constructor form now keeps that gate safe.
 
 * A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
   is refused: the block frees its scratch before the task copy takes

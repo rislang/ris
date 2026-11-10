@@ -2034,6 +2034,23 @@ class Iyi::TapeShrinkChecker
 
   @handed = Set(UInt64).new
 
+  # A board's take decodes the message onto the taking scope's tape: a
+  # non-flat message is made there, as by a constructor, so it cannot
+  # leave a marked def or round unchecked (SPEC 3.6).
+  private def board_taken(node : ASTNode, result : Value) : Value
+    return result unless @checking && !@text_only && !@tape_blocks.empty?
+    return result unless node.is_a?(Call) && node.name == "take"
+    return result unless node.obj.try(&.type?).try(&.to_s.starts_with?("RisBoard"))
+    type = node.type?
+    return result unless type && TapeChecker.tape_in(@program, type) && !flat_result?(type)
+    @root_scopes[node.object_id] = @scopes.dup
+    @root_types[node.object_id] = type
+    @root_births[node.object_id] = @uses.size
+    note_fresh(node.object_id)
+    @handed << node.object_id
+    Value.new(result.roots | [node.object_id], result.views)
+  end
+
   # An @[OnTape] struct: a value whose fields may hold tape storage.
   # A union with a class instance or a tape struct in it (`Box?`): a call
   # whose def answers such a thing it made made it here, as a `Box`. What
@@ -2297,6 +2314,7 @@ class Iyi::TapeShrinkChecker
     result = tape_text(node, result)
     result = growing_text(node, result, env)
     result = handed_on(node, result)
+    result = board_taken(node, result)
     if (fields = @condition_storage) && storage?(node)
       result.roots.each do |root|
         if parent = @parents[root]?
