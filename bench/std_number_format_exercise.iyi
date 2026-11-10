@@ -47,15 +47,12 @@ class Cases
 end
 
 def double_of(bits : UInt64) : Float64
-  holder = Pointer(UInt64).malloc(1_u64)
-  holder.value = bits
-  Pointer(Float64).new(holder.address).value
+  IyiFloatText.from_bits(bits)
 end
 
+@[PointerUnsafe("bitcast local bits without allocating storage")]
 def single_of(bits : UInt32) : Float32
-  holder = Pointer(UInt32).malloc(1_u64)
-  holder.value = bits
-  Pointer(Float32).new(holder.address).value
+  pointerof(bits).as(Pointer(Float32)).value
 end
 
 if Program.args.size > 0 && Program.args[0] == "oracle"
