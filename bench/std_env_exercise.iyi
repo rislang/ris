@@ -130,7 +130,9 @@ assert_true all_vals.includes?("val1"), "values includes val1"
 assert_true all_vals.includes?("val2"), "values includes val2"
 assert_true all_vals.includes?("val3"), "values includes val3"
 
-env_map = ENV.to_h
+env_map = {} of String => String
+env_text = String::Builder.new
+ENV.to_h(env_map, env_text)
 assert_str "val1", env_map[K1], "to_h K1"
 assert_str "val2", env_map[K2], "to_h K2"
 assert_str "val3", env_map[K3], "to_h K3"
@@ -199,8 +201,12 @@ path_was = ENV["PATH"]?
 if path_was
   ENV["PATH"] = path_was + PREFIX
 end
-churn = [] of String
-20000.times { |i| churn << "c" * 48 + i.to_s }
+churn = String::Builder.new
+churned = 0
+20000.times do |i|
+  churn << "c" * 48 << i << '\n'
+  churned += 1
+end
 assert_str kept, ENV[K2], "a variable set before two collections"
 assert_true ENV.keys.includes?(K2), "a variable set before two collections is enumerated"
 if path_was
@@ -208,7 +214,7 @@ if path_was
   ENV["PATH"] = path_was
 end
 ENV.delete(K2)
-puts "  a variable set and one overwritten read back after two collections, #{churn.size} strings between"
+puts "  a variable set and one overwritten read back after two collections, #{churned} strings between"
 
 puts "\n== a name the environment holds twice"
 # `execve` hands a program whatever table it is given, the same name twice
@@ -217,6 +223,30 @@ puts "\n== a name the environment holds twice"
 # then K3 twice. Deleting only the first brought the variable back with
 # the second value. Windows' block holds a name once, and keeps no table.
 {% if !flag?(:wasm32) && !flag?(:win32) %}
+  # The environment with K3 twice, from a table on this def's stack: the
+  # C environment is set back to *was* before the table goes.
+  @[PointerUnsafe("makes a C environ table on its stack, restored before return")]
+  def check_name_twice(was : Pointer(Pointer(UInt8)), count : Int32) : Nil
+    raise "the environment is too large to copy" if count > 4000
+    table = uninitialized StaticArray(Pointer(UInt8), 4003)
+    entries = uninitialized StaticArray(UInt8, 128)
+    rows = pointerof(table).as(Pointer(Pointer(UInt8)))
+    bytes = pointerof(entries).as(Pointer(UInt8))
+    count.times { |i| rows[i] = was[i] }
+    text = "#{K3}=first\0#{K3}=second\0"
+    text.copy_to_local(0, bytes, text.bytesize)
+    rows[count] = bytes
+    rows[count + 1] = bytes + (K3.bytesize + 7)
+    rows[count + 2] = Pointer(UInt8).new(0_u64)
+    __iyi_set_environ(rows)
+    assert_str "first", ENV[K3], "the first of two entries is the value"
+    assert_str_nilable "first", ENV.delete(K3), "delete answers the first entry"
+    assert_nil ENV[K3]?, "no entry of a deleted name is left"
+    assert_true !ENV.has_key?(K3), "has_key? after deleting a name held twice"
+    assert_true !ENV.keys.includes?(K3), "keys after deleting a name held twice"
+    __iyi_set_environ(was)
+  end
+
   was = __iyi_environ
   count = 0
   if was.address != 0_u64
@@ -224,21 +254,7 @@ puts "\n== a name the environment holds twice"
       count = count + 1
     end
   end
-  twice = Pointer(UInt8*).malloc((count + 3).to_u64)
-  count.times { |i| twice[i] = was[i] }
-  ["#{K3}=first", "#{K3}=second"].each_with_index do |text, i|
-    entry = Pointer(UInt8).malloc((text.bytesize + 1).to_u64)
-    (text.bytesize).times { |k_| entry[k_] = text.byte_at(k_) }
-    entry[text.bytesize] = 0_u8
-    twice[count + i] = entry
-  end
-  twice[count + 2] = Pointer(UInt8).new(0_u64)
-  __iyi_set_environ(twice)
-  assert_str "first", ENV[K3], "the first of two entries is the value"
-  assert_str_nilable "first", ENV.delete(K3), "delete answers the first entry"
-  assert_nil ENV[K3]?, "no entry of a deleted name is left"
-  assert_true !ENV.has_key?(K3), "has_key? after deleting a name held twice"
-  assert_true !ENV.keys.includes?(K3), "keys after deleting a name held twice"
+  check_name_twice(was, count)
   puts "  every entry of a name held twice is deleted"
 {% else %}
   puts "  not measured: this platform keeps no environ table to hold it twice"
