@@ -15,7 +15,7 @@ import std/acme::{AcmeHttp01}
 struct Ready
 end
 
-# A test PKI (bench/std_http_resume.iyi's): Ed25519, valid to 9999. The
+# A test PKI (test/cli/std_http_resume.iyi's): Ed25519, valid to 9999. The
 # leaf's key guards nothing but this test.
 LEAF_PEM = "-----BEGIN CERTIFICATE-----\n" \
            "MIIBQzCB9qADAgECAgEDMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \

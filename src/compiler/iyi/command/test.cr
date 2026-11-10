@@ -2,7 +2,7 @@
 # (AI_FIRST.md §2 #4).
 #
 # A test is a plain iyi program named `*_test.iyi`: it asserts by exiting
-# non-zero, exactly the contract every gate in `bench/` already runs on,
+# non-zero, exactly the contract every gate in `test/cli/` already runs on,
 # because this repository's own culture is the framework. No DSL, no
 # registry — a program that prints what failed and exits 1 is a failing
 # test, and one that exits 0 passed. The prelude's `assert` is that in one

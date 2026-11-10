@@ -20,7 +20,7 @@ path = ["lib/*/**"]
 # code as well. The math gate's oracle is Arm's files as published, with
 # their own headers.
 [[annotations]]
-path = ["src/std/math.iyi", "bench/libm_oracle/exp.c", "bench/libm_oracle/exp_data.c", "bench/libm_oracle/pow.c", "bench/libm_oracle/pow_log_data.c", "bench/libm_oracle/pow_common.h", "bench/libm_oracle/log.c", "bench/libm_oracle/log_data.c", "bench/libm_oracle/exp2.c", "bench/libm_oracle/log2.c", "bench/libm_oracle/log2_data.c"]
+path = ["src/std/math.iyi", "test/cli/libm_oracle/exp.c", "test/cli/libm_oracle/exp_data.c", "test/cli/libm_oracle/pow.c", "test/cli/libm_oracle/pow_log_data.c", "test/cli/libm_oracle/pow_common.h", "test/cli/libm_oracle/log.c", "test/cli/libm_oracle/log_data.c", "test/cli/libm_oracle/exp2.c", "test/cli/libm_oracle/log2.c", "test/cli/libm_oracle/log2_data.c"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "Copyright (c) 2018-2025 Arm Limited"
 SPDX-License-Identifier = "MIT"
@@ -40,14 +40,14 @@ SPDX-License-Identifier = "MIT"
 # ported with their tables; the notice is beside the code. The math gate's
 # oracle is glibc's files as published, with their own headers.
 [[annotations]]
-path = ["src/std/math.iyi", "bench/libm_oracle/core_math/**"]
+path = ["src/std/math.iyi", "test/cli/libm_oracle/core_math/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "Copyright (c) 2022-2026 Alexei Sibidanov, Paul Zimmermann, Tom Hubrecht and Claude-Pierre Jeannerod"
 SPDX-License-Identifier = "MIT"
 
-# iyi: the port of kostya's crystal-metric that `bench/metric_port.sh` gates.
+# iyi: the port of kostya's crystal-metric that `test/speed/metric_port.sh` gates.
 [[annotations]]
-path = ["bench/metric/**"]
+path = ["test/speed/metric/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "Copyright (c) 2024 Konstantin Makarchev"
 SPDX-License-Identifier = "MIT"
@@ -56,25 +56,25 @@ SPDX-License-Identifier = "MIT"
 # functions are glibc's fdlibm files, with Sun's notice, which is kept beside
 # the port and in the oracle's copies.
 [[annotations]]
-path = ["bench/libm_oracle/e_log10.c", "bench/libm_oracle/s_expm1.c", "bench/libm_oracle/s_log1p.c", "bench/libm_oracle/e_sinh.c", "bench/libm_oracle/e_cosh.c", "bench/libm_oracle/s_tanh.c", "bench/libm_oracle/e_j0.c", "bench/libm_oracle/e_j1.c", "bench/libm_oracle/e_jn.c"]
+path = ["test/cli/libm_oracle/e_log10.c", "test/cli/libm_oracle/s_expm1.c", "test/cli/libm_oracle/s_log1p.c", "test/cli/libm_oracle/e_sinh.c", "test/cli/libm_oracle/e_cosh.c", "test/cli/libm_oracle/s_tanh.c", "test/cli/libm_oracle/e_j0.c", "test/cli/libm_oracle/e_j1.c", "test/cli/libm_oracle/e_jn.c"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "Copyright (C) 1993 by Sun Microsystems, Inc."
 SPDX-License-Identifier = "LicenseRef-SunPro"
 
 # iyi: a subset of NIST's ACVP vectors for ML-KEM-768, which
-# `bench/std_mlkem_exercise.sh` checks std/mlkem against; NIST's notice,
+# `test/cli/std_mlkem_exercise.sh` checks std/mlkem against; NIST's notice,
 # the source and what was changed are in the NOTICE beside them.
 [[annotations]]
-path = ["bench/std_mlkem_fixture/**"]
+path = ["test/cli/std_mlkem_fixture/**"]
 precedence = "override"
 SPDX-FileCopyrightText = "National Institute of Standards and Technology"
 SPDX-License-Identifier = "LicenseRef-NIST-Software"
 
 # iyi: a subset of RFC 9180's test vectors, from the CFRG's HPKE draft
-# repository, which `bench/std_hpke_exercise.sh` checks std/hpke against;
+# repository, which `test/cli/std_hpke_exercise.sh` checks std/hpke against;
 # the source, its terms and what was changed are in the NOTICE beside them.
 [[annotations]]
-path = ["bench/std_hpke_fixture/**"]
+path = ["test/cli/std_hpke_fixture/**"]
 precedence = "override"
 SPDX-FileCopyrightText = "IETF Trust and the persons identified as the document authors"
 SPDX-License-Identifier = "BSD-2-Clause"

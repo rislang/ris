@@ -3,7 +3,7 @@ require "../../src/compiler/iyi/mod/resolver"
 
 # iyi: the manifest and the resolver — iyi SPEC III.7 step 1. The fetch is a
 # seam, so everything here runs from tables; the gate
-# (`bench/packages_resolve.sh`) is where git and the mirror get exercised.
+# (`test/cli/packages_resolve.sh`) is where git and the mirror get exercised.
 
 private def version(spelling : String) : SemanticVersion
   SemanticVersion.parse(spelling)

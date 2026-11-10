@@ -8,7 +8,7 @@ Database that `scripts/generate_unicode_data.cr` downloads and writes for the
 compatibility library, and `src/unicode/unicode.cr`, which names the UCD
 version it was written from. The repository already carries that data, and
 both libraries answering from one table is what lets
-`bench/std_unicode_exercise.sh` diff them.
+`test/cli/std_unicode_exercise.sh` diff them.
 
 Some properties are not in it, because the compatibility library has no
 use for them, and are read from the UCD files of the same release, fetched

@@ -97,7 +97,7 @@
 #
 # Quoted-printable is written as Python's `email.quoprimime.body_encode`
 # writes it, line for line, and read as RFC 2045 says; base64 in lines of
-# 76. `bench/std_mail_exercise.sh` has Python's `email` read what this
+# 76. `test/cli/std_mail_exercise.sh` has Python's `email` read what this
 # builds and this read what Python's `EmailMessage` builds, under
 # `policy.default` and `policy.SMTP`, holds the encodings to `quopri`,
 # `base64` and `email.quoprimime`, and dates to `email.utils`.

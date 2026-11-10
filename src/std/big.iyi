@@ -41,7 +41,7 @@
 # counters and n alone. After the rounds: the test that b is 1 branches,
 # which is the answer's nil and public, and `BigInt.new` trims the
 # answer's leading zero limbs, which shows how many it has.
-# bench/ct_timing.sh, x = (m - 1) / 2 against random x modulo 2048 bits:
+# test/speed/ct_timing.sh, x = (m - 1) / 2 against random x modulo 2048 bits:
 # |t| = 2.4 to 3.4 over 50,000 to 100,000 inversions (under 10 is no
 # leak seen), where the extended Euclid's algorithm std/rsa had reached
 # |t| = 317 to 403 on 2,000 to 5,000.
@@ -1329,7 +1329,7 @@ pub struct BigInt
   # modulus' length, and a 2048-bit modulus with a 2048-bit exponent took
   # 19.0 ms in a --release build where Python 3.14's `pow` took 13.3 (3072
   # bits: 63.2 and 42.3, 4096: 168.7 and 100.3). Montgomery's takes 2.5 ms,
-  # 8.5 and 20.6 in the run of bench/std_big_exercise.sh that measured
+  # 8.5 and 20.6 in the run of test/cli/std_big_exercise.sh that measured
   # Python at 13.7, 45.4 and 102.1, which prints these each run.
   def pow_mod(exp : BigInt, mod : BigInt) : BigInt
     BigInt.new(1, BigInt.pow_mod_limbs(self, exp, mod))

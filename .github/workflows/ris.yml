@@ -65,7 +65,7 @@ jobs:
         run: ./bin/ris run samples/ris/respond.ri
       - name: ris check
         if: matrix.shard == 'heap'
-        run: python3 bench/check_verb.py
+        run: python3 test/cli/check_verb.py
         env:
           IYI: ./bin/ris
       - name: test/ris/check.sh

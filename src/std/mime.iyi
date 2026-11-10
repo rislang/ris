@@ -12,7 +12,7 @@
 # `application/xml` (RFC 7303 prefers it to `text/xml`), `.ico` is IANA's
 # `image/vnd.microsoft.icon` rather than the older `image/x-icon`, which
 # browsers accept as well. Every entry is checked against Python's table
-# by bench/std_mime_exercise.sh, which lists the few deliberate
+# by test/cli/std_mime_exercise.sh, which lists the few deliberate
 # differences and why.
 #
 # Left out: registering types at run time, which would make the answer

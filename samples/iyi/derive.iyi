@@ -5,7 +5,7 @@
 # A derive runs once, in the module that declares the type. What it generates is
 # an ordinary declaration of that module, so it travels in the module's
 # `.iyimod` and a consumer calls the derived method without running the macro
-# and without this module's source. `bench/samples_roundtrip.sh` builds this
+# and without this module's source. `test/cli/samples_roundtrip.sh` builds this
 # sample from its artifacts with `std/derives` deleted, which is that claim
 # taken literally.
 #

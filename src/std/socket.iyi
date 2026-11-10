@@ -572,7 +572,7 @@ pub struct IyiSocket
   # first address dropped SYNs cost all of *timeout_ms* - or the kernel's
   # two minutes of retries, unbounded - before the second was tried. Now
   # it costs the delay: 250 ms to a name whose first address is a full
-  # listen queue and whose second listens (`bench/std_dns_exercise.sh`,
+  # listen queue and whose second listens (`test/cli/std_dns_exercise.sh`,
   # under a 5,000 ms bound).
   #
   # `localhost` is raced the same way, 127.0.0.1 and then ::1, without
@@ -2772,7 +2772,7 @@ pub struct IyiSocket
       # the kernel reads and writes these while the fiber is parked, and a
       # heap chunk whose only reference is a local the posting call has
       # finished with is a chunk the collector can hand to somebody else
-      # first. `bench/server_load.iyi` died of a memory fault on exactly
+      # first. `test/cli/server_load.iyi` died of a memory fault on exactly
       # that, with the accepted addresses on the heap.
       struct WSABuf
         len : Int32

@@ -69,7 +69,7 @@
 # 2147483647 ms, about 24 days, past what `sleep` takes); a blank line
 # sets the last event ID and dispatches the event when its data is not
 # empty, and what a stream ends with before its blank line is discarded.
-# `bench/std_sse_exercise.sh` holds it to the standard's own examples and
+# `test/cli/std_sse_exercise.sh` holds it to the standard's own examples and
 # to a Python transcription of the algorithm over a generated corpus fed
 # in pieces of one to seven bytes, and runs the client against a Python
 # server that drops the connection mid-stream, and the server under

@@ -62,7 +62,7 @@
 #
 # Not here: PIPELINING, CHUNKING, DSN, and a password that std/tls has not
 # kept from the wire because the caller set `cleartext_auth`.
-# bench/std_smtp_exercise.sh holds it to a server written in Python for
+# test/cli/std_smtp_exercise.sh holds it to a server written in Python for
 # the purpose, over plain TCP, STARTTLS and TLS.
 
 module std/smtp

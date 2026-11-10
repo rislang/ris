@@ -351,7 +351,7 @@
 # (section 7.1); padding beyond the name's (section 6.1.3's ALPN profiles,
 # and the server's record padding). Measured on loopback (--release, this
 # program's client and server on one thread, the median of 200 handshakes
-# each, the best of five runs, bench/std_tls_exercise.iyi's `ech-speed`):
+# each, the best of five runs, test/cli/std_tls_exercise.iyi's `ech-speed`):
 # 0.619 ms without ECH, 0.646 with GREASE, 0.730 with ECH taken - ECH
 # costs 0.11 ms a handshake, the HPKE seal and open and the inner built,
 # encoded and rebuilt. `TlsServerConfig#groups` orders the key exchange
@@ -1753,7 +1753,7 @@ module RisTlsConnectionState
   # peer what it had received and not yet read: closed at once on a
   # request body it had not read, an HTTPS server lost its whole answer to
   # Python's http.client in each of 50 runs, and curl the end of it in
-  # each of 50 (bench/std_http_exercise.sh, "a close while the client
+  # each of 50 (test/cli/std_http_exercise.sh, "a close while the client
   # still sends"). Nothing is waited for once the peer's close_notify has
   # been read: nothing comes after it. A socket already closed under the
   # connection leaves only the close: no alert, and nothing read. `abort`

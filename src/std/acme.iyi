@@ -103,7 +103,7 @@
 # `profiles` extension. Keys are not written out: a `SigningKey` is made
 # from a PEM or its bytes and keeping it is the caller's.
 #
-# bench/std_acme_exercise.sh holds it to RFC 7515's, 7638's and 8037's
+# test/cli/std_acme_exercise.sh holds it to RFC 7515's, 7638's and 8037's
 # examples, to OpenSSL and Python's cryptography for the request and the
 # tls-alpn-01 certificate, to a server in the exercise that breaks the
 # protocol one rule at a time, and to Let's Encrypt's Pebble for whole

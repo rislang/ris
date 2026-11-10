@@ -129,7 +129,7 @@ class File
     end
   {% else %}
     # No answer, darwin's included: `lseek` or `fstat` there would be a
-    # libSystem symbol the floor lists in `bench/` do not name.
+    # libSystem symbol the floor lists in `test/cli/` do not name.
     private def self.size_of(fd : Int64) : Int64
       -1_i64
     end

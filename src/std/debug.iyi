@@ -46,7 +46,7 @@ module std/debug
   # mapped them, and then that file.
   #
   # Eight calls, every one of them kernel32, which is the floor
-  # `bench/dependency_floor.sh` holds this runtime to: the running module's
+  # `test/cli/dependency_floor.sh` holds this runtime to: the running module's
   # base address and its path, a file opened, measured, read and closed, and
   # pages to hold what was read. `lib LibC` inside a module is that module's
   # own — `Std::Debug::LibC` — so the four the prelude already names are

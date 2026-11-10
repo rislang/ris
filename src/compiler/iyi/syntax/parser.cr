@@ -111,7 +111,7 @@ module Iyi
     # `(a + b) + c` - and sits at under a third of the 3,750 links the
     # passes after the parser overflowed on; `&&`, `elsif`, `case` and
     # unary chains went further. The deepest real code measured, every file
-    # of src/, bench/, samples/, test/ and the other library's src/, was 23
+    # of src/, test/cli/, samples/, test/ and the other library's src/, was 23
     # levels of descent (src/std/yaml.iyi) and a tree 39 deep.
     NESTING_LIMIT =  128
     DEPTH_LIMIT   = 1000

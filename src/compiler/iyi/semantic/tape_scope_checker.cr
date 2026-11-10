@@ -328,7 +328,7 @@ end
 # pointer into a tape in a heap object.
 module Iyi::TapeScopeRuntime
   # The loaded prelude's directory, "/"-terminated: a test's patched copy
-  # of `src/iyi/` (bench/*.sh mutation proofs) is the runtime as much as
+  # of `src/iyi/` (test/cli/*.sh mutation proofs) is the runtime as much as
   # the original, so the rules that exempt the runtime exempt it too.
   class_property prelude_dir : String? = nil
   @@expanded = {} of String => String

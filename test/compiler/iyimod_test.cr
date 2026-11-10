@@ -3842,7 +3842,7 @@ describe Iyi::IyiMod do
   # The `calc` sample is the one this was found on — `impl Node for
   # Number` answers `Int32` under a `def evaluate(scope) : Int32 |
   # UnknownName | DividedByZero` — and it is a sample
-  # `bench/samples_roundtrip.sh` did not cover, because that gate named
+  # `test/cli/samples_roundtrip.sh` did not cover, because that gate named
   # six of the twelve samples that import a module. It names all twelve
   # now.
   it "carries an impl method whose declaration is wider than its body" do

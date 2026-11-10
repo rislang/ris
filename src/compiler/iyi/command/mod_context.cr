@@ -250,7 +250,7 @@ class Iyi::Command
   # out with every exported name in them. The surface says what a module
   # offers and nothing about how a file names it; the raw sources a pack
   # replaces carry their *own* `import` lines and so show the
-  # spelling by accident, and the rounds arm of `bench/context_pack.py`
+  # spelling by accident, and the rounds arm of `test/cli/context_pack.py`
   # lost a round to exactly that — a model that wrote `import kemal/dsl`,
   # called `before_all` bare, and was refused for the missing `using`
   # (the keyword `import X::{...}` replaced; AI_FIRST.md §5, the third

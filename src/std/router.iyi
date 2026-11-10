@@ -59,7 +59,7 @@
 # is not a path (`OPTIONS *`, `CONNECT`'s authority) is 404. Wildcard
 # names are ASCII identifiers (Go takes any Unicode letter). The `Host`
 # is matched as Go matches it: its port dropped, otherwise as sent.
-# `bench/std_router_exercise.sh` hands its tables - 70 requests, 23 pairs
+# `test/cli/std_router_exercise.sh` hands its tables - 70 requests, 23 pairs
 # of patterns registered in turn, 28 patterns read - to Go's own
 # `ServeMux` where a Go toolchain is installed. Under Go 1.26 or later
 # every answer is the same; under 1.22 to 1.25 the one difference allowed

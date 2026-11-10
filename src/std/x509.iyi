@@ -77,7 +77,7 @@
 # (a request leaves a longer first name out of its subject, a self-signed
 # certificate refuses it), and a serial that is positive and 20 octets
 # at most.
-# bench/std_acme_exercise.sh holds both to OpenSSL and Python's
+# test/cli/std_acme_exercise.sh holds both to OpenSSL and Python's
 # cryptography.
 #
 # Pure computation: std/asn1, std/rsa, std/ecdsa, std/p256, std/p384,

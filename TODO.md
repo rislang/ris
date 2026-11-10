@@ -173,19 +173,19 @@ Unknown must be refused (SPEC 3.6).
 
 ## 7. Benches
 
-* bench/agent_loop.py fails at step 12 on main (2026-11-10) and no CI
+* test/cli/agent_loop.py fails at step 12 on main (2026-11-10) and no CI
   job runs it (gates_reachable counts it only through a spec comment):
   fix it and put it in .github/workflows/ris.yml. Its `check -f json`
   and `fix --json` calls still need moving to `check types --json`
   (diagnostics in the steps object) and `check types --fix`.
-* bench/test_verb.sh fails on main (2026-11-10) at "the discount says
+* test/cli/test_verb.sh fails on main (2026-11-10) at "the discount says
   when it turns itself off": the eiy macro gets the file name
   `::String.view(::String.view("page.eiy"))` and panics `cannot read`.
-* bench/packages_get.sh: 9 FAIL (get/reach/doc/mod context), 31 on main
-  before ris check; bench/verbs_exercise.sh: a reopen of String (now a
+* test/cli/packages_get.sh: 9 FAIL (get/reach/doc/mod context), 31 on main
+  before ris check; test/cli/verbs_exercise.sh: a reopen of String (now a
   struct) and `fix printed its edit` (split.iyi already clean).
 
-* Build each bench, group the refusals by message, fix per group (old
+* Build each test/cli program, group refusals by message, fix per group (old
   step 5). Known before the new rules: 5.1 task captures (tls server
   configs, udp:274, dns:951, http.iyi:2154 serve's `handle`, sse.iyi:513
   and :543, std_compress's opaque source proc); drop std/gc imports
@@ -275,7 +275,7 @@ change. Gates stay structural.
 * TlsConfig system roots: check whether SystemRoots (00130b97e) already
   keeps them. If still read per handshake, make Certificate copyable to
   Program.tape to keep them once.
-* Autocert part B: bench/std_autocert_exercise.iyi and its driver, with
+* Autocert part B: test/cli/std_autocert_exercise.iyi and its driver, with
   real TLS deadline and parallel-server cases, Pebble, restarts and
   mutation checks (part A's gates: test/ris/autocert.ri, autocert_wire.ri).
 * std_process: the `handlers` mutation proof (child keeps this program's
@@ -304,17 +304,17 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
   up to eight (doc/drafts/fileserver-outgoing.md, Memory).
 * compiler_test: 225 failures and two segfaulting groups (Code gen: if,
   Codegen: special vars), each top-level describe run apart (80fc5b354).
-* bench/concurrency_exercise.sh needs `ulimit -n 8192` and is not in
+* test/cli/concurrency_exercise.sh needs `ulimit -n 8192` and is not in
   check.sh; recheck on minitest.
-* bench/parallel_exercise.iyi:124 (a task value's Panicked arm) and
-  bench/metric/metric.iyi (Array of the tape type Planet) do not
+* test/cli/parallel_exercise.iyi:124 (a task value's Panicked arm) and
+  test/speed/metric/metric.iyi (Array of the tape type Planet) do not
   typecheck; recheck on minitest.
-* bench/std_websocket_exercise.iyi appends to an `io` builder and reads
+* test/cli/std_websocket_exercise.iyi appends to an `io` builder and reads
   it back: move it to a String local, then recheck the artifact
   comparison on minitest.
 * test/compiler/iyimod_test.cr's getter/defer case cannot resolve
   `Pointer(RisArrayPool(String))` from boot/shelf's type ids.
-* bench/socket_exercise.sh: several mutations are not caught; a
+* test/cli/socket_exercise.sh: several mutations are not caught; a
   unix-socket mutation fails with "the address is in use". Recheck on
   minitest.
 * The mutation phases of std_acme, cookie, router, sse and websocket .sh

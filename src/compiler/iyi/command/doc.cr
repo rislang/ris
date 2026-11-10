@@ -244,7 +244,7 @@ class Iyi::Command
     # Asked of the posix reading: on Windows the expansion's real file is
     # spelled with `\`, and `iyi doc Int32` there listed `%`, `**` and `-`
     # — the three written by hand — and none of the operators the macro
-    # writes: no `+`, no `<`, no `to_i64`. `bench/packages_resolve.sh`
+    # writes: no `+`, no `<`, no `to_i64`. `test/cli/packages_resolve.sh`
     # said so the first time it ran on Windows.
     filename = location.original_filename
     return false unless filename.is_a?(String)

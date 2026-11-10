@@ -68,7 +68,7 @@
 # which is what Go answers; its home is `%USERPROFILE%`, which Windows
 # sets at logon to the directory `GetUserProfileDirectoryW` answers -
 # that call is userenv.dll's, which an iyi program does not link (the
-# floor in bench/floor_base.sh lists the DLLs one may). The full name is
+# floor in test/cli/floor_base.sh lists the DLLs one may). The full name is
 # netapi32's `NetUserGetInfo` and is `""` here (Go answers the account
 # name in its place when it cannot ask); Windows has no login shell, so
 # that is `""` too. Every other lookup - by name, by id, a group, a

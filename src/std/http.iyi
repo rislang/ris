@@ -91,7 +91,7 @@
 # written. `format_request`, `Server.parse_head`, `format_response` and
 # `parse_response` are the text of whole messages, pure, for a program
 # and for the gate; both halves are this one module, so what one writes
-# the other reads, and `bench/std_http_exercise.sh` runs the client
+# the other reads, and `test/cli/std_http_exercise.sh` runs the client
 # against the server and both against Python's.
 #
 # **HTTP/2** (RFC 9113, the section near the end of this file): the same
@@ -102,7 +102,7 @@
 # `HTTP.tls_config.alpn` - and over `http://` from an
 # `HTTPClient.new(prior_knowledge: true)`. A server's handler, a request's
 # body and an answer's are what they are over HTTP/1.1; `version` says
-# `HTTP/2`. bench/http2_exercise.iyi and the gate hold it against curl,
+# `HTTP/2`. test/cli/http2_exercise.iyi and the gate hold it against curl,
 # Node's own HTTP/2 both ways (TLS with ALPN included, the server's own
 # TLS too) and RFC 9113's error rules frame by frame.
 #
@@ -120,7 +120,7 @@
 # `HTTP.proxy_for(url, http_proxy, https_proxy, no_proxy)` says which
 # proxy a URL takes under those variables' values, `NO_PROXY` read as
 # Go's `httpproxy` reads it, and std/http_proxy's `HTTPProxy.from_env`
-# reads them from the environment. bench/std_http_exercise.sh holds it
+# reads them from the environment. test/cli/std_http_exercise.sh holds it
 # against a proxy written in Python - a WebSocket through it, `ws://`
 # and `wss://`, among the rest - curl through the same proxy, and Go's
 # net/http for `NO_PROXY`.
@@ -792,7 +792,7 @@ struct Conn
   # it had received and not yet read: a server that closed at once on a
   # request body it had not read lost its whole answer to Python's
   # http.client in each of 50 runs, and the end of it to curl in each of
-  # 50 (bench/std_http_exercise.sh, "a close while the client still
+  # 50 (test/cli/std_http_exercise.sh, "a close while the client still
   # sends"). nginx's lingering_close is this; Go's server half-closes the
   # same way (closeWriteAndWait) and then waits without reading. A
   # connection that ended or failed is closed at once (`close_now`).
@@ -3522,7 +3522,7 @@ end
 # leaves them. Nothing goes early (0-RTT), whatever a ticket allows: the
 # module's header says why. `connections_resumed`, `tickets_held` and
 # `Response#tls_resumed?` say what was kept and used. What it saves, by
-# bench/std_http_resume.iyi built --release on a 12-core machine other
+# test/cli/std_http_resume.iyi built --release on a 12-core machine other
 # jobs shared (medians of 200, the middle of three runs): the handshake
 # took 0.96 ms full and 0.51 resumed against std/http's server, 1.03 and
 # 0.57 against OpenSSL 3.5's s_server - and a GET on a new connection,
@@ -6106,7 +6106,7 @@ pub class Multipart
   # names none - or one of a length RFC 2046 §5.1.1 does not allow, 1 to
   # 70 characters, which `new` refuses with a panic. The type is the
   # peer's: `Request#multipart` handed a client's 90-character boundary
-  # through to that panic (found by bench/std_fuzz_exercise.sh).
+  # through to that panic (found by test/cli/std_fuzz_exercise.sh).
   def self.boundary(content_type : String) : String?
     parsed = MIME.parse?(content_type)
     return nil unless parsed

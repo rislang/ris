@@ -36,7 +36,7 @@
 # pre-commit
 .pre-commit-config.yaml
 
-# Python bytecode from bench helpers
+# Python bytecode from test/cli and test/speed helpers
 __pycache__/
 *.pyc
 
@@ -55,9 +55,10 @@ __pycache__/
 /test-out/
 /test-build.log
 
-# ris: the bench scripts' work directories, so the probes they write are
-# std's exercises under bench/ (FfiBoundaryChecker).
-/bench/.work/
+# ris: the test scripts' work directories, so the probes they write are
+# std's exercises under test/cli/ (FfiBoundaryChecker).
+/test/cli/.work/
+/test/speed/.work/
 
 # ris: EGM drift reports are worksheets, not committed.
 /*_DRIFT_REPORT.md

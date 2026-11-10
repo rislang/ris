@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# Format strings, exercised and driven. Runs the format exercise plain and
+# optimised, checks every section reported, and proves the checks can fail
+# by patching copies of the format library via IYI_PATH.
+#
+#     bash test/cli/format_exercise.sh
+#
+# A check that cannot fail is not a check. This script proves failure across
+# each capability: width padding, left-alignment, zero-padding, float
+# precision rounding, integer base conversion, sign handling, and boundary
+# handling for zero-precision integers.
+#
+# Exits non-zero if any check fails.
+
+set -u
+
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+# The gate runs whatever compiler the caller names; `bin/iyi` is a shell
+# wrapper, and on Windows the caller has to point at the built exe itself.
+IYI="${IYI:-$REPO/bin/iyi}"
+mkdir -p "$REPO/test/cli/.work"
+WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+# A native compiler cannot resolve this shell's own path mapping: a search
+# path built from the shell's `pwd` finds no prelude at all, and a scratch
+# directory named `/tmp/tmp.X` on it is silently ignored, so the patched
+# copy is never read and the proof that a check can fail quietly stops
+# proving it.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN* | Windows_NT)
+    REPO="$(cygpath -m "$REPO")"
+    WORK="$(cygpath -m "$WORK")"
+    ;;
+esac
+trap 'rm -rf "$WORK"' EXIT
+
+# The search path is a list, and the byte between its entries is the
+# platform's: `;` where a drive letter already owns the colon.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN* | Windows_NT) PSEP=';' ;;
+  *) PSEP=':' ;;
+esac
+
+status=0
+
+run_case() {
+  local label="$1" name="$2"
+  shift 2
+  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/format_exercise.iyi" \
+       >"$WORK/$name.build.log" 2>&1; then
+    echo "$label: build failed"
+    sed -n '1,12p' "$WORK/$name.build.log"
+    status=1
+    return 1
+  fi
+  "$WORK/$name" >"$WORK/$name.out" 2>&1
+  local exit_code=$?
+  sed 's/^/  /' "$WORK/$name.out"
+  if [ "$exit_code" -ne 0 ]; then
+    echo "$label: exited $exit_code"
+    status=1
+    return 1
+  fi
+  return 0
+}
+
+echo "== the format exercise, plain build"
+run_case "plain" format-plain
+if ! grep -q "all format checks passed" "$WORK/format-plain.out" 2>/dev/null; then
+  echo "  MISSING: plain build did not reach the end"
+  status=1
+fi
+
+echo
+echo "== every format section reported"
+for phrase in "width:" "alignment:" "zero pad:" "precision:" "base:" "negative:" "boundary:" "general:" "tower:" "list arguments:"; do
+  grep -q "$phrase" "$WORK/format-plain.out" 2>/dev/null || {
+    echo "  MISSING: nothing reported for $phrase"
+    status=1
+  }
+done
+[ "$status" -eq 0 ] && echo "  width, alignment, zero pad, precision, base, negative, boundary, general, tower and the argument list all reported"
+
+echo
+echo "== the same program with optimisation on (--release)"
+run_case "release" format-release --release
+if ! grep -q "all format checks passed" "$WORK/format-release.out" 2>/dev/null; then
+  echo "  MISSING: release build did not reach the end"
+  status=1
+fi
+
+echo
+echo "== proving the checks can fail when formatting is broken"
+
+prove_fails() {
+  local label="$1" dir="$2" phrase="$3" sed_script="$4"
+  # The library the program imports, not the prelude: `std/format` is a
+  # module now, so the patched copy is `std/` and `IYI_PATH` finds it first.
+  mkdir -p "$WORK/$dir/std"
+  cp -R "$REPO/src/std/." "$WORK/$dir/std/"
+  sed -e "$sed_script" "$REPO/src/std/format.iyi" > "$WORK/$dir/std/format.iyi"
+  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/format_exercise.iyi" \
+       >"$WORK/$dir/build.log" 2>&1; then
+    echo "  $label: the patched format library did not build"
+    sed -n '1,12p' "$WORK/$dir/build.log"
+    status=1
+    return
+  fi
+  "$WORK/$dir/program" >"$WORK/$dir/out" 2>&1
+  local exit_code=$?
+  if [ "$exit_code" -eq 0 ]; then
+    echo "  $label: the exercise still passed, so it does not test this"
+    status=1
+    return
+  fi
+  if ! grep -q "$phrase" "$WORK/$dir/out"; then
+    echo "  $label: failed, but not at expected check (expected '$phrase')"
+    sed -n '$p' "$WORK/$dir/out"
+    status=1
+    return
+  fi
+  printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" \
+    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+}
+
+# 1. Width padding removed
+prove_fails "width padding broken" no_width "format: width" \
+  's/^\( *\)repeat(w, 32_u8, \([a-z -]*\)) unless minus.*$/\1nil/'
+
+# 2. Alignment reversed
+prove_fails "alignment ignored" no_align "format: alignment" \
+  's/ unless minus || zero$/ unless zero/; s/ unless minus$//; s/^\( *\)repeat(w, 32_u8, [a-z -]*) if minus$/\1nil/'
+
+# 3. Zero padding replaced with spaces
+prove_fails "zero pad broken" no_zero "format: zero pad" \
+  's/repeat(w, 48_u8, pad) if zero/repeat(w, 32_u8, pad) if zero/'
+
+# 3b. An array one argument again rather than the argument list.
+prove_fails "an array is one argument again" no_list "too few arguments for format string" \
+  's/^pub def sprintf(format_string : String, args : Array) : String$/private def sprintf_no_list(format_string : String, args : Array) : String/'
+
+# 4. Float rounding dropped (always rounds down): the half-to-even test in
+#    `scaled_digits` is the one place every float digit is decided.
+prove_fails "precision rounding broken" no_prec "format: precision float round up" \
+  's/^    if c > 0 || (c == 0 \&\& quotient.low_bit == 1_u64)$/    if false/'
+
+# 4b. The tie decided away from zero again, which is what every reference
+#     formatter disagrees with and what this file pinned before.
+prove_fails "a tie rounds away from zero" no_even "format: precision float tie to even" \
+  's/^    if c > 0 || (c == 0 \&\& quotient.low_bit == 1_u64)$/    if c >= 0/'
+
+# 4d. The same two, in the two-word path most formats take: rounding
+#     dropped, and a tie sent away from zero.
+prove_fails "two-word rounding broken" no_quick_prec "format: precision float round up" \
+  's/^    if above || (tie \&\& quotient \& 1_u64 == 1_u64)$/    if false/'
+prove_fails "a two-word tie rounds away from zero" no_quick_even "format: precision float tie to even" \
+  's/^    if above || (tie \&\& quotient \& 1_u64 == 1_u64)$/    if above || tie/'
+
+# 4e. Every value through the bignum again.
+# Pending (TODO.md): the bignum's words are Arrays in side reservations
+# now, which `RisRegion.tape_bytes` does not see: both shapes read 0
+# bytes a call, so the check cannot fail until a side count exists.
+echo "  the two-word path taken out: pending, no side-reservation count"
+
+# 4c. The digits past the shortest ones dropped: a bignum rendered without
+#     its zero-led chunks prints 1e22 as 10000.000, which is what a printer
+#     that pads the shortest digits with zeros was never able to see.
+prove_fails "the digits are the value's, all of them" no_exact "format: exact large zeros" \
+  's/^\( *\)IyiFormat\.repeat(w, 48_u8, 9 - text\.bytesize) if .*$/\1nil/'
+
+# 5. Base conversion broken (binary emits decimal)
+prove_fails "base conversion broken" no_base "format: base" \
+  's/tape_int64(val\.to_i64, 2, false, true/tape_int64(val.to_i64, 10, false, true/'
+
+# 6. Negative number sign flag broken (space flag dropped)
+prove_fails "sign flag broken" no_neg "format: sign space positive" \
+  's/(space ? " " : "")/""/'
+
+# 6b. Hex unsigned again for a sign flag, while its `-` stays.
+prove_fails "hex sign flags dropped" no_hex_sign "format: sign flags in other bases" \
+  's/tape_int64(val\.to_i64, 16, false, true/tape_int64(val.to_i64, 16, false, false/'
+
+# 7. Boundary case broken (precision 0 on value 0 produces "0" instead of "")
+prove_fails "boundary zero precision broken" no_bound "format: boundary" \
+  's/digits = "".as_tape if !nonzero && precision == 0/nil/'
+
+# 8. %g that never trims, and %g that never switches to the exponent
+prove_fails "general notation keeps its zeros" no_trim "general: trailing zeros trimmed" \
+  's/^    return text unless text.index(.\..)$/    return text/'
+prove_fails "general notation never switches" no_switch "general: large switches to exponent" \
+  's/^    if exp < -4 || exp >= prec$/    if false/'
+
+# 9. %u of a negative Int64 signed again, the exponent of the shortest
+#    digits trusted, NaN deaf to + and space, and %g's fixed notation
+#    asked of %f's limited places once more.
+prove_fails "unsigned Int64 signed again" no_u64 "format: boundary negative int64 unsigned" \
+  's/tape_uint64(val\.unsafe_to_u64, 10, false, false/tape_int64(val, 10, false, false/'
+prove_fails "the shortest digits' exponent trusted" no_lower "the exponent is the value's" \
+  's/^        if lower\.bytesize == places + 1$/        if false/'
+prove_fails "NaN drops the sign flags" no_nan_sign "general: NaN takes the sign flags" \
+  's/plus ? "+NaN" : (space ? " NaN" : "NaN")/"NaN"/'
+prove_fails "%g fixed from %f's places" no_g_digits "precision must be at most 400, not 403" \
+  's/^      text << (hash ? fixed : trim_tape(fixed))$/      text << (hash ? fixed : trim_tape(exp < 0 ? fixed_text(val.abs, prec - 1 - exp, false) : fixed))/'
+
+# 10. An Int128's `%p` asked of its digits as a string again: 65_i128 in quotes.
+prove_fails "an Int128's %p asked of its digits again" no_wide_text "format: Int128 text and code point" \
+  "s/verb == 'p' ? val\.inspect\.as_tape : integer_text(val, 10)/verb == 'p' ? integer_text(val, 10).inspect.as_tape : integer_text(val, 10)/"
+
+echo
+if [ "$status" -eq 0 ]; then
+  echo "Format strings: width, alignment, zero pad, precision, bases, negatives,"
+  echo "boundary cases and %g all pass plain and optimised, and each check is"
+  echo "proven to fail when its mechanism is broken."
+else
+  echo "Format strings: something above failed."
+fi
+exit "$status"

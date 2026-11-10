@@ -10,7 +10,7 @@
 # unsigned bignum of 32-bit limbs, because the boundaries between one
 # double and the next are exact rationals with up to eleven hundred bits
 # in them and no floating arithmetic can compare them. No table of powers,
-# no libc: the prelude links nothing, and `bench/dependency_floor.sh`
+# no libc: the prelude links nothing, and `test/cli/dependency_floor.sh`
 # audits that.
 #
 # The notation is Crystal's: `1.0`, `0.1`, `123.456`, `0.0001`, then

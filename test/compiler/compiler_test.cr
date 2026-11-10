@@ -480,7 +480,7 @@ describe "Compiler" do
   end
 
   # iyi: the concurrency runtime — iyi SPEC III.4, Linux only. The bench gate
-  # (`bench/concurrency_exercise.sh`) is the full property list; what earns a
+  # (`test/cli/concurrency_exercise.sh`) is the full property list; what earns a
   # place *here* is what `make compiler_test` should catch without bash: the
   # runtime compiles, interleaves, cancels, passes mail, and adds no undefined
   # symbol. Skipped where the runtime does not exist, by the same platform

@@ -100,7 +100,7 @@
 # the all-zero check on an X25519 secret, which depends on the peer's key.
 #
 # Measured on one x86_64 Linux machine other jobs shared, --release, the
-# best of five runs of 200 (bench/std_hpke_exercise.sh), X25519,
+# best of five runs of 200 (test/cli/std_hpke_exercise.sh), X25519,
 # HKDF-SHA256 and AES-128-GCM over a 1 KiB message: a single-shot `seal`
 # took 46 microseconds and a single-shot `open` 36; in an established
 # context, a `seal` took 3.8 and an `open` 5.0. The curve is most of the
@@ -109,7 +109,7 @@
 # the labeled HKDF steps, eight HMACs to open and ten to seal, take under
 # a microsecond each.
 #
-# Held by bench/std_hpke_exercise.sh to RFC 9180's test vectors (Appendix
+# Held by test/cli/std_hpke_exercise.sh to RFC 9180's test vectors (Appendix
 # A, from the CFRG's test-vectors.json) for every suite of them this module
 # has - DHKEM(X25519) and DHKEM(P-256), with HKDF-SHA256 and HKDF-SHA512,
 # each AEAD, each mode: the key pairs from their ikm, the encapsulation and

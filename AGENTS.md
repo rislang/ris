@@ -33,6 +33,9 @@ ris is iyi plus Goose's tape memory. These rules are for every agent.
   each Now step (TODO.md), time the ports with ris-bench's goose-evals.sh:
   one line per port in the commit body. A timing never fails a gate;
   nothing is timed per change.
+* Pass/fail checks live in test/cli/ (scripts with the programs and
+  fixtures they use); measurements live in test/speed/. A timing there
+  never fails a check unless SPEC promises the number.
 * The rules: [SPEC.md](SPEC.md), ris's specification. Other languages
   are in [ris-bench](https://github.com/rislang/ris-bench), which keeps a
   copy of `samples/ris/respond.ri`: change both in one go.
@@ -90,7 +93,9 @@ temporaries and response on one tape.
   [SPEC_CHANGELOG.md](SPEC_CHANGELOG.md), in the same commit.
 * EGM is required: every SPEC change or design proposal gets an EGM
   review of its draft before SPEC.md or code changes, and a drift report
-  after ([CONTRIBUTING.md](CONTRIBUTING.md), Design checks).
+  after ([CONTRIBUTING.md](CONTRIBUTING.md), Design checks). Keep only
+  consolidated_review_report.md next to the draft; the stage reports
+  are not committed. The SPEC_CHANGELOG entry names the draft folder.
 * Cite doc/reference/iyi/ for unchanged iyi rules, doc/reference/goose/
   for Goose designs, doc/reference/koja/ for messages between tasks.
   Record only ris differences; check snapshot versions.

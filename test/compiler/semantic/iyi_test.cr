@@ -588,7 +588,8 @@ describe "Semantic: iyi" do
   # iyi: `rescue` compiled and never ran - a panic unwinds by registry to a
   # task boundary, through no handler on the way - and `ensure` ran on the
   # ordinary exit only. Both are refused in an iyi file; a `.cr` file keeps
-  # them, and so does the handler `defer` lowers to (bench/panics.sh runs it).
+  # them, and so does the handler `defer` lowers to (test/cli/panics.sh
+  # runs it).
   describe "rescue and ensure" do
     it "refuses a rescue in an iyi file" do
       assert_error <<-CODE, "iyi has no exceptions to rescue", filename: "prog.iyi"
@@ -3993,7 +3994,7 @@ describe "Semantic: iyi" do
     # file and is where that half is exercised.
 
     # `Consumer` is inside app/greeter (see above), so the reason given is
-    # the one for the module's own code; `bench/agent_loop.py` holds the
+    # the one for the module's own code; `test/cli/agent_loop.py` holds the
     # one another module is given.
     it "refuses a qualified call to a name the module does not export" do
       assert_error <<-CODE, "App::Greeter does not export 'helper', and a qualified name reaches only what a module exports, from inside it too: write `helper` here"

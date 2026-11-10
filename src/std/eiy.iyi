@@ -605,7 +605,7 @@ pub struct Eiy
   # filename arrives from the macro as `C:\...\bench\program.iyi`, and a
   # resolver that knew only `/` found no separator in it at all: it then
   # looked for the template in the current directory and reported it
-  # missing, which is what `bench/std_eiy_exercise.iyi` did on Windows.
+  # missing, which is what `test/cli/std_eiy_exercise.iyi` did on Windows.
   private def self.separator?(byte : UInt8) : Bool
     {% if flag?(:win32) %}
       byte == 47_u8 || byte == 92_u8

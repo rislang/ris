@@ -394,7 +394,7 @@ end
 # prelude had no `Enum` surface when the scheduler was written; it has one
 # now (`src/iyi/enum.iyi`), and the comment was the argument for keeping the
 # integer - what those comparisons cost is measured, so naming them is a
-# change that has to be measured too. It was: `bench/server_load.sh`'s shape
+# change that has to be measured too. It was: `test/cli/server_load.sh`'s shape
 # holds and 2,000,000 message round trips cost what they cost before, plain
 # and optimised, because `==` on an enum is its value compared and the
 # member is a constant.
@@ -818,7 +818,7 @@ class IyiFiber
       # `__chkstk` turn a return address ending 0x66 into one ending
       # 0x00 while StackLimit read 0x...cc000 and rsp 0x...caff0, and the
       # `ret` that read it jumped into the middle of `UInt8#%`. That is
-      # the memory fault `bench/std_fuzz_exercise.iyi` died of at
+      # the memory fault `test/cli/std_fuzz_exercise.iyi` died of at
       # tls-client seed 8 on every Windows run, after earlier seeds had
       # grown the stack the TLS 1.2 handshake's certificate parse reused.
       Pointer(UInt64).new(saved + 8_u64).value = Pointer(UInt64).new(top - 16_u64).value
@@ -2064,7 +2064,7 @@ class IyiScheduler
   {% if flag?(:win32) %}
     # `NtSetInformationFile`, asked of ntdll once and kept as a proc's two
     # words: ntdll is in every process, and naming it on the import table
-    # adds a DLL to the floor `bench/concurrency_exercise.sh` reads.
+    # adds a DLL to the floor `test/cli/concurrency_exercise.sh` reads.
     @@set_information = Pointer(UInt64).new(0_u64)
 
     # FileReplaceCompletionInformation (61, Windows 8.1): *handle*'s

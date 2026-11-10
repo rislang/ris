@@ -1626,7 +1626,7 @@ module Iyi
     # methods and *no members*, and the consumer said `enum Kind must have at
     # least one member` — about a type it could not name, in a module whose
     # own code was the only thing using it. Seven of the sixty
-    # `bench/std_*_exercise.iyi` failed that way, `std/path` and `std/dir`
+    # `test/cli/std_*_exercise.iyi` failed that way, `std/path` and `std/dir`
     # among them.
     #
     # *container* is the key a travelling body of one of its methods is
@@ -2926,7 +2926,7 @@ module Iyi
       # iyi: whichever language the file is written in. A `.iyi` file full of
       # bytes that are not text was reported as "not a valid Crystal source
       # file", which names the other language for a file this one was asked
-      # to read - the identity `bench/identity_floor.py` exists to keep.
+      # to read - the identity `test/cli/identity_floor.py` exists to keep.
       language = source.filename.ris_source? ? "iyi" : "Crystal"
       # iyi: raised, never printed and exited on here. `Lsp::Analysis`
       # compiles in the language server's own worker, and one `.iyi` file

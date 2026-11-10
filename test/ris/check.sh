@@ -1982,11 +1982,11 @@ else
   echo "FAILED   dns: $out"; status=1
 fi
 # std/secure_dns over loopback: DoT, then DoH by POST and GET, against
-# bench/std_secure_dns_server.py; the upstreams connect by address, so no
+# test/cli/std_secure_dns_server.py; the upstreams connect by address, so no
 # exchange calls back into the resolver (SPEC 3.5).
 if python3 -c 'import ssl; from cryptography import x509' 2>/dev/null; then
   srv=$(mktemp -d)
-  python3 bench/std_secure_dns_server.py "$srv" >"$srv/log" 2>&1 &
+  python3 test/cli/std_secure_dns_server.py "$srv" >"$srv/log" 2>&1 &
   srv_pid=$!
   for _ in $(seq 200); do [ -f "$srv/ready" ] && break; sleep 0.1; done
   out=$(RIS_HEAP_STATS=1 timeout 300 "$RIS" run test/ris/secure_dns.ri -- \

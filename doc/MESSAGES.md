@@ -248,7 +248,7 @@ prepares the account key before starting concurrent flights. Servers
 compare cached PEM with their task-local version and rebuild identities
 when renewal publishes a change, even within one filesystem timestamp.
 Stopping joins and cancels flights; valid cached certificates keep serving.
-Part B of the autocert port covers the bench exercise and its driver.
+Part B of the autocert port covers the test/cli exercise and its driver.
 
 Many readers of one completion use a retained IyiTask result and value,
 subject to task-handle Share checks. Results are copied to each reader's

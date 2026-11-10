@@ -144,7 +144,7 @@
 # between would have split the first.
 #
 # Not here: extensions other than permessage-deflate, TLS, and sending a
-# message in fragments. `bench/std_websocket_exercise.sh` runs both
+# message in fragments. `test/cli/std_websocket_exercise.sh` runs both
 # halves against each other, against hand-made frames, and against
 # Python and Node peers, compressed and not.
 

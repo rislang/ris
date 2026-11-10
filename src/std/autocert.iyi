@@ -101,7 +101,7 @@
 # test/ris/autocert.ri gates completion broadcast, independent deadlines,
 # failure expiry, renewal reload, stop and manager isolation with a local
 # issuer. autocert_wire.ri gates Copyable config and bounded orders with
-# zero heap. Part B updates bench/std_autocert_exercise.sh and its driver
+# zero heap. Part B updates test/cli/std_autocert_exercise.sh and its driver
 # for Python SSL and Pebble: chain trust, host policy before ordering,
 # ten first handshakes making one order, restarts without an order,
 # short-lived renewal seen as a new serial before expiry, rejected

@@ -45,7 +45,7 @@
 # and a first field that opens with U+FEFF is quoted so it is not read
 # past as a byte order mark. `quote_all: true` quotes every field. Python's
 # `csv` module reads what it writes, and it reads what Python's writes;
-# `bench/std_csv_exercise.sh` holds both directions on a generated corpus.
+# `test/cli/std_csv_exercise.sh` holds both directions on a generated corpus.
 
 module std/csv
 

@@ -375,7 +375,7 @@ end
 # The values are views of the record's data, on the caller's tape.
 #
 # `to_s` is the record's data in presentation format as dig 9.20 prints it,
-# for reading the record while debugging: bench/std_dns_exercise.sh holds
+# for reading the record while debugging: test/cli/std_dns_exercise.sh holds
 # the two to the same text, record by record.
 @[OnTape]
 pub struct SvcbRecord

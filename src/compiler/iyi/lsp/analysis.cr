@@ -121,7 +121,7 @@ module Iyi::Lsp
     #
     # A seed rather than a compile at handover: compiling every adopted
     # buffer there put the work in front of whatever the person typed
-    # next, and `bench/lsp_latency.py` measured a didChange 32 ms past
+    # next, and `test/cli/lsp_latency.py` measured a didChange 32 ms past
     # its 2 s budget. This pays for a buffer only when a question about
     # it actually needs the fallback, and once.
     def seed(path : String, text : String) : Nil

@@ -446,7 +446,7 @@ module Iyi::Lsp
         #
         # A seed rather than a compile here: compiling every adopted
         # buffer at the handover puts that work in front of whatever the
-        # person types next, and `bench/lsp_latency.py` measured a
+        # person types next, and `test/cli/lsp_latency.py` measured a
         # didChange 32 ms past its 2 s budget for it.
         # `Analysis#result_for` pays for one only when a question about
         # it needs the fallback.
@@ -3900,7 +3900,7 @@ module Iyi::Lsp
     # the path an `import` resolves to with `File.join`, which spells the
     # joint with `\` — a key kept posix matched nothing, and the sibling
     # the editor had just edited was read off the disk instead (step 9 of
-    # `bench/lsp_session.py`, the first time it ran on Windows). The way
+    # `test/cli/lsp_session.py`, the first time it ran on Windows). The way
     # back turns the separators around and puts the third slash in, so a
     # URI this side builds is one the editor built for the same file.
     # A filesystem path in the one spelling this server keeps: the
@@ -3908,7 +3908,7 @@ module Iyi::Lsp
     # the pattern's spelling, `path_of` hands back the platform's, and the
     # compiler joins with `File::SEPARATOR` — three spellings of the same
     # file on Windows, and every table keyed by one of them missed the
-    # other two (steps 9, 31c and 32 of `bench/lsp_session.py`, the first
+    # other two (steps 9, 31c and 32 of `test/cli/lsp_session.py`, the first
     # times it ran there). Everything that enters as a path goes through
     # here first.
     # The workspace's `.iyi` files under *root*, each with whether it sits

@@ -11,7 +11,7 @@
 # compares the render against a string written in its source. Checked out
 # with CRLF — which is what a Windows clone does to a file nothing pins —
 # every line of the render gained a byte and
-# `bench/std_eiy_exercise.iyi` failed on Windows alone.
+# `test/cli/std_eiy_exercise.iyi` failed on Windows alone.
 *.eiy text eol=lf
 
 # iyi: and Crystal's templates for the same reason, one step removed: an
@@ -25,11 +25,11 @@
 # iyi: a gate is a shell script, and a shell script with CRLF is not a
 # program: Linux reads `#!/usr/bin/env bash\r` as an interpreter it cannot
 # find. A Windows clone gives CRLF to anything nothing pins, and an editor
-# on Windows gives it back on every save, so 27 gates in `bench/` arrived
+# on Windows gives it back on every save, so 27 gates in `test/cli/` arrived
 # that way in one night's work.
 *.sh text eol=lf
 
-# iyi: the design documents are read by line - `bench/doc_numbers.py` quotes
+# iyi: the design documents are read by line - `test/cli/doc_numbers.py` quotes
 # them by line number, and a diff of one is a review. A Windows save gave
 # GC_DESIGN.md CRLF, and a one-line change came in as 1,929.
 *.md text eol=lf

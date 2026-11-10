@@ -4,7 +4,7 @@ require "../../test_helper"
 #
 # What it does on every exit — inline on an ordinary one, through the
 # registry (the proc whose def is marked `iyi_defer`) on a panic, innermost
-# first, once per scope — is held by bench/panics.sh, which runs it.
+# first, once per scope — is held by test/cli/panics.sh, which runs it.
 describe "Normalize: defer" do
   it "guards a defer that has nothing after it" do
     assert_normalize "defer x", "begin\nensure\n  x\nend", filename: "x.iyi"

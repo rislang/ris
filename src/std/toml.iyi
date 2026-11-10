@@ -969,7 +969,7 @@ struct TapeReader
   # whatever called them. Measured in a plain build, with the limit
   # lifted: inline tables nested 110 deep read in a task and 120 ran out
   # of stack; arrays, 160 and 200. At 64 the deepest inline table uses a
-  # little over half of what overflowed. `bench/std_toml_exercise.iyi`
+  # little over half of what overflowed. `test/cli/std_toml_exercise.iyi`
   # reads, compares, hashes, dumps and inspects values DEPTH_LIMIT deep,
   # each kind of nesting, in a task.
   DEPTH_LIMIT = 64

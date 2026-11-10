@@ -60,7 +60,7 @@ class Iyi::Command
     end
 
     # The worker: today's server, one process, no proxy. What the proxy
-    # spawns, and what `bench/lsp_memory.py --direct` measures to show
+    # spawns, and what `test/cli/lsp_memory.py --direct` measures to show
     # what the split is worth.
     if options.first? == "--worker"
       server = Lsp::Server.new

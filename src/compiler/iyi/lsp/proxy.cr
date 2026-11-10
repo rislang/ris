@@ -97,7 +97,7 @@ module Iyi::Lsp
       # and said nothing, and a client waiting on the verdict waited for
       # ever. Held to two cores beside a busy loop, a compile ran past
       # `RETIRE_IDLE`, the quiet replaced the worker 2.06 s into it, and
-      # `bench/lsp_memory.py`'s paced session stopped at its 36th edit.
+      # `test/cli/lsp_memory.py`'s paced session stopped at its 36th edit.
       getter verdicts = {} of String => Int64
 
       def initialize(@process : Process)
