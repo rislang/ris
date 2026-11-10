@@ -24,6 +24,7 @@ import std/ecdsa::{EcdsaPublicKey, EcdsaCurve, EcdsaHash, EcdsaError}
 import std/asn1::{Der, DerValue, Asn1Error}
 import std/dir::{Dir}
 import std/file::{File}
+import std/tuple
 
 def check(cond : Bool, label : String) : Nil
   raise "ASSERTION FAILED: #{label}" unless cond
@@ -78,7 +79,7 @@ K_D1_P384   = "3076301006072a8648ce3d020106052b8104002203620004aa87ca22be8b05378
 K_DNEG_P384 = "3076301006072a8648ce3d020106052b8104002203620004aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7c9e821b569d9d390a26167406d6d23d6070be242d765eb831625ceec4a0f473ef59f4e30e2817e6285bce2846f15f1a0"
 
 # key, hash, message, signature, verdict, what it holds
-SIGNATURES = [
+signatures = {
   {K_P256, "SHA256", "abc", "304402203488dd85b2e8c4e82b6f500935fda75c25e3269043cee72182bd61f71bd9fe44022072409dacd33f989e77b07a66e97340a0ada2ff739b218b28c50412b33b4c64ea", true, "P256 SHA256"},
   {K_P256, "SHA384", "abc", "3045022100b31d8f799a2da0a0153a60a0f08f95e921f3800d819447367efdbda457e9c83602207aec81ed2698f5020882bb48d1d76138ddb1b5dae48d18782345cdbd45f5ff88", true, "P256 SHA384"},
   {K_P256, "SHA512", "abc", "30460221008d49a1fdcca7a00afa4ce64a67b32b34409eae4d7a4e726ca9687088cb39c21d022100b63d5a97d72ab75ea3d316e0e0b5d11ad7e3b6b1c4ab6e8cb21b4f1ae900b7bf", true, "P256 SHA512"},
@@ -121,7 +122,7 @@ SIGNATURES = [
   {K_D1_P384, "SHA384", "abc", "306402301c56b4483c9244e3114e2204a3816b1ed79180872fadd82f1d19f7f55e6e3f61dc1432e10a85797a0974a1b96ed23e0b02307c22fd188c7218d1fc2a932ff541af37301b2d6047e7130ff045f43522c4dded97261a1c3301b52ec0104363491aae4c", true, "D1 over abc"},
   {K_DNEG_P384, "SHA384", "abc", "30650230721fe300cf642f0407a59c42fde70be038b2892858b0e0e11b53536bb4c0b901c1879b6f0829c2af03a863b12f60d2510231008cc9c89d15cfcebbd85090424653cf8b83f1628a5cf2e2195638b1df74b461c2e9908bfae2717d22c04c4fd6f072aa97", true, "DNEG over abc"},
   {K_P256, "SHA512", "a digest longer than n", "30440220008c4e677fc84a7c53472dbdbe7f758685f84511cde07fe5f136ce10ae2bbb2a022068653826ed1bead0dd3473dc1b9692382fbc2a7cb6ffbfd02a04829da0ea8fa4", true, "P-256 SHA-512 cut"},
-]
+}
 
 COMPRESSED    = "3039301306072a8648ce3d020106082a8648ce3d030107032200021ce8bd42f847d37ba2a624ea4f21ffdbac7682974b514df89b538e95ac7cbe0e"
 OFF_CURVE     = "3059301306072a8648ce3d020106082a8648ce3d030107034200041ce8bd42f847d37ba2a624ea4f21ffdbac7682974b514df89b538e95ac7cbe0e9870c79029b37954a86c95e5f5b9cd4b2569c8dc102d2be6937d839b0d42da59"
@@ -172,13 +173,16 @@ p521 = EcdsaPublicKey.from_spki(b(K_P521)).or_panic
 check p256.curve == EcdsaCurve::P256, "a P-256 key read as #{p256.curve}"
 check p384.curve == EcdsaCurve::P384, "a P-384 key read as #{p384.curve}"
 check p521.curve == EcdsaCurve::P521, "a P-521 key read as #{p521.curve}"
-SIGNATURES.each do |c|
+accepted = 0
+refused = 0
+signatures.each do |c|
   key = EcdsaPublicKey.from_spki(b(c[0])).or_panic
   got = key.verify(hash_named(c[1]), c[2], b(c[3]))
   check got == c[4], "#{c[5]} (#{key.curve} #{c[1]}): expected #{c[4]}, got #{got}"
+  c[4] ? (accepted += 1) : (refused += 1)
 end
-puts "  #{SIGNATURES.count { |c| c[4] }} accepted and #{SIGNATURES.count { |c| !c[4] }} refused as they should be"
-check p256.verify(EcdsaHash::SHA256, b("616263"), b(SIGNATURES[0][3])), "a message given as bytes"
+puts "  #{accepted} accepted and #{refused} refused as they should be"
+check p256.verify(EcdsaHash::SHA256, b("616263"), b(signatures[0][3])), "a message given as bytes"
 from_point = EcdsaPublicKey.from_point(EcdsaCurve::P256, b(POINT_P256)).or_panic
 check from_point.x == p256.x && from_point.y == p256.y, "a point read as the key that carries it"
 
