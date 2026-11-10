@@ -81,6 +81,14 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
   the method's scope; the same store is refused at a caller that holds
   the receiver in a local. Check it where it is made.
 
+* A refill under a branch in a loop is refused as clearing a view an
+  earlier round left: a class whose `@names` view its own `@text`,
+  refilled (`@text.clear; @names.clear`, then appends) through
+  `if c = client; c.refill; end` in `2.times`, then `client` read, is
+  refused at the clear. The else path keeps the slot the then path
+  emptied, and the next round's use carries the old view, born before
+  that round's clear. No path holds it: kill the view with its slot.
+
 
 * A one-call def's value moves down only when it is one fresh flat
   value: a tuple or two locals do not. Bzip2.decompress tags its String
@@ -112,20 +120,27 @@ Decide with EGM, then gate:
   made per request; SSE.open keeps one exchange beside its parser; gate:
   two requests over one connection, `reused` 1. Today `client.open` is
   refused at open_by: the exchange it makes is its own, and give_back
-  would keep its Conn in the client. Blockers met in a first try, each
-  after the one before:
-  - The HTTPS-records path (`connect_by_records`, `records_handshake`)
-    makes and answers a TlsClient ("cannot return an owner from a
-    def"): pass the exchange's `tls` slot and answer `TlsError?` (done
-    in the try; it built).
-  - The client's exchanges, made in initialize under `if i <= idle`
-    (macro-unrolled; a round frees them) and pushed into `@exchanges`,
-    are refused ("cannot store a view beyond its owner scope"); without
-    the `if` they pass. A branch is no scope (SPEC 1.1): a checker
-    error, or make all MAX_POOLED (16 resolvers and buffers a client).
-  - Then connect_by_records holds `client.system_resolver`'s text over
-    its refill: "live view of HTTPClient.@system.@own_text ... via
-    system_resolver -> read_system -> read_files -> refill -> clear".
+  would keep its Conn in the client. A try (exchanges made in
+  initialize, `lend`/`release` by index, `take` given the exchange)
+  got past these, in order:
+  - `connect_by_records` made and answered a TlsClient and a tuple: it
+    takes the exchange, moves the socket into it (an `adopt` beside
+    `take_connection`), handshakes on its `tls` slot and answers the
+    socket; the caller reads the config back with `https_current`.
+  - Exchanges made under `if i <= idle` in initialize (macro-unrolled)
+    and pushed into `@exchanges` are refused ("cannot store a view
+    beyond its owner scope"). Taking branches out of the checker's
+    scopes passes them but breaks refused/root_branch_escape and
+    root_store_join: SPEC 3.2 says branch-local storage cannot escape,
+    while 1.1 frees only per def, round and block. Decide with EGM, or
+    make all MAX_POOLED exchanges (16 resolvers and buffers a client).
+  - The resolver refill: read once a request before the loop (done).
+  - SvcbStore kept views of the DNS message (done).
+  Next: `HTTP.https_endpoints` stores `ech` bytes and the `ordered`
+  alpn made in its block into the endpoints, and passes Arrays where
+  HttpsEndpoint takes views: build them into caller-owned storage.
+  Unknown what follows; the HTTPS-records path never compiled behind a
+  client before.
 
 ## Tighten heap_trap
 

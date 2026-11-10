@@ -3848,11 +3848,18 @@ pub class HTTPClient
     @bound = bound
   end
 
-  # The machine's resolver, read afresh: what a connection by name uses
-  # where the client has no `resolver` of its own.
+  # The machine's resolver as `read_system` last read it: what a
+  # connection by name uses where the client has no `resolver` of its own.
   def system_resolver : Resolver
-    @system.read_system
     @system
+  end
+
+  # The machine's resolver read afresh, once a request, before
+  # `HTTP.open_by_into`'s loop of connections and redirects: refilled in
+  # that loop, the text a lookup views would be cleared under a later
+  # round, as the checker sees it.
+  protected def read_system : Nil
+    @system.read_system
   end
 
   # Connections this client has opened, and requests sent over one it
@@ -4817,6 +4824,7 @@ pub struct HTTP
     upgrade_config.now = under.now
     upgrade_config.identity = under.identity
     recorded = dialer.records? && secure && route.nil? && upgrade.nil? && !client.nil? && client.use_https_records
+    client.read_system if recorded && client && client.resolver.nil?
     connection_slot = state.conn
     tls_slot = state.tls
     tls_stream = state.stream
