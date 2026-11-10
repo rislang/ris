@@ -9,6 +9,7 @@
 module bench/std_mime_exercise
 
 import std/mime::{MIME}
+import std/tuple
 
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -64,33 +65,33 @@ puts "== parse"
 parsed = MIME.parse?("text/html")
 assert_true !parsed.nil?, "plain type parses"
 if parsed
-  assert_str "text/html", parsed[0], "plain essence"
-  assert_true parsed[1].empty?, "no params"
+  assert_str "text/html", parsed.essence, "plain essence"
+  assert_true parsed.params.empty?, "no params"
 end
 parsed = MIME.parse?("  Text/HTML ;Charset=UTF-8;  q=0.5\t ")
 if parsed
-  assert_str "text/html", parsed[0], "essence lowercased"
-  assert_str "UTF-8", parsed[1]["charset"]?, "param name lowercased, value kept"
-  assert_str "0.5", parsed[1]["q"]?, "second param"
+  assert_str "text/html", parsed.essence, "essence lowercased"
+  assert_str "UTF-8", parsed.params["charset"]?, "param name lowercased, value kept"
+  assert_str "0.5", parsed.params["q"]?, "second param"
 else
   assert_true false, "whitespace parses"
 end
 parsed = MIME.parse?("multipart/form-data; boundary=\"a b;c=\\\"d\\\\\"")
 if parsed
-  assert_str "a b;c=\"d\\", parsed[1]["boundary"]?, "quoted with escapes"
+  assert_str "a b;c=\"d\\", parsed.params["boundary"]?, "quoted with escapes"
 else
   assert_true false, "quoted parses"
 end
 parsed = MIME.parse?("a/b; x=\"\"; y=1;; ;")
 if parsed
-  assert_str "", parsed[1]["x"]?, "empty quoted"
-  assert_str "1", parsed[1]["y"]?, "after empty params"
+  assert_str "", parsed.params["x"]?, "empty quoted"
+  assert_str "1", parsed.params["y"]?, "after empty params"
 else
   assert_true false, "empty params parse"
 end
 parsed = MIME.parse?("a/b; x=1; X=2")
 if parsed
-  assert_str "2", parsed[1]["x"]?, "last of a repeated name"
+  assert_str "2", parsed.params["x"]?, "last of a repeated name"
 else
   assert_true false, "repeated parses"
 end

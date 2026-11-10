@@ -237,6 +237,9 @@ class Bits
 
   def initialize(s : String)
     @bits = [] of Int32
+  end
+
+  def load(s : String) : self
     i = 0
     while i < s.bytesize
       v = s.byte_at(i).to_i32
@@ -247,6 +250,7 @@ class Bits
       end
       i = i + 1
     end
+    self
   end
 
   def get(pos : Int32, n : Int32) : Int32
@@ -423,6 +427,7 @@ edge = big_text + run_of(0x7a, 1000) + random_bytes(5000, 7_u64)
 multi = Bzip2.compress(edge, 1)
 blocks = 0
 mb = Bits.new(multi)
+mb.load(multi)
 pos = 0
 while pos + 48 <= mb.bits.size
   blocks = blocks + 1 if mb.get(pos, 24) == 0x314159 && mb.get(pos + 24, 24) == 0x265359
@@ -448,6 +453,7 @@ nine = Bzip2.compress("123456789")
 assert_true hex(nine[0, 10]) == "425a6839314159265359", "a block starts with BZh9 and pi's BCD digits: #{hex(nine[0, 10])}"
 assert_true hex(nine[10, 4]) == "fc891918", "the block CRC of \"123456789\" is CRC-32/BZIP2's check value fc891918, not #{hex(nine[10, 4])}"
 nb = Bits.new(nine)
+nb.load(nine)
 at = nb.last_end
 assert_true at > 0 && nb.get(at + 48, 16) == 0xfc89 && nb.get(at + 64, 16) == 0x1918, "one block's combined CRC is its own CRC"
 assert_true (nb.bits.size - (at + 80)) < 8, "the stream ends at the byte after its combined CRC"
@@ -517,36 +523,69 @@ puts "  twenty streams, four of them empty, levels 1 to 9, read as one"
 
 puts "\n== refused as a value"
 good = Bzip2.compress(big_text, 9)
-lay = Layout.new(Bits.new(good))
+bits = Bits.new(good)
+bits.load(good)
+lay = Layout.new(bits)
 refused("", "the stream is empty", "nothing at all")
 refused("BZ", "ends inside its header", "a header cut short")
 refused("BZx9" + good[4, 100], "not a bzip2 stream", "a magic that is not BZh")
 refused("BZh0" + good[4, good.bytesize - 4], "not a digit 1 to 9", "a block size of 0")
-refused(Bits.new(good).set(32, 1, 1).to_s, "starts with neither a block's magic nor the end of the stream", "a block magic one bit off")
-refused(Bits.new(good).set(80, 1, Bits.new(good).get(80, 1) ^ 1).to_s, "block 1's CRC does not match", "a block CRC one bit off")
+bits_1 = Bits.new(good)
+bits_1.load(good)
+refused(bits_1.set(32, 1, 1).to_s, "starts with neither a block's magic nor the end of the stream", "a block magic one bit off")
+bits_2 = Bits.new(good)
+bits_2.load(good)
+bits_3 = Bits.new(good)
+bits_3.load(good)
+refused(bits_2.set(80, 1, bits_3.get(80, 1) ^ 1).to_s, "block 1's CRC does not match", "a block CRC one bit off")
 cb = Bits.new(good)
+cb.load(good)
 ce = cb.last_end + 48
 refused(cb.set(ce + 31, 1, cb.get(ce + 31, 1) ^ 1).to_s, "combined CRC does not match", "a combined CRC one bit off")
 refused(good[0, good.bytesize // 2], "the stream ends inside a block", "a stream cut in half")
 refused(good[0, good.bytesize - 3], "ends inside its combined CRC", "a stream cut inside its combined CRC")
-refused(Bits.new(good).set(112, 1, 1).to_s, "is randomised", "a randomised block")
-refused(Bits.new(good).set(113, 24, 0xffffff).to_s, "origin pointer 16777215 is outside its #{rle1_size(big_text)} bytes", "an origin pointer past the block")
-refused(Bits.new(good).set(113, 24, rle1_size(big_text)).to_s, "origin pointer #{rle1_size(big_text)} is outside", "an origin pointer one past the block")
-refused(Bits.new(good).set(lay.groups_at, 3, 7).to_s, "has 7 Huffman tables, not 2 to 6", "seven tables")
-refused(Bits.new(good).set(lay.groups_at, 3, 1).to_s, "has 1 Huffman tables, not 2 to 6", "one table")
-refused(Bits.new(good).splice(lay.nsel_at, lay.tables_at, [{0, 15}]).to_s, "has no selectors", "no selectors")
-tables = Bits.new(good).get(lay.groups_at, 3)
+bits_4 = Bits.new(good)
+bits_4.load(good)
+refused(bits_4.set(112, 1, 1).to_s, "is randomised", "a randomised block")
+bits_5 = Bits.new(good)
+bits_5.load(good)
+refused(bits_5.set(113, 24, 0xffffff).to_s, "origin pointer 16777215 is outside its #{rle1_size(big_text)} bytes", "an origin pointer past the block")
+bits_6 = Bits.new(good)
+bits_6.load(good)
+refused(bits_6.set(113, 24, rle1_size(big_text)).to_s, "origin pointer #{rle1_size(big_text)} is outside", "an origin pointer one past the block")
+bits_7 = Bits.new(good)
+bits_7.load(good)
+refused(bits_7.set(lay.groups_at, 3, 7).to_s, "has 7 Huffman tables, not 2 to 6", "seven tables")
+bits_8 = Bits.new(good)
+bits_8.load(good)
+refused(bits_8.set(lay.groups_at, 3, 1).to_s, "has 1 Huffman tables, not 2 to 6", "one table")
+bits_9 = Bits.new(good)
+bits_9.load(good)
+refused(bits_9.splice(lay.nsel_at, lay.tables_at, [{0, 15}]).to_s, "has no selectors", "no selectors")
+bits_10 = Bits.new(good)
+bits_10.load(good)
+tables = bits_10.get(lay.groups_at, 3)
 past = [{(1 << tables) - 1, tables}, {0, 1}]
-refused(Bits.new(good).splice(lay.selectors_at, lay.selectors_at + 1, past).to_s, "is past its #{tables} Huffman tables", "a selector past the tables")
-short = Bits.new(good).splice(lay.last_selector_at, lay.tables_at, [] of {Int32, Int32})
+bits_11 = Bits.new(good)
+bits_11.load(good)
+refused(bits_11.splice(lay.selectors_at, lay.selectors_at + 1, past).to_s, "is past its #{tables} Huffman tables", "a selector past the tables")
+bits_12 = Bits.new(good)
+bits_12.load(good)
+short = bits_12.splice(lay.last_selector_at, lay.tables_at, [] of {Int32, Int32})
 refused(short.set(lay.nsel_at, 15, lay.nsel - 1).to_s, "more symbols than its #{lay.nsel - 1} selectors cover", "a block with one selector too few")
-refused(Bits.new(good).set(lay.tables_at, 5, 0).to_s, "a code length of block 1 is not 1 to 20", "a code length of 0")
+bits_13 = Bits.new(good)
+bits_13.load(good)
+refused(bits_13.set(lay.tables_at, 5, 0).to_s, "a code length of block 1 is not 1 to 20", "a code length of 0")
 walked = [{20, 5}, {2, 2}, {0, 1}]
 (lay.alpha - 1).times { walked << {0, 1} }
-refused(Bits.new(good).splice(lay.tables_at, lay.table0_end, walked).to_s, "a code length of block 1 is not 1 to 20", "a code length walked to 21")
+bits_14 = Bits.new(good)
+bits_14.load(good)
+refused(bits_14.splice(lay.tables_at, lay.table0_end, walked).to_s, "a code length of block 1 is not 1 to 20", "a code length walked to 21")
 ones = [{1, 5}]
 lay.alpha.times { ones << {0, 1} }
-refused(Bits.new(good).splice(lay.tables_at, lay.table0_end, ones).to_s, "is over-subscribed", "every code one bit long")
+bits_15 = Bits.new(good)
+bits_15.load(good)
+refused(bits_15.splice(lay.tables_at, lay.table0_end, ones).to_s, "is over-subscribed", "every code one bit long")
 # Every code 9 bits but the first symbol's 1, every group on that table,
 # and nine 1s where the symbols start: a 9-bit pattern past the codes
 # the lengths make, which is no code. Spliced from the back so the
@@ -558,7 +597,9 @@ nine_bits = [{1, 5}, {0, 1}] of {Int32, Int32}
 end
 all_first = [] of {Int32, Int32}
 lay.nsel.times { all_first << {0, 1} }
-missing = Bits.new(good).splice(lay.data_at, lay.data_at, [{0x1ff, 9}])
+bits_16 = Bits.new(good)
+bits_16.load(good)
+missing = bits_16.splice(lay.data_at, lay.data_at, [{0x1ff, 9}])
 missing.splice(lay.tables_at, lay.table0_end, nine_bits)
 missing.splice(lay.selectors_at, lay.tables_at, all_first)
 refused(missing.to_s, "no code in its table", "a bit pattern no code has")
@@ -569,7 +610,8 @@ refused("BZh1" + good[4, good.bytesize - 4], "holds more than its 100000 bytes",
 # 150,000: one RUNA/RUNB run already past the 100,000.
 abab = Bzip2.compress("ab" * 150000)
 refused("BZh1" + abab[4, abab.bytesize - 4], "holds more than its 100000 bytes", "a run past a 100k block")
-second = Bzip2.compress("second") + "BZh9" + Bits.new(Bzip2.compress("third")).set(32, 1, 1).to_s[4, 30]
+bits_17 = Bits.new(Bzip2.compress("third"))
+second = Bzip2.compress("second") + "BZh9" + bits_17.set(32, 1, 1).to_s[4, 30]
 refused(second, "block 2 starts with neither", "a second stream whose block is broken")
 puts "  every corrupt stream above refused whole, a piece at a time, and on every read after"
 
@@ -577,19 +619,36 @@ args = Program.args
 if args.size > 0
   dir = args[0]
   # The corrupt streams, for Python to refuse as well (the .sh).
-  File.write("#{dir}/bad_block_crc.bz2", Bits.new(good).set(80, 1, Bits.new(good).get(80, 1) ^ 1).to_s)
+  bits_18 = Bits.new(good)
+  bits_18.load(good)
+  bits_19 = Bits.new(good)
+  bits_19.load(good)
+  File.write("#{dir}/bad_block_crc.bz2", bits_18.set(80, 1, bits_19.get(80, 1) ^ 1).to_s)
   cb2 = Bits.new(good)
+  cb2.load(good)
   File.write("#{dir}/bad_combined_crc.bz2", cb2.set(ce + 31, 1, cb2.get(ce + 31, 1) ^ 1).to_s)
-  File.write("#{dir}/bad_selector.bz2", Bits.new(good).splice(lay.selectors_at, lay.selectors_at + 1, past).to_s)
-  File.write("#{dir}/bad_no_selectors.bz2", Bits.new(good).splice(lay.nsel_at, lay.tables_at, [{0, 15}]).to_s)
-  File.write("#{dir}/bad_origin.bz2", Bits.new(good).set(113, 24, rle1_size(big_text)).to_s)
-  File.write("#{dir}/bad_groups.bz2", Bits.new(good).set(lay.groups_at, 3, 7).to_s)
-  File.write("#{dir}/bad_length.bz2", Bits.new(good).splice(lay.tables_at, lay.table0_end, walked).to_s)
+  bits_20 = Bits.new(good)
+  bits_20.load(good)
+  File.write("#{dir}/bad_selector.bz2", bits_20.splice(lay.selectors_at, lay.selectors_at + 1, past).to_s)
+  bits_21 = Bits.new(good)
+  bits_21.load(good)
+  File.write("#{dir}/bad_no_selectors.bz2", bits_21.splice(lay.nsel_at, lay.tables_at, [{0, 15}]).to_s)
+  bits_22 = Bits.new(good)
+  bits_22.load(good)
+  File.write("#{dir}/bad_origin.bz2", bits_22.set(113, 24, rle1_size(big_text)).to_s)
+  bits_23 = Bits.new(good)
+  bits_23.load(good)
+  File.write("#{dir}/bad_groups.bz2", bits_23.set(lay.groups_at, 3, 7).to_s)
+  bits_24 = Bits.new(good)
+  bits_24.load(good)
+  File.write("#{dir}/bad_length.bz2", bits_24.splice(lay.tables_at, lay.table0_end, walked).to_s)
   File.write("#{dir}/bad_cut.bz2", good[0, good.bytesize // 2])
   File.write("#{dir}/bad_block_size.bz2", "BZh1" + good[4, good.bytesize - 4])
   File.write("#{dir}/bad_run.bz2", "BZh1" + abab[4, abab.bytesize - 4])
   File.write("#{dir}/bad_few_selectors.bz2", short.to_s)
-  File.write("#{dir}/bad_over_subscribed.bz2", Bits.new(good).splice(lay.tables_at, lay.table0_end, ones).to_s)
+  bits_25 = Bits.new(good)
+  bits_25.load(good)
+  File.write("#{dir}/bad_over_subscribed.bz2", bits_25.splice(lay.tables_at, lay.table0_end, ones).to_s)
   File.write("#{dir}/bad_no_code.bz2", missing.to_s)
 
   puts "\n== against python"

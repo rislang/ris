@@ -108,10 +108,9 @@ class RisSse1Handler
   def call(req) : Response
     if req.path == "/stop"
       RisExerciseServer.stop(RisSse1Handler)
-      Response.new(200, "bye")
-    else
-      @routes.answer(req)
+      return Response.new(200, "bye")
     end
+    @routes.answer(req)
   end
 end
 
@@ -129,10 +128,9 @@ class RisSse2Handler
   def call(req) : Response
     if req.path == "/stop"
       RisExerciseServer.stop(RisSse2Handler)
-      Response.new(200, "bye")
-    else
-      @routes.answer(req)
+      return Response.new(200, "bye")
     end
+    @routes.answer(req)
   end
 end
 
@@ -486,9 +484,9 @@ seen = [] of String
 ["data: a\r", "\ndata: b\r", "\n\r", "\n"].each { |part| split.feed(part) { |e| seen << event_text(e) } }
 assert_str "message|a\nb|", seen.join(";"), "a CRLF split between pieces is one line end"
 utf = "data: é\n\n"
-split = EventParser.new
+split_utf = EventParser.new
 seen = [] of String
-[utf[0, 7], utf[7, 3]].each { |part| split.feed(part) { |e| seen << event_text(e) } }
+[utf[0, 7], utf[7, 3]].each { |part| split_utf.feed(part) { |e| seen << event_text(e) } }
 assert_str "message|é|", seen.join(";"), "a character split between pieces is whole"
 cases = [
   ": test stream\n\ndata: first event\nid: 1\n\ndata:second event\nid\n\ndata:  third event\n\n",

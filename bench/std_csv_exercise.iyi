@@ -15,11 +15,18 @@ def assert_str(expected : String, actual : String, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}\n  expected #{expected.inspect}\n  got      #{actual.inspect}" unless expected == actual
 end
 
+# Every row of *text*, kept past the parse.
+def csv_rows(text : String) : Array(Array(String))
+  rows = [] of Array(String)
+  CSV.parse(text) { |row| rows << row.copy_to(Program.tape) }
+  rows
+end
+
 # What `CSV.parse` panicked with, or "parsed" and the rows.
 def csv_refusal(doc : String) : String
   said = "parsed"
   group do |g|
-    attempt = g.spawn { CSV.parse(doc).inspect }
+    attempt = g.spawn { csv_rows(doc).inspect }
     outcome = attempt.value
     said = outcome.is_a?(Panicked) ? outcome.message.to_s : "parsed #{outcome}"
     0
@@ -53,7 +60,8 @@ def first_error(r : CSVReader) : CSVError | Nil
 end
 
 def error_of(doc : String, same_size : Bool = false) : String
-  e = first_error(CSVReader.new(doc, same_size: same_size))
+  reader = CSVReader.new(doc, same_size: same_size)
+  e = first_error(reader)
   e ? "#{e.message} [#{e.line}:#{e.column}]" : "none"
 end
 
@@ -94,11 +102,11 @@ def random_rows(rng : Lcg, count : Int32) : Array(Array(String))
 end
 
 puts "== parse"
-rows = CSV.parse("a,b\n1,2\n")
+rows = csv_rows("a,b\n1,2\n")
 assert_true rows.size == 2, "two rows"
 assert_str "a", rows[0][0], "first field"
 assert_str "2", rows[1][1], "last field"
-quoted = CSV.parse("\"a,b\",c\n")
+quoted = csv_rows("\"a,b\",c\n")
 assert_str "a,b", quoted[0][0], "quoted comma"
 assert_str "c", quoted[0][1], "after quoted"
 built = CSV.build(quoted)
@@ -107,11 +115,11 @@ puts "  rows, quotes, build"
 
 # A byte order mark, which Excel writes into every "CSV UTF-8" file, is not
 # the first field's: `row[0] == "id"` was false.
-assert_str "id", CSV.parse("\uFEFFid,name\r\n1,a\r\n")[0][0], "a header behind a byte order mark"
+assert_str "id", csv_rows("\uFEFFid,name\r\n1,a\r\n")[0][0], "a header behind a byte order mark"
 # A first field that opens with U+FEFF is the field's, not a mark: written
 # bare it was read past, and `[["\uFEFFid"]]` came back `[["id"]]`.
 marked = [["\uFEFFid", "x"], ["\uFEFFb"]]
-assert_str marked.inspect, CSV.parse(CSV.build(marked)).inspect, "a first field opening with U+FEFF round trips"
+assert_str marked.inspect, csv_rows(CSV.build(marked)).inspect, "a first field opening with U+FEFF round trips"
 assert_str "\"\uFEFFid\",x\n\uFEFFb", CSV.build(marked), "only the first field is quoted for its U+FEFF"
 puts "  a byte order mark, read past and written as a field's"
 
@@ -120,7 +128,7 @@ puts "  a byte order mark, read past and written as a field's"
 # every two letters, and no error.
 said = "parsed"
 group do |g|
-  attempt = g.spawn { CSV.parse("\xFF\xFE\"\0N\0\"\0\r\0\n\0") }
+  attempt = g.spawn { csv_rows("\xFF\xFE\"\0N\0\"\0\r\0\n\0") }
   outcome = attempt.value
   said = outcome.message.to_s if outcome.is_a?(Panicked)
   0
@@ -131,22 +139,22 @@ puts "  a UTF-16 document is refused"
 puts "\n== line ends and empty fields"
 # A lone CR ends a line, as in the other library: it was dropped, and the
 # text either side of it ran into one field (`a"b"`).
-assert_str "[[\"a\"], [\"b\"]]", CSV.parse("a\rb").inspect, "a lone CR ends the line"
-assert_str "[[\"a\"], [\"b\"]]", CSV.parse("a\r\"b\"").inspect, "a lone CR ends the line before a quoted field"
+assert_str "[[\"a\"], [\"b\"]]", csv_rows("a\rb").inspect, "a lone CR ends the line"
+assert_str "[[\"a\"], [\"b\"]]", csv_rows("a\r\"b\"").inspect, "a lone CR ends the line before a quoted field"
 # A blank line is a row of no fields there, not a row of one empty field.
-assert_str "[[\"a\"], [], [\"b\"]]", CSV.parse("a\n\nb\n").inspect, "a blank line is a row of no fields"
+assert_str "[[\"a\"], [], [\"b\"]]", csv_rows("a\n\nb\n").inspect, "a blank line is a row of no fields"
 # `""` is a field with nothing in it, last line or not: it was dropped.
-assert_str "[[\"a\"], [\"\"]]", CSV.parse("a\n\"\"").inspect, "a last line of one quoted empty field"
+assert_str "[[\"a\"], [\"\"]]", csv_rows("a\n\"\"").inspect, "a last line of one quoted empty field"
 # Written bare, a row of one empty field was a blank line, and the last
 # one vanished on the way back.
 lone = [[""], ["a"], [""]]
 assert_str "\"\"\na\n\"\"", CSV.build(lone), "a row of one empty field is written quoted"
-assert_str lone.inspect, CSV.parse(CSV.build(lone)).inspect, "a row of one empty field round trips"
+assert_str lone.inspect, csv_rows(CSV.build(lone)).inspect, "a row of one empty field round trips"
 # A last row of no fields was the empty text after the last line break,
 # which reads back as nothing: `[["a"], []]` came back `[["a"]]`, and
 # `[[]]` came back `[]`.
 [[["a"], [] of String], [[] of String], [["a"], [] of String, [] of String], [[] of String, ["b"]]].each do |empty_last|
-  assert_str empty_last.inspect, CSV.parse(CSV.build(empty_last)).inspect, "a last row of no fields round trips: #{empty_last.inspect}"
+  assert_str empty_last.inspect, csv_rows(CSV.build(empty_last)).inspect, "a last row of no fields round trips: #{empty_last.inspect}"
 end
 assert_str "a\n\n", CSV.build([["a"], [] of String]), "a last row of no fields is ended"
 assert_str "", CSV.build([] of Array(String)), "no rows are no text"
@@ -239,7 +247,9 @@ assert_str "[#{["x" * 65535].inspect}, [\"b\"]]", read_all(CSVReader.new(Memory.
 split_quote = "\"" + "y" * 65534 + "\"\"z\"\n"
 assert_str "[#{["y" * 65534 + "\"z"].inspect}]", read_all(CSVReader.new(Memory.new(split_quote))), "a doubled quote split across chunks"
 split_char = "a" * 65535 + "ğ\"\n"
-split_error = first_error(CSVReader.new(Memory.new(split_char)))
+split_source = Memory.new(split_char)
+split_reader = CSVReader.new(split_source)
+split_error = first_error(split_reader)
 assert_str "csv: unexpected quote at line 1, column 65537", (split_error ? split_error.message : "none"), "a column counted across chunks in characters"
 puts "  three dialects of random rows both ways, through a string and a stream; fields split across chunks"
 

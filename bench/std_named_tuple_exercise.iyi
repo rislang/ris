@@ -14,6 +14,7 @@ def assert_str(expected : String, actual : String, msg : String) : Nil
 end
 
 import std/named_tuple
+import std/tuple
 
 class CloneBox
   getter val : Int32
@@ -55,7 +56,7 @@ assert_true nt[sym_b] == "two", "dynamic symbol b"
 
 # Literal string indexing
 assert_true nt["a"] == 1, "string literal a"
-assert_str "two", nt["b"], "string literal b"
+assert_true nt["b"] == "two", "string literal b"
 
 # Dynamic string indexing
 str_a = ["a"][0]

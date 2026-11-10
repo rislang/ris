@@ -53,26 +53,26 @@ end
 
 def unhex(text : String) : String
   raw = text
-  String.from_bytes(text.bytesize // 2) do |p|
-    i = 0
-    while i < text.bytesize // 2
-      p[i] = (hex_value(raw.byte_at(2 * i)) * 16 + hex_value(raw.byte_at(2 * i + 1))).to_u8
-      i += 1
-    end
+  out = ""
+  i = 0
+  while i < text.bytesize // 2
+    out << (hex_value(raw.byte_at(2 * i)) * 16 + hex_value(raw.byte_at(2 * i + 1))).to_u8
+    i += 1
   end
+  out
 end
 
 def hex(text : String) : String
   digits = "0123456789abcdef"
   raw = text
-  String.build(text.bytesize * 2) do |io|
-    i = 0
-    while i < text.bytesize
-      io.write_byte(digits[(raw.byte_at(i) >> 4).to_i32, 1])
-      io.write_byte(digits[(raw.byte_at(i) & 15_u8).to_i32, 1])
-      i += 1
-    end
+  io = ""
+  i = 0
+  while i < text.bytesize
+    io << digits[(raw.byte_at(i) >> 4).to_i32, 1]
+    io << digits[(raw.byte_at(i) & 15_u8).to_i32, 1]
+    i += 1
   end
+  io
 end
 
 # The fields of a corpus line after the first *skip*, each "w" and hex.
@@ -80,7 +80,7 @@ def corpus_words(fields : Array(String), skip : Int32) : Array(String)
   words = [] of String
   k = skip
   while k < fields.size
-    words << unhex(fields[k][1, fields[k].bytesize - 1])
+    words << unhex(fields[k][1, fields[k].bytesize - 1]).copy_to(Program.tape)
     k += 1
   end
   words
@@ -167,7 +167,7 @@ while rounds < 3000
   args = [] of String
   (rng.below(5) + 1).times do
     arg = String.build { |io| rng.below(6).times { io << pieces[rng.below(pieces.size)] } }
-    args << arg
+    args << arg.copy_to(Program.tape)
   end
   joined = Shlex.join(args)
   back = Shlex.split(joined)

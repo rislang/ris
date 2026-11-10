@@ -266,8 +266,8 @@ raise "utf8: size counts characters" unless s_utf8.size == 5
 raise "utf8: bytesize counts bytes" unless s_utf8.bytesize == 6
 # Indexing is byte-indexed:
 raise "utf8: byte indexing byte 0" unless s_utf8[0] == 'h'
-raise "utf8: byte indexing byte 1 (fragment)" unless s_utf8[1].or == 195
-raise "utf8: byte indexing byte 2 (fragment)" unless s_utf8[2].ord == 169
+raise "utf8: byte indexing byte 1 (fragment)" unless s_utf8[1] == 195
+raise "utf8: byte indexing byte 2 (fragment)" unless s_utf8[2] == 169
 raise "utf8: byte indexing byte 3" unless s_utf8[3] == 'l'
 raise "utf8: byte offset index" unless s_utf8.index('l') == 3
 

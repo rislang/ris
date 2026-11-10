@@ -225,7 +225,7 @@ struct Base32Codec
       last = table[src[data - 1].to_i32]
       clean = last & (31 ^ ((1 << over) - 1))
       if clean != last
-        return "\u0001#{name}: the last data character, #{show(src[data - 1])} at byte #{data - 1}, sets bits past the data; canonically it is '#{alphabet[clean]}'"
+        return "\u0001#{name}: the last data character, #{show(src[data - 1])} at byte #{data - 1}, sets bits past the data; canonically it is '#{alphabet[clean, 1]}'"
       end
     end
     size = data * 5 // 8
