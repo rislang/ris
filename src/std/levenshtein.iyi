@@ -166,32 +166,23 @@ module ::Levenshtein
   class Finder
     getter target : String
     getter tolerance : Int32
-    @best_entry : Entry?
+    @best_value : String? = nil
+    @best_distance : Int32 = 0
 
     def initialize(@target : String, tolerance : Int32? = nil)
       @tolerance = tolerance || ((@target.chars.size + 4) // 5)
-      @best_entry = nil
     end
 
     def test(name : String, value : String = name) : Nil
       dist = Levenshtein.osa_distance(@target, name)
-      if dist <= @tolerance
-        if best = @best_entry
-          if dist < best.distance
-            @best_entry = Entry.new(value, dist)
-          end
-        else
-          @best_entry = Entry.new(value, dist)
-        end
+      if dist <= @tolerance && (@best_value.nil? || dist < @best_distance)
+        @best_value = value
+        @best_distance = dist
       end
     end
 
     def best_match : String?
-      if entry = @best_entry
-        entry.value
-      else
-        nil
-      end
+      @best_value
     end
 
     def self.find(name : String, tolerance : Int32? = nil, &block : Finder -> Nil) : String?
