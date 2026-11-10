@@ -404,7 +404,6 @@
   def panics(watch : Int32) : Nil
     watched("panics", watch) do
       fine = 0
-      text = ""
       group do |g|
         bad = g.spawn_parallel do
           raise "parallel boom" unless thread_here == 0_u64
@@ -413,12 +412,12 @@
         good = g.spawn_parallel { 2 }
         answer = bad.value
         text = answer.is_a?(Panicked) ? answer.text : "not a panic: #{answer}"
+        fail("panics: a panicking parallel task answered #{text}") unless text == "parallel boom"
         other = good.value
         fine = other.is_a?(Int32) ? other : -1
       end
-      fail("panics: a panicking parallel task answered #{text}") unless text == "parallel boom"
       fail("panics: its sibling answered #{fine}") unless fine == 2
-      puts "panics: a parallel task's panic arrived as Panicked(\"#{text}\") and its sibling finished"
+      puts "panics: a parallel task's panic arrived as Panicked(\"parallel boom\") and its sibling finished"
     end
   end
 

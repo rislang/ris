@@ -32,25 +32,23 @@ assert_str "b", marked["s", "a"], "a section behind a byte order mark"
 assert_str "v", INI.parse("\uFEFFk=v\n")["", "k"], "a first key behind a byte order mark"
 puts "  a byte order mark"
 
-# A document of one key: the shape every refusal below is built from.
-def one(section : String, key : String, value : String) : RisIni
+# A document of one key, written: the shape every refusal below is built
+# from.
+def one(section : String, key : String, value : String) : String
   made = RisIni.new
   made[section, key] = value
-  made
+  INI.build(made)
 end
 
 # What `parse` would read back as something else is refused, not written:
 # a value holding a line break wrote a section and a key of its own, and a
 # padded value came back unpadded. What can be written round-trips.
 def build_refusal(section : String, key : String, value : String) : String
-  said = "built"
   group do |g|
-    attempt = g.spawn { INI.build(one(section, key, value)) }
+    attempt = g.spawn { one(section, key, value) }
     outcome = attempt.value
-    said = outcome.message.to_s if outcome.is_a?(Panicked)
-    0
+    outcome.is_a?(Panicked) ? outcome.message.to_s : "built"
   end
-  said
 end
 
 injected = build_refusal("s", "motd", "hello\r\n[admin]\r\nrole=root")
@@ -73,7 +71,7 @@ assert_str "a=b=c", back["s", "eq"], "a value holding = round-trips"
 # came back `key`.
 bom_key = build_refusal("", "\uFEFFkey", "v")
 assert_true bom_key.includes?("opens with U+FEFF"), "a key opening with U+FEFF is refused, not #{bom_key.inspect}"
-inner = INI.parse(INI.build(one("s", "k\uFEFF", "v")))
+inner = INI.parse(one("s", "k\uFEFF", "v"))
 assert_true !inner["s", "k\uFEFF"]?.nil?, "a U+FEFF past a key's first character round-trips"
 puts "  build refuses a line break, padding, a key with = or opening with U+FEFF and a section with ]"
 

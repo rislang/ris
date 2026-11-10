@@ -384,14 +384,11 @@ puts "    general: %g and %G choose the shorter notation and trim it"
 # The sentence a format is refused with, asked of a task of its own so
 # the panic is an outcome rather than the end of this program.
 def refusal(&block : -> String) : String
-  said = "formatted"
   group do |g|
     attempt = g.spawn { block.call }
     outcome = attempt.value
-    said = outcome.message.to_s if outcome.is_a?(Panicked)
-    0
+    outcome.is_a?(Panicked) ? outcome.message.to_s : "formatted"
   end
-  said
 end
 
 # A verb of several bytes is named whole in the refusal: its lead byte

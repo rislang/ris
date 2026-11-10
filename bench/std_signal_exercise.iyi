@@ -233,9 +233,7 @@ puts "== a graceful stop: the signal stops the listener's task, the group joins"
 # Cancelled and the owner closes the listener (SPEC 5.1).
 server = IyiSocket.listen("127.0.0.1", 0)
 port = server.local_port
-answered = ""
-served = 0
-group do |g|
+finished = group do |g|
   listener = g.spawn do
     count = 0
     while true
@@ -265,10 +263,11 @@ group do |g|
   end
   g.spawn { watchdog(-> { stopper.done? }) }
   reply = asker.value
-  answered = reply if reply.is_a?(String)
   count = listener.value
-  served = count if count.is_a?(Int32)
+  {reply.is_a?(String) ? reply : "", count.is_a?(Int32) ? count : 0}
 end
+answered = finished[0]
+served = finished[1]
 fail("the request in flight was answered #{answered.inspect}") unless answered == "served one"
 fail("served #{served}") unless served == 1
 puts "  one request served, the listener closed, the group joined"
@@ -306,7 +305,7 @@ group do |g|
   2.times do
     seen = RisBoard.take(SeenProbe, 5000_i64)
     break unless seen.is_a?(Tuple) && (probe = seen[0])
-    handled << Signal.new(probe.value).to_s
+    handled << Signal.new(probe.value).to_s.copy_to(Program.tape)
   end
   g.cancel_children
 end
@@ -350,14 +349,13 @@ puts "  an ignored #{first_probe} left the process alive"
 {% end %}
 
 puts "== a cancelled task's wait answers Cancelled"
-outcome = ""
-group do |g|
+outcome = group do |g|
   waiter = g.spawn { Signal.wait(Signal::TERM) }
   g.spawn do
     sleep(20)
     TimedOut.new
   end
-  outcome = waited_text(waiter.value)
+  waited_text(waiter.value)
 end
 fail("the wait answered #{outcome}") unless outcome == "cancelled"
 puts "  the waiter left with Cancelled"

@@ -220,11 +220,11 @@ if Program.args.size > 0
     File.read("#{dir}/join.txt").split('\n').each do |line|
       next if line.empty?
       fields = line.split('\t')
-      args = corpus_words(fields, 1)
-      line_out = Shlex.join(args)
-      check_str unhex(fields[0]), line_out, "join as shlex.join: #{args.inspect}"
-      back = Shlex.split(line_out)
-      check back.is_a?(Array(String)) && back == args, "split(join(args)) is args on the corpus: #{args.inspect}"
+      words = corpus_words(fields, 1)
+      line_out = Shlex.join(words)
+      check_str unhex(fields[0]), line_out, "join as shlex.join: #{words.inspect}"
+      split_back = Shlex.split(line_out)
+      check split_back.is_a?(Array(String)) && split_back == words, "split(join(args)) is args on the corpus: #{words.inspect}"
       io << hex(line_out) << '\n'
       joined += 1
     end

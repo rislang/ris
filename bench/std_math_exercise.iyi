@@ -34,6 +34,38 @@ def assert_close(expected : Float64, actual : Float64, msg : String) : Nil
 end
 
 import std/math::{Math}
+import std/int
+import std/float
+
+# The words of an oracle file, little-endian, read a byte at a time.
+@[OnTape]
+struct Oracle
+  def initialize(@text : String)
+  end
+
+  def [](index : Int32) : UInt64
+    at = index * 8
+    value = 0_u64
+    8.times { |i| value |= @text.byte_at(at + i).to_u64 << (8 * i) }
+    value
+  end
+
+  def single(index : Int32) : Float32
+    at = index * 4
+    value = 0_u32
+    4.times { |i| value |= @text.byte_at(at + i).to_u32 << (8 * i) }
+    # Widened to a Float64 bit for bit: every Float32 is one exactly.
+    sign = (value >> 31).to_u64 << 63
+    exponent = ((value >> 23) & 0xFF_u32).to_u64
+    fraction = (value & 0x7FFFFF_u32).to_u64
+    if exponent == 0_u64
+      magnitude = fraction.to_f64 * 2.0 ** -149
+      return (sign == 0_u64 ? magnitude : -magnitude).to_f32
+    end
+    exponent = exponent == 0xFF_u64 ? 0x7FF_u64 : exponent - 127_u64 + 1023_u64
+    IyiFloatText.from_bits(sign | (exponent << 52) | (fraction << 29)).to_f32
+  end
+end
 
 INF = 1.0 / 0.0
 NAN = 0.0 / 0.0
@@ -340,7 +372,7 @@ puts "  they compile without the consumer importing std/float, and overflow to i
 def against(path : String, name : String, source : String, least : Int32, & : Float64 -> Float64) : Nil
   puts "\n== #{name} against #{source} #{name}, bit for bit"
   pairs = File.read(path)
-  words = pairs.to_unsafe.as(Pointer(UInt64))
+  words = Oracle.new(pairs)
   cases = pairs.bytesize // 16
   index = 0
   while index < cases
@@ -359,7 +391,7 @@ end
 def against_pairs(path : String, name : String, source : String, least : Int32, & : Float64, Float64 -> Float64) : Nil
   puts "\n== #{name} against #{source} #{name}, bit for bit"
   triples = File.read(path)
-  words = triples.to_unsafe.as(Pointer(UInt64))
+  words = Oracle.new(triples)
   cases = triples.bytesize // 24
   index = 0
   while index < cases
@@ -380,7 +412,7 @@ against(args[0], "exp", "Arm's", 300000) { |x| Math.exp(x) } if args.size > 0
 if args.size > 1
   puts "\n== pow against Arm's pow, bit for bit"
   triples = File.read(args[1])
-  words = triples.to_unsafe.as(Pointer(UInt64))
+  words = Oracle.new(triples)
   cases = triples.bytesize // 24
   index = 0
   while index < cases
@@ -428,16 +460,16 @@ against(args[27], "bessely1", "glibc's", 120000) { |x| Math.bessely1(x) } if arg
 if args.size > 29
   puts "\n== jn and yn against glibc's, bit for bit"
   [{args[28], true}, {args[29], false}].each do |pair|
-    triples = File.read(pair[0])
-    words = triples.to_unsafe.as(Pointer(UInt64))
-    cases = triples.bytesize // 24
+    oracle = File.read(pair[0])
+    jn_words = Oracle.new(oracle)
+    cases = oracle.bytesize // 24
     index = 0
     while index < cases
-      n = IyiFloatText.from_bits(words[index * 3]).to_i
-      x = IyiFloatText.from_bits(words[index * 3 + 1])
-      want = IyiFloatText.from_bits(words[index * 3 + 2])
+      n = IyiFloatText.from_bits(jn_words[index * 3]).to_i
+      x = IyiFloatText.from_bits(jn_words[index * 3 + 1])
+      want = IyiFloatText.from_bits(jn_words[index * 3 + 2])
       got = pair[1] ? Math.besselj(n, x) : Math.bessely(n, x)
-      same = IyiFloatText.bits_of(got) == words[index * 3 + 2] || (got != got && want != want)
+      same = IyiFloatText.bits_of(got) == jn_words[index * 3 + 2] || (got != got && want != want)
       raise "ASSERTION FAILED: #{pair[1] ? "besselj" : "bessely"}(#{n}, #{x}) is #{got}, glibc's is #{want}" unless same
       index = index + 1
     end
@@ -465,7 +497,7 @@ fma_singles = Program.env("IYI_MATH_FMA_SINGLES")
 if fma_doubles.is_a?(String) && fma_singles.is_a?(String)
   puts "\n== fma against the exact sum rounded once, bit for bit"
   quads = File.read(fma_doubles)
-  words = quads.to_unsafe.as(Pointer(UInt64))
+  words = Oracle.new(quads)
   cases = quads.bytesize // 32
   index = 0
   while index < cases
@@ -480,14 +512,14 @@ if fma_doubles.is_a?(String) && fma_singles.is_a?(String)
   end
   assert_true cases > 150000, "the fma cases were #{cases}"
   quads = File.read(fma_singles)
-  singles = quads.to_unsafe.as(Pointer(Float32))
+  singles = Oracle.new(quads)
   single_cases = quads.bytesize // 16
   index = 0
   while index < single_cases
-    got = Math.fma(singles[index * 4], singles[index * 4 + 1], singles[index * 4 + 2])
-    want = singles[index * 4 + 3]
+    got = Math.fma(singles.single(index * 4), singles.single(index * 4 + 1), singles.single(index * 4 + 2))
+    want = singles.single(index * 4 + 3)
     same = IyiFloatText.bits_of(got.to_f64) == IyiFloatText.bits_of(want.to_f64) || (got != got && want != want)
-    raise "ASSERTION FAILED: fma(#{singles[index * 4]}_f32, #{singles[index * 4 + 1]}_f32, #{singles[index * 4 + 2]}_f32) is #{got}, rounded once it is #{want}" unless same
+    raise "ASSERTION FAILED: fma(#{singles.single(index * 4)}_f32, #{singles.single(index * 4 + 1)}_f32, #{singles.single(index * 4 + 2)}_f32) is #{got}, rounded once it is #{want}" unless same
     index = index + 1
   end
   assert_true single_cases > 100000, "the single fma cases were #{single_cases}"
