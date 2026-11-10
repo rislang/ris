@@ -88,9 +88,6 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
 * A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
   is refused: the block frees its scratch before the task copy takes
   the value. Copy the value at the boundary before the reset.
-* A tape block in a constant's initializer (program_local_init:
-  `INIT = tape { State.keep(String.new("x")) }`) stores block text into
-  a class variable unrefused.
 * The call graph's `fresh?` takes a call's String-or-error union as
   fresh when any path allocates (an error sentence's interpolation),
   though every String it answers views the parser (toml's
