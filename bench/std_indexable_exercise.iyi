@@ -18,6 +18,7 @@ import std/random::{Random}
 # Minimal custom sequence implementing ONLY the two requirements.
 # Does NOT implement `def each`. Indexable supplies `def each`, which then
 # satisfies Enumerable's requirement check with an empty impl body.
+@[OnTape]
 pub struct MinimalSeq(T)
   @data : Array(T)
 
@@ -52,6 +53,7 @@ end
 # A sequence that is `Indexable` and nothing else, so that what it is asked
 # is answered by this trait: `MinimalSeq` is `Enumerable` too, and where the
 # two traits both write a method - `join` - it gets the later impl's.
+@[OnTape]
 pub struct IndexOnly
   def initialize(@data : Array(Int32))
   end
@@ -145,9 +147,9 @@ assert_equal("10,20", slices[0].join(","), "slice 0")
 assert_equal("30,40", slices[1].join(","), "slice 1")
 assert_equal("50", slices[2].join(","), "slice 2")
 
-slice_accum = [] of String
-arr.each_slice(2) { |s| slice_accum << s.join("+") }
-assert_equal("10+20,30+40,50", slice_accum.join(","), "each_slice block")
+slice_accum = ""
+arr.each_slice(2) { |s| slice_accum << (slice_accum.empty? ? "" : ",") << s.join("+") }
+assert_equal("10+20,30+40,50", slice_accum, "each_slice block")
 
 windows = arr.each_cons(3)
 assert_true(windows.size == 3, "each_cons size")
@@ -155,9 +157,9 @@ assert_equal("10,20,30", windows[0].join(","), "cons 0")
 assert_equal("20,30,40", windows[1].join(","), "cons 1")
 assert_equal("30,40,50", windows[2].join(","), "cons 2")
 
-cons_accum = [] of String
-arr.each_cons(3) { |w| cons_accum << w.join("+") }
-assert_equal("10+20+30,20+30+40,30+40+50", cons_accum.join(","), "each_cons block")
+cons_accum = ""
+arr.each_cons(3) { |w| cons_accum << (cons_accum.empty? ? "" : ",") << w.join("+") }
+assert_equal("10+20+30,20+30+40,30+40+50", cons_accum, "each_cons block")
 
 # Sampling
 s_default = arr.sample
@@ -440,12 +442,12 @@ raise "hash: equal collections agree" unless [1, 2, 3].hash == [1, 2, 3].hash
 raise "hash: order counts" unless [1, 2, 3].hash != [3, 2, 1].hash
 puts "  hash: a long collection mixes without leaving the type"
 
-pairs = [] of String
-[1, 2].each_cartesian(["a", "b"]) { |n, s| pairs << "#{n}#{s}" }
-assert_equal "1a,1b,2a,2b", pairs.join(","), "each_cartesian: every pair, this array's order first"
-zipped = [] of String
-[1, 2].zip(["x", "y", "z"]) { |n, s| zipped << "#{n}#{s}" }
-assert_equal "1x,2y", zipped.join(","), "zip with a block: as many pairs as this array holds"
+pairs = ""
+[1, 2].each_cartesian(["a", "b"]) { |n, s| pairs << (pairs.empty? ? "" : ",") << n << s }
+assert_equal "1a,1b,2a,2b", pairs, "each_cartesian: every pair, this array's order first"
+zipped = ""
+[1, 2].zip(["x", "y", "z"]) { |n, s| zipped << (zipped.empty? ? "" : ",") << n << s }
+assert_equal "1x,2y", zipped, "zip with a block: as many pairs as this array holds"
 puts "  each_cartesian and zip with a block hand pairs over without an array of them"
 
 puts "all indexable checks passed"
