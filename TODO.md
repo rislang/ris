@@ -12,6 +12,20 @@ How to work (fewer tokens, faster to the goal):
   git log. Remove an item when its guarantee passes its gate.
 * Linux x86_64 and aarch64, macOS arm64 (SPEC 7.1): no other targets.
 
+## 0.1.0 blockers (decided 2026-11-10)
+
+What CHANGELOG's 0.1.0 promises must work; the items stay in their
+sections below and are listed here in order:
+
+* HTTP handlers on Incoming/Outgoing (section 1).
+* Checking time per nested block (sections 1 and 2): web's examples
+  must check in seconds.
+* Benches build (section 7), including `HTTP.tls_config=` callers.
+* compiler_spec passes: fix its 225 failures and two segfaulting
+  groups (section 12).
+* Release: Linux tarball and its job, `install_ris.sh`, tag v0.1.0;
+  `ris --version` prints 0.1.0.
+
 ## 1. Programs first
 
 * HTTP handlers: port every HTTP bench and samples/iyi/autocert.iyi
