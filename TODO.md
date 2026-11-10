@@ -177,10 +177,26 @@ Unknown must be refused (SPEC 3.6).
   step 5). Known before the new rules: 5.1 task captures (tls server
   configs, udp:274, dns:951, http.iyi:2154 serve's `handle`, sse.iyi:513
   and :543, std_compress's opaque source proc); drop std/gc imports
-  from its importers and server_load. 2026-11-10: 40 of 139 benches
-  pass --no-codegen; the most common first refusals are a block's or
-  round's data stored past it (18), TlsServerConfig.from_pem (6), then
-  API drift (Upgraded, TlsClient.over, Resolver, Zip, Mail, SMTP).
+  from its importers and server_load. 2026-11-10: 70 of 139 benches
+  pass --no-codegen (40 before the group fixes). Left, by first refusal:
+  - a def's or block's result made in its scratch, SPEC 1.9 (box,
+    capsule, deque, benchmark, std, named_tuple, number_format, png, sse,
+    steppable, time, mlkem, semantic_version, runtime; yaml's read_value
+    of a Hash, which a derived Hash field needs a destination for);
+  - block or round data stored past it (big, bzip2, xz, rsa, user,
+    indexable, dir, io, cookie, http_server, ct_timing, socket, process);
+  - procs outliving their tape block (atomic, file, file_utils, udp,
+    router, iterator);
+  - certificates and Times in constants (ocsp, x509), log's @parent;
+  - std_tls: from_pem and configs returned from defs; http2_exercise;
+  - API drift: hpack (encode answers a String, decode takes
+    TapeHeaders), dns (SvcbRecord.parse takes a String), secure_dns
+    (https_records), toml (Any), xml, websocket, http_https_records,
+    acme and fuzz (Array::View), slice, wasm32, http2_tape_*;
+  - TLS owners: autocert, http_latency, http_resume, hpke; Upgraded
+    (http, http_stop); views in csv, zip, zstd, tar, compress, netip;
+  - number (invalid constant), eiy (its run step).
+  std_regex builds but overflows a task's stack at the deepest nesting.
 
 ## 8. Speed
 
