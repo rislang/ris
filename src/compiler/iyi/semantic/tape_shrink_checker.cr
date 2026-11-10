@@ -1675,7 +1675,11 @@ class Iyi::TapeShrinkChecker
                                yielded : Value, outer : Env) : Array(Var)?
     return nil unless @checking && !@text_only && node.name != "tape"
     return nil unless targets.try(&.any? { |t| yields_fresh?(t) })
-    fresh = block.args.select { |arg| reference?(arg) }
+    # Judged per argument: `yield name, joined` hands a view and a value
+    # the def made; only the made one ends with the def's round.
+    fresh = block.args.each_with_index.select do |arg, i|
+      reference?(arg) && targets.not_nil!.any? { |t| yields_fresh_at(t).includes?(i) }
+    end.map(&.[0]).to_a
     fresh.each do |arg|
       # A struct it yields is a source as well, not a plain value.
       @handed << arg.object_id
@@ -1752,6 +1756,14 @@ class Iyi::TapeShrinkChecker
   @yielded_roots = Set(UInt64).new
   @made_texts = Set(UInt64).new
 
+  # The positions of *target*'s yields that hand data it made.
+  @yields_fresh_at = Hash(UInt64, Set(Int32)).new
+
+  def yields_fresh_at(target : Def) : Set(Int32)
+    return Set(Int32).new unless yields_fresh?(target)
+    @yields_fresh_at[target.object_id]? || Set(Int32).new
+  end
+
   def yields_fresh?(target : Def) : Bool
     id = target.object_id
     known = @yields_fresh[id]?
@@ -1762,8 +1774,9 @@ class Iyi::TapeShrinkChecker
     loop do
       before = scan.names.size
       target.body.accept scan
-      break if scan.found || scan.names.size == before
+      break if scan.names.size == before
     end
+    @yields_fresh_at[id] = scan.fresh_at
     @yields_fresh[id] = scan.found
   end
 
@@ -1881,6 +1894,7 @@ class Iyi::TapeShrinkChecker
     getter names = Set(String).new
     getter found = false
     getter answered = false
+    getter fresh_at = Set(Int32).new
 
     def initialize(@checker : TapeShrinkChecker)
     end
@@ -1897,7 +1911,12 @@ class Iyi::TapeShrinkChecker
     end
 
     def visit(node : Yield)
-      @found ||= node.exps.any? { |e| @checker.fresh_text?(e, names) }
+      node.exps.each_with_index do |e, i|
+        if @checker.fresh_text?(e, names)
+          @fresh_at << i
+          @found = true
+        end
+      end
       true
     end
 
@@ -3054,6 +3073,10 @@ class Iyi::TapeShrinkChecker
         # round: to the block it is scratch (SPEC 3.2, 3.6).
         fresh_args = fresh_block_args(node, block, targets, yielded, outer)
         bind_yielded_fields(block, targets, receiver, args, named, outer)
+        # The summary's view of a made argument keeps it made.
+        fresh_args.try &.each do |arg|
+          outer[arg.name] = merge(outer[arg.name]? || EMPTY, Value.new([arg.object_id], [] of View))
+        end
         @callback_chain << "#{node.name} block"
         @scopes << block.object_id
         if node.name == "tape"

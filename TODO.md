@@ -61,9 +61,6 @@ files; one full check.sh on minitest per finished step, not per fix.
 
 Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
 
-* A yield is judged per def, not per argument: `each_field`'s name is a
-  view, its joined value is fresh, and storing either is refused.
-
 * A struct whose constructor makes its own data is refused at a store
   past its round only with no owner argument: one given an Array or Hash
   it reads, or a builder, pool or class it does not allocate through, is
