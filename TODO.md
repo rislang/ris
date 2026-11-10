@@ -16,6 +16,14 @@ How to work (fewer tokens, faster to the goal):
 
 * The user's own ris programs: each obstacle becomes an item here.
 
+* Checking time doubles per nested block: each loop's two final
+  rounds re-walk every inner block and keep their events, so a body d
+  blocks deep costs 4^d walks. web's examples/testing_test.ri checks
+  for 1182 s, web/static_test.ri for 11 min. Caching alone does not
+  help: events and the final pairing pass still grow 2^d. Plan, gate
+  and open questions: doc/drafts/checker-nested-blocks.md (EGM review
+  first).
+
 Breakage between steps is fine; no transition stages.
 
 Fewest tokens: the compiler's refusals are the list. One task per
@@ -36,9 +44,30 @@ Unknown must be refused (SPEC 3.6).
   growing; that result views the argument, so a block appending to an
   outer String is refused. Lend the local to a builder parameter.
 
-* A block's value that its yielder discards (`each`, `tape`) is still
-  checked as leaving: blocks end with `nil` to pass. Skip the check when
-  the yielder ignores the value.
+* A `tape` block's value is checked as leaving even where the tape
+  call's own value is dropped: such blocks end with `nil` to pass.
+
+* The tape check takes exponential time in nested yield blocks: a def
+  nesting `wrap(text) do |text| ... end` (wrap yields its String) 8
+  deep spends 8.7 s in "Semantic (tape check)", 12 deep over 120 s.
+  checker_deep (check.sh) gates ifs, calls and operators only; add
+  blocks to it once a block's check no longer repeats per level.
+
+* An untyped class default still loses its roots at a cycle store
+  when the def answers the Array it stored into: in
+  refused/cycle_default_untyped, `def node(a = -1, v = C.new)` with the
+  body `@nodes << v` and `node(b).size` in pipe passes; ending node with
+  `0` is refused. In the checking pass the call's store holds an untyped
+  root that `placed` does not find in @default_roots. Track the default
+  at the call.
+
+* A refill under a branch in a loop is refused as clearing a view an
+  earlier round left: a class whose `@names` view its own `@text`,
+  refilled (`@text.clear; @names.clear`, then appends) through
+  `if c = client; c.refill; end` in `2.times`, then `client` read, is
+  refused at the clear. The else path keeps the slot the then path
+  emptied, and the next round's use carries the old view, born before
+  that round's clear. No path holds it: kill the view with its slot.
 
 * A one-call def's value moves down only when it is one fresh flat
   value: a tuple or two locals do not. Bzip2.decompress tags its String
@@ -52,9 +81,6 @@ Unknown must be refused (SPEC 3.6).
   past its round only with no owner argument: one given an Array or Hash
   it reads, or a builder, pool or class it does not allocate through, is
   still taken by the older rule. Follow where the constructor allocates.
-
-* A yield is judged per def, not per argument: `each_field`'s name is a
-  view, its joined value is fresh, and storing either is refused.
 
 * The call graph's `fresh?` takes a call's String-or-error union as
   fresh when any path allocates (an error sentence's interpolation),
@@ -92,20 +118,40 @@ Unknown must be refused (SPEC 3.6).
   `@line` and `@data` with a new builder in a round, and keeps `@type` and
   `@id_buffer` from `SSE.clean`'s scratch. Give them stable storage.
 
-* HTTPClient's ordinary open/request pooling still needs transport
-  storage supplied by its caller. DoH now retains an explicit exchange
-  owner and uses HTTP.open_at_into; a request-local Conn cannot be kept
-  in a longer-lived client's idle list.
+* HTTPClient pooling: HTTPClient owns one exchange per pooled
+  connection with `@idle` as indexes into them, not `{String, Conn}`
+  made per request; SSE.open keeps one exchange beside its parser; gate:
+  two requests over one connection, `reused` 1. Today `client.open` is
+  refused at open_by: the exchange it makes is its own, and give_back
+  would keep its Conn in the client. A try (exchanges made in
+  initialize, `lend`/`release` by index, `take` given the exchange)
+  got past these, in order:
+  - `connect_by_records` made and answered a TlsClient and a tuple: it
+    takes the exchange, moves the socket into it (an `adopt` beside
+    `take_connection`), handshakes on its `tls` slot and answers the
+    socket; the caller reads the config back with `https_current`.
+  - Exchanges made under `if i <= idle` in initialize (macro-unrolled)
+    and pushed into `@exchanges` are refused ("cannot store a view
+    beyond its owner scope"). Taking branches out of the checker's
+    scopes passes them but breaks refused/root_branch_escape and
+    root_store_join: SPEC 3.2 says branch-local storage cannot escape,
+    while 1.1 frees only per def, round and block. Decide with EGM, or
+    make all MAX_POOLED exchanges (16 resolvers and buffers a client).
+  - The resolver refill: read once a request before the loop (done).
+  - SvcbStore kept views of the DNS message (done).
+  Next: `HTTP.https_endpoints` stores `ech` bytes and the `ordered`
+  alpn made in its block into the endpoints, and passes Arrays where
+  HttpsEndpoint takes views: build them into caller-owned storage.
+  Unknown what follows; the HTTPS-records path never compiled behind a
+  client before.
 
 ## 5. Tighten heap_trap
 
-* `heap_trap` (`test/ris/check.sh:34-53`) passes on any compile error naming
-  String, Array, Hash or tape, so it can hide a refusal: tighten it.
+* None open: heap_trap checks each case's outcome (ris2).
 
 ## 6. Checker `evaluate` stack use
 
-* The checker's `evaluate` uses a lot of stack: small changes must not
-  decide whether it fits. Add a gate.
+* None open: call_value keeps `evaluate`'s frame small (ris2).
 
 ## 7. Benches
 
@@ -113,7 +159,8 @@ Unknown must be refused (SPEC 3.6).
   step 5). Known before the new rules: 5.1 task captures (tls server
   configs, udp:274, dns:951, http.iyi:2154 serve's `handle`, sse.iyi:513
   and :543, std_compress's opaque source proc); drop std/gc imports
-  from its importers and server_load.
+  from its importers and server_load. HTTP.tls_config= is removed but
+  still called by acme, http2_exercise and std_http_exercise.sh.
 
 ## 8. Speed
 

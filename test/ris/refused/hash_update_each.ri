@@ -1,0 +1,7 @@
+# Hash#update keeps its block's value: made in a block round, it is freed.
+module test/ris/refused/hash_update_each
+
+counts = Hash(String, String).new
+counts["a"] = "x"
+"The fox".split.each { |word| counts.update("a") { |old| word.downcase } }
+puts counts["a"]

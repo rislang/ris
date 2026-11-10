@@ -1,0 +1,34 @@
+# A block appends to an outer String local: the local grows in place.
+module test/ris/block_text_append
+
+def a1(first : String, items : Array(String)) : String
+  acc = first
+  items.each { |item| acc << item }
+  acc
+end
+
+def a2(items : Array(String)) : String
+  acc = ""
+  items.each { |item| acc << item }
+  acc = "<#{acc}>"
+  acc
+end
+
+def a3(items : Array(String)) : Int32
+  acc = ""
+  items.each { |item| acc << item }
+  acc.size
+end
+
+
+def nested(items : Array(String)) : String
+  acc = ""
+  items.each do |item|
+    2.times { acc << item }
+  end
+  acc
+end
+
+top = ""
+["x", "y"].each { |item| top << item }
+puts "#{a1("f", ["a", "b"])} #{a2(["a", "b"])} #{a3(["a", "b"])} #{nested(["a", "b"])} #{top}"

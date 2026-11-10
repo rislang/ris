@@ -64,7 +64,7 @@ def chain(algorithm : H.class) : String forall H
   joined = ""
   n = 0
   while n <= 300
-    joined = joined + algorithm.hexdigest("a" * n)
+    joined << algorithm.hexdigest("a" * n)
     n = n + 1
   end
   SHA256.hexdigest(joined)

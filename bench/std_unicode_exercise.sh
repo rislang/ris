@@ -212,12 +212,11 @@ mutate "final sigma judged without the letters before it" \
   'if cp == 0x3A3 && !options.ascii? && !options.fold? && final_sigma?(source, index)' \
   'if cp == 0x3A3 && !options.ascii? && !options.fold? && final_sigma?(source, index) && index > from'
 mutate "a category read from the wrong column" \
-  'at < 0 ? "Cn" : category_names[table[at + 2]]' \
-  'at < 0 ? "Cn" : category_names[table[at + 1] % 29]'
-mutate "an orbit without CaseFolding's S rows" \
-  '      join_orbit(map, data[row + 1], data[row])
-      row = row + 2' \
-  '      row = row + 2'
+  'at < 0 ? "Cn" : category_name(table[at + 2])' \
+  'at < 0 ? "Cn" : category_name(table[at + 1] % 29)'
+mutate "an orbit missing its last member" \
+  '      stop = index + table[at + 2]' \
+  '      stop = index + table[at + 2] - 1'
 # The grapheme rules, each taken out of a copy that compiles.
 mutate "a conjunct broken at its consonant (GB9c)" \
   '    return false if linked && after >> 5 == INCB_CONSONANT' ''

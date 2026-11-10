@@ -30,26 +30,37 @@ if [ -z "${RIS_CHECK_SERIAL:-}" ]; then
   exit $rc
 fi
 
-# Migration APIs remain checked, but executing them must trap with a site.
+# Migration APIs remain checked. Each case names its one expected outcome:
+#   heap_trap NAME traps
+#   heap_trap NAME refused LINE 'message fragment'  (LINE - : in a macro)
+#   heap_trap NAME runs
+# so an unrelated compile error, or a refusal at another site, fails it.
 heap_trap() {
-  local name=$1 out code
+  local name=$1 want=$2 out code
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
-  if [ "$code" -ne 0 ] &&
-      grep -qF 'ris: heap allocation:' <<<"$out" &&
-      grep -qE '  at .*:[0-9]+:[0-9]+' <<<"$out"; then
-    echo "traps    $name (heap migration, source site)"
-  elif [ "$code" -ne 0 ] && grep -qF 'Error:' <<<"$out" &&
-      grep -qE 'String|Array|Hash|tape' <<<"$out"; then
-    # A program's literals and to_s are tape values now: the heap path is
-    # refused at compile time, before it can trap.
-    echo "refused  $name (heap migration, at compile time)"
-  elif [ "$code" -eq 0 ]; then
-    # A program's Array, Hash and text are tape types now: no heap left.
-    echo "runs     $name (heap migration now on the tape)"
-  else
-    echo "FAILED   $name: expected heap trap with source site: $out"
-    status=1
-  fi
+  case $want in
+    traps)
+      if [ "$code" -ne 0 ] &&
+          grep -qF 'ris: heap allocation:' <<<"$out" &&
+          grep -qE '  at .*:[0-9]+:[0-9]+' <<<"$out"; then
+        echo "traps    $name (heap migration, source site)"; return
+      fi ;;
+    refused)
+      # A program's literals and to_s are tape values now: the heap path is
+      # refused at compile time, at its own site, before it can trap.
+      if [ "$code" -ne 0 ] &&
+          { [ "$3" = - ] || grep -qF "In test/ris/$name.ri:$3:" <<<"$out"; } &&
+          grep -qF -- "Error: $4" <<<"$out"; then
+        echo "refused  $name (heap migration, at compile time)"; return
+      fi ;;
+    runs)
+      # A program's Array, Hash and text are tape types now: no heap left.
+      if [ "$code" -eq 0 ]; then
+        echo "runs     $name (heap migration now on the tape)"; return
+      fi ;;
+  esac
+  echo "FAILED   $name: expected $want ${3:-} ${4:-}: $out"
+  status=1
 } # heap_trap
 
 expect() {
@@ -64,7 +75,7 @@ expect() {
 }
 
 # Yielded holders retain the provenance of their borrowed owner fields.
-for name in yield_owner_field yield_clone_attrs; do
+for name in yield_owner_field yield_clone_attrs svcb_store; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
   if [ "$code" -eq 0 ] && [ -z "$out" ]; then
     echo "runs     $name"
@@ -86,6 +97,38 @@ expect construct_alias_growth 'grow after new'
 expect construct_field_alias 'grow after new'
 expect construct_helper_shrink 'grow after new'
 expect construct_text_growth 'grow after new'
+
+# A module's top level grows a String local in place, as a def does.
+out=$("$RIS" run test/ris/module_text_growth.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '205 012' ]; then
+  echo 'runs     module_text_growth'
+else
+  echo "FAILED   module_text_growth: $out"; status=1
+fi
+
+# A def with several returns answers what its value views (SPEC 1.9).
+out=$("$RIS" run test/ris/several_returns_view.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'abab' ]; then
+  echo 'runs     several_returns_view'
+else
+  echo "FAILED   several_returns_view: $out"; status=1
+fi
+
+# A block appends to an outer String local, which grows in place.
+out=$("$RIS" run test/ris/block_text_append.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'fab <ab> 2 aabb xy' ]; then
+  echo 'runs     block_text_append'
+else
+  echo "FAILED   block_text_append: $out"; status=1
+fi
+
+# A block value its yielder drops (`each`) is not checked as leaving.
+out=$("$RIS" run test/ris/block_value_dropped.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '12' ]; then
+  echo 'runs     block_value_dropped'
+else
+  echo "FAILED   block_value_dropped: $out"; status=1
+fi
 
 out=$("$RIS" run test/ris/construct_growth.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = $'2\n1' ]; then
@@ -190,6 +233,7 @@ expect class_alias_held_view 'cannot shrink tape storage'
 expect class_alias_field_view 'cannot shrink tape storage'
 expect class_receiver_borrow 'cannot shrink tape storage'
 expect class_receiver_view 'cannot shrink tape storage'
+expect class_argument_view 'cannot shrink tape storage'
 expect tape_block_program_store 'cannot store request tape data'
 expect copied_root_shrink 'cannot shrink tape storage'
 expect copied_field_return 'cannot return a value made in this def'
@@ -203,9 +247,13 @@ expect hash_key_block 'cannot store data made in this block'
 expect hash_update_block 'cannot store data made in this block'
 expect self_field_param 'cannot store data made in this tape block'
 expect set_add_block 'cannot store data made in this block'
+expect hash_update_each 'cannot store data made in this block'
+expect board_take_leave 'cannot return a value made in this def'
+expect option_parser_short_args 'This call hands it to a store that keeps it'
 expect array_insert_block 'cannot store data made in this block'
 expect optional_result_store 'cannot store data made in this loop round'
 expect yield_fresh_store 'cannot store data made in this block'
+expect yield_made_argument 'cannot store data made in this block'
 expect yield_class_store 'cannot store data made in this block'
 expect yield_struct_store 'cannot store data made in this block'
 expect yield_element_store 'cannot store data made in this block'
@@ -256,6 +304,15 @@ if [ "$?" -eq 0 ] && [ "$out" = '2' ]; then
   echo 'runs     hash_join_copy'
 else
   echo "FAILED   hash_join_copy: $out"; status=1
+fi
+
+# An SSE parser keeps its text in builders it refills, on the caller's tape.
+out=$("$RIS" run test/ris/sse.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    [ "$out" = 'PASS: sse caller tape and explicit retained copy' ]; then
+  echo 'runs     sse'
+else
+  echo "FAILED   sse: $out"; status=1
 fi
 
 # Empty local collections fix their types at the first store.
@@ -968,7 +1025,8 @@ expect copy_class_override 'remove this override'
 expect copy_pointer 'build on the destination with Array nodes and indices'
 expect copy_link 'copy_to refuses pointers and self-relative links'
 
-heap_trap string_parameters
+heap_trap string_parameters refused 31 \
+  'this block becomes a proc, which may run after the tape block'
 
 expect text_capture 'pass what the block needs as owned data (copy_to(owner))'
 # These old heap-boundary refusals are safe on the object's tape now.
@@ -991,9 +1049,10 @@ else
   status=1
 fi
 
-heap_trap text_literal_heap
+heap_trap text_literal_heap refused 4 \
+  'cannot store request tape data on the program tape'
 
-heap_trap borrowed_text
+heap_trap borrowed_text runs
 
 expect class_field   "cannot store data made in this tape block"
 expect class_task "this block becomes a proc"
@@ -1001,6 +1060,7 @@ expect class_share 'ClassShareValue is a tape type'
 expect class_finalize "tape class instances cannot finalize"
 expect class_inherited_finalize "tape class instances cannot finalize"
 expect class_escape "is a variable of the code around this tape block"
+expect round_class_outer_store "Copy it with .copy_to(owner)"
 expect struct_field  'Use an @[OnTape] struct for request data'
 expect class_var     "copy it with .copy_to(Program.tape)"
 expect proc_capture  "this block becomes a proc"
@@ -1064,7 +1124,9 @@ for name in implicit fibers/implicit implicit_loop; do
   fi
 done
 
-heap_trap escape
+# keep stores tape-block text in a constant: no @[TapeToHeap] exempts it.
+heap_trap escape refused 35 \
+  'cannot store data made in this tape block'
 
 # Cleanup keeps LIFO order on early exits, panic and explicit exit.
 out=$("$RIS" run test/ris/local.ri 2>&1)
@@ -1188,7 +1250,7 @@ if grep -qF $'10 25 35 35' <<<"$out" && grep -qF "index 3 out of range for 3 ele
 out=$("$RIS" run test/ris/stream.ri 2>&1)
 if grep -qF '7 1,2,5,6 3,4 0 7' <<<"$out" && grep -qF "RisTree#close: 2 is not open" <<<"$out"; then echo "runs     stream"; else echo "FAILED   stream: $out"; status=1; fi
 
-heap_trap owned
+heap_trap owned runs
 
 out=$("$RIS" run test/ris/writer.ri 2>&1)
 if [ "$out" = '0 -42 9223372036854775807 -9223372036854775808 a&amp;b&lt;c&gt;&quot;d&#39;e <b>' ]; then echo "runs     writer"; else echo "FAILED   writer: $out"; status=1; fi
@@ -1244,9 +1306,9 @@ if [ "$out" = 'PASS: read as Params reads, nothing on the heap' ]; then echo "ru
 out=$("$RIS" run test/ris/truncate.ri 2>&1)
 if grep -qF "PASS: cut back and written over" <<<"$out" && grep -qF "truncate to 1 of 0 bytes" <<<"$out"; then echo "runs     truncate"; else echo "FAILED   truncate: $out"; status=1; fi
 
-heap_trap json
+heap_trap json runs
 
-heap_trap json_buffer
+heap_trap json_buffer runs
 expect json_builder_escape 'is a variable of the code around this tape block'
 
 out=$("$RIS" run test/ris/json_repeat.ri 2>&1)
@@ -1350,6 +1412,30 @@ if [ "$out" = "$want" ]; then
   echo 'runs     websocket_handshake (connect and upgrade, no heap)'
 else
   echo "FAILED   websocket_handshake: $out"; status=1
+fi
+# HTTP.open and HTTP.open_into over loopback; open's error is a copy.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/http_open.ri 2>&1)
+want='/one 211
+/two 200
+/three 200
+refused true
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     http_open'
+else
+  echo "FAILED   http_open: $out"; status=1
+fi
+# SSE.open against SSE.stream on a ris Server: an event, a reconnect
+# that names it in Last-Event-ID, the next event.
+out=$(RIS_HEAP_STATS=1 timeout 300 "$RIS" run test/ris/sse_open.ri 2>&1)
+want='message 1 "first"
+update 2 "second\nline"
+stopped after 2
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     sse_open (SSE.stream served; SSE.open reconnects with Last-Event-ID)'
+else
+  echo "FAILED   sse_open: $out"; status=1
 fi
 # std/http client: coded answers decoded through BodyFeed, an io Reader.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/http_coding.ri 2>&1)
@@ -2196,7 +2282,7 @@ else
 fi
 rm -f "$exe"
 
-heap_trap string_arguments
+heap_trap string_arguments runs
 
 # Generic std classes and crypto inputs use checked tape storage.
 for name in std_generic_tape std_small_tape curve_views mlkem_views shlex base32 \
@@ -2243,7 +2329,7 @@ else
   echo "FAILED   uri_legacy: $out"; status=1
 fi
 
-heap_trap http_head_legacy
+heap_trap http_head_legacy runs
 
 # Log text, numeric formatting and quoting use the caller's tape.
 out=$(RIS_HEAP_STATS=1 "$RIS" run \
@@ -2988,6 +3074,24 @@ if [ "$out" = "$want" ]; then
 else
   echo "FAILED   xpath: $out"; status=1
 fi
+
+# The checker's `evaluate` recurses once per nesting level. At the deepest
+# nesting the parser reads (126 under a def), nested ifs, calls and
+# operators must check in 3 MiB of stack: about 1.8 MiB today, 8 MiB by
+# default, so a frame that grows fails here, not in a random later change.
+for deep in "$(mktemp -d)"; do
+  python3 test/ris/checker_deep.py "$deep/deep.ri"
+  out=$(bash -c 'ulimit -s 3072; exec "$0" build --no-codegen "$1"' \
+    "$RIS" "$deep/deep.ri" 2>&1); code=$?
+  if [ "$code" -eq 0 ]; then
+    echo "checks   checker_deep (126 levels in 3 MiB of stack)"
+  else
+    echo "FAILED   checker_deep: needs more than 3 MiB of stack: $out" | head -c 2000
+    echo
+    status=1
+  fi
+  rm -rf "$deep"
+done
 
 # Run heap workloads after the other gates to avoid compiler contention.
 # Keep their fixed timeouts: a hung census must still fail.

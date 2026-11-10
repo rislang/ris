@@ -1,0 +1,20 @@
+# A board's take decodes onto the def's scratch: a non-flat message
+# cannot be answered after other work (SPEC 1.9, 3.6).
+module test/ris/refused/board_take_leave
+
+@[OnTape]
+struct Msg
+  getter hosts : Array(String)
+
+  def initialize(@hosts : Array(String))
+  end
+end
+
+def settings : Msg
+  got = RisBoard.take(Msg)
+  raise "cancelled" unless got.is_a?(Msg)
+  got
+end
+
+RisBoard.post(Msg.new(["a", "b"]))
+puts settings.hosts.size

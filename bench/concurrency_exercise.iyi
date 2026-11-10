@@ -278,7 +278,7 @@ group do |g|
   end
 end
 
-6.times { order = order + hear }
+6.times { order << hear }
 fail("interleaving: expected bababa, got #{order}") unless order == "bababa"
 puts "interleaved: #{order}"
 
@@ -392,7 +392,7 @@ group do |g|
   end
 end
 
-3.times { io_order = io_order + hear }
+3.times { io_order << hear }
 fail("poller: expected parked,wrote,read:7 — got #{io_order}") unless io_order == "parked,wrote,read:7"
 puts "a read parked in the poller and a sleeping writer woke it"
 
@@ -543,7 +543,7 @@ group do |g|
   v = slow_task.value
   note("owner:#{v.is_a?(Int32) ? v : -1}")
 end
-3.times { readers = readers + hear }
+3.times { readers << hear }
 fail("readers: expected owner:42,a:42,b:42 — got #{readers}") unless readers == "owner:42,a:42,b:42"
 broken_readers = ""
 group do |g|
@@ -560,7 +560,7 @@ group do |g|
     end
   end
 end
-2.times { broken_readers = broken_readers + hear }
+2.times { broken_readers << hear }
 fail("readers of a panicked task saw #{broken_readers}") unless broken_readers == "PP"
 puts "three fibers read one task's value, and two read a panicked one's"
 
@@ -684,7 +684,7 @@ group do |g|
   break
 end
 fail("leaving a group block early took #{elapsed_ms(started)} ms beside 10 s sleeps") if elapsed_ms(started) >= 5000
-3.times { early << hear }
+3.times { early << hear.copy_to(Program.tape) }
 fail("leaving a group block early did not cancel its task: #{early}") unless early == ["return cancelled", "! cancelled", "break cancelled"]
 puts "a block left by `return`, `!` or `break` cancelled its sleeping task, under 5 s"
 
@@ -721,7 +721,7 @@ group do |g|
   end
 end
 fail("a failing group took #{elapsed_ms(started)} ms to stop its grandchildren") if elapsed_ms(started) >= 5000
-5.times { outer << hear }
+5.times { outer << hear.copy_to(Program.tape) }
 heard = outer.sorted.join(", ")
 unless heard == "joined cancelled, owner cancelled, started late cancelled, typed answered cancelled, typed cancelled"
   fail("a cancel did not reach a task's own group: #{heard}")

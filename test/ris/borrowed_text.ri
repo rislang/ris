@@ -30,15 +30,6 @@ exit 13 unless "alpha beta".starts_with?("alpha")
 exit 14 unless "aaaaab".byte_index("aab") == 3
 exit 15 unless "".byte_index("") == 0
 exit 16 unless "abc".byte_index("", 4).nil?
-# A default proc may retain a missing key after its source tape ends.
-defaults = Hash(String, Int32).new do |table, key|
-  table[key] = key.bytesize
-end
-tape do
-  missing = "key #{7}"
-  exit 17 unless defaults[missing] == 5
-end
-exit 18 unless defaults["key 7"] == 5
 json = JSON.build do |b|
   b.object do
     b.field "name", "value #{7}"

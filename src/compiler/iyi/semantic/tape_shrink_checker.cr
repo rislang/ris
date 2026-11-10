@@ -429,6 +429,17 @@ class Iyi::TapeShrinkChecker
           site = @store_site
           if site && site.location && !site.same?(node) &&
              (call_at = node.location)
+            # A library's store is the library's to keep: the program's
+            # call is what hands it the short-lived value, so the error
+            # stands there and names the library's line.
+            store_file = site.location.try(&.original_filename) || ""
+            call_file = call_at.original_filename || ""
+            if TapeScopeRuntime.library_file?(store_file) &&
+               !TapeScopeRuntime.library_file?(call_file)
+              node.raise "#{message}\nThis call hands it to a store that " \
+                         "keeps it, at #{File.expand_path(store_file)}:" \
+                         "#{site.location.not_nil!.line_number}"
+            end
             site.raise "#{message}\nThis store runs inside the tape block " \
                        "of the call at " \
                        "#{call_at.original_filename.try { |f| File.expand_path(f) }}:" \
@@ -1697,7 +1708,11 @@ class Iyi::TapeShrinkChecker
                                yielded : Value, outer : Env) : Array(Var)?
     return nil unless @checking && !@text_only && node.name != "tape"
     return nil unless targets.try(&.any? { |t| yields_fresh?(t) })
-    fresh = block.args.select { |arg| reference?(arg) }
+    # Judged per argument: `yield name, joined` hands a view and a value
+    # the def made; only the made one ends with the def's round.
+    fresh = block.args.each_with_index.select do |arg, i|
+      reference?(arg) && targets.not_nil!.any? { |t| yields_fresh_at(t).includes?(i) }
+    end.map(&.[0]).to_a
     fresh.each do |arg|
       # A struct it yields is a source as well, not a plain value.
       @handed << arg.object_id
@@ -1774,6 +1789,14 @@ class Iyi::TapeShrinkChecker
   @yielded_roots = Set(UInt64).new
   @made_texts = Set(UInt64).new
 
+  # The positions of *target*'s yields that hand data it made.
+  @yields_fresh_at = Hash(UInt64, Set(Int32)).new
+
+  def yields_fresh_at(target : Def) : Set(Int32)
+    return Set(Int32).new unless yields_fresh?(target)
+    @yields_fresh_at[target.object_id]? || Set(Int32).new
+  end
+
   def yields_fresh?(target : Def) : Bool
     id = target.object_id
     known = @yields_fresh[id]?
@@ -1784,8 +1807,9 @@ class Iyi::TapeShrinkChecker
     loop do
       before = scan.names.size
       target.body.accept scan
-      break if scan.found || scan.names.size == before
+      break if scan.names.size == before
     end
+    @yields_fresh_at[id] = scan.fresh_at
     @yields_fresh[id] = scan.found
   end
 
@@ -1834,6 +1858,147 @@ class Iyi::TapeShrinkChecker
 
     private def self_receiver?(obj : ASTNode?) : Bool
       obj.nil? || obj.is_a?(Self) || (obj.is_a?(Var) && obj.name == "self")
+    end
+  end
+
+  # Whether *target* keeps its block's value: `self[key] = yield v`, or
+  # `<<`, push or add of it (Hash#update, put_if_absent). The value
+  # is the block's, made in the caller's block round (SPEC 3.6).
+  @keeps_yield = Hash(UInt64, Bool).new
+
+  # Whether *target* drops its block's value: every `yield` is a
+  # statement whose value nothing reads, as in `each`.
+  @discards_yield = Hash(UInt64, Bool).new
+
+  def discards_yield?(target : Def) : Bool
+    @discards_yield.fetch(target.object_id) do
+      found = false
+      if !target.is_a?(External) && (body = target.body)
+        scan = UsedYieldScan.new
+        # The body's value is the def's answer, unless it answers nil.
+        if target.return_type.try(&.to_s) == "Nil"
+          scan.drop(body)
+          scan.drop(UsedYieldScan.scoped_value(body) || body)
+        end
+        body.accept(scan)
+        found = scan.yields && !scan.used
+      end
+      @discards_yield[target.object_id] = found
+    end
+  end
+
+  class UsedYieldScan < Visitor
+    getter used = false
+    getter yields = false
+    @dropped = Set(UInt64).new
+
+    def drop(node : ASTNode) : Nil
+      @dropped << node.object_id
+    end
+
+    # A marked def's body: `t = (body); t = __iyi_scope_result(m, t); t`.
+    # The wrapped body, whose value is the def's answer.
+    def self.scoped_value(body : ASTNode) : ASTNode?
+      return nil unless body.is_a?(Expressions)
+      exps = body.expressions
+      exps.each_with_index do |exp, i|
+        result = exps[i + 1]?
+        next unless exp.is_a?(Assign) && result.is_a?(Assign)
+        target = exp.target
+        call = result.value
+        next unless target.is_a?(Var) && result.target == target
+        next unless call.is_a?(Call) && call.name == TapeScopeChecker::RESULT
+        return exp.value
+      end
+      nil
+    end
+
+    def visit(node : Expressions)
+      last = node.expressions.size - 1
+      node.expressions.each_with_index do |e, i|
+        drop(e) if i < last || @dropped.includes?(node.object_id)
+      end
+      true
+    end
+
+    def visit(node : While)
+      drop(node.body)
+      true
+    end
+
+    def visit(node : If | Unless)
+      if @dropped.includes?(node.object_id)
+        drop(node.then)
+        drop(node.else)
+      end
+      true
+    end
+
+    def visit(node : Yield)
+      @yields = true
+      @used ||= !@dropped.includes?(node.object_id)
+      true
+    end
+
+    def visit(node : Call)
+      if expanded = node.expanded
+        drop(expanded) if @dropped.includes?(node.object_id)
+        expanded.accept self
+        return false
+      end
+      true
+    end
+
+    def visit(node : MacroIf | MacroFor | MacroExpression | MacroVerbatim)
+      if expanded = node.expanded
+        drop(expanded) if @dropped.includes?(node.object_id)
+        expanded.accept self
+      end
+      false
+    end
+
+    def visit(node : Def | ProcLiteral)
+      false
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
+  end
+
+  def keeps_yield?(target : Def) : Bool
+    @keeps_yield.fetch(target.object_id) do
+      scan = KeptYieldScan.new
+      target.body.accept(scan)
+      @keeps_yield[target.object_id] = scan.found
+    end
+  end
+
+  class KeptYieldScan < Visitor
+    KEEPS = {"[]=", "<<", "push", "unshift", "add", "insert", "upsert"}
+    getter found = false
+
+    def self.yielded?(node : ASTNode?) : Bool
+      case node
+      when Yield       then true
+      when Expressions then yielded?(node.expressions.last?)
+      when If          then yielded?(node.then) || yielded?(node.else)
+      else                  false
+      end
+    end
+
+    def visit(node : Call)
+      @found ||= KEEPS.includes?(node.name) && node.args.any? { |a| self.class.yielded?(a) }
+      true
+    end
+
+    def visit(node : Assign)
+      @found ||= node.target.is_a?(InstanceVar) && self.class.yielded?(node.value)
+      true
+    end
+
+    def visit(node : ASTNode)
+      true
     end
   end
 
@@ -1910,6 +2075,7 @@ class Iyi::TapeShrinkChecker
     getter names = Set(String).new
     getter found = false
     getter answered = false
+    getter fresh_at = Set(Int32).new
 
     def initialize(@checker : TapeShrinkChecker)
     end
@@ -1926,7 +2092,12 @@ class Iyi::TapeShrinkChecker
     end
 
     def visit(node : Yield)
-      @found ||= node.exps.any? { |e| @checker.fresh_text?(e, names) }
+      node.exps.each_with_index do |e, i|
+        if @checker.fresh_text?(e, names)
+          @fresh_at << i
+          @found = true
+        end
+      end
       true
     end
 
@@ -2709,568 +2880,7 @@ class Iyi::TapeShrinkChecker
     when Cast
       value(node.obj, env)
     when Call
-      return value(node.expanded.not_nil!, env) if node.expanded
-      # Specialized-out branches retain syntax without executable targets.
-      return EMPTY unless node.type?
-      # `String.new(pointer, size)` views bytes it does not own (std's
-      # mapped files, FFI buffers): it makes nothing on the tape.
-      if foreign_view?(node)
-        node.args.each { |arg| value(arg, env) }
-        return EMPTY
-      end
-      if node.name == "new"
-        # A local container can hold an owner declared in the same scope.
-        # Parameter and program roots still carry their longer lifetimes.
-        @root_scopes[node.object_id] = @scopes.dup
-        @root_types[node.object_id] = node.type
-        @root_births[node.object_id] = @uses.size
-        note_fresh(node.object_id)
-      end
-      if @text_only && node.name.in?("copy_to", "new", "dup") &&
-         TapeChecker.possible_string?(node.type?)
-        @text_copies << node.object_id
-      end
-      # A call to a top-level def (`::f`, or one the Program owns) takes no
-      # self: the caller's self is no input of it.
-      top_level = node.global? || (@graph.targets(node).try do |found|
-        !found.empty? && found.all? { |t| t.owner?.is_a?(Program) }
-      end || false)
-      receiver = node.obj.try { |obj| value(obj, env) } ||
-                 (top_level ? EMPTY : env["self"]?) || EMPTY
-      args = node.args.map { |arg| argument_value(arg, env) }
-      named = Hash(String, Value).new
-      node.named_args.try &.each do |arg|
-        named[arg.name] = v = argument_value(arg.value, env)
-        args << v
-      end
-      node.block_arg.try { |arg| args << value(arg, env) }
-      # Scope reception preserves borrowed identities; fresh results may
-      # be copied, so forwarding the original is conservative. The global
-      # wrapper must not turn an implicit self into a result dependency.
-      if @text_only && node.global?
-        return args.last? || EMPTY if node.name == TapeScopeChecker::RESULT
-        return EMPTY if node.name.in?(TapeScopeChecker::MARK,
-          TapeScopeChecker::RESET, TapeScopeChecker::RESULT_AT)
-      end
-      # Growing text's companion is its stable reservation identity.
-      # Reset has the same invalidation rule as Array#clear. Call summaries
-      # carry this effect through methods and field accessors.
-      if node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth"
-        if !@text_only && node.name == "__ris_text_reset"
-          return args.first? || EMPTY
-        end
-        # Growing text appends a copy of its argument's bytes: the result
-        # views the text grown (its first argument), never the argument.
-        if !@text_only && node.name == "append"
-          shrink(receiver.roots, node, chain("append"), env, true)
-          args.each { |arg| use(arg, node) }
-          return args.first? || EMPTY
-        end
-      end
-      if @text_only && node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth"
-        @text_roots.concat(receiver.roots)
-        if node.name == "__ris_text_reset"
-          return args.first? || EMPTY unless TapeChecker.possible_string?(node.type?)
-          text_reset(receiver.roots, node, env, chain("text reset"))
-          args.each { |arg| use(arg, node) }
-          # With no writer yet, runtime returns the input unchanged.
-          # Keep that possible borrow as well as the reservation view.
-          return merge(args.first? || EMPTY, Value.new(receiver.roots,
-            receiver.roots.map { |root| view(root) }))
-        elsif node.name == "append"
-          return Value.new(receiver.roots,
-            receiver.roots.map { |root| view(root) })
-        end
-      end
-      storage_receiver = node.obj.try { |obj| storage?(obj) } ||
-                         @graph.targets(node).try &.any? { |target| storage_type?(target.owner) }
-      if storage_receiver && {"<<", "push", "concat", "append", "write_bytes", "unshift"}.includes?(node.name)
-        shrink(receiver.roots, node, chain(node.name), env, true)
-      end
-      if storage_receiver && {"[]=", "__loop_store", "unchecked_store"}.includes?(node.name) &&
-         node.obj.try do |obj|
-           name = obj.type?.try(&.to_s) || ""
-           name.starts_with?("Array(Array(") || name == "Array(String)" ||
-             name.starts_with?("Hash(")
-         end
-        shrink(receiver.roots, node, chain(node.name), env)
-      end
-      if storage_receiver && SHRINK.includes?(node.name)
-        shrink(receiver.roots, node, chain(node.name), env)
-        if node.name == "clear" && receiver.roots.size == 1 &&
-           !@folded_roots.includes?(receiver.roots.first)
-          env.slots.reject! do |key, _|
-            contains_root?(receiver.roots, key)
-          end
-        end
-      end
-      if storage_receiver && {"<<", "push", "[]=", "__loop_store", "unchecked_store"}.includes?(node.name)
-        # A scalar element (a byte into an Array(UInt8)) holds no storage:
-        # it is no store a summary should carry.
-        # A builder's (or a String grown in place's) `<<` copies the
-        # text's bytes: it keeps no view of it.
-        builder_copy = node.name == "<<" &&
-                       node.obj.try(&.type?).try { |t| {"String::Builder", "String"}.includes?(type_name(t)) }
-        if (element = args.last?) && !builder_copy && node.args.last?.try { |arg| reference?(arg) } != false
-          store(receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }, element, env, node, false)
-        end
-        store_hash_key(node, receiver, args, env)
-      end
-      store_kept_argument(node, receiver, args, env)
-      element_result : Value? = nil
-      if node.obj.try do |obj|
-           obj.type?.try do |t|
-             name = type_name(t)
-             name.starts_with?("Array(") || name.starts_with?("Hash(")
-           end
-         end &&
-         {"[]", "[]?", "first", "first?", "last", "last?", "fetch", "__loop_fetch"}.includes?(node.name)
-        # An indexed read uses the field lent by the loop condition,
-        # including when a fresh getter call obtained the same handle.
-        use(Value.new([] of UInt64, @loop_storage.select { |v|
-          contains_root?(receiver.roots, v.root)
-        }), node)
-        elements = receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }
-        if storage?(node)
-          @pooled_roots.concat(elements)
-          elements.each { |root| @root_types[root] = node.type }
-          element_result = Value.new(elements, [] of View)
-        elsif !elements.empty? && elements.all? { |r| env.slots.has_key?(r) }
-          element_result = elements.reduce(EMPTY) do |result, root|
-            contents = value_holder?(node.type?) ? Value.new([root], [] of View) : env.slots[root]
-            merge(result, stored(contents, env))
-          end
-        end
-      end
-      inputs = [receiver] + args
-      call_result = EMPTY
-      result_fields = [] of UInt64
-      summarized = false
-      incomplete_result = false
-      reset_roots = [] of UInt64
-      targets = @graph.targets(node)
-      # What the receiver's fields held before the call: a callee that
-      # clears and refills them drops these from the caller's slots.
-      held_before = [] of View
-      if !@text_only && !receiver.roots.empty? && targets && !targets.empty?
-        env.slots.each do |key, contents|
-          held_before.concat(contents.views) if contains_root?(receiver.roots, key)
-        end
-      end
-      if targets && !targets.empty?
-        before_calls = env
-        after_calls : Env? = nil
-        targets.each do |target|
-          summary = summary(target)
-          call_env = summary && !summary.stores.empty? ? before_calls.dup : before_calls
-          boundary = target.is_a?(External) || @graph.proc_call?(target) ||
-                     (target.iyi_from_artifact? && !target.iyi_body_travelled?)
-          if boundary && target.iyi_from_artifact? && !target.ris_call_contract
-            node.raise "imported def lacks a checked tape contract; rebuild the module with --emit-iyimod"
-          end
-          if boundary && (checked = @graph.contract(target))
-            # A directly known proc is executed below with its environment.
-            unless @graph.proc_call?(target) && !receiver.procs.empty? && !receiver.unknown_proc
-              actuals = [receiver] + target.args.map_with_index do |arg, i|
-                named[arg.external_name]? || args[i]? || EMPTY
-              end
-              summarized = true
-              checked.parameters.each_with_index do |bits, i|
-                # Field paths also model ordinary heap/scalar values. Only
-                # a tape-capable formal can carry a borrowed storage effect.
-                borrowed = i == 0 ? reference_type?(target.owner?) : reference?(target.args[i - 1])
-                next unless borrowed
-                input = actuals[i]? || EMPTY
-                roots = source_roots(input).flat_map { |r| aliases(r, env) }.uniq
-                # An unknown proc's argument: what its type's methods can
-                # do decides (`handed_effect`); an object's effect is on
-                # its fields, so a reference to it stays valid.
-                handed = @graph.proc_call?(target) && i > 0 ? proc_argument_type(target, i - 1) : nil
-                # A constructor's receiver is the value `new` just made:
-                # no view of it exists yet for the constructor's own field
-                # growth to move (an imported `initialize` filling Arrays).
-                constructing = i == 0 && TapeScopeChecker.constructor?(target) && !handed
-                if bits & TapeCallGraph::Contract::SHRINK != 0 && !constructing
-                  if found = handed ? handed_effect(handed, false) : WHOLE
-                    shrunk = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
-                    shrink(shrunk, node, chain("#{node.name} (opaque contract)"), env)
-                  end
-                end
-                if bits & TapeCallGraph::Contract::GROW != 0 && !constructing
-                  if found = handed ? handed_effect(handed, false) : WHOLE
-                    grown = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
-                    shrink(grown, node, chain("#{node.name} (opaque growth)"), env, true)
-                  end
-                end
-                if bits & TapeCallGraph::Contract::RETAIN != 0 && !roots.empty?
-                  if found = handed ? handed_effect(handed, true) : WHOLE
-                    kept = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
-                    @retains.concat(kept)
-                    STDERR.puts "DBG unproved-contract #{node.name} #{kept.map { |r| root_name(r) }.join(",")} at #{node.location}" if ENV["RIS_DBG"]? && @checking
-                    @unproved << node if @checking
-                  end
-                end
-                if bits & TapeCallGraph::Contract::STORE_SELF != 0
-                  destinations = receiver.roots.flat_map { |r| aliases(r, call_env) }.uniq
-                  store(destinations, input, call_env, node, replace: false)
-                end
-                if bits & TapeCallGraph::Contract::RESULT != 0
-                  call_result = merge(call_result, input)
-                end
-              end
-            end
-          elsif summary
-            # A proc obtained from a summary can execute a body outside
-            # the lexical call tree. Record the summaries it reads too.
-            if caller = @solving
-              (@summary_callers[target.object_id] ||= Set(UInt64).new) << caller
-            end
-            summarized = true
-            actuals = [receiver] + target.args.map_with_index do |arg, i|
-              named[arg.external_name]? || args[i]? || EMPTY
-            end
-            summary.shrinks.each do |root, chain|
-              roots = translate(root, summary, actuals).flat_map { |r| aliases(r, env) }.uniq
-              if @text_only && chain.includes?("text reset")
-                reset_roots.concat(roots)
-                text_reset(roots, node, env,
-                  chain("#{node.name} -> #{chain}"))
-              else
-                shrink(roots, node, chain("#{node.name} -> #{chain}"), env)
-                # A callee that clears a field empties it: what the caller
-                # knew it held is gone, as after a direct `clear`.
-                if !@text_only && chain.ends_with?("clear") && roots.size == 1 &&
-                   !@folded_roots.includes?(roots.first)
-                  call_env.slots.reject! { |key, _| contains_root?(roots, key) }
-                end
-              end
-            end
-            summary.grows.each do |root, cause|
-              roots = translate(root, summary, actuals).flat_map do |r|
-                aliases(r, env)
-              end.uniq
-              shrink(roots, node, chain("#{node.name} -> #{cause}"), env, true)
-            end
-            retained = summary.retains.flat_map { |r| translate(r, summary, actuals) }
-            @retains.concat(retained)
-            STDERR.puts "DBG unproved-summary #{node.name} #{retained.map { |r| root_name(r) }.join(",")} at #{node.location}" if ENV["RIS_DBG"]? && @checking && !retained.empty?
-            @unproved << node if @checking && !retained.empty?
-            # What the callee makes and answers is this call's allocation,
-            # made here: inside any tape block around the call.
-            # (Only a growing or text result: a callee that copies onto
-            # another owner, `copy_to(Program.tape)`, answers no such thing.)
-            # A tape struct (an @[OnTape] answer) holding what the callee
-            # allocated is made here the same way.
-            if !@tape_blocks.empty? && node.name != "copy_to" && (@graph.fresh?(node) ||
-               (node.type?.try { |t| TapeChecker.possible_string?(t) || tape_struct?(t) } &&
-                @graph.allocates?(node)) || made_union?(node))
-              @root_scopes[node.object_id] ||= @scopes.dup
-              note_fresh(node.object_id) unless @root_tapes.has_key?(node.object_id)
-            end
-            # What the callee builds and answers is built here: a store
-            # into it is a store into this scope's value.
-            @root_scopes[node.object_id] ||= @scopes.dup unless summary.stores.empty?
-            summary.stores.each do |root, contents|
-              destinations = translate(root, summary, actuals, node.object_id)
-              # A store whose contents do not reach this call - an object or
-              # storage the callee made, which is on the running tape - put
-              # into an object from outside a tape block: the block's
-              # scratch is not proved private. (A copy into an Array's own
-              # pool shows no contents either; it keeps the block's tape.)
-              # Bytes pushed into a builder are copied into its own
-              # reservation: its growth, not a store of what the callee made.
-              builder = summary_root_type(root, summary, target).try { |t| type_name(t.remove_typedef) == "String::Builder" }
-              STDERR.puts "DBG fresh-store #{node.name} root=#{root} type=#{summary_root_type(root, summary, target)} at #{node.location}" if ENV["RIS_DBG"]? && contents.roots.empty? && contents.views.empty?
-              store_kind = @store_kinds[target.object_id]?.try &.[root]?
-              current_copy = source_roots(contents).any? { |r| current_copy?(r) }
-              refuse_fresh_store(destinations, node) if current_copy
-              # An unmarked callee (a one-call body) makes its arguments
-              # in this scope's scratch: text or storage it made and
-              # stored is this scope's, though no root of it translates
-              # here (`k.put(n.to_s)`), as a local holding it would be.
-              if !@text_only && !summary_marked?(target) &&
-                 source_roots(contents).any? { |r| callee_made?(r, summary, actuals) }
-                refuse_fresh_store(destinations, node)
-              end
-              refuse_fresh_store(destinations, node) if (store_kind.nil? || store_kind.not_nil! & 2_u8 != 0) && contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root) && !builder
-              incoming = resolved(
-                translated(contents, summary, actuals, node.object_id),
-                call_env)
-              # A marked callee's own scratch cannot reach its stores: it
-              # refused that itself. What it made and stored is not this
-              # scope's.
-              if !@text_only && summary_marked?(target)
-                incoming = Value.new(incoming.roots.reject { |r| r == node.object_id },
-                  incoming.views.reject { |v| v.root == node.object_id },
-                  incoming.procs, incoming.unknown_proc)
-              end
-              # A summary can write on only one branch. It cannot prove
-              # that an older foreign text borrow was killed on every
-              # path. Keep those borrows until a direct store kills them.
-              # The reset's own current binding is the permitted holder.
-              destinations.each do |destination|
-                next unless @text_only
-                previous = stored(call_env.slots[destination]? || EMPTY, call_env)
-                kept = Value.new(previous.roots.select do |r|
-                  text_root?(r) && !contains_root?(reset_roots, r)
-                end, previous.views.select do |v|
-                  text_root?(v.root) && !contains_root?(reset_roots, v.root)
-                end)
-                incoming = merge(incoming, kept)
-              end
-              @store_site = @store_sites[target.object_id]?.try &.[root]?
-              begin
-                # A marked callee refused its own scratch at the store, so
-                # what its store answers here is not fresh: a def that only
-                # forwards it (`other` in a cycle) must not read it as made.
-                kind = !@text_only && summary_marked?(target) ? 1_u8 : store_kind
-                # A cycle's summary is still being solved when it is read:
-                # an answer that replaced the slot would drop what this
-                # def stored, and the store would stay dropped (SPEC 3.7).
-                store(destinations, incoming, call_env, node,
-                  replace: !@graph.in_cycle?(target), store_kind: kind)
-              ensure
-                @store_site = nil
-              end
-            end
-            # Only a field load needs read-back. Roots forwarded from an
-            # argument already name its storage, even when that storage is
-            # itself a field of another owner.
-            summary.result.roots.each do |root|
-              if @parents.has_key?(root)
-                result_fields.concat(translate(root, summary, actuals, node.object_id))
-              end
-            end
-            call_result = merge(call_result, translated(summary.result, summary, actuals, node.object_id))
-          else
-            incomplete_result = true
-            unless TapeRules.runtime?(@program, target.location)
-              inputs.each { |v| shrink((v.roots + v.views.map(&.root)).uniq, node, chain("#{node.name} (opaque)"), env) }
-            end
-          end
-          after_calls = after_calls.try { |previous| join_env(previous, call_env) } || call_env
-        end
-        if (joined = after_calls) && !joined.same?(env)
-          env.replace(joined)
-        end
-      elsif !TapeRules.runtime?(@program, node.location)
-        inputs.each do |v|
-          roots = source_roots(v)
-          shrink(roots.uniq, node, chain("#{node.name} (unknown)"), env)
-          @retains.concat(roots)
-          STDERR.puts "DBG unproved #{node.name} #{roots.map { |r| root_name(r) }.join(",")} at #{node.location}" if ENV["RIS_DBG"]? && @checking && !roots.empty?
-          @unproved << node if @checking && !roots.empty?
-        end
-      end
-      # Arguments remain evaluated values until the call consumes them.
-      consumed = @text_only ? Value.new(receiver.roots,
-        receiver.views.reject { |v| contains_root?(reset_roots, v.root) },
-        receiver.procs, receiver.unknown_proc) : receiver
-      # What the receiver's fields hold is the callee's to order against
-      # its own shrinks (a reader refilling its row): a summarized call
-      # consumes the receiver, not the views its slots carry.
-      if summarized && !@text_only && !receiver.roots.empty?
-        held = env.slots.compact_map { |key, contents| contents.views if contains_root?(receiver.roots, key) }.flatten + held_before
-        receiver_type = one_class(node.obj.try(&.type?))
-        class_receiver = receiver_type && class_instance?(receiver_type)
-        unless held.empty? && !class_receiver
-          remaining = consumed.views.reject do |borrow|
-            held.includes?(borrow) ||
-              (class_receiver && contains_root?(receiver.roots, borrow.root))
-          end
-          consumed = Value.new(consumed.roots, remaining,
-            consumed.procs, consumed.unknown_proc)
-        end
-      end
-      use(consumed, node)
-      args.each { |arg| use(arg, node) }
-      derived = receiver
-      # A builder's `<<` copies its argument and answers the builder: the
-      # chained result views no argument storage.
-      # A String grown in place copies the same way.
-      copied = node.name == "<<" && !node.block &&
-               node.obj.try(&.type?).try { |t| {"String::Builder", "String"}.includes?(type_name(t)) } &&
-               {"String::Builder", "String"}.includes?(type_name(node.type))
-      # String's `+` copies both sides into a new String: it views neither.
-      concatenated = node.name == "+" && !node.block && node.args.size == 1 &&
-                     node.obj.try(&.type?).try { |t| type_name(t) } == "String" &&
-                     node.args[0].type?.try { |t| type_name(t) } == "String" &&
-                     type_name(node.type) == "String"
-      args.each { |arg| derived = merge(derived, arg) } unless copied
-      if block = node.block
-        outer = env.dup
-        yielded_views = derived.views
-        if VIEWS.includes?(node.name)
-          yielded_views += receiver.roots.map { |root| view(root) }
-        end
-        yielded = Value.new(derived.roots, yielded_views)
-        block.args.each { |arg| outer[arg.name] = reference?(arg) ? yielded : EMPTY }
-        # What the called def made and yields ends with that def or its
-        # round: to the block it is scratch (SPEC 3.2, 3.6).
-        fresh_args = fresh_block_args(node, block, targets, yielded, outer)
-        bind_yielded_fields(block, targets, receiver, args, named, outer)
-        @callback_chain << "#{node.name} block"
-        @scopes << block.object_id
-        if node.name == "tape"
-          explicit = node.name == "tape" && !node.obj
-          if explicit
-            @tape_blocks << block.object_id
-            @tape_kinds[block.object_id] = "tape block"
-          end
-          block_value = value(block.body, outer)
-          check_leaving(block.object_id, block_value, outer, block.body.type?, block) if explicit
-          @tape_blocks.pop if explicit
-        else
-          block_value = loop_value(block.body, outer, kind: "block", fresh_args: fresh_args)
-          # A program constant's initializer runs on the program's tape:
-          # its value is the constant's, made on its owner.
-          check_leaving(block.body.object_id, block_value, outer, block.body.type?, block) unless node.program_initializer?
-        end
-        @scopes.pop
-        @callback_chain.pop
-        keep_block_value(node, block, block_value, receiver, targets, env)
-        use(yielded, block)
-        env.keys.each { |key| env[key] = merge(env[key], outer[key]? || EMPTY) }
-        (@text_only ? (env.slots.keys | outer.slots.keys) : env.slots.keys).each do |key|
-          env.slots[key] = merge(env.slots[key]? || EMPTY,
-            outer.slots[key]? || EMPTY)
-        end
-      end
-      inputs.each do |input|
-        input.procs.each do |literal|
-          unless @active_procs.add?(literal.object_id)
-            shrink(derived.roots, node,
-              chain("#{node.name} (recursive callback)"), env)
-            next
-          end
-          captured = env.dup
-          # The callback may receive any of the call's tape arguments.
-          literal.def.args.each { |arg| captured[arg.name] = Value.new(derived.roots, derived.views) }
-          @callback_chain << "#{node.name} proc"
-          loop_value(literal.def.body, captured)
-          env.keys.each { |key| env[key] = merge(env[key], captured[key]? || EMPTY) }
-          env.slots.each_key { |key| env.slots[key] = merge(env.slots[key], captured.slots[key]? || EMPTY) }
-          @callback_chain.pop
-          @active_procs.delete(literal.object_id)
-        end
-      end
-      if {"[]", "view", "as_view", "slice_from", "new"}.includes?(node.name) &&
-         type_name(node.type).starts_with?("Array::View(")
-        source = node.name == "new" ? derived : receiver
-        Value.new([] of UInt64,
-          source.views + source.roots.map { |root| view(root) })
-      elsif node.name == "new" && (type_name(node.type).starts_with?("SlicePool::Run(") ||
-                                   type_name(node.type).starts_with?("SlicePool::List("))
-        # A list keeps its state in its pool's words: it views the pool.
-        # A run borrows initialized slots from its Ary argument. Unlike
-        # allocating constructors, it must retain that storage's lifetime.
-        Value.new([] of UInt64,
-          (derived.views + derived.roots.map { |root| view(root) }).uniq)
-      elsif {"copy_to", "dup", "new"}.includes?(node.name) || concatenated
-        if reference?(node)
-          copying = node.name == "copy_to"
-          current = (node.name == "copy_to" && node.args.first?.try(&.type?).try do |t|
-              t.to_s.includes?("RisCurrentTape")
-            end)
-          @root_scopes[node.object_id] = copying && !current ? [] of UInt64 : @scopes.dup
-          # copy_to puts the copy on its owner, not here.
-          note_fresh(node.object_id) unless copying && !current
-          @copied_roots << node.object_id if node.name == "copy_to"
-          @current_copies << node.object_id if copying && current && node.name == "copy_to"
-          if node.name == "copy_to"
-            env.slots.reject! { |root, _| contains_root?([node.object_id], root) }
-          end
-          # A struct `new` holds what its arguments give it: a value it
-          # returns carries their storage (SPEC 1.9).
-          # (The constructor's own work, not its arguments': a struct
-          # holding a copied sentence is still a plain value.)
-          if node.name == "new" && @graph.targets(node).try(&.any? { |t| @graph.allocates?(t.body) })
-            @allocating_structs << node.object_id
-            # Given nowhere else to put it, what the constructor makes is
-            # on the running tape: the value holds this scope's data.
-            @made_structs << node.object_id unless node.args.any? { |arg| owner_argument?(arg.type?) }
-          end
-          holder = node.name == "new" && struct_value?(node.object_id)
-          # Tracked fields carry replaceable borrows. A duplicate on the
-          # aggregate would survive an assignment emptying its field.
-          tracked = env.slots.each_key.any? do |root|
-            contains_root?([node.object_id], root)
-          end
-          borrowed = if @text_only && node.name.in?("new", "dup") &&
-                        type_name(node.type) != "String"
-                       derived.views + derived.roots.map { |root| view(root) }
-                     elsif holder && !tracked
-                       args.flat_map { |a| a.views + a.roots.reject { |r| struct_value?(r) }.map { |root| view(root) } }
-                     else
-                       [] of View
-                     end
-          Value.new([node.object_id], borrowed.uniq)
-        else
-          EMPTY
-        end
-      elsif copying_text?(node)
-        # Keep the same independence in call summaries as at call sites.
-        # Formatting reads its inputs; it retains none of their storage.
-        env.slots.reject! { |root, _| contains_root?([node.object_id], root) }
-        @root_types[node.object_id] = node.type
-        @root_scopes[node.object_id] = @scopes.dup
-        note_fresh(node.object_id)
-        Value.new([node.object_id], [] of View)
-      elsif element_result && reference?(node)
-        if storage?(node)
-          element_result = merge(element_result,
-            Value.new([] of UInt64, receiver.roots.map { |r| view(r) }))
-        end
-        use(element_result, node)
-        element_result
-      elsif summarized && reference?(node)
-        call_result = merge(call_result, derived) if incomplete_result
-        # Result views are born after the callee's shrinks. Stored views
-        # keep their original birth when read back from a holder.
-        call_result = Value.new(call_result.roots,
-          call_result.views.map { |v| view(v.root) })
-        if !storage?(node) && !VIEWS.includes?(node.name)
-          call_result = read_slots(call_result, env, node.type?, result_fields)
-        end
-        # A returned view can name a builder field. Its storage keeps
-        # the declared field type, rather than the view's String type.
-        string_view = type_name(node.type) == "String"
-        call_result.roots.each do |root|
-          @root_types[root] ||= (root_type(root) if string_view) || node.type
-        end
-        if storage?(node)
-          aliases = call_result.roots.flat_map do |root|
-            (env.slots[root]?.try(&.roots) || [] of UInt64).reject do |source|
-              # Constructor storage built into a field is represented by
-              # its receiver until rebased here. It is not an alias of
-              # every sibling field in that receiver.
-              contains_root?([source], root)
-            end
-          end
-          call_result = merge(call_result, Value.new(aliases, [] of View))
-        end
-        call_result = resolved(call_result, env)
-        call_result = stored(call_result, env)
-        views = call_result.views
-        array_view = type_name(node.type).starts_with?("Array::View(")
-        unless storage?(node) || (value_holder?(node.type?) && !array_view)
-          views += call_result.roots.reject { |r| env.slots.has_key?(r) }.map { |r| view(r) }
-        end
-        result = Value.new(call_result.roots, views)
-        use(result, node)
-        result
-      elsif reference?(node) && storage?(node) && incomplete_result &&
-            @graph.makes?(node)
-        runtime_made(node, derived)
-      elsif reference?(node)
-        views = derived.views
-        if VIEWS.includes?(node.name) || !storage?(node)
-          views = views + derived.roots.map { |root| view(root) }
-        end
-        Value.new(storage?(node) ? derived.roots : [] of UInt64, views)
-      else
-        EMPTY
-      end
+      call_value(node, env)
     when If
       conditional_value(node, env)
     when Yield
@@ -3297,6 +2907,623 @@ class Iyi::TapeShrinkChecker
       else
         EMPTY
       end
+    end
+  end
+
+  # A call, out of `evaluate`: its locals would otherwise sit in the
+  # frame of every nested `evaluate`, and nesting depth decides the stack.
+  private def call_value(node : Call, env : Env) : Value
+    return value(node.expanded.not_nil!, env) if node.expanded
+    # Specialized-out branches retain syntax without executable targets.
+    return EMPTY unless node.type?
+    # `String.new(pointer, size)` views bytes it does not own (std's
+    # mapped files, FFI buffers): it makes nothing on the tape.
+    if foreign_view?(node)
+      node.args.each { |arg| value(arg, env) }
+      return EMPTY
+    end
+    if node.name == "new"
+      # A local container can hold an owner declared in the same scope.
+      # Parameter and program roots still carry their longer lifetimes.
+      @root_scopes[node.object_id] = @scopes.dup
+      @root_types[node.object_id] = node.type
+      @root_births[node.object_id] = @uses.size
+      note_fresh(node.object_id)
+    end
+    if @text_only && node.name.in?("copy_to", "new", "dup") &&
+       TapeChecker.possible_string?(node.type?)
+      @text_copies << node.object_id
+    end
+    # A call to a top-level def (`::f`, or one the Program owns) takes no
+    # self: the caller's self is no input of it.
+    top_level = node.global? || (@graph.targets(node).try do |found|
+      !found.empty? && found.all? { |t| t.owner?.is_a?(Program) }
+    end || false)
+    receiver = node.obj.try { |obj| value(obj, env) } ||
+               (top_level ? EMPTY : env["self"]?) || EMPTY
+    args = node.args.map { |arg| argument_value(arg, env) }
+    named = Hash(String, Value).new
+    node.named_args.try &.each do |arg|
+      named[arg.name] = v = argument_value(arg.value, env)
+      args << v
+    end
+    node.block_arg.try { |arg| args << value(arg, env) }
+    # The rest of the work stays out of this frame, which every nested
+    # argument repeats.
+    call_result(node, env, receiver, args, named)
+  end
+
+  # What a call makes of its evaluated receiver and arguments.
+  private def call_result(node : Call, env : Env, receiver : Value,
+                           args : Array(Value),
+                           named : Hash(String, Value)) : Value
+    # Scope reception preserves borrowed identities; fresh results may
+    # be copied, so forwarding the original is conservative. The global
+    # wrapper must not turn an implicit self into a result dependency.
+    if node.global? && node.name == TapeScopeChecker::RESULT &&
+       !@text_only && node.type?.try(&.remove_typedef).is_a?(UnionType) &&
+       flat_result?(node.type?)
+      # A flat union result (a String or an Array member) moves down
+      # whole: it is the value handed in, which a def with several
+      # returns answers as one with a single call does (SPEC 1.9).
+      return args.last? || EMPTY
+    end
+    if @text_only && node.global?
+      return args.last? || EMPTY if node.name == TapeScopeChecker::RESULT
+      return EMPTY if node.name.in?(TapeScopeChecker::MARK,
+        TapeScopeChecker::RESET, TapeScopeChecker::RESULT_AT)
+    end
+    # Growing text's companion is its stable reservation identity.
+    # Reset has the same invalidation rule as Array#clear. Call summaries
+    # carry this effect through methods and field accessors.
+    if node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth"
+      if !@text_only && node.name == "__ris_text_reset"
+        return args.first? || EMPTY
+      end
+      # Growing text appends a copy of its argument's bytes: the result
+      # views the text grown (its first argument), never the argument.
+      if !@text_only && node.name == "append"
+        shrink(receiver.roots, node, chain("append"), env, true)
+        args.each { |arg| use(arg, node) }
+        return args.first? || EMPTY
+      end
+    end
+    if @text_only && node.obj.try(&.type?.try(&.to_s)) == "RisTextGrowth"
+      @text_roots.concat(receiver.roots)
+      if node.name == "__ris_text_reset"
+        return args.first? || EMPTY unless TapeChecker.possible_string?(node.type?)
+        text_reset(receiver.roots, node, env, chain("text reset"))
+        args.each { |arg| use(arg, node) }
+        # With no writer yet, runtime returns the input unchanged.
+        # Keep that possible borrow as well as the reservation view.
+        return merge(args.first? || EMPTY, Value.new(receiver.roots,
+          receiver.roots.map { |root| view(root) }))
+      elsif node.name == "append"
+        return Value.new(receiver.roots,
+          receiver.roots.map { |root| view(root) })
+      end
+    end
+    storage_receiver = node.obj.try { |obj| storage?(obj) } ||
+                       @graph.targets(node).try &.any? { |target| storage_type?(target.owner) }
+    if storage_receiver && {"<<", "push", "concat", "append", "write_bytes", "unshift"}.includes?(node.name)
+      shrink(receiver.roots, node, chain(node.name), env, true)
+    end
+    if storage_receiver && {"[]=", "__loop_store", "unchecked_store"}.includes?(node.name) &&
+       node.obj.try do |obj|
+         name = obj.type?.try(&.to_s) || ""
+         name.starts_with?("Array(Array(") || name == "Array(String)" ||
+           name.starts_with?("Hash(")
+       end
+      shrink(receiver.roots, node, chain(node.name), env)
+    end
+    if storage_receiver && SHRINK.includes?(node.name)
+      shrink(receiver.roots, node, chain(node.name), env)
+      if node.name == "clear" && receiver.roots.size == 1 &&
+         !@folded_roots.includes?(receiver.roots.first)
+        env.slots.reject! do |key, _|
+          contains_root?(receiver.roots, key)
+        end
+      end
+    end
+    if storage_receiver && {"<<", "push", "[]=", "__loop_store", "unchecked_store"}.includes?(node.name)
+      # A scalar element (a byte into an Array(UInt8)) holds no storage:
+      # it is no store a summary should carry.
+      # A builder's (or a String grown in place's) `<<` copies the
+      # text's bytes: it keeps no view of it.
+      builder_copy = node.name == "<<" &&
+                     node.obj.try(&.type?).try { |t| {"String::Builder", "String"}.includes?(type_name(t)) }
+      if (element = args.last?) && !builder_copy && node.args.last?.try { |arg| reference?(arg) } != false
+        store(receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }, element, env, node, false)
+      end
+      store_hash_key(node, receiver, args, env)
+    end
+    store_kept_argument(node, receiver, args, env)
+    element_result : Value? = nil
+    if node.obj.try do |obj|
+         obj.type?.try do |t|
+           name = type_name(t)
+           name.starts_with?("Array(") || name.starts_with?("Hash(")
+         end
+       end &&
+       {"[]", "[]?", "first", "first?", "last", "last?", "fetch", "__loop_fetch"}.includes?(node.name)
+      # An indexed read uses the field lent by the loop condition,
+      # including when a fresh getter call obtained the same handle.
+      use(Value.new([] of UInt64, @loop_storage.select { |v|
+        contains_root?(receiver.roots, v.root)
+      }), node)
+      elements = receiver.roots.map { |r| field_root(r, "[]").as(UInt64) }
+      if storage?(node)
+        @pooled_roots.concat(elements)
+        elements.each { |root| @root_types[root] = node.type }
+        element_result = Value.new(elements, [] of View)
+      elsif !elements.empty? && elements.all? { |r| env.slots.has_key?(r) }
+        element_result = elements.reduce(EMPTY) do |result, root|
+          contents = value_holder?(node.type?) ? Value.new([root], [] of View) : env.slots[root]
+          merge(result, stored(contents, env))
+        end
+      end
+    end
+    inputs = [receiver] + args
+    call_result = EMPTY
+    result_fields = [] of UInt64
+    summarized = false
+    incomplete_result = false
+    reset_roots = [] of UInt64
+    targets = @graph.targets(node)
+    # What the receiver's fields held before the call: a callee that
+    # clears and refills them drops these from the caller's slots.
+    held_before = [] of View
+    if !@text_only && !receiver.roots.empty? && targets && !targets.empty?
+      env.slots.each do |key, contents|
+        held_before.concat(contents.views) if contains_root?(receiver.roots, key)
+      end
+    end
+    if targets && !targets.empty?
+      before_calls = env
+      after_calls : Env? = nil
+      targets.each do |target|
+        summary = summary(target)
+        call_env = summary && !summary.stores.empty? ? before_calls.dup : before_calls
+        boundary = target.is_a?(External) || @graph.proc_call?(target) ||
+                   (target.iyi_from_artifact? && !target.iyi_body_travelled?)
+        if boundary && target.iyi_from_artifact? && !target.ris_call_contract
+          node.raise "imported def lacks a checked tape contract; rebuild the module with --emit-iyimod"
+        end
+        if boundary && (checked = @graph.contract(target))
+          # A directly known proc is executed below with its environment.
+          unless @graph.proc_call?(target) && !receiver.procs.empty? && !receiver.unknown_proc
+            actuals = [receiver] + target.args.map_with_index do |arg, i|
+              named[arg.external_name]? || args[i]? || EMPTY
+            end
+            summarized = true
+            checked.parameters.each_with_index do |bits, i|
+              # Field paths also model ordinary heap/scalar values. Only
+              # a tape-capable formal can carry a borrowed storage effect.
+              borrowed = i == 0 ? reference_type?(target.owner?) : reference?(target.args[i - 1])
+              next unless borrowed
+              input = actuals[i]? || EMPTY
+              roots = source_roots(input).flat_map { |r| aliases(r, env) }.uniq
+              # An unknown proc's argument: what its type's methods can
+              # do decides (`handed_effect`); an object's effect is on
+              # its fields, so a reference to it stays valid.
+              handed = @graph.proc_call?(target) && i > 0 ? proc_argument_type(target, i - 1) : nil
+              # A constructor's receiver is the value `new` just made:
+              # no view of it exists yet for the constructor's own field
+              # growth to move (an imported `initialize` filling Arrays).
+              constructing = i == 0 && TapeScopeChecker.constructor?(target) && !handed
+              if bits & TapeCallGraph::Contract::SHRINK != 0 && !constructing
+                if found = handed ? handed_effect(handed, false) : WHOLE
+                  shrunk = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
+                  shrink(shrunk, node, chain("#{node.name} (opaque contract)"), env)
+                end
+              end
+              if bits & TapeCallGraph::Contract::GROW != 0 && !constructing
+                if found = handed ? handed_effect(handed, false) : WHOLE
+                  grown = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
+                  shrink(grown, node, chain("#{node.name} (opaque growth)"), env, true)
+                end
+              end
+              if bits & TapeCallGraph::Contract::RETAIN != 0 && !roots.empty?
+                if found = handed ? handed_effect(handed, true) : WHOLE
+                  kept = found == WHOLE ? roots : roots.flat_map { |r| found.map { |f| handed_field(r, f) } }.uniq
+                  @retains.concat(kept)
+                  STDERR.puts "DBG unproved-contract #{node.name} #{kept.map { |r| root_name(r) }.join(",")} at #{node.location}" if ENV["RIS_DBG"]? && @checking
+                  @unproved << node if @checking
+                end
+              end
+              if bits & TapeCallGraph::Contract::STORE_SELF != 0
+                destinations = receiver.roots.flat_map { |r| aliases(r, call_env) }.uniq
+                store(destinations, input, call_env, node, replace: false)
+              end
+              if bits & TapeCallGraph::Contract::RESULT != 0
+                call_result = merge(call_result, input)
+              end
+            end
+          end
+        elsif summary
+          # A proc obtained from a summary can execute a body outside
+          # the lexical call tree. Record the summaries it reads too.
+          if caller = @solving
+            (@summary_callers[target.object_id] ||= Set(UInt64).new) << caller
+          end
+          summarized = true
+          actuals = [receiver] + target.args.map_with_index do |arg, i|
+            named[arg.external_name]? || args[i]? || EMPTY
+          end
+          summary.shrinks.each do |root, chain|
+            roots = translate(root, summary, actuals).flat_map { |r| aliases(r, env) }.uniq
+            if @text_only && chain.includes?("text reset")
+              reset_roots.concat(roots)
+              text_reset(roots, node, env,
+                chain("#{node.name} -> #{chain}"))
+            else
+              shrink(roots, node, chain("#{node.name} -> #{chain}"), env)
+              # A callee that clears a field empties it: what the caller
+              # knew it held is gone, as after a direct `clear`.
+              if !@text_only && chain.ends_with?("clear") && roots.size == 1 &&
+                 !@folded_roots.includes?(roots.first)
+                call_env.slots.reject! { |key, _| contains_root?(roots, key) }
+              end
+            end
+          end
+          summary.grows.each do |root, cause|
+            roots = translate(root, summary, actuals).flat_map do |r|
+              aliases(r, env)
+            end.uniq
+            shrink(roots, node, chain("#{node.name} -> #{cause}"), env, true)
+          end
+          retained = summary.retains.flat_map { |r| translate(r, summary, actuals) }
+          @retains.concat(retained)
+          STDERR.puts "DBG unproved-summary #{node.name} #{retained.map { |r| root_name(r) }.join(",")} at #{node.location}" if ENV["RIS_DBG"]? && @checking && !retained.empty?
+          @unproved << node if @checking && !retained.empty?
+          # What the callee makes and answers is this call's allocation,
+          # made here: inside any tape block around the call.
+          # (Only a growing or text result: a callee that copies onto
+          # another owner, `copy_to(Program.tape)`, answers no such thing.)
+          # A tape struct (an @[OnTape] answer) holding what the callee
+          # allocated is made here the same way.
+          if !@tape_blocks.empty? && node.name != "copy_to" && (@graph.fresh?(node) ||
+             (node.type?.try { |t| TapeChecker.possible_string?(t) || tape_struct?(t) } &&
+              @graph.allocates?(node)) || made_union?(node))
+            @root_scopes[node.object_id] ||= @scopes.dup
+            note_fresh(node.object_id) unless @root_tapes.has_key?(node.object_id)
+          end
+          # What the callee builds and answers is built here: a store
+          # into it is a store into this scope's value.
+          @root_scopes[node.object_id] ||= @scopes.dup unless summary.stores.empty?
+          summary.stores.each do |root, contents|
+            destinations = translate(root, summary, actuals, node.object_id)
+            # A store whose contents do not reach this call - an object or
+            # storage the callee made, which is on the running tape - put
+            # into an object from outside a tape block: the block's
+            # scratch is not proved private. (A copy into an Array's own
+            # pool shows no contents either; it keeps the block's tape.)
+            # Bytes pushed into a builder are copied into its own
+            # reservation: its growth, not a store of what the callee made.
+            builder = summary_root_type(root, summary, target).try { |t| type_name(t.remove_typedef) == "String::Builder" }
+            STDERR.puts "DBG fresh-store #{node.name} root=#{root} type=#{summary_root_type(root, summary, target)} at #{node.location}" if ENV["RIS_DBG"]? && contents.roots.empty? && contents.views.empty?
+            store_kind = @store_kinds[target.object_id]?.try &.[root]?
+            current_copy = source_roots(contents).any? { |r| current_copy?(r) }
+            refuse_fresh_store(destinations, node) if current_copy
+            # An unmarked callee (a one-call body) makes its arguments
+            # in this scope's scratch: text or storage it made and
+            # stored is this scope's, though no root of it translates
+            # here (`k.put(n.to_s)`), as a local holding it would be.
+            if !@text_only && !summary_marked?(target) &&
+               source_roots(contents).any? { |r| callee_made?(r, summary, actuals) }
+              refuse_fresh_store(destinations, node)
+            end
+            refuse_fresh_store(destinations, node) if (store_kind.nil? || store_kind.not_nil! & 2_u8 != 0) && contents.roots.empty? && contents.views.empty? && !summary_marked?(target) && !destinations.all? { |d| flat_array_field?(d) } && !flat_field_type?(summary_root_type(root, summary, target), root) && !builder
+            incoming = resolved(
+              translated(contents, summary, actuals, node.object_id),
+              call_env)
+            # A marked callee's own scratch cannot reach its stores: it
+            # refused that itself. What it made and stored is not this
+            # scope's.
+            if !@text_only && summary_marked?(target)
+              incoming = Value.new(incoming.roots.reject { |r| r == node.object_id },
+                incoming.views.reject { |v| v.root == node.object_id },
+                incoming.procs, incoming.unknown_proc)
+            end
+            # A summary can write on only one branch. It cannot prove
+            # that an older foreign text borrow was killed on every
+            # path. Keep those borrows until a direct store kills them.
+            # The reset's own current binding is the permitted holder.
+            destinations.each do |destination|
+              next unless @text_only
+              previous = stored(call_env.slots[destination]? || EMPTY, call_env)
+              kept = Value.new(previous.roots.select do |r|
+                text_root?(r) && !contains_root?(reset_roots, r)
+              end, previous.views.select do |v|
+                text_root?(v.root) && !contains_root?(reset_roots, v.root)
+              end)
+              incoming = merge(incoming, kept)
+            end
+            @store_site = @store_sites[target.object_id]?.try &.[root]?
+            begin
+              # A marked callee refused its own scratch at the store, so
+              # what its store answers here is not fresh: a def that only
+              # forwards it (`other` in a cycle) must not read it as made.
+              kind = !@text_only && summary_marked?(target) ? 1_u8 : store_kind
+              # A cycle's summary is still being solved when it is read:
+              # an answer that replaced the slot would drop what this
+              # def stored, and the store would stay dropped (SPEC 3.7).
+              store(destinations, incoming, call_env, node,
+                replace: !@graph.in_cycle?(target), store_kind: kind)
+            ensure
+              @store_site = nil
+            end
+          end
+          # Only a field load needs read-back. Roots forwarded from an
+          # argument already name its storage, even when that storage is
+          # itself a field of another owner.
+          summary.result.roots.each do |root|
+            if @parents.has_key?(root)
+              result_fields.concat(translate(root, summary, actuals, node.object_id))
+            end
+          end
+          call_result = merge(call_result, translated(summary.result, summary, actuals, node.object_id))
+        else
+          incomplete_result = true
+          unless TapeRules.runtime?(@program, target.location)
+            inputs.each { |v| shrink((v.roots + v.views.map(&.root)).uniq, node, chain("#{node.name} (opaque)"), env) }
+          end
+        end
+        after_calls = after_calls.try { |previous| join_env(previous, call_env) } || call_env
+      end
+      if (joined = after_calls) && !joined.same?(env)
+        env.replace(joined)
+      end
+    elsif !TapeRules.runtime?(@program, node.location)
+      inputs.each do |v|
+        roots = source_roots(v)
+        shrink(roots.uniq, node, chain("#{node.name} (unknown)"), env)
+        @retains.concat(roots)
+        STDERR.puts "DBG unproved #{node.name} #{roots.map { |r| root_name(r) }.join(",")} at #{node.location}" if ENV["RIS_DBG"]? && @checking && !roots.empty?
+        @unproved << node if @checking && !roots.empty?
+      end
+    end
+    # Arguments remain evaluated values until the call consumes them.
+    consumed = @text_only ? Value.new(receiver.roots,
+      receiver.views.reject { |v| contains_root?(reset_roots, v.root) },
+      receiver.procs, receiver.unknown_proc) : receiver
+    # What the receiver's fields hold is the callee's to order against
+    # its own shrinks (a reader refilling its row): a summarized call
+    # consumes the receiver, not the views its slots carry.
+    if summarized && !@text_only && !receiver.roots.empty?
+      held = env.slots.compact_map { |key, contents| contents.views if contains_root?(receiver.roots, key) }.flatten + held_before
+      receiver_type = one_class(node.obj.try(&.type?))
+      class_receiver = receiver_type && class_instance?(receiver_type)
+      unless held.empty? && !class_receiver
+        remaining = consumed.views.reject do |borrow|
+          held.includes?(borrow) ||
+            (class_receiver && contains_root?(receiver.roots, borrow.root))
+        end
+        consumed = Value.new(consumed.roots, remaining,
+          consumed.procs, consumed.unknown_proc)
+      end
+    end
+    use(consumed, node)
+    # A class instance passed to a summarized call is consumed the same
+    # way: what its own fields hold is the callee's to order against its
+    # shrinks (an exchange that clears its last answer for the next).
+    # A view the caller keeps elsewhere is still used where it is read.
+    args.each_with_index do |arg, i|
+      if summarized && !@text_only && !arg.roots.empty? &&
+         (arg_type = one_class(node.args[i]?.try(&.type?))) &&
+         class_instance?(arg_type)
+        held = env.slots.compact_map { |key, contents| contents.views if contains_root?(arg.roots, key) }.flatten
+        remaining = arg.views.reject do |borrow|
+          held.includes?(borrow) || contains_root?(arg.roots, borrow.root)
+        end
+        arg = Value.new(arg.roots, remaining, arg.procs, arg.unknown_proc)
+      end
+      use(arg, node)
+    end
+    derived = receiver
+    # A builder's `<<` copies its argument and answers the builder: the
+    # chained result views no argument storage.
+    # A String grown in place copies the same way.
+    copied = node.name == "<<" && !node.block &&
+             node.obj.try(&.type?).try { |t| {"String::Builder", "String"}.includes?(type_name(t)) } &&
+             {"String::Builder", "String"}.includes?(type_name(node.type))
+    # String's `+` copies both sides into a new String: it views neither.
+    concatenated = node.name == "+" && !node.block && node.args.size == 1 &&
+                   node.obj.try(&.type?).try { |t| type_name(t) } == "String" &&
+                   node.args[0].type?.try { |t| type_name(t) } == "String" &&
+                   type_name(node.type) == "String"
+    args.each { |arg| derived = merge(derived, arg) } unless copied
+    if block = node.block
+      outer = env.dup
+      yielded_views = derived.views
+      if VIEWS.includes?(node.name)
+        yielded_views += receiver.roots.map { |root| view(root) }
+      end
+      yielded = Value.new(derived.roots, yielded_views)
+      block.args.each { |arg| outer[arg.name] = reference?(arg) ? yielded : EMPTY }
+      # What the called def made and yields ends with that def or its
+      # round: to the block it is scratch (SPEC 3.2, 3.6).
+      fresh_args = fresh_block_args(node, block, targets, yielded, outer)
+      bind_yielded_fields(block, targets, receiver, args, named, outer)
+      # The summary's view of a made argument keeps it made.
+      fresh_args.try &.each do |arg|
+        outer[arg.name] = merge(outer[arg.name]? || EMPTY, Value.new([arg.object_id], [] of View))
+      end
+      @callback_chain << "#{node.name} block"
+      @scopes << block.object_id
+      if node.name == "tape"
+        explicit = node.name == "tape" && !node.obj
+        if explicit
+          @tape_blocks << block.object_id
+          @tape_kinds[block.object_id] = "tape block"
+        end
+        block_value = value(block.body, outer)
+        check_leaving(block.object_id, block_value, outer, block.body.type?, block) if explicit
+        @tape_blocks.pop if explicit
+      else
+        block_value = loop_value(block.body, outer, kind: "block", fresh_args: fresh_args)
+        # A yielder that keeps the block's value stores it in its
+        # receiver: `h.update(k) { |v| w.downcase }` (SPEC 3.6).
+        if !@text_only && targets.try(&.any? { |t| keeps_yield?(t) })
+          # The value moves down to the scope around the block: a
+          # receiver from outside that scope would outlive it.
+          kept = receiver.roots.flat_map { |r| aliases(r, env) }.uniq
+          made = source_roots(block_value).any? do |r|
+            root_tapes_of(r).try(&.includes?(block.body.object_id))
+          end
+          refuse_fresh_store(kept, node) if made
+        end
+        # A program constant's initializer runs on the program's tape:
+        # its value is the constant's, made on its owner. A yielder
+        # that drops the value (`each`) takes nothing out of the block.
+        unless node.program_initializer? || targets.try { |ts| !ts.empty? && ts.all? { |t| discards_yield?(t) } }
+          check_leaving(block.body.object_id, block_value, outer, block.body.type?, block)
+        end
+      end
+      @scopes.pop
+      @callback_chain.pop
+      keep_block_value(node, block, block_value, receiver, targets, env)
+      use(yielded, block)
+      env.keys.each { |key| env[key] = merge(env[key], outer[key]? || EMPTY) }
+      (@text_only ? (env.slots.keys | outer.slots.keys) : env.slots.keys).each do |key|
+        env.slots[key] = merge(env.slots[key]? || EMPTY,
+          outer.slots[key]? || EMPTY)
+      end
+    end
+    inputs.each do |input|
+      input.procs.each do |literal|
+        unless @active_procs.add?(literal.object_id)
+          shrink(derived.roots, node,
+            chain("#{node.name} (recursive callback)"), env)
+          next
+        end
+        captured = env.dup
+        # The callback may receive any of the call's tape arguments.
+        literal.def.args.each { |arg| captured[arg.name] = Value.new(derived.roots, derived.views) }
+        @callback_chain << "#{node.name} proc"
+        loop_value(literal.def.body, captured)
+        env.keys.each { |key| env[key] = merge(env[key], captured[key]? || EMPTY) }
+        env.slots.each_key { |key| env.slots[key] = merge(env.slots[key], captured.slots[key]? || EMPTY) }
+        @callback_chain.pop
+        @active_procs.delete(literal.object_id)
+      end
+    end
+    if {"[]", "view", "as_view", "slice_from", "new"}.includes?(node.name) &&
+       type_name(node.type).starts_with?("Array::View(")
+      source = node.name == "new" ? derived : receiver
+      Value.new([] of UInt64,
+        source.views + source.roots.map { |root| view(root) })
+    elsif node.name == "new" && (type_name(node.type).starts_with?("SlicePool::Run(") ||
+                                 type_name(node.type).starts_with?("SlicePool::List("))
+      # A list keeps its state in its pool's words: it views the pool.
+      # A run borrows initialized slots from its Ary argument. Unlike
+      # allocating constructors, it must retain that storage's lifetime.
+      Value.new([] of UInt64,
+        (derived.views + derived.roots.map { |root| view(root) }).uniq)
+    elsif {"copy_to", "dup", "new"}.includes?(node.name) || concatenated
+      if reference?(node)
+        copying = node.name == "copy_to"
+        current = (node.name == "copy_to" && node.args.first?.try(&.type?).try do |t|
+            t.to_s.includes?("RisCurrentTape")
+          end)
+        @root_scopes[node.object_id] = copying && !current ? [] of UInt64 : @scopes.dup
+        # copy_to puts the copy on its owner, not here.
+        note_fresh(node.object_id) unless copying && !current
+        @copied_roots << node.object_id if node.name == "copy_to"
+        @current_copies << node.object_id if copying && current && node.name == "copy_to"
+        if node.name == "copy_to"
+          env.slots.reject! { |root, _| contains_root?([node.object_id], root) }
+        end
+        # A struct `new` holds what its arguments give it: a value it
+        # returns carries their storage (SPEC 1.9).
+        # (The constructor's own work, not its arguments': a struct
+        # holding a copied sentence is still a plain value.)
+        if node.name == "new" && @graph.targets(node).try(&.any? { |t| @graph.allocates?(t.body) })
+          @allocating_structs << node.object_id
+          # Given nowhere else to put it, what the constructor makes is
+          # on the running tape: the value holds this scope's data.
+          @made_structs << node.object_id unless node.args.any? { |arg| owner_argument?(arg.type?) }
+        end
+        holder = node.name == "new" && struct_value?(node.object_id)
+        # Tracked fields carry replaceable borrows. A duplicate on the
+        # aggregate would survive an assignment emptying its field.
+        tracked = env.slots.each_key.any? do |root|
+          contains_root?([node.object_id], root)
+        end
+        borrowed = if @text_only && node.name.in?("new", "dup") &&
+                      type_name(node.type) != "String"
+                     derived.views + derived.roots.map { |root| view(root) }
+                   elsif holder && !tracked
+                     args.flat_map { |a| a.views + a.roots.reject { |r| struct_value?(r) }.map { |root| view(root) } }
+                   else
+                     [] of View
+                   end
+        Value.new([node.object_id], borrowed.uniq)
+      else
+        EMPTY
+      end
+    elsif copying_text?(node)
+      # Keep the same independence in call summaries as at call sites.
+      # Formatting reads its inputs; it retains none of their storage.
+      env.slots.reject! { |root, _| contains_root?([node.object_id], root) }
+      @root_types[node.object_id] = node.type
+      @root_scopes[node.object_id] = @scopes.dup
+      note_fresh(node.object_id)
+      Value.new([node.object_id], [] of View)
+    elsif element_result && reference?(node)
+      if storage?(node)
+        element_result = merge(element_result,
+          Value.new([] of UInt64, receiver.roots.map { |r| view(r) }))
+      end
+      use(element_result, node)
+      element_result
+    elsif summarized && reference?(node)
+      call_result = merge(call_result, derived) if incomplete_result
+      # Result views are born after the callee's shrinks. Stored views
+      # keep their original birth when read back from a holder.
+      call_result = Value.new(call_result.roots,
+        call_result.views.map { |v| view(v.root) })
+      if !storage?(node) && !VIEWS.includes?(node.name)
+        call_result = read_slots(call_result, env, node.type?, result_fields)
+      end
+      # A returned view can name a builder field. Its storage keeps
+      # the declared field type, rather than the view's String type.
+      string_view = type_name(node.type) == "String"
+      call_result.roots.each do |root|
+        @root_types[root] ||= (root_type(root) if string_view) || node.type
+      end
+      if storage?(node)
+        aliases = call_result.roots.flat_map do |root|
+          (env.slots[root]?.try(&.roots) || [] of UInt64).reject do |source|
+            # Constructor storage built into a field is represented by
+            # its receiver until rebased here. It is not an alias of
+            # every sibling field in that receiver.
+            contains_root?([source], root)
+          end
+        end
+        call_result = merge(call_result, Value.new(aliases, [] of View))
+      end
+      call_result = resolved(call_result, env)
+      call_result = stored(call_result, env)
+      views = call_result.views
+      array_view = type_name(node.type).starts_with?("Array::View(")
+      unless storage?(node) || (value_holder?(node.type?) && !array_view)
+        views += call_result.roots.reject { |r| env.slots.has_key?(r) }.map { |r| view(r) }
+      end
+      result = Value.new(call_result.roots, views)
+      use(result, node)
+      result
+    elsif reference?(node) && storage?(node) && incomplete_result &&
+          @graph.makes?(node)
+      runtime_made(node, derived)
+    elsif reference?(node)
+      views = derived.views
+      if VIEWS.includes?(node.name) || !storage?(node)
+        views = views + derived.roots.map { |root| view(root) }
+      end
+      Value.new(storage?(node) ? derived.roots : [] of UInt64, views)
+    else
+      EMPTY
     end
   end
 

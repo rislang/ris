@@ -425,6 +425,14 @@ pub struct SvcbRecord
     read(data, text, keys, values, start)
   end
 
+  # Whether the record read: false when it is malformed, and `why` says
+  # why.
+  def read? : ::Bool
+    @why.empty?
+  end
+
+  getter why : String
+
   def self.checked(record : SvcbRecord) : SvcbRecord | DnsError
     return record if record.@why.empty?
     DnsTapeMessage.malformed(record.@why)
@@ -559,7 +567,11 @@ pub struct SvcbRecord
       why = SvcbRecord.fault(key, value)
       return refuse(text, "SvcParamKey #{SvcbRecord.key_name(key)}: #{why}") if why
       keys << key
-      values << value
+      # Kept in *text* beside the target: the message *data* views goes
+      # with the lookup that read it, the store stays.
+      kept = text.bytesize
+      text << value
+      values << text.finish[kept, length]
       at = at + 4 + length
     end
     @priority = priority
@@ -841,11 +853,15 @@ pub class SvcbStore
     @text.finish[from, text.bytesize]
   end
 
-  # The record in *data*, kept here when it is one.
-  def parse(data : String, owner : String) : SvcbRecord | DnsError
-    record = SvcbRecord.checked(SvcbRecord.new(data, owner, @text, @keys, @values))
-    @records << record if record.is_a?(SvcbRecord)
-    record
+  # The record in *data*, kept here as the last of `records` when it is
+  # one; why it is malformed when not.
+  def parse(data : String, owner : String) : DnsError?
+    record = SvcbRecord.new(data, owner, @text, @keys, @values)
+    if record.read?
+      @records << record
+      return nil
+    end
+    DnsTapeMessage.malformed(record.why)
   end
 
   # The records from *first* on by ascending priority, those of one

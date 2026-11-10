@@ -1,0 +1,29 @@
+import std/dns::{SvcbStore}
+
+# A SvcbStore keeps what it parses: a record's SvcParam values are copied
+# into the store, not left viewing the message they were read from, which
+# goes with the def (or the lookup) that read it.
+
+def parse_into(store : SvcbStore) : Nil
+  data = String::Builder.new(16)
+  # Priority 1, target ".", SvcParam port (key 3), 2 bytes: 443.
+  data.write_byte(0_u8)
+  data.write_byte(1_u8)
+  data.write_byte(0_u8)
+  data.write_byte(0_u8)
+  data.write_byte(3_u8)
+  data.write_byte(0_u8)
+  data.write_byte(2_u8)
+  data.write_byte(1_u8)
+  data.write_byte(187_u8)
+  why = store.parse(data.finish, "example.com")
+  raise "svcb_store: #{why.message}" if why
+  nil
+end
+
+store = SvcbStore.new
+parse_into(store)
+raise "svcb_store: #{store.records.size} records" unless store.records.size == 1
+record = store.records[0]
+raise "svcb_store: port #{record.port}" unless record.port == 443
+raise "svcb_store: owner #{record.owner}" unless record.owner == "example.com"

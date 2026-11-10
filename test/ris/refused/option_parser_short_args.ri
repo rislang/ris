@@ -1,0 +1,16 @@
+# found outlives args: the refusal stands at the program's parse call,
+# not inside std/option_parser.
+module test/ris/refused/option_parser_short_args
+
+import std/option_parser::{OptionParser, RisOptions}
+
+parser = OptionParser.new
+ending = parser.on("-e EXT", "ending")
+found = RisOptions.new
+3.times do |n|
+  args = [] of String
+  args << "-e"
+  args << "x#{n}"
+  parser.parse(args, found)
+end
+puts found[ending]?

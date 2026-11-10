@@ -1,0 +1,34 @@
+# A yield is judged per argument: the name views the receiver and may be
+# kept; the joined value is made in the yielding def's round.
+module test/ris/refused/yield_made_argument
+
+class Head
+  def initialize(@names : Array(String))
+  end
+
+  def each_field(& : String, String -> Nil) : Nil
+    i = 0
+    while i < @names.size
+      yield @names[i], joined(i)
+      i = i + 1
+    end
+  end
+
+  private def joined(i : Int32) : String
+    return @names[i] if i == 0
+    writer = ""
+    writer << @names[i] << ", " << @names[0]
+    writer
+  end
+end
+
+head = Head.new(["a", "b"])
+names = [] of String
+values = [] of String
+2.times do
+  head.each_field do |name, value|
+    names << name
+    values << value
+  end
+end
+puts names.size + values.size

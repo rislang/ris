@@ -1,0 +1,47 @@
+# A def with several returns answers what its value views, as a def with
+# one call does: read_union's Array member views the document, not the
+# scratch of the def that tail-calls it.
+module test/ris/several_returns_view
+
+@[OnTape]
+struct Doc
+  def initialize(@text : String)
+  end
+
+  def view(i : Int32) : String
+    @text[i, 1]
+  end
+
+  def each(& : Int32 -> Nil) : Nil
+    i = 0
+    while i < @text.size
+      yield i
+      i += 1
+    end
+  end
+end
+
+def read_array(doc : Doc) : Array(String)
+  ary = Array(String).new(2)
+  doc.each { |child| ary << doc.view(child) }
+  ary
+end
+
+def read_union(doc : Doc, i : Int32) : Array(String) | String
+  return doc.view(0) if i == 0
+  return read_array(doc) if i == 1
+  raise "no"
+end
+
+def read_value(doc : Doc, i : Int32, nilable : Bool) : Array(String) | String | Nil
+  if nilable
+    i == 5 ? nil : read_union(doc, i)
+  else
+    read_union(doc, i)
+  end
+end
+
+doc = Doc.new("ab")
+got = read_value(doc, 1, false)
+other = read_value(doc, 1, true)
+puts got.is_a?(Array(String)) && other.is_a?(Array(String)) ? got.join + other.join : "?"
