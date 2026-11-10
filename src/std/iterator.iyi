@@ -541,6 +541,7 @@ impl Iterator for EntryIterator(K, V) forall K, V
   type Elem = Tuple(K, V)
 end
 
+@[OnTape]
 pub struct MapIterator(I, T, U)
   def initialize(@iter : I, @func : T -> U)
   end
@@ -559,6 +560,7 @@ impl Iterator for MapIterator(I, T, U) forall I, T, U
   type Elem = U
 end
 
+@[OnTape]
 pub struct SelectIterator(I, T)
   def initialize(@iter : I, @func : T -> Bool)
   end
@@ -577,6 +579,7 @@ impl Iterator for SelectIterator(I, T) forall I, T
   type Elem = T
 end
 
+@[OnTape]
 pub struct RejectIterator(I, T)
   def initialize(@iter : I, @func : T -> Bool)
   end
@@ -696,6 +699,7 @@ impl Iterator for SkipWhileIterator(I, T) forall I, T
   type Elem = T
 end
 
+@[OnTape]
 pub struct ZipIterator(I1, T1, I2, T2)
   def initialize(@iter1 : I1, @iter2 : I2)
   end
@@ -769,6 +773,7 @@ impl Iterator for FlatMapIterator(I, T, U) forall I, T, U
   type Elem = U
 end
 
+@[OnTape]
 pub struct SliceIterator(I, T)
   def initialize(@iter : I, @n : Int32)
   end
@@ -960,6 +965,7 @@ impl Iterator for StepIterator(I, T) forall I, T
   type Elem = T
 end
 
+@[OnTape]
 pub struct CompactMapIterator(I, T, U)
   def initialize(@iter : I, @func : T -> U?)
   end
