@@ -1,0 +1,25 @@
+# A block's value that its yielder drops takes nothing out of the block:
+# `each`, `times` and a def whose yields are statements need no `nil`.
+module test/ris/block_value_dropped
+
+class Box
+  getter n : Int32
+
+  def initialize(@n : Int32)
+  end
+end
+
+def each_twice(& : Int32 -> _) : Nil
+  yield 1
+  i = 2
+  while i < 4
+    yield i
+    i += 1
+  end
+end
+
+sum = 0
+[1, 2].each { |i| sum += i; Box.new(i) }
+3.times { |i| sum += i; "n#{i}" }
+each_twice { |i| sum += i; [Box.new(i)] }
+puts sum

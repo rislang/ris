@@ -89,9 +89,8 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
 * A class instance made in a def and returned after other work was
   taken as flat (no tape fields): UdpSocket.bind? answered a freed
   socket. Now refused; check other `flat_result?` callers.
-* A block's value that its yielder discards (`each`, `tape`) is still
-  checked as leaving: blocks end with `nil` to pass. Skip the check when
-  the yielder ignores the value.
+* A `tape` block's value is checked as leaving even where the tape
+  call's own value is dropped: such blocks end with `nil` to pass.
 * Call summaries model text a callee builds from its inputs
   (interpolation, inspect) as a view of them; tape_text now adds a
   fresh root for an allocating String call not known to answer a view.

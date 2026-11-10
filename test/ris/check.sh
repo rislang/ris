@@ -94,6 +94,14 @@ else
   echo "FAILED   block_text_append: $out"; status=1
 fi
 
+# A block value its yielder drops (`each`) is not checked as leaving.
+out=$("$RIS" run test/ris/block_value_dropped.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '12' ]; then
+  echo 'runs     block_value_dropped'
+else
+  echo "FAILED   block_value_dropped: $out"; status=1
+fi
+
 out=$("$RIS" run test/ris/construct_growth.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = $'2\n1' ]; then
   echo 'runs     construct_growth (grow after new)'

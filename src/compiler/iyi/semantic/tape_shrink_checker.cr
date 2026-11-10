@@ -1785,6 +1785,106 @@ class Iyi::TapeShrinkChecker
   # is the block's, made in the caller's block round (SPEC 3.6).
   @keeps_yield = Hash(UInt64, Bool).new
 
+  # Whether *target* drops its block's value: every `yield` is a
+  # statement whose value nothing reads, as in `each`.
+  @discards_yield = Hash(UInt64, Bool).new
+
+  def discards_yield?(target : Def) : Bool
+    @discards_yield.fetch(target.object_id) do
+      found = false
+      if !target.is_a?(External) && (body = target.body)
+        scan = UsedYieldScan.new
+        # The body's value is the def's answer, unless it answers nil.
+        if target.return_type.try(&.to_s) == "Nil"
+          scan.drop(body)
+          scan.drop(UsedYieldScan.scoped_value(body) || body)
+        end
+        body.accept(scan)
+        found = scan.yields && !scan.used
+      end
+      @discards_yield[target.object_id] = found
+    end
+  end
+
+  class UsedYieldScan < Visitor
+    getter used = false
+    getter yields = false
+    @dropped = Set(UInt64).new
+
+    def drop(node : ASTNode) : Nil
+      @dropped << node.object_id
+    end
+
+    # A marked def's body: `t = (body); t = __iyi_scope_result(m, t); t`.
+    # The wrapped body, whose value is the def's answer.
+    def self.scoped_value(body : ASTNode) : ASTNode?
+      return nil unless body.is_a?(Expressions)
+      exps = body.expressions
+      exps.each_with_index do |exp, i|
+        result = exps[i + 1]?
+        next unless exp.is_a?(Assign) && result.is_a?(Assign)
+        target = exp.target
+        call = result.value
+        next unless target.is_a?(Var) && result.target == target
+        next unless call.is_a?(Call) && call.name == TapeScopeChecker::RESULT
+        return exp.value
+      end
+      nil
+    end
+
+    def visit(node : Expressions)
+      last = node.expressions.size - 1
+      node.expressions.each_with_index do |e, i|
+        drop(e) if i < last || @dropped.includes?(node.object_id)
+      end
+      true
+    end
+
+    def visit(node : While)
+      drop(node.body)
+      true
+    end
+
+    def visit(node : If | Unless)
+      if @dropped.includes?(node.object_id)
+        drop(node.then)
+        drop(node.else)
+      end
+      true
+    end
+
+    def visit(node : Yield)
+      @yields = true
+      @used ||= !@dropped.includes?(node.object_id)
+      true
+    end
+
+    def visit(node : Call)
+      if expanded = node.expanded
+        drop(expanded) if @dropped.includes?(node.object_id)
+        expanded.accept self
+        return false
+      end
+      true
+    end
+
+    def visit(node : MacroIf | MacroFor | MacroExpression | MacroVerbatim)
+      if expanded = node.expanded
+        drop(expanded) if @dropped.includes?(node.object_id)
+        expanded.accept self
+      end
+      false
+    end
+
+    def visit(node : Def | ProcLiteral)
+      false
+    end
+
+    def visit(node : ASTNode)
+      true
+    end
+  end
+
   def keeps_yield?(target : Def) : Bool
     @keeps_yield.fetch(target.object_id) do
       scan = KeptYieldScan.new
@@ -3109,8 +3209,11 @@ class Iyi::TapeShrinkChecker
             refuse_fresh_store(kept, node) if made
           end
           # A program constant's initializer runs on the program's tape:
-          # its value is the constant's, made on its owner.
-          check_leaving(block.body.object_id, block_value, outer, block.body.type?, block) unless node.program_initializer?
+          # its value is the constant's, made on its owner. A yielder
+          # that drops the value (`each`) takes nothing out of the block.
+          unless node.program_initializer? || targets.try { |ts| !ts.empty? && ts.all? { |t| discards_yield?(t) } }
+            check_leaving(block.body.object_id, block_value, outer, block.body.type?, block)
+          end
         end
         @scopes.pop
         @callback_chain.pop
