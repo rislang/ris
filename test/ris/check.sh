@@ -70,6 +70,14 @@ expect construct_field_alias 'grow after new'
 expect construct_helper_shrink 'grow after new'
 expect construct_text_growth 'grow after new'
 
+# A module's top level grows a String local in place, as a def does.
+out=$("$RIS" run test/ris/module_text_growth.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '205 012' ]; then
+  echo 'runs     module_text_growth'
+else
+  echo "FAILED   module_text_growth: $out"; status=1
+fi
+
 out=$("$RIS" run test/ris/construct_growth.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = $'2\n1' ]; then
   echo 'runs     construct_growth (grow after new)'

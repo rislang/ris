@@ -798,19 +798,30 @@ module Iyi
         NilLiteral.new.at(receiver)).at(receiver)
     end
 
-    def prepare_text_growth(body : ASTNode, params = [] of String) : ASTNode
+    def prepare_text_growth(body : ASTNode, params = [] of String,
+                            builders = true) : ASTNode
       @ris_growing_locals = Set(String).new
       @ris_text_slots = {} of String => Var
       return body unless program.tape_platform? && @macro_code == 0 &&
                          !TapeScopeRuntime.runtime?(body.location) &&
                          !iyimod_code?(body)
-      refuse_plain_builders(body)
+      refuse_plain_builders(body) if builders
       scan = GrowingTextScan.new
       body.accept(scan)
       @ris_growing_locals = scan.locals
+      # A module unit: only a local its own top level assigns; one a block
+      # assigns (`tape do`) keeps that block's lowering.
+      unless builders
+        statements = body.is_a?(Expressions) ? body.expressions : [body]
+        direct = statements.compact_map do |e|
+          target = e.as?(Assign).try(&.target)
+          target.as?(Var).try(&.name)
+        end
+        @ris_growing_locals &= direct.to_set
+      end
       # Lend only a local assigned once: a rebinding (`kept = x.copy_to(...)`
       # in a tape block) must keep its own lowering and lifetime checks.
-      if ris_text_code?(body)
+      if builders && ris_text_code?(body)
         once = scan.assignments.select { |_, n| n == 1 }.keys.to_set
         @ris_growing_locals |= (scan.text_starts & scan.arguments & once) -
                                scan.block_args
@@ -1422,6 +1433,9 @@ module Iyi
       outer_locals, outer_slots = @ris_growing_locals, @ris_text_slots
       @ris_growing_locals = Set(String).new
       @ris_text_slots = {} of String => Var
+      # A file's `module` unit holds the program's top level: a String
+      # local it appends to grows in place, as a def's does.
+      node.body = prepare_text_growth(node.body, builders: false) if node.iyi_unit? && !@current_def
       outer = @scanners
       @scanners = [] of String
       node = super

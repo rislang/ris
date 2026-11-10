@@ -104,9 +104,6 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
   `GrowingTextEvent.new(@text).copy_to(owner)`, yet the caller sees the
   event as a live view of `field`'s text, so the later rebind is refused
   as a shrink. A callee's copy_to result is not a view of its input.
-* A String local that starts as a literal (`text = "head:"`) and grows
-  in a block (`100.times { text << i }`) fails at run time: "tape side
-  reservation exhausted: 20". `text = ""` then `text << "head:"` works.
 * A String local's `<<` is lowered to `__ris_append` unless the local is
   growing; that result views the argument, so a block appending to an
   outer String is refused. Lend the local to a builder parameter.
