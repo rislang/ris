@@ -169,19 +169,20 @@ puts "  Atomic(Int64).fence and the weaker fences on Atomic(UInt8), Atomic(Int32
 # ---------------------------------------------------------------------------
 puts "== four threads counting"
 
-shared = Shared.new
+# The threads may outlive a tape block: the counter is program data.
+SHARED = Shared.new
 threads = Array(IyiThread).new
 t = 0
 while t < THREADS
   threads << IyiThread.start do
     n = 0
     while n < PER_THREAD
-      shared.count.add_relaxed(1_i64)
-      shared.count.add_acq_rel(1_i64)
+      SHARED.count.add_relaxed(1_i64)
+      SHARED.count.add_acq_rel(1_i64)
       # A retry loop: the failed exchange hands back the word it saw.
-      seen = shared.count.get_relaxed
+      seen = SHARED.count.get_relaxed
       loop do
-        outcome = shared.count.compare_and_set_acq_rel(seen, seen + 1_i64)
+        outcome = SHARED.count.compare_and_set_acq_rel(seen, seen + 1_i64)
         break if outcome[1]
         seen = outcome[0]
       end
@@ -193,22 +194,24 @@ while t < THREADS
 end
 threads.each { |th| th.join }
 expected = (THREADS * PER_THREAD * 3).to_i64
-check(shared.count.get == expected, "#{THREADS} threads x #{PER_THREAD} x 3 verbs: counted #{shared.count.get}, expected #{expected}")
-puts "  #{THREADS} threads, #{PER_THREAD} rounds each of add_relaxed, add_acq_rel and a compare_and_set_acq_rel loop: #{shared.count.get} of #{expected}, nothing lost"
+check(SHARED.count.get == expected, "#{THREADS} threads x #{PER_THREAD} x 3 verbs: counted #{SHARED.count.get}, expected #{expected}")
+puts "  #{THREADS} threads, #{PER_THREAD} rounds each of add_relaxed, add_acq_rel and a compare_and_set_acq_rel loop: #{SHARED.count.get} of #{expected}, nothing lost"
 
 # ---------------------------------------------------------------------------
 puts "== release publishes, acquire sees"
 # The writer fills the payload with a relaxed store, then raises the flag
 # with a release store; the reader spins on an acquire load of the flag,
 # and the payload it then reads is whole. Fifty handoffs, each a block call
-# of its own: every captured local, that call's `box` and `handoff`, is
-# assigned once (iyi SPEC III.4.4). A `while` reusing one `box` and one
-# counter for every round no longer compiles.
+# of its own: the captured `handoff` is assigned once (iyi SPEC III.4.4).
+# The thread may outlive a tape block, so the box is program data, its
+# flag lowered before each handoff.
+BOX = Shared.new
 50.times do |handoff|
-  box = Shared.new
+  box = BOX
+  box.flag.set_relaxed(0_u8)
   writer = IyiThread.start do
-    box.payload.set_relaxed(0xDEADBEEF_u64 + handoff.to_u64)
-    box.flag.set_release(1_u8)
+    BOX.payload.set_relaxed(0xDEADBEEF_u64 + handoff.to_u64)
+    BOX.flag.set_release(1_u8)
     nil
   end
   spins = 0_i64
