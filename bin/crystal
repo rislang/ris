@@ -240,7 +240,9 @@ export CRYSTAL_EXEC_PATH
 IYI_EXEC_PATH="${IYI_EXEC_PATH:-$SCRIPT_ROOT}"
 export IYI_EXEC_PATH
 
-if [ -x "$CRYSTAL_DIR/${CRYSTAL_BIN}" ]; then
+# ris: a compiler built from this source has String as a struct and cannot
+# build the compiler again, so the compiler's own tests skip it.
+if [ -z "$CRYSTAL_SKIP_BUILT" ] && [ -x "$CRYSTAL_DIR/${CRYSTAL_BIN}" ]; then
   __warning_msg "Using compiled compiler at ${CRYSTAL_DIR#"$PWD/"}/${CRYSTAL_BIN}"
   exec "$CRYSTAL_DIR/${CRYSTAL_BIN}" "$@"
 elif (! $PARENT_CRYSTAL_EXISTS); then

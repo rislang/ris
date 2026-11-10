@@ -519,7 +519,7 @@ endif
 $(O)/all_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
 	$(call check_llvm_config)
 	@mkdir -p $(O)
-	$(EXPORT_CC) $(EXPORTS) ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/all_test.cr
+	$(EXPORT_CC) $(EXPORTS) CRYSTAL_SKIP_BUILT=1 ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/all_test.cr
 
 $(O)/std_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
 	$(call check_llvm_config)
@@ -528,7 +528,7 @@ $(O)/std_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
 $(O)/compiler_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
 	$(call check_llvm_config)
 	@mkdir -p $(O)
-	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/compiler_test.cr --release
+	$(EXPORT_CC) CRYSTAL_SKIP_BUILT=1 ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/compiler_test.cr --release
 
 $(O)/primitives_test$(EXE): $(O)/$(CRYSTAL_BIN) $(DEPS) $(SOURCES) $(TEST_SOURCES)
 	@mkdir -p $(O)
