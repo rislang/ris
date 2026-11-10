@@ -1486,6 +1486,11 @@ pub class BodyWriter
     @written
   end
 
+  # Whether a write has failed: every write after it answers that failure.
+  def failed? : Bool
+    @fault_kind != 0
+  end
+
   def write(text : String) : Nil | Cancelled | SocketError
     return fault_now unless @fault_kind == 0
     raise "BodyWriter: a write after the body's end" if @done
@@ -1934,11 +1939,42 @@ pub class Response
     @decoded = false
   end
 
-  # A response whose body the block writes as it goes, chunked.
-  def self.stream(status : Int32, headers : Hash(String, String) = {} of String => String, &writer : BodyWriter -> Nil) : Response
-    response = Response.new(status, "", headers)
-    response.writer = writer
-    response
+  # A response whose body the block writes as it goes, chunked. A
+  # *content_type* given is the stream's own: *headers* naming one is
+  # refused. A *cache_control* given is sent unless *headers* names its
+  # own. std/sse's are `text/event-stream` and `no-cache`.
+  def self.stream(status : Int32, headers : Hash(String, String) = {} of String => String, content_type : String? = nil, cache_control : String? = nil, &writer : BodyWriter -> Nil) : Response
+    Response.new(status, headers, content_type, cache_control, writer)
+  end
+
+  # A response whose body *writer* writes as it goes: `Response.stream`'s.
+  # The headers are a copy made here, so the answer holds nothing of its
+  # caller's scratch.
+  def initialize(@status : Int32, headers : Hash(String, String), content_type : String?, cache_control : String?, writer : BodyWriter -> Nil)
+    sent = Hash(String, String).new
+    cached = false
+    headers.each do |name, value|
+      if HTTP.same_name?(name, "Content-Type") && (type = content_type)
+        raise "Response.stream: Content-Type is the stream's own, #{type}"
+      end
+      cached = true if HTTP.same_name?(name, "Cache-Control")
+      sent[name] = value
+    end
+    if type = content_type
+      sent["Content-Type"] = type
+    end
+    if cache = cache_control
+      sent["Cache-Control"] = cache unless cached
+    end
+    held = RisHttpResponseBody.new(sent)
+    @held = held
+    @reason = HTTP.reason_for(@status)
+    @body = ""
+    @source = nil
+    @writer = writer
+    @reader = nil
+    @url = nil
+    @decoded = false
   end
 
   # A 101 Switching Protocols with *headers* (`Upgrade` and the

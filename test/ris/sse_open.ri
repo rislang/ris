@@ -1,16 +1,63 @@
 module test/sse_open
 
+import std/socket::{IyiSocket}
+import std/http::{Server, Request, Response}
 import std/sse::{SSE}
 
-# SSE.open against test/ris/sse_server.py on the port given: the first
+# SSE.open against SSE.stream on a ris Server over loopback: the first
 # connection brings one event and ends, the reconnect sends its id as
 # Last-Event-ID and brings the next, and the block stops after it.
 
-port = Program.args[0]
-count = 0
-got = SSE.open("http://127.0.0.1:#{port}/events", reconnects: 2, retry: 10) do |event|
-  count += 1
-  puts "#{event.event} #{event.id} #{event.data.inspect}"
-  count < 2
+struct Listening
 end
-puts got.nil? ? "stopped after #{count}" : "failed: #{got}"
+
+struct Events
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Listening.new)
+  end
+
+  # One call (SPEC 1.5): the answer is built on the server's tape, and
+  # what the stream needs of the request goes in as a number.
+  def call(req : Request) : Response
+    Events.answer(Events.step(req.header("Last-Event-ID")))
+  end
+
+  def self.step(last : String?) : Int32
+    last.nil? ? 0 : last == "1" ? 1 : 2
+  end
+
+  def self.answer(step : Int32) : Response
+    SSE.stream do |events|
+      if step == 0
+        events.send("first", id: "1", retry: 10)
+      elsif step == 1
+        events.send("second\nline", event: "update", id: "2")
+      else
+        events.send("unexpected")
+      end
+      nil
+    end
+  end
+end
+
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
+group do |g|
+  g.spawn do
+    Server.serve("127.0.0.1", port, 0, Events, max_connections: 2)
+    0
+  end
+  RisBoard.take(Listening).or_panic
+  count = 0
+  got = SSE.open("http://127.0.0.1:#{port}/events", reconnects: 2, retry: 10) do |event|
+    count += 1
+    puts "#{event.event} #{event.id} #{event.data.inspect}"
+    count < 2
+  end
+  puts got.nil? ? "stopped after #{count}" : "failed: #{got}"
+  g.cancel_children
+end

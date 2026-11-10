@@ -1384,26 +1384,17 @@ if [ "$out" = "$want" ]; then
 else
   echo "FAILED   http_open: $out"; status=1
 fi
-# SSE.open against test/ris/sse_server.py: an event, a reconnect that
-# names it in Last-Event-ID, the next event.
-if command -v python3 >/dev/null; then
-  srv=$(mktemp -d)
-  python3 test/ris/sse_server.py "$srv" >"$srv/log" 2>&1 &
-  srv_pid=$!
-  for _ in $(seq 300); do [ -f "$srv/ready" ] && break; sleep 0.1; done
-  out=$(RIS_HEAP_STATS=1 timeout 300 "$RIS" run test/ris/sse_open.ri -- \
-    "$(cat "$srv/port")" 2>&1)
-  kill "$srv_pid" 2>/dev/null; wait "$srv_pid" 2>/dev/null
-  rm -rf "$srv"
-  want='message 1 "first"
+# SSE.open against SSE.stream on a ris Server: an event, a reconnect
+# that names it in Last-Event-ID, the next event.
+out=$(RIS_HEAP_STATS=1 timeout 300 "$RIS" run test/ris/sse_open.ri 2>&1)
+want='message 1 "first"
 update 2 "second\nline"
 stopped after 2
 ris heap: 0 allocations, 0 bytes'
-  if [ "$out" = "$want" ]; then
-    echo 'runs     sse_open (SSE.open reconnects with Last-Event-ID)'
-  else
-    echo "FAILED   sse_open: $out"; status=1
-  fi
+if [ "$out" = "$want" ]; then
+  echo 'runs     sse_open (SSE.stream served; SSE.open reconnects with Last-Event-ID)'
+else
+  echo "FAILED   sse_open: $out"; status=1
 fi
 # std/http client: coded answers decoded through BodyFeed, an io Reader.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/http_coding.ri 2>&1)

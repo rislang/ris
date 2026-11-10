@@ -346,19 +346,19 @@ end
 
 # What `SSE.stream`'s block writes with: an event a `send`, a comment a
 # `comment`, each one chunk sent at once. The first write that fails -
-# the client went - is kept, and it and every write after it answer it;
-# `gone?` says whether one has.
-pub class EventWriter
+# the client went - is kept by the body's writer, and it and every write
+# after it answer it; `gone?` says whether one has. A struct over that
+# writer: a copy handed on writes to the same body.
+@[OnTape]
+pub struct EventWriter
   @writer : BodyWriter
-  @fault : Cancelled | SocketError | Nil
 
   def initialize(@writer : BodyWriter)
-    @fault = nil
   end
 
   # Whether a write found the client gone.
   def gone? : Bool
-    !@fault.nil?
+    @writer.failed?
   end
 
   # One event: `event:`, `id:` and `retry:` when given, *data* a `data:`
@@ -366,20 +366,11 @@ pub class EventWriter
   # then the blank line that dispatches it. An empty *data* is an event
   # whose data is empty; an empty *id* resets the client's last event ID.
   def send(data : String, event : String? = nil, id : String? = nil, retry : Int32? = nil) : Nil | Cancelled | SocketError
-    put(SSE.encode(data, event, id, retry))
+    @writer.write(SSE.encode(data, event, id, retry))
   end
 
   def comment(text : String = "") : Nil | Cancelled | SocketError
-    put(SSE.comment(text))
-  end
-
-  private def put(text : String) : Nil | Cancelled | SocketError
-    if fault = @fault
-      return fault
-    end
-    got = @writer.write(text)
-    @fault = got
-    got
+    @writer.write(SSE.comment(text))
   end
 end
 
@@ -547,15 +538,7 @@ pub struct SSE
   # *block* writes through an `EventWriter` as it goes. The stream ends
   # when the block returns. A `Content-Type` in *headers* is refused.
   def self.stream(headers : Hash(String, String) = {} of String => String, &block : EventWriter -> Nil) : Response
-    sent = {"Content-Type" => "text/event-stream"}
-    cached = false
-    headers.each do |name, value|
-      raise "SSE: Content-Type is the stream's own, text/event-stream" if HTTP.same_name?(name, "Content-Type")
-      cached = true if HTTP.same_name?(name, "Cache-Control")
-      sent[name] = value
-    end
-    sent["Cache-Control"] = "no-cache" unless cached
-    Response.stream(200, sent) { |writer| block.call(EventWriter.new(writer)) }
+    Response.stream(200, headers, "text/event-stream", "no-cache") { |writer| block.call(EventWriter.new(writer)) }
   end
 
   # The event stream at *url*, each event handed to *block*, which answers

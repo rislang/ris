@@ -122,9 +122,6 @@ Decide with EGM, then gate:
   exchange per pooled connection with `@idle` as indexes into them, not
   `{String, Conn}` made per request; SSE.open keeps one exchange beside
   its parser; gate: two requests over one connection, `reused` 1.
-* Response.stream is refused ("cannot return a value made in this def
-  `stream`'s scratch", SPEC 1.9): the response keeps the writer proc.
-  SSE.stream and every streaming handler are refused with it.
 
 ## Tighten heap_trap
 
