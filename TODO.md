@@ -65,9 +65,6 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
   past its round only with no owner argument: one given an Array or Hash
   it reads, or a builder, pool or class it does not allocate through, is
   still taken by the older rule. Follow where the constructor allocates.
-* A def with several returns loses what its answer views: read_union's
-  `Array(String)` member was taken as made in its caller's scratch and
-  refused (SPEC 1.9); std/json reads it by a tail call instead.
 
 * `def load(t : String) : T; T.from_json(t); end` builds: an @[OnTape]
   struct's String may view the document's decoded text, in load's scratch.

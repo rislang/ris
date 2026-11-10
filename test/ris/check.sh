@@ -78,6 +78,14 @@ else
   echo "FAILED   module_text_growth: $out"; status=1
 fi
 
+# A def with several returns answers what its value views (SPEC 1.9).
+out=$("$RIS" run test/ris/several_returns_view.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'abab' ]; then
+  echo 'runs     several_returns_view'
+else
+  echo "FAILED   several_returns_view: $out"; status=1
+fi
+
 out=$("$RIS" run test/ris/construct_growth.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = $'2\n1' ]; then
   echo 'runs     construct_growth (grow after new)'
