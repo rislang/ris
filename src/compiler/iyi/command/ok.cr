@@ -14,6 +14,7 @@ require "json"
 
 class Iyi::Command
   OK_STEP_WIDTH = 7
+  OK_TIME_WIDTH = 11
 
   private record OkStep, name : String, runs : Array(Array(String)),
     next_hint : String
@@ -50,8 +51,9 @@ class Iyi::Command
     name = Command.program_name
     steps = ok_steps(name, paths, affected, jobs)
     exe = Process.executable_path.not_nil!
-    results = [] of {String, String}
+    results = [] of {String, String, Float64?}
     failed = nil
+    started = Time.instant
     output = ""
 
     # fmt and tidy run first, in order; check, vet and test then run at
@@ -72,20 +74,31 @@ class Iyi::Command
     runners.each do |runner|
       step = runner.step
       if step.runs.empty?
-        results << {step.name, "skip"}
+        results << {step.name, "skip", nil}
         puts ok_line(step.name, "skip (nothing to #{step.name})") unless json
         next
       end
       passed = runner.passed?
-      results << {step.name, passed ? "ok" : "fail"}
-      puts ok_line(step.name, passed ? "ok" : "FAIL") unless json
+      seconds = runner.seconds
+      results << {step.name, passed ? "ok" : "fail", seconds}
+      puts ok_line(step.name, passed ? "ok" : "FAIL", seconds) unless json
       unless passed
         failed = step
         output = runner.output
         break
       end
     end
-    runners.each(&.cancel) if failed
+    if failed
+      # A later step still running is killed: its line says so.
+      stopped = runners.select(&.running?)
+      runners.each(&.cancel)
+      unless json
+        runners.each do |runner|
+          puts ok_line(runner.step.name, "stopped") if stopped.includes?(runner)
+        end
+      end
+    end
+    total = (Time.instant - started).total_seconds
 
     if json
       JSON.build(STDOUT) do |builder|
@@ -93,10 +106,11 @@ class Iyi::Command
           builder.field "ok", failed.nil?
           builder.field "steps" do
             builder.array do
-              results.each do |step_name, status|
+              results.each do |step_name, status, seconds|
                 builder.object do
                   builder.field "name", step_name
                   builder.field "status", status
+                  builder.field "seconds", seconds.round(1) if seconds
                 end
               end
             end
@@ -104,15 +118,19 @@ class Iyi::Command
           builder.field "failed", failed.try(&.name)
           builder.field "output", failed ? output : nil
           builder.field "next", failed.try(&.next_hint)
+          builder.field "seconds", total.round(1)
         end
       end
       puts
     elsif failed
+      puts "FAIL in #{ok_seconds(total)}"
       puts
       print output
       puts unless output.empty? || output.ends_with?('\n')
       puts
       puts "next: #{failed.next_hint}"
+    else
+      puts "ok in #{ok_seconds(total)}"
     end
     exit(failed ? 1 : 0)
   end
@@ -127,12 +145,14 @@ class Iyi::Command
     @process : Process? = nil
     @cancelled = false
     @started = false
+    getter seconds : Float64 = 0.0
 
     def initialize(@step : OkStep, @exe : String)
     end
 
     def run : Nil
       @started = true
+      began = Time.instant
       ok = @step.runs.all? do |args|
         break false if @cancelled
         process = Process.new(@exe, args, output: @buffer, error: @buffer)
@@ -140,6 +160,7 @@ class Iyi::Command
         process.wait.success?
       end
       @process = nil
+      @seconds = (Time.instant - began).total_seconds
       @passed = ok
       @done.send(nil)
     end
@@ -157,6 +178,10 @@ class Iyi::Command
       @passed.not_nil!
     end
 
+    def running? : Bool
+      @started && @passed.nil?
+    end
+
     def output : String
       @buffer.to_s
     end
@@ -167,8 +192,16 @@ class Iyi::Command
     end
   end
 
-  private def ok_line(name : String, status : String) : String
-    "#{name.ljust(OK_STEP_WIDTH)}#{status}"
+  private def ok_line(name : String, status : String,
+                      seconds : Float64? = nil) : String
+    line = "#{name.ljust(OK_STEP_WIDTH)}#{status}"
+    return line unless seconds
+    time = ok_seconds(seconds)
+    line + time.rjust({OK_TIME_WIDTH - status.size, time.size + 1}.max)
+  end
+
+  private def ok_seconds(seconds : Float64) : String
+    "%.1fs" % seconds
   end
 
   private def ok_steps(name : String, paths : Array(String),
@@ -289,9 +322,13 @@ class Iyi::Command
       One line per step, in this order. The first that fails ends the run: its
       own output is shown, and a `next:` line names the command that
       fixes it. Exit 0 only when every step passed; otherwise 1.
+      Each step line ends in its wall time; a step killed because an
+      earlier one failed reads `stopped`. A last line gives the total:
+      `ok in 22.7s` or `FAIL in 9.3s`. A time never changes the verdict.
 
       --json           the same verdict as data: ok, steps (name and
-                       status), failed, output and next
+                       status, seconds), failed, output, next
+                       and seconds (the total)
       --affected FILE  (repeatable) passed to check and test, so only
                        what a change reaches is checked and tested
       -j N             passed to test: tests run at once (default:

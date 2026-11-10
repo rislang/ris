@@ -28,6 +28,8 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
 * `ris test -j N` and `ris ok -j N` use the machine's cores (default
   `RIS_JOBS`, else the CPU count); `ris ok` runs check, vet and test at
   once. Output keeps file and step order.
+* `ris ok` shows each step's wall time and the total (`ok in 22.7s`);
+  `--json` carries them as `seconds`.
 * Runs on Linux x86_64 and aarch64, and macOS arm64 (built from source).
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.

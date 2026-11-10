@@ -101,7 +101,8 @@ Needs Crystal and LLVM 23. In the clone: `make ris`, then
   gives the verdict as data; `--affected FILE` narrows check and test.
   check, vet and test run at once; `ris test` and `ris ok` run up to
   `-j N` tests at once (default `RIS_JOBS`, else the CPU count), and
-  report in file and step order as if run one by one.
+  report in file and step order as if run one by one. Each step line
+  shows its wall time and a last line the total (`ok in 22.7s`).
 * `ris doc MODULE` prints a module's exported surface: read that, not its
   body. `ris mcp` serves check, fix, context, test and ok as MCP
   tools.
