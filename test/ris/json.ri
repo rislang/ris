@@ -14,7 +14,7 @@ failures = [] of String
 
 
 def check(failures : Array(String), ok : Bool, what : String) : Nil
-  failures << what.to_heap unless ok
+  failures << what.copy_to(Program.tape) unless ok
 end
 
 def heap_doc(b : Builder) : Nil

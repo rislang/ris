@@ -142,11 +142,6 @@ Decide with EGM, then gate:
   Unknown what follows; the HTTPS-records path never compiled behind a
   client before.
 
-## Tighten heap_trap
-
-`heap_trap` (`test/ris/check.sh:29`) passes on any compile error naming
-String, Array, Hash or tape, so it can hide a refusal: tighten it.
-
 ## Checker evaluate stack
 
 The checker's `evaluate` uses a lot of stack: small changes must not

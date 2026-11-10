@@ -18,26 +18,37 @@ if [ -z "${RIS_CHECK_SERIAL:-}" ]; then
   exit $rc
 fi
 
-# Migration APIs remain checked, but executing them must trap with a site.
+# Migration APIs remain checked. Each case names its one expected outcome:
+#   heap_trap NAME traps
+#   heap_trap NAME refused LINE 'message fragment'  (LINE - : in a macro)
+#   heap_trap NAME runs
+# so an unrelated compile error, or a refusal at another site, fails it.
 heap_trap() {
-  local name=$1 out code
+  local name=$1 want=$2 out code
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
-  if [ "$code" -ne 0 ] &&
-      grep -qF 'ris: heap allocation:' <<<"$out" &&
-      grep -qE '  at .*:[0-9]+:[0-9]+' <<<"$out"; then
-    echo "traps    $name (heap migration, source site)"
-  elif [ "$code" -ne 0 ] && grep -qF 'Error:' <<<"$out" &&
-      grep -qE 'String|Array|Hash|tape' <<<"$out"; then
-    # A program's literals and to_s are tape values now: the heap path is
-    # refused at compile time, before it can trap.
-    echo "refused  $name (heap migration, at compile time)"
-  elif [ "$code" -eq 0 ]; then
-    # A program's Array, Hash and text are tape types now: no heap left.
-    echo "runs     $name (heap migration now on the tape)"
-  else
-    echo "FAILED   $name: expected heap trap with source site: $out"
-    status=1
-  fi
+  case $want in
+    traps)
+      if [ "$code" -ne 0 ] &&
+          grep -qF 'ris: heap allocation:' <<<"$out" &&
+          grep -qE '  at .*:[0-9]+:[0-9]+' <<<"$out"; then
+        echo "traps    $name (heap migration, source site)"; return
+      fi ;;
+    refused)
+      # A program's literals and to_s are tape values now: the heap path is
+      # refused at compile time, at its own site, before it can trap.
+      if [ "$code" -ne 0 ] &&
+          { [ "$3" = - ] || grep -qF "In test/ris/$name.ri:$3:" <<<"$out"; } &&
+          grep -qF -- "Error: $4" <<<"$out"; then
+        echo "refused  $name (heap migration, at compile time)"; return
+      fi ;;
+    runs)
+      # A program's Array, Hash and text are tape types now: no heap left.
+      if [ "$code" -eq 0 ]; then
+        echo "runs     $name (heap migration now on the tape)"; return
+      fi ;;
+  esac
+  echo "FAILED   $name: expected $want ${3:-} ${4:-}: $out"
+  status=1
 } # heap_trap
 
 expect() {
@@ -990,7 +1001,8 @@ expect copy_class_override 'remove this override'
 expect copy_pointer 'build on the destination with Array nodes and indices'
 expect copy_link 'copy_to refuses pointers and self-relative links'
 
-heap_trap string_parameters
+heap_trap string_parameters refused 31 \
+  'this block becomes a proc, which may run after the tape block'
 
 expect text_capture 'pass what the block needs as owned data (copy_to(owner))'
 # These old heap-boundary refusals are safe on the object's tape now.
@@ -1013,9 +1025,10 @@ else
   status=1
 fi
 
-heap_trap text_literal_heap
+heap_trap text_literal_heap refused 4 \
+  'cannot store request tape data on the program tape'
 
-heap_trap borrowed_text
+heap_trap borrowed_text runs
 
 expect class_field   "cannot store data made in this tape block"
 expect class_task "this block becomes a proc"
@@ -1087,7 +1100,7 @@ for name in implicit fibers/implicit implicit_loop; do
   fi
 done
 
-heap_trap escape
+heap_trap escape runs
 
 # Cleanup keeps LIFO order on early exits, panic and explicit exit.
 out=$("$RIS" run test/ris/local.ri 2>&1)
@@ -1211,7 +1224,8 @@ if grep -qF $'10 25 35 35' <<<"$out" && grep -qF "index 3 out of range for 3 ele
 out=$("$RIS" run test/ris/stream.ri 2>&1)
 if grep -qF '7 1,2,5,6 3,4 0 7' <<<"$out" && grep -qF "RisTree#close: 2 is not open" <<<"$out"; then echo "runs     stream"; else echo "FAILED   stream: $out"; status=1; fi
 
-heap_trap owned
+heap_trap owned refused 30 \
+  'cannot return a tape value out of its tape block'
 
 out=$("$RIS" run test/ris/writer.ri 2>&1)
 if [ "$out" = '0 -42 9223372036854775807 -9223372036854775808 a&amp;b&lt;c&gt;&quot;d&#39;e <b>' ]; then echo "runs     writer"; else echo "FAILED   writer: $out"; status=1; fi
@@ -1267,9 +1281,9 @@ if [ "$out" = 'PASS: read as Params reads, nothing on the heap' ]; then echo "ru
 out=$("$RIS" run test/ris/truncate.ri 2>&1)
 if grep -qF "PASS: cut back and written over" <<<"$out" && grep -qF "truncate to 1 of 0 bytes" <<<"$out"; then echo "runs     truncate"; else echo "FAILED   truncate: $out"; status=1; fi
 
-heap_trap json
+heap_trap json runs
 
-heap_trap json_buffer
+heap_trap json_buffer runs
 expect json_builder_escape 'is a variable of the code around this tape block'
 
 out=$("$RIS" run test/ris/json_repeat.ri 2>&1)
@@ -2216,7 +2230,8 @@ else
   echo "FAILED   samples/ris/web: does not build"; status=1
 fi
 rm -rf "$web"
-heap_trap to_heap
+heap_trap to_heap refused - \
+  "HeapHit's field \`@path : String\` holds the tape type String"
 out=$("$RIS" run test/ris/text_api.ri 2>&1)
 if grep -qF $'3 12 true\ntrue false\n4 212\n/users/1\n4 true true\n-42 7 true\ntrue -2147483648\nShip it|7|it|7 Ship\ntrue\n1 5 11\n3 café false\n200 /users/1 took 12 ms\n200 /users/1 took 12 ms' <<<"$out" && grep -qF "not a number" <<<"$out"; then echo "runs     text_api"; else echo "FAILED   text_api: $out"; status=1; fi
 out=$("$RIS" run test/ris/each_line.ri 2>&1)
@@ -2243,7 +2258,7 @@ else
 fi
 rm -f "$exe"
 
-heap_trap string_arguments
+heap_trap string_arguments runs
 
 # Generic std classes and crypto inputs use checked tape storage.
 for name in std_generic_tape std_small_tape curve_views mlkem_views shlex base32 \
@@ -2290,7 +2305,7 @@ else
   echo "FAILED   uri_legacy: $out"; status=1
 fi
 
-heap_trap http_head_legacy
+heap_trap http_head_legacy runs
 
 # Log text, numeric formatting and quoting use the caller's tape.
 out=$(RIS_HEAP_STATS=1 "$RIS" run \
