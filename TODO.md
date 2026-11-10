@@ -110,10 +110,22 @@ Decide with EGM, then gate:
 * HTTPClient pooling: HTTPClient owns one exchange per pooled
   connection with `@idle` as indexes into them, not `{String, Conn}`
   made per request; SSE.open keeps one exchange beside its parser; gate:
-  two requests over one connection, `reused` 1. First blocker: the
-  HTTPS-records path (`connect_by_records`, `records_handshake`) makes
-  and answers a TlsClient ("cannot return an owner from a def"): fill
-  the exchange's own `tls` slot, as the plain path does.
+  two requests over one connection, `reused` 1. Today `client.open` is
+  refused at open_by: the exchange it makes is its own, and give_back
+  would keep its Conn in the client. Blockers met in a first try, each
+  after the one before:
+  - The HTTPS-records path (`connect_by_records`, `records_handshake`)
+    makes and answers a TlsClient ("cannot return an owner from a
+    def"): pass the exchange's `tls` slot and answer `TlsError?` (done
+    in the try; it built).
+  - The client's exchanges, made in initialize under `if i <= idle`
+    (macro-unrolled; a round frees them) and pushed into `@exchanges`,
+    are refused ("cannot store a view beyond its owner scope"); without
+    the `if` they pass. A branch is no scope (SPEC 1.1): a checker
+    error, or make all MAX_POOLED (16 resolvers and buffers a client).
+  - Then connect_by_records holds `client.system_resolver`'s text over
+    its refill: "live view of HTTPClient.@system.@own_text ... via
+    system_resolver -> read_system -> read_files -> refill -> clear".
 
 ## Tighten heap_trap
 
