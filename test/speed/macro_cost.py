@@ -58,7 +58,8 @@ def build(path, prelude_empty=True, cold=False):
 
 
 def calls(n):
-    # A bare call is enough to type the method, and needs nothing from a prelude.
+    # A bare call is enough to type the method, and needs nothing from a
+    # prelude.
     return "".join(f"m{i}\n" for i in range(n))
 
 

@@ -4,11 +4,11 @@
 #     bash test/cli/std_eiy_exercise.sh
 #
 # Proves:
-#   * `Eiy.render`, `Eiy.embed` and `Eiy.def_to_s` of test/cli/std_eiy_exercise.eiy
-#     (output tags, `if`, a block, `<%-`/`-%>` trimming, a two-line comment,
-#     an escaped tag, quotes, backslashes, `#{`, UTF-8 text, and
-#     test/cli/std_eiy_exercise_part.eiy rendered from inside it) print the
-#     expected text byte for byte, plain and with --release.
+#   * `Eiy.render`, `Eiy.embed` and `Eiy.def_to_s` of
+#     test/cli/std_eiy_exercise.eiy (output tags, `if`, a block, `<%-`/`-%>`
+#     trimming, a two-line comment, an escaped tag, quotes, backslashes, `#{`,
+#     UTF-8 text, and test/cli/std_eiy_exercise_part.eiy rendered from inside
+#     it) print the expected text byte for byte, plain and with --release.
 #   * Two builds of it at once, the template helper the macros run made
 #     stale before each of four rounds, all build.
 #   * `Eiy::Lexer` token types, values, flags and positions; the generated
@@ -25,8 +25,8 @@
 #     with the same sentences.
 #   * Dependency floor: the exercise binary adds no symbol and no library.
 #
-# Needs `make` for bin/iyi, plus `nm`, and `otool` on Darwin or `readelf` on Linux.
-# Exits non-zero if any check fails.
+# Needs `make` for bin/iyi, plus `nm`, and `otool` on Darwin or `readelf` on
+# Linux. Exits non-zero if any check fails.
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"

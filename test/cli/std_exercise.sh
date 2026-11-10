@@ -296,8 +296,8 @@ echo "== the library is iyi all the way down"
 # (`_dyld_get_image_vmaddr_slide`), the executable's path
 # (`_NSGetExecutablePath`, `dladdr`), and the file mapped to read it
 # (`open`, `mmap`, `munmap`, `lseek`, `close`). Every one of those is in
-# libSystem, the platform libc `test/cli/dependency_floor.sh` already permits, so
-# this costs no library: a program importing `std/debug` still links
+# libSystem, the platform libc `test/cli/dependency_floor.sh` already permits,
+# so this costs no library: a program importing `std/debug` still links
 # libSystem and nothing else, which the floor checks separately. On Linux it
 # walks the stack itself, reading the registers with `asm` and the image
 # through the linker's `__ehdr_start`, and maps `/proc/self/exe` through the

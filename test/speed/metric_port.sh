@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds crystal-metric's port (`test/speed/metric/metric.iyi`) with --release and
-# requires all twenty-six answers.
+# Builds crystal-metric's port (`test/speed/metric/metric.iyi`) with --release
+# and requires all twenty-six answers.
 #
 # Each benchmark checks its result against the one the Crystal program
 # prints: a checksum of what it wrote, or the numbers themselves. So the

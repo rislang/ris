@@ -336,8 +336,8 @@ with open(sys.argv[1], "wb") as out:
     for x in xs:
         out.write(struct.pack("<d", x))
 PY
-  # sin's, cos's and tan's: the whole range to 2^1023, where the reduction takes the table
-  # of 2/pi's bits; [-10, 10]; each side of the multiples of pi/2 and
+  # sin's, cos's and tan's: the whole range to 2^1023, where the reduction takes
+  # the table of 2/pi's bits; [-10, 10]; each side of the multiples of pi/2 and
   # pi/4, the poles and zeros a reduction can lose; the worst cases for
   # reduction the literature names; the tiny and the specials.
   "$PY" - "$WORK/trig.in" <<'PY'

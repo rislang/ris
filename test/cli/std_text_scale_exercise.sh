@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# The library's text building is linear. Runs test/cli/std_text_scale_exercise.iyi - eight
-# megabytes through join, reverse, tr, gsub, delete, squeeze, Regex#replace,
-# each_line, String.build, Enumerable#join, String.join, CSV.build,
-# HTTP.decode_chunked, center and a near-miss search, each checked - plain
-# and optimised, under a clock sixty times what it needs, and proves the
-# clock catches a builder that grows by a fixed step rather than doubling:
-# every method above then copies what it has written on each write, which
-# is the `result = result + piece` shape they all had, and the run does not
-# end; and that it catches a join, a CSV build or a search that goes back
-# to its quadratic shape on its own.
+# The library's text building is linear. Runs
+# test/cli/std_text_scale_exercise.iyi - eight megabytes through join, reverse,
+# tr, gsub, delete, squeeze, Regex#replace, each_line, String.build,
+# Enumerable#join, String.join, CSV.build, HTTP.decode_chunked, center and a
+# near-miss search, each checked - plain and optimised, under a clock sixty
+# times what it needs, and proves the clock catches a builder that grows by a
+# fixed step rather than doubling: every method above then copies what it has
+# written on each write, which is the `result = result + piece` shape they all
+# had, and the run does not end; and that it catches a join, a CSV build or a
+# search that goes back to its quadratic shape on its own.
 #
 #     bash test/cli/std_text_scale_exercise.sh
 #

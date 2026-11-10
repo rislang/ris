@@ -52,7 +52,8 @@ fi
 #   ok      <stream> <plain> <window limit>   decompressed equal to <plain>
 #   refuse  <stream> <phrase> <window limit>  refused, the error saying <phrase>
 #   huge    <stream> <crc-32> <bytes> <window> read through a bounded reader
-#   write   <plain>                           compressed by iyi to <plain>.iyi.zst
+#   write   <plain>                           compressed by iyi to
+#   <plain>.iyi.zst
 mkdir -p "$WORK/fixtures"
 if ! "$PY" - "$WORK/fixtures" "$REPO/src/std/zstd.iyi" <<'PY'
 import os, random, struct, sys, time, zlib

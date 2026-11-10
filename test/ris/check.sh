@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# spec: 2.2@67a6a6f1, 1.9@3f448e8c, 3.5@4513f7df, 3.6@47d91b08, 1.1@fdc7907b, 5.1@610b0d22, 1.5@9935f4c7, 3.2@9533bb9c, 7.1@e54681fa
-# ris's own checks: every program under test/ris/refused must be refused by
-# the compiler with the expected message, test/ris/allowed.ri must compile
-# and run, the fibers test must read back what each fiber wrote, a tape must
-# grow past its first mapping in whole 64 KiB grains and refuse an index out
-# of range, a RisTree must step over subtrees, and the respond sample must
-# print its known checksum. Fatal size errors must allocate nothing.
+# spec: 2.2@67a6a6f1, 1.9@3f448e8c, 3.5@4513f7df, 3.6@47d91b08, 1.1@fdc7907b,
+# 5.1@610b0d22, 1.5@9935f4c7, 3.2@9533bb9c, 7.1@e54681fa ris's own checks: every
+# program under test/ris/refused must be refused by the compiler with the
+# expected message, test/ris/allowed.ri must compile and run, the fibers test
+# must read back what each fiber wrote, a tape must grow past its first mapping
+# in whole 64 KiB grains and refuse an index out of range, a RisTree must step
+# over subtrees, and the respond sample must print its known checksum. Fatal
+# size errors must allocate nothing.
 #
 #   bash test/ris/check.sh
 set -uo pipefail
@@ -2596,7 +2597,8 @@ for kind in field parameter literal; do
 done
 expect text_plain_builder 'only appends and is read back: write `text = ""`'
 expect text_plain_build 'this String.build only appends: write `io = ""`'
-# ris check types --fix applies the compiler's own edits: Crystal-style text becomes ris.
+# ris check types --fix applies the compiler's own edits: Crystal-style text
+# becomes ris.
 out=$(f="${TMPDIR:-/tmp}/plain_builder.ri"; cp test/ris/fix/plain_builder.ri "$f" && "$RIS" check types --fix "$f" >/dev/null 2>&1 && diff test/ris/fix/plain_builder.expected "$f" && "$RIS" run "$f" 2>&1)
 if [ "$out" = "hello, ris" ]; then echo "runs     fix plain_builder"; else echo "FAILED   fix plain_builder: $out"; status=1; fi
 for rule in plain_build plain_build_inline io_parameter array_refill; do

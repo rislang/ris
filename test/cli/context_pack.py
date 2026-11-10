@@ -203,8 +203,8 @@ def run_task(agent: str, grounding: str):
             )
             if build.returncode == 0:
                 return attempt, sent
-            # The loop AI_FIRST.md §2 describes has `ris check types --fix` in it: the
-            # compiler's own suggested edits are applied before a model
+            # The loop AI_FIRST.md §2 describes has `ris check types --fix` in
+            # it: the compiler's own suggested edits are applied before a model
             # is asked again, because an agent would run exactly that.
             # Both arms get the step; a program fix converges is green
             # on the round that wrote it, and what fix changed is printed

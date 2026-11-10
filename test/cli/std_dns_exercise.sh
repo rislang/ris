@@ -190,8 +190,8 @@ else
       echo "send"
     done
   } >"$WORK/zone.nsupdate"
-  # A BIND that predates the HTTPS type does not know it: darwin's nsupdate refused
-  # the zone with "'HTTPS' is not a valid type: unknown class/type" (CI,
+  # A BIND that predates the HTTPS type does not know it: darwin's nsupdate
+  # refused the zone with "'HTTPS' is not a valid type: unknown class/type" (CI,
   # measured), and an old dig says ";; Warning, ignoring invalid type
   # HTTPS" to `-t HTTPS` - both BIND's sentences for a type it does not
   # know, measured here with an unknown type's name. One record goes to

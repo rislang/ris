@@ -1172,8 +1172,8 @@ echo "== TLS resumption: an HTTPClient's tickets (test/cli/std_http_resume.iyi)"
 # 16 KiB of it (-max_early_data), but no ClientHello asks. Then
 # copies of the module with the sessions kept under the origin alone (the
 # configuration ignored), under the default `HTTP.tls_config` where the
-# client has a configuration of its own, a ticket offered to any origin, no session
-# handed to the handshake, early data sent, and each origin's limit and
+# client has a configuration of its own, a ticket offered to any origin, no
+# session handed to the handshake, early data sent, and each origin's limit and
 # the total left out, each caught at the line that names it. The iyi
 # server's half is the program run with no arguments, as CI runs every
 # bench program: it holds what each line should say, under a test PKI of

@@ -74,21 +74,21 @@ def scan_build(repo):
     }
     MAKE_MACROS = {"$(call", "$(if", "$(error", "$(warning", "#"}
 
-    # Every recipe, not a chosen few. Scoping discovery to a hardcoded target list
-    # means a tool invoked from a target nobody listed is invisible, which is the
-    # one thing this gate exists to catch: `smoke-probe:` calling `sha256sum` kept
-    # the gate green until this scanned all of them. The allowlist does the
-    # narrowing; discovery must not.
+    # Every recipe, not a chosen few. Scoping discovery to a hardcoded target
+    # list means a tool invoked from a target nobody listed is invisible, which
+    # is the one thing this gate exists to catch: `smoke-probe:` calling
+    # `sha256sum` kept the gate green until this scanned all of them. The
+    # allowlist does the narrowing; discovery must not.
     SHELL_KEYWORDS = {
         "for", "if", "then", "else", "elif", "fi", "do", "done", "while", "case",
         "esac", "in", "return", "local", "read", "set", "unset", "shift", "eval",
         "source", ".", "[", "[[", "trap", "wait", "time",
     }
 
-    # A tool needed to produce the compiler is a dependency of iyi. A tool needed
-    # only by `docs`, `lint`, `spec` or `package` is a dependency of working on
-    # iyi, which is a different claim and belongs in its own list. Both are
-    # discovered; only the bucket differs.
+    # A tool needed to produce the compiler is a dependency of iyi. A tool
+    # needed only by `docs`, `lint`, `spec` or `package` is a dependency of
+    # working on iyi, which is a different claim and belongs in its own list.
+    # Both are discovered; only the bucket differs.
     found_aux = {}
 
     in_target = False
@@ -149,12 +149,14 @@ def scan_build(repo):
                 # being recorded as dependencies named `-d`, `-m` and `-B`.
                 if tok.startswith("-"):
                     continue
-                # Nor is a file mode (`install -m 0755`) or an included makefile.
+                # Nor is a file mode (`install -m 0755`) or an included
+                # makefile.
                 if tok.isdigit() or tok.endswith(".mk"):
                     continue
                 # Nor an argument: a destination path, a completion file, an
                 # automatic variable. `install -m 644 etc/completion.bash
-                # $(DESTDIR)$(DATADIR)/...` was being read as three dependencies.
+                # $(DESTDIR)$(DATADIR)/...` was being read as three
+                # dependencies.
                 if tok.startswith("$"):
                     continue
                 if "/" in tok and not tok.startswith("./bin/"):
@@ -210,7 +212,8 @@ def scan_runtime(repo):
             for idx, line in enumerate(fh, 1):
                 for m in re.finditer(r'Process\.find_executable\(\s*"([^"]+)"\s*\)', line):
                     t = m.group(1)
-                    # Exclude dynamic subcommands and alternative modern linkers (probed under cc)
+                    # Exclude dynamic subcommands and alternative modern linkers
+                    # (probed under cc)
                     if not t.startswith("#{") and t not in ["ld.lld", "mold"]:
                         found_runtime.setdefault(t, []).append(f"{rel}:{idx}")
                 for m in re.finditer(r'Process\.run\(\s*"([^"]+)"', line):

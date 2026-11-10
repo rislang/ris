@@ -4,10 +4,10 @@
 #     bash test/cli/std_base64_exercise.sh
 #
 # Proves the exercise holds plain and --release, that a broken encoder or
-# decoder is caught, and what `decode` refuses: a byte outside the alphabet, data after
-# the padding, data inside it, more `=` than the group needs, `=` with no
-# group to close, and a final group of one character - each a panic with a
-# sentence, where before the data was silently dropped.
+# decoder is caught, and what `decode` refuses: a byte outside the alphabet,
+# data after the padding, data inside it, more `=` than the group needs, `=`
+# with no group to close, and a final group of one character - each a panic with
+# a sentence, where before the data was silently dropped.
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"

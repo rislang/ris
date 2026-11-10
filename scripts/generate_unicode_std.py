@@ -466,7 +466,8 @@ def main() -> None:
     begin = module.index(BEGIN)
     end = module.index(END)
     generated = BEGIN + "\n" + "\n\n".join(sections) + "\n" + END
-    # The module's lines end in LF on every platform; a Windows text write would end them in CRLF.
+    # The module's lines end in LF on every platform; a Windows text write would
+    # end them in CRLF.
     MODULE.write_text(module[:begin] + generated + module[end + len(END):], encoding="utf-8", newline="\n")
     total = sum(len(section) for section in sections)
     print(f"wrote {len(sections) - 1} tables ({total} bytes) for Unicode {ucd} into {MODULE.relative_to(REPO)}")

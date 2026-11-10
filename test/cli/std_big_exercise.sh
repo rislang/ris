@@ -129,8 +129,9 @@ fi
 #                              half away from zero to 20 places, an exact
 #                              quotient with its trailing zeros dropped)
 #   oracle cmp:  A <=> B = R   BigDecimal three-way comparison
-#   oracle rat:  A op B = R    op in + - * / ** <=>  BigRational, fractions.Fraction
-#   oracle base: N digits = V  BigInt#to_s(N), checked with int(digits, N)
+#   oracle rat:  A op B = R    op in + - * / ** <=>  BigRational,
+#   fractions.Fraction oracle base: N digits = V  BigInt#to_s(N), checked with
+#   int(digits, N)
 
 echo
 echo "== decimal, rational and base arithmetic against python3"
@@ -145,7 +146,8 @@ if hasattr(sys, "set_int_max_str_digits"):
     sys.set_int_max_str_digits(0)
 
 def fmt(n, scale):
-    # std/big's BigDecimal#to_s: zero is "0"; a negative scale is multiplied out.
+    # std/big's BigDecimal#to_s: zero is "0"; a negative scale is multiplied
+    # out.
     if n == 0:
         return "0"
     if scale < 0:

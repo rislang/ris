@@ -173,6 +173,19 @@ Unknown must be refused (SPEC 3.6).
 
 ## 7. Benches
 
+* 36 check scripts nothing runs (not CI, not test/ris/check.sh, not another
+  script; gates_reachable.py lists them): wire each into CI or delete it.
+  test/cli: bounded_gate.sh, collections_exercise.sh, collector_free_floor.sh,
+  daemon_agrees.py, debug_info.py, enum_exercise.sh, float_text.sh,
+  format_exercise.sh, gates_reachable.py, generic_boundary.py, io_exercise.sh,
+  language_is_named.py, lsp_artifacts.py, lsp_positions.py,
+  lsp_token_boundaries.py, mod_context.sh, mod_diff.sh, number_exercise.sh,
+  packages_get.sh, parallel_exercise.sh, runtime_exercise.sh,
+  sandbox_story.sh, server_load.sh, socket_exercise.sh, tarball_std.sh,
+  test_verb.sh, value_exercise.sh, verbs_exercise.sh,
+  wasm_concurrency_probe.sh, windows_exercise.sh. test/speed: defer_cost.sh,
+  definition_typing_scale.py, measured_numbers.py, metric_port.sh,
+  rebuild_speed.py, tls_speed.sh.
 * test/cli/agent_loop.py fails at step 12 on main (2026-11-10) and no CI
   job runs it (gates_reachable counts it only through a spec comment):
   fix it and put it in .github/workflows/ris.yml. Its `check -f json`

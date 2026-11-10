@@ -670,7 +670,8 @@ prove_fails_host() {
   # live chunks corrupts the machinery `puts` needs, and the program dies
   # before any check can report. That is the break being caught, not missed,
   # so it counts only under conditions that cannot be satisfied by a working
-  # collector: the process failed, and it never reached the line that says it passed.
+  # collector: the process failed, and it never reached the line that says it
+  # passed.
   if [ "$exit_code" -ne 0 ] && ! grep -q "windows exercise: every check passed" "$WORK/$dir/out"; then
     printf '  %s: dies (exit %s) before it can report, and never passes\n' \
       "$label" "$exit_code"

@@ -126,8 +126,8 @@ COMPILER="$REPO/.build/iyi"
 # futex, rt_sigaction and mprotect are syscalls. `accept`, `bind`,
 # `connect`, `getsockname`, `listen`, `recv`, `send`, `setsockopt` and `socket`
 # joined with `IyiSocket` (samples/iyi/socket.iyi): on darwin libSystem is the
-# platform interface, while Linux issues raw socket syscalls and names none of them.
-# `sigaltstack` joined with the stack guard (concurrency.iyi, III.1.4): a
+# platform interface, while Linux issues raw socket syscalls and names none of
+# them. `sigaltstack` joined with the stack guard (concurrency.iyi, III.1.4): a
 # stack overflow is the program's own panic, said from a handler on an
 # alternate stack, and every darwin program installs one. Linux's is a
 # syscall.
@@ -292,11 +292,14 @@ ALLOWED_DLLS_COMPILER="$ALLOWED_DLLS_PROGRAM llvm-c.dll dbghelp.dll ntdll.dll ol
 
 # Crystal requires thirteen libraries:
 #   1. libc        platform runtime (permitted for programs and compiler)
-#   2. bdw-gc      garbage collector (compiler only, until self-hosting; forbidden for programs)
-#   3. LLVM        code generation back end (compiler only, toolchain requirement; forbidden for programs)
+#   2. bdw-gc      garbage collector (compiler only, until self-hosting;
+#      forbidden for programs)
+#   3. LLVM        code generation back end (compiler only, toolchain
+#      requirement; forbidden for programs)
 #   4. libevent    event loop (forbidden for both; in-tree event loop)
 #   5. compiler-rt runtime builtins (forbidden for both; ported in tree)
-#   6. pcre2       regular expressions (forbidden for both; owned Iyi::Rx engine)
+#   6. pcre2       regular expressions (forbidden for both; owned Iyi::Rx
+#      engine)
 #   7. gmp         arbitrary precision numbers (forbidden for both)
 #   8. iconv       character encoding (forbidden for both; UTF-8 only)
 #   9. openssl     TLS and cryptography (forbidden for both; digests in tree)
@@ -312,8 +315,8 @@ ALLOWED_DLLS_COMPILER="$ALLOWED_DLLS_PROGRAM llvm-c.dll dbghelp.dll ntdll.dll ol
 # Ancestor libraries forbidden for ALL binaries (programs and compiler alike):
 ANCESTOR_FORBIDDEN_ALL="libevent:libevent compiler-rt:libclang_rt compiler-rt:compiler_rt pcre2:libpcre gmp:libgmp gmp:mpir iconv:libiconv openssl:libssl openssl:libcrypto libxml2:libxml2 libyaml:libyaml zlib:libz\\. libffi:libffi"
 
-# Ancestor libraries permitted for the compiler only (with a recorded reason in iyi SPEC III.9),
-# but strictly forbidden for any program iyi builds:
+# Ancestor libraries permitted for the compiler only (with a recorded reason in
+# iyi SPEC III.9), but strictly forbidden for any program iyi builds:
 ANCESTOR_COMPILER_ONLY="bdw-gc:libgc LLVM:libLLVM"
 
 # The name a reader has to be given is not always the name `-o` was given:

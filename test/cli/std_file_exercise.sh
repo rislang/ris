@@ -135,9 +135,9 @@ fi
 echo
 echo "== proving the checks can fail when the module is broken"
 # The temporary name made predictable for the exercise's `plant` prefix -
-# all zeros, the name it plants a symlink at - is refused by the exclusive create a hundred times
-# and fails by name; with the create made the old test-then-write as well,
-# the upload goes through the symlink.
+# all zeros, the name it plants a symlink at - is refused by the exclusive
+# create a hundred times and fails by name; with the create made the old
+# test-then-write as well, the upload goes through the symlink.
 tempfile_broken() { # tempfile_broken <label> <dir> <phrase> <exclusive: yes|no>
   local label="$1" dir="$2" phrase="$3" exclusive="$4"
   if [ -z "$PY" ]; then
@@ -614,7 +614,8 @@ if [ "$(uname -s)" = Linux ]; then
 fi
 
 # The refusals above on a copy without the line that makes each: the
-# program answers. refusal_broken <label> <dir> <std|prelude> <old> <new> <expression>
+# program answers. refusal_broken <label> <dir> <std|prelude> <old> <new>
+# <expression>
 refusal_broken() {
   if [ -z "$PY" ]; then
     echo "  $1: no python3 on this machine, so the proof is unmeasured"

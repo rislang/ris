@@ -582,8 +582,8 @@ pub def facade_value : Int32
 end
 EOF
 # deep/core is reached through the facade's `pub import` and nothing of
-# main's own: an `import deep/core::*` would import it here, and then it would be
-# main's dependency and no re-export at all.
+# main's own: an `import deep/core::*` would import it here, and then it would
+# be main's dependency and no re-export at all.
 cat > main.iyi <<'EOF'
 import facade::{facade_value}
 

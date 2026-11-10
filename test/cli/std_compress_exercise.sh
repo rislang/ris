@@ -88,7 +88,8 @@ for name, data in corpora.items():
         open(os.path.join(out, f"{name}.{level}.raw"), "wb").write(deflate(data, level, -15))
         open(os.path.join(out, f"{name}.{level}.zlib"), "wb").write(deflate(data, level, 15))
         open(os.path.join(out, f"{name}.{level}.gzip"), "wb").write(deflate(data, level, 31))
-# FTEXT|FHCRC|FEXTRA|FNAME|FCOMMENT, a subfield, a name, a comment, and the header's own CRC-16.
+# FTEXT|FHCRC|FEXTRA|FNAME|FCOMMENT, a subfield, a name, a comment, and the
+# header's own CRC-16.
 header = bytes([0x1f, 0x8b, 8, 0x1f]) + struct.pack("<IBB", 0, 0, 255)
 extra = b"AB" + struct.pack("<H", 4) + b"wxyz"
 header += struct.pack("<H", len(extra)) + extra + b"a-name.txt\0" + b"a comment\0"

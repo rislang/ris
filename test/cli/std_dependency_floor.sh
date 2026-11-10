@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Fails when iyi's standard library grows a dependency.
 #
-# `test/cli/dependency_floor.sh` builds the samples and checks what they link. The
-# samples are not the surface a user imports: `src/std` is. This builds every
-# module in it, alone, and checks the binary that comes out.
+# `test/cli/dependency_floor.sh` builds the samples and checks what they link.
+# The samples are not the surface a user imports: `src/std` is. This builds
+# every module in it, alone, and checks the binary that comes out.
 #
 #     bash test/cli/std_dependency_floor.sh
 #

@@ -224,7 +224,8 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     (r"Crystal's", "a sentence about the other language"),
     # The Makefile's targets and the binaries they build. `make crystal` builds
     # the compatibility binary, `crystal-front` the front-end bench binary, and
-    # `crystal-daemon` the build daemon that binary execs. Those are their names.
+    # `crystal-daemon` the build daemon that binary execs. Those are their
+    # names.
     (r"crystal-front|crystal-daemon|IYI_DAEMON_BIN", "binaries named for the compatibility binary"),
     (r"^\.PHONY: crystal|^crystal[:-]|^all: crystal|^build: crystal|make clean crystal|install crystal", "Makefile targets building those binaries"),
     (r"share/crystal|doc/crystal|DATADIR\)/doc", "where Crystal's library and docs install"),

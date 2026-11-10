@@ -82,7 +82,8 @@ def generated_project_lines() -> int:
 # the namespace rename moved a dozen of Crystal's tool specs under
 # `test/compiler/iyi/`, and counting those claims Crystal's testing as iyi's.
 # `iyi_path_test.cr`, `iyi-daemon_test.cr` and `iyi/tools/unreachable_test.cr`
-# are the same trap wearing an iyi name: each is a Crystal spec that was renamed.
+# are the same trap wearing an iyi name: each is a Crystal spec that was
+# renamed.
 #
 # A missing file raises rather than counting short, because a rename that this
 # list does not follow would otherwise report a smaller number as though the

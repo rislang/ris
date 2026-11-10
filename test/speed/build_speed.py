@@ -90,9 +90,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 #
 # `bin/crystal` is development scaffolding: a POSIX-sh script that resolves
 # symlinks with recursive shell functions, shells out to `uname` and `readlink`,
-# warns which compiler it found, and then `exec`s this binary. It costs **30 ms**
-# — half of what the front end costs now — and no released compiler would ship
-# it. `go build` is timed as a bare binary, so timing iyi through a shell
+# warns which compiler it found, and then `exec`s this binary. It costs **30
+# ms** — half of what the front end costs now — and no released compiler would
+# ship it. `go build` is timed as a bare binary, so timing iyi through a shell
 # wrapper measures this repository's ergonomics against Go's compiler.
 #
 # It was worth timing while the front end cost 1.3 s and the wrapper was 2% of

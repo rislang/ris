@@ -297,7 +297,8 @@ def drive(oracle_bin, rounds):
                         plain = [] if aead == 0xFFFF else [(os.urandom(rnd.choice((0, 5, 30))), os.urandom(rnd.choice((0, 1, 16, 17, 1024, rnd.randrange(3000)))))
                                                           for _ in range(rnd.randrange(1, 5))]
                         msgs = ",".join(f"{a.hex()}.{p.hex()}" for a, p in plain) or "-"
-                        # The same ephemeral randomness at both ends: every byte the same.
+                        # The same ephemeral randomness at both ends: every byte
+                        # the same.
                         enc, _, ctx = setup_s(kem, kdf, aead, mode, keys["R"].pk, info, ikm["E"], psk, psk_id, sender)
                         mine = f"{enc.hex()} {ctx.export(context, length).hex()} " + (",".join(ctx.seal(a, p).hex() for a, p in plain) or "-")
                         sks = sender.sk.hex() if sender else "-"

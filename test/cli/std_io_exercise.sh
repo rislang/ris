@@ -178,7 +178,8 @@ done
 [ "$status" -eq 0 ] && echo "  memory, descriptor stream, byte format, sized/delimited, hexdump, multi writer and pipe all reported"
 
 # ---------------------------------------------------------------------------
-# Oracles: python3's struct for every encoding, python3's hexdump -C for every dump
+# Oracles: python3's struct for every encoding, python3's hexdump -C for every
+# dump
 # ---------------------------------------------------------------------------
 
 echo

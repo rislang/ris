@@ -7,8 +7,8 @@
 #   * Known-value table across calendar landmarks (Unix epoch, leap day, century
 #     leap and non-leap years, boundary years 0001 and 9999).
 #   * Gregorian leap-year rules and month lengths.
-#   * Bidirectional round-trip between civil date and Unix timestamp across 5,000+
-#     scattered days.
+#   * Bidirectional round-trip between civil date and Unix timestamp across
+#     5,000+ scattered days.
 #   * Platform wall clock and monotonic clock readings.
 #   * Span construction, accessors, operators (+, -, -@), and Time arithmetic.
 #   * ISO 8601 / RFC 3339 serialization (fraction digits 0, 3, 6, 9) and parsing
@@ -31,10 +31,11 @@
 #     `Time::Location` (a rule's weekday, the footer, the version 2 block,
 #     signed words, header counts, a repeated wall time, a shifted day, a
 #     Windows bias read unsigned), asserting each is caught.
-#   * Dependency floor: audits symbols and libraries to prove zero new dependencies.
+#   * Dependency floor: audits symbols and libraries to prove zero new
+#     dependencies.
 #
-# Needs `make` for bin/iyi, plus `nm`, and `otool` on Darwin or `readelf` on Linux.
-# Exits non-zero if any check fails.
+# Needs `make` for bin/iyi, plus `nm`, and `otool` on Darwin or `readelf` on
+# Linux. Exits non-zero if any check fails.
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"

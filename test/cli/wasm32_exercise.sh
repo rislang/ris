@@ -5,7 +5,8 @@
 #
 #   bash test/cli/wasm32_exercise.sh
 #
-# Needs `make iyi`, wasi-sdk clang, and wasmtime. Exits non-zero if any check fails.
+# Needs `make iyi`, wasi-sdk clang, and wasmtime. Exits non-zero if any check
+# fails.
 
 set -u
 
@@ -185,7 +186,8 @@ prove_fails "reclamation failure" no_reclaim "reclamation:" \
 prove_fails "stack root failure" no_stack "survival:" \
   '{ if ($0 ~ /scan_stack\(visit\)/) { sub(/scan_stack\(visit\)/, "# no-op") } print }'
 
-# 3. Break layout precision: disable layout_search so integer fields holding addresses are followed
+# 3. Break layout precision: disable layout_search so integer fields holding
+#    addresses are followed
 prove_fails "layout precision failure" no_precision "precision:" \
   '{ if ($0 ~ /entry = has_table && type_id != 0_u64/) { sub(/entry = has_table && type_id != 0_u64 \? layout_search\(table, entry_count, type_id\) : 0_u64/, "entry = 0_u64") } print }'
 

@@ -6,8 +6,8 @@
 # Proves the exercise holds plain and --release, that broken operations are
 # caught (toggle, word boundary crossing, unused bit masking, invert), and
 # what BitArray refuses: negative size, out-of-bounds index reads, out-of-bounds
-# index writes, out-of-bounds toggle, first/last of an empty array, and out-of-bounds
-# fill start - each a panic with the module's sentence.
+# index writes, out-of-bounds toggle, first/last of an empty array, and
+# out-of-bounds fill start - each a panic with the module's sentence.
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"

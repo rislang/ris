@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Runs the std modules' own exercises - every `test/cli/std_<module>_exercise.sh`
-# but `std_exercise.sh` itself - or one shard of them.
+# Runs the std modules' own exercises - every
+# `test/cli/std_<module>_exercise.sh` but `std_exercise.sh` itself - or one
+# shard of them.
 #
 #     bash test/cli/std_siblings.sh          # all of them
 #     bash test/cli/std_siblings.sh 2 4      # the second of four shards
-#     bash test/cli/std_siblings.sh --plan 4 # which shard each goes to; runs none
+#     bash test/cli/std_siblings.sh --plan 4 # which shard each goes to; runs
+#     none
 #
 # `test/cli/std_exercise.sh` runs all of them after its own sections; CI runs
 # the shards side by side, because one after another they outgrew the hour

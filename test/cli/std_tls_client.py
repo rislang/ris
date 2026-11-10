@@ -67,7 +67,8 @@ SIGALGS = (0x0807, 0x0403, 0x0503, 0x0804)
 # names: in TLS 1.2 a scheme names a hash, not a curve.
 PKCS1 = {0x0401: hashes.SHA256, 0x0501: hashes.SHA384, 0x0601: hashes.SHA512}
 ECDSA = {0x0403: hashes.SHA256, 0x0503: hashes.SHA384, 0x0603: hashes.SHA512}
-# TLS 1.2's six suites: name, signed by RSA, key bytes, ChaCha20, the PRF's hash.
+# TLS 1.2's six suites: name, signed by RSA, key bytes, ChaCha20, the PRF's
+# hash.
 SUITES12 = {
     0xc02b: ("TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", False, 16, False, "sha256"),
     0xc02f: ("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", True, 16, False, "sha256"),
@@ -401,7 +402,8 @@ class Client:
                 ticket = body[at + 2:at + 2 + length]
                 rest = body[at + 2 + length:]
                 assert 0 < lifetime <= 604800, f"a ticket lifetime of {lifetime} s"
-                # No extension, or early_data alone with its max_early_data_size.
+                # No extension, or early_data alone with its
+                # max_early_data_size.
                 assert ticket and len(ticket) == length and (rest == b"\x00\x00" or (len(rest) == 10 and rest[:6] == b"\x00\x08\x00\x2a\x00\x04")), \
                     f"a NewSessionTicket laid out wrong: {body.hex()}"
                 self.tickets.append((lifetime, age_add, nonce, ticket))

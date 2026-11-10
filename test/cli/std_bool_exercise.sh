@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Exercises `std/bool`: eager | & ^, to_unsafe, and a hash that tells true from false.
+# Exercises `std/bool`: eager | & ^, to_unsafe, and a hash that tells true from
+# false.
 #
 #     bash test/cli/std_bool_exercise.sh
 set -u

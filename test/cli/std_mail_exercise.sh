@@ -457,7 +457,8 @@ for i in range(300):
         want.append(f"?\t{value!r} with defects {h.defects}")
     else:
         want.append(",".join(hx(a.display_name) + "/" + hx(a.addr_spec) for a in h.addresses) + f"\tPython's headerregistry of {value!r}")
-# Unstructured values Python folds, read here; values folded here, read by Python.
+# Unstructured values Python folds, read here; values folded here, read by
+# Python.
 words = ["hello", "Grüße", "東京", "😀", "x" * 50, "a=?b", "  ", "\t", "naïve"]
 for i in range(300):
     v = "".join(rng.choice(words) + rng.choice([" ", "", "  "]) for _ in range(rng.randint(1, 30))).strip()

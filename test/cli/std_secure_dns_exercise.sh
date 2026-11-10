@@ -10,8 +10,8 @@
 # test/cli/std_secure_dns_exercise.iyi against them, plain and --release;
 # asks dig the same questions over the same servers (`+tls`, `+https`,
 # `+https-get`) - HTTPS records (RFC 9460) among them, which dig prints as
-# `SvcbRecord#to_s` does - and holds the two to the same answers, which is what shows
-# the scripted servers speak the protocols and not merely what the iyi
+# `SvcbRecord#to_s` does - and holds the two to the same answers, which is what
+# shows the scripted servers speak the protocols and not merely what the iyi
 # client expects; holds the servers' padding rule, which every DoT and DoH
 # query the iyi client sends must pass, to dig's `+padding`; and proves the
 # checks can fail - each proof builds the exercise against a copy of the

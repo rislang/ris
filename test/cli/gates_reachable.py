@@ -168,7 +168,7 @@ def main():
         print()
         print("A gate nothing runs passes on the machine that wrote it:")
         for name in unexplained:
-            print(f"    test/cli/{name}")
+            print(f"    {os.path.relpath(every[name], ROOT)}")
         print()
         print("Name it in a workflow job — the job whose platform the gate is")
         print("about — or, if it is a tool rather than a gate, add it to TOOLS")

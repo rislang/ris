@@ -45,11 +45,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 # The binary `make crystal` writes, which is the one the specs and the rest of
-# `test/cli/` time. This used to be `.build/crystal-release`, a copy taken by hand
-# after `make crystal release=1` — and a copy goes stale in silence. The one in
-# this tree was three weeks older than `src/iyi` and could not compile it at
-# all, so the probe timed a compiler error. Whether the binary is optimised is
-# read off its own version line below rather than assumed from a filename: a
+# `test/cli/` time. This used to be `.build/crystal-release`, a copy taken by
+# hand after `make crystal release=1` — and a copy goes stale in silence. The
+# one in this tree was three weeks older than `src/iyi` and could not compile it
+# at all, so the probe timed a compiler error. Whether the binary is optimised
+# is read off its own version line below rather than assumed from a filename: a
 # debug front end is about 1.5x, which is worth printing and not worth refusing
 # over, since this probe is read as a ratio against its own second run.
 CRYSTAL = ROOT / ".build" / "crystal"

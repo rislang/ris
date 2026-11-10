@@ -18,9 +18,9 @@
 # ClientHello offers 1.2 alone meets a real server's downgrade sentinel.
 # Then the server: its configurations judged, and the exercise
 # serving - on an Ed25519 key, a P-256 one, a P-384 one, a 2048-bit RSA
-# one (PKCS #8) and a 4096-bit RSA one (PKCS #1) - test/cli/std_tls_client.py, the scripted
-# client's every scenario, a handshake checked step by step or one rule
-# broken and the alert named; the std/tls client, Python's ssl, OpenSSL's
+# one (PKCS #8) and a 4096-bit RSA one (PKCS #1) - test/cli/std_tls_client.py,
+# the scripted client's every scenario, a handshake checked step by step or one
+# rule broken and the alert named; the std/tls client, Python's ssl, OpenSSL's
 # s_client (an RSA server held to the RSA-PSS scheme the client lists
 # first, and refusing a client that offers PKCS #1 v1.5 alone), curl and
 # Node; client certificates of each kind, RSA among them. X25519MLKEM768 is
@@ -541,9 +541,9 @@ echo "== TLS 1.2: the client against servers that speak nothing newer"
 # The client told to speak TLS 1.2 (`min_version = TlsVersion::TLS12`, the
 # exercise's TLS_MIN_VERSION=1.2), which it does only when told: the
 # scripted server's "tls12" scenario and the section above hold the default
-# to 1.3 alone. OpenSSL's s_server pinned to TLS 1.2 (-tls1_2), each of the six suites on
-# its certificate's kind; a ServerKeyExchange signed under PKCS #1 v1.5
-# and RSA-PSS, ECDSA under SHA-384, Ed25519; secp256r1 and secp384r1; a
+# to 1.3 alone. OpenSSL's s_server pinned to TLS 1.2 (-tls1_2), each of the six
+# suites on its certificate's kind; a ServerKeyExchange signed under PKCS #1
+# v1.5 and RSA-PSS, ECDSA under SHA-384, Ed25519; secp256r1 and secp384r1; a
 # P-384 certificate; ALPN; a server without the extended master secret
 # (-no_ems) refused by name, a P-521 certificate refused by the server
 # (the ClientHello names no P-521, RFC 8422 section 5.1.1), client
@@ -1267,7 +1267,8 @@ with ctx.wrap_socket(socket.create_connection(("127.0.0.1", int(sys.argv[1])), t
           ;;
         rsa*)
           # The scheme the client lists first, and never PKCS #1 v1.5. OpenSSL
-          # 3.2 on names the scheme (`Peer signature type: rsa_pss_rsae_sha256`);
+          # 3.2 on names the scheme (`Peer signature type:
+          # rsa_pss_rsae_sha256`);
           # 3.0, the Linux container's, names the type and the digest apart
           # (`RSA-PSS`, then `Peer signing digest: SHA256`), which say the same
           # of a certificate whose key is rsaEncryption.
@@ -1919,9 +1920,9 @@ stapling_round() {
       failed=1
     fi
   }
-  # staple_served <label> <dir> <want> <unwanted or -> <client: iyi [env] | s_client args...>:
-  # the server's directory copied to this round's own, where it writes its
-  # port, since broken copies run side by side.
+  # staple_served <label> <dir> <want> <unwanted or -> <client: iyi [env] |
+  # s_client args...>: the server's directory copied to this round's own, where
+  # it writes its port, since broken copies run side by side.
   staple_served() {
     local label="$1" from="$O/$2" dir="$CW/staple-$2" want="$3" unwanted="$4" out
     shift 4
@@ -2297,9 +2298,9 @@ echo "== proving the checks can fail when the module is broken"
 # on a copy of the module with <old> replaced, at the check that names
 # <phrase> - over the trace; against the scripted server (`scenarios`);
 # as a server, before the scripted client (`server`, on the Ed25519 key,
-# `server-p256`, `server-p384`, `server-rsa` on the 2048-bit RSA key, `server-mtls`,
-# asking for a client's certificate, or `server-mtls-optional`, asking
-# without requiring one; the client's report must name the scenario);
+# `server-p256`, `server-p384`, `server-rsa` on the 2048-bit RSA key,
+# `server-mtls`, asking for a client's certificate, or `server-mtls-optional`,
+# asking without requiring one; the client's report must name the scenario);
 # judging the server's configurations (`config`); the TLS 1.2 client
 # against OpenSSL, Python's ssl and the man in the middle (`client12`);
 # the server told to speak TLS 1.2 too, before the scripted client

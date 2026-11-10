@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Exercises `std/string_pool`: interned strings: the same bytes become one object.
+# Exercises `std/string_pool`: interned strings: the same bytes become one
+# object.
 #
 #     bash test/cli/std_string_pool_exercise.sh
 set -u

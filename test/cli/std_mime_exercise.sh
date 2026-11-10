@@ -146,7 +146,8 @@ echo "== the table against Python's mimetypes"
 #   .tgz  application/x-gtar-compressed  a tgz is a gzip stream; Go, nginx
 #                                        and browsers send application/gzip.
 #   .wav  audio/x-wav                    audio/wav is what browsers and Go
-#                                        send; x-wav is the pre-registration name.
+#                                        send; x-wav is the pre-registration
+#                                        name.
 #   .rs   application/rls-services+xml   RFC 4855's .rs is not Rust source,
 #                                        which is what a web server meets.
 #   .rss  application/x-rss+xml          application/rss+xml is what feeds
