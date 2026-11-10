@@ -3051,6 +3051,24 @@ else
   echo "FAILED   xpath: $out"; status=1
 fi
 
+# The checker's `evaluate` recurses once per nesting level. At the deepest
+# nesting the parser reads (126 under a def), nested ifs, calls and
+# operators must check in 3 MiB of stack: about 1.8 MiB today, 8 MiB by
+# default, so a frame that grows fails here, not in a random later change.
+for deep in "$(mktemp -d)"; do
+  python3 test/ris/checker_deep.py "$deep/deep.ri"
+  out=$(bash -c 'ulimit -s 3072; exec "$0" build --no-codegen "$1"' \
+    "$RIS" "$deep/deep.ri" 2>&1); code=$?
+  if [ "$code" -eq 0 ]; then
+    echo "checks   checker_deep (126 levels in 3 MiB of stack)"
+  else
+    echo "FAILED   checker_deep: needs more than 3 MiB of stack: $out" | head -c 2000
+    echo
+    status=1
+  fi
+  rm -rf "$deep"
+done
+
 # Run heap workloads after the other gates to avoid compiler contention.
 # Keep their fixed timeouts: a hung census must still fail.
 python3 test/ris/heap_check.py || status=1

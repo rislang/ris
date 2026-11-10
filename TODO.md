@@ -24,14 +24,12 @@ The items are below; this is only their order.
 3. SPEC 3.3 alias question (`clear` of an Array a local aliases),
    decided with EGM.
 4. test/ris/sse.ri, then HTTPClient's pooling.
-5. Tighten heap_trap.
-6. A gate on the checker `evaluate`'s stack use.
-7. Benches as one item.
-8. Speed.
-9. Language and runtime.
-10. std.
-11. macOS arm64.
-12. Known failures.
+5. Benches as one item.
+6. Speed.
+7. Language and runtime.
+8. std.
+9. macOS arm64.
+10. Known failures.
 
 Speed work stays out of minitest. The jq check at jqg.ri:424 is the
 maintainer's.
@@ -105,6 +103,11 @@ Checker holes (unknown must be refused, SPEC 3.6) and wrong refusals:
 * Call summaries model text a callee builds from its inputs
   (interpolation, inspect) as a view of them; tape_text now adds a
   fresh root for an allocating String call not known to answer a view.
+* The tape check takes exponential time in nested yield blocks: a def
+  nesting `wrap(text) do |text| ... end` (wrap yields its String) 8
+  deep spends 8.7 s in "Semantic (tape check)", 12 deep over 120 s.
+  checker_deep (check.sh) gates ifs, calls and operators only; add
+  blocks to it once a block's check no longer repeats per level.
 
 ## SPEC 3.3 alias question
 
@@ -141,11 +144,6 @@ Decide with EGM, then gate:
   HttpsEndpoint takes views: build them into caller-owned storage.
   Unknown what follows; the HTTPS-records path never compiled behind a
   client before.
-
-## Checker evaluate stack
-
-The checker's `evaluate` uses a lot of stack: small changes must not
-decide whether it fits. Add a gate on its stack use.
 
 ## Benches
 
