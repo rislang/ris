@@ -40,6 +40,20 @@ maintainer's.
 
 Each obstacle a program under ~/contribute/rispacks hits, with a repro.
 
+* Checking time doubles per nested block: `loop_value` settles a
+  block's body, then runs two final rounds (round 2 sees round 1's
+  clears), each re-running every inner block in full, so the cost is
+  at least 2^depth (4^depth with the settling rounds). web's
+  examples/testing_test.ri (blocks ~10 deep) checks for 20 min and
+  web/static_test.ri for 11 min (debug compiler). Repro: `step(0) do
+  |v0|; names << x; step(v0) do |v1| ...` nested 10 deep, with
+  `def step(n, & : Int32 -> Nil); yield n + 1; nil; end`: 0.6 s at
+  depth 2, 1.6 s at 8, 7.4 s at 10 (`build --no-codegen`). Caching the
+  settled head per body and entry within one outer loop only removes
+  the settling rounds' share. Replay an inner loop's recorded events
+  per entry instead of re-evaluating it; gate: depth 16 checks in a
+  few seconds.
+
 ## Checker errors
 
 Code to the new SPEC (1.1, 1.5, 1.9, 2.1, 3.2, 3.3, 3.5, 3.6); breakage
