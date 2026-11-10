@@ -32,6 +32,8 @@ sections below and are listed here in order:
   from `def call(req) : Response` to `call(req : Incoming, res :
   Outgoing) : Nil` (HTTP.answer, src/std/http.iyi:2384). The old form
   stays refused; no adapter (decided 2026-11-10).
+  Blocked: Server.answer has no TLS, HTTP/2, compress, upgrade or
+  streaming, which 10 of the 13 files use (tls_config, h2, SSE, WS).
 
 * The user's own ris programs: each obstacle becomes an item here.
 
@@ -175,8 +177,10 @@ Unknown must be refused (SPEC 3.6).
   step 5). Known before the new rules: 5.1 task captures (tls server
   configs, udp:274, dns:951, http.iyi:2154 serve's `handle`, sse.iyi:513
   and :543, std_compress's opaque source proc); drop std/gc imports
-  from its importers and server_load. HTTP.tls_config= is removed but
-  still called by acme, http2_exercise and std_http_exercise.sh.
+  from its importers and server_load. 2026-11-10: 40 of 139 benches
+  pass --no-codegen; the most common first refusals are a block's or
+  round's data stored past it (18), TlsServerConfig.from_pem (6), then
+  API drift (Upgraded, TlsClient.over, Resolver, Zip, Mail, SMTP).
 
 ## 8. Speed
 
