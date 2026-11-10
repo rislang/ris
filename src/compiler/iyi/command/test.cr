@@ -42,11 +42,18 @@ class Iyi::Command
     timeout = 60.0
     paths = [] of String
     affected = [] of String
+    jobs = test_default_jobs
 
     while option = options.shift?
       case option
       when "--json"
         as_json = true
+      when "-j", "--jobs"
+        value = options.shift?
+        jobs = value.try(&.to_i?) || 0
+        unless jobs > 0
+          abort! "-j takes a number of tests to run at once, not '#{value}'", :USAGE_ERROR
+        end
       when "--timeout"
         value = options.shift?
         abort! "--timeout takes seconds", :USAGE_ERROR unless value
@@ -175,7 +182,7 @@ class Iyi::Command
       exit
     end
 
-    results = files.map { |file| run_one_test(file, timeout) }
+    results = run_tests(files, timeout, jobs)
     failed = results.count { |result| result[:status] != "pass" }
 
     if as_json
@@ -316,6 +323,39 @@ class Iyi::Command
     File.dirname(path)
   end
 
+  # ris: `RIS_JOBS`, else the CPU count: how many tests build and run at once.
+  private def test_default_jobs : Int32
+    if env = ENV["RIS_JOBS"]?.presence
+      value = env.to_i?
+      return value if value && value > 0
+      abort! "RIS_JOBS takes a number of tests to run at once, not '#{env}'", :USAGE_ERROR
+    end
+    Math.max(System.cpu_count.to_i, 1)
+  end
+
+  # ris: up to *jobs* tests at once, each built and run in its own process;
+  # the results come back in *files*' order, so the report does not depend
+  # on which test ended first.
+  private def run_tests(files : Array(String), deadline : Float64, jobs : Int32)
+    return files.map { |file| run_one_test(file, deadline) } if jobs <= 1 || files.size <= 1
+    results = Array({file: String, status: String, seconds: Float64, output: String}?).new(files.size, nil)
+    next_index = 0
+    finished = ::Channel(Nil).new
+    workers = Math.min(jobs, files.size)
+    workers.times do
+      spawn do
+        while next_index < files.size
+          index = next_index
+          next_index += 1
+          results[index] = run_one_test(files[index], deadline)
+        end
+        finished.send(nil)
+      end
+    end
+    workers.times { finished.receive }
+    results.map(&.not_nil!)
+  end
+
   private def run_one_test(file : String, deadline : Float64) : {file: String, status: String, seconds: Float64, output: String}
     started = Time.instant
     output = IO::Memory.new
@@ -433,7 +473,7 @@ class Iyi::Command
 
   private def test_usage
     <<-USAGE
-    Usage: #{Command.program_name} test [--json] [--timeout SECONDS] [--affected FILE]... [paths]
+    Usage: #{Command.program_name} test [--json] [-j N] [--timeout SECONDS] [--affected FILE]... [paths]
 
     Runs every `*_test.ri` and `*_test.iyi` under the given paths (default:
     `.`). A test is a plain program: exit 0 is a pass, anything else is a
@@ -444,6 +484,10 @@ class Iyi::Command
     The closure is read by parsing, so selection costs milliseconds; a
     deleted file turns the discount off, because nothing can prove the
     tests that imported it unaffected.
+
+    `-j N` builds and runs up to N tests at once (default: `RIS_JOBS`, else
+    the CPU count; `-j 1` runs them one by one). The report keeps the file
+    order whatever finishes first.
     USAGE
   end
 end

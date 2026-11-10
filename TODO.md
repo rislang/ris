@@ -176,6 +176,9 @@ Unknown must be refused (SPEC 3.6).
 * bench/agent_loop.py fails at step 12 on main (2026-11-10) and no CI
   job runs it (gates_reachable counts it only through a spec comment):
   fix it and put it in .github/workflows/ris.yml.
+* bench/test_verb.sh fails on main (2026-11-10) at "the discount says
+  when it turns itself off": the eiy macro gets the file name
+  `::String.view(::String.view("page.eiy"))` and panics `cannot read`.
 
 * Build each bench, group the refusals by message, fix per group (old
   step 5). Known before the new rules: 5.1 task captures (tls server

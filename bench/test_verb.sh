@@ -255,6 +255,54 @@ TMPDIR="$scratch" TMP="$scratch" TEMP="$scratch" "$IYI" test math_test.iyi > tmp
 left="$(ls -A "$scratch")"
 [ -z "$left" ] || { echo "a test left behind:"; echo "$left"; exit 1; }
 
+step "-j 4 gives the verdicts and order of -j 1"
+mkdir -p par && (
+  cd par || exit 1
+  printf '__iyi_exit(0)\n' > a_pass_test.iyi
+  printf 'puts "b failed"\n__iyi_exit(1)\n' > b_fail_test.iyi
+  printf 'this does not build (\n' > c_nobuild_test.iyi
+  printf 'while true\n  sleep 100\nend\n' > d_hang_test.iyi
+  printf '__iyi_exit(0)\n' > e_pass_test.iyi
+)
+"$IYI" test --timeout 3 -j 1 par > j1.txt 2>&1; j1=$?
+"$IYI" test --timeout 3 -j 4 par > j4.txt 2>&1; j4=$?
+[ "$j1" -eq 1 ] && [ "$j4" -eq 1 ] ||
+  { echo "exit codes -j1=$j1 -j4=$j4"; cat j1.txt j4.txt; exit 1; }
+diff <(grep -v 'passed,' j1.txt) <(grep -v 'passed,' j4.txt) ||
+  { echo "-j 4 differs from -j 1"; exit 1; }
+grep -q '2 passed, 3 failed' j4.txt ||
+  { echo "wrong tally:"; cat j4.txt; exit 1; }
+order="$(grep -o '[a-e]_[a-z]*_test.iyi: [a-z ]*' j4.txt | cut -c1 | tr -d '\n')"
+[ "$order" = "bcd" ] || { echo "order $order, want bcd:"; cat j4.txt; exit 1; }
+"$IYI" test --timeout 3 -j 4 --json par > j4.json 2>&1
+python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+s=[t["status"].split(":")[0] for t in d["tests"]]
+assert s==["pass","fail","does not build","hung","pass"], s
+' j4.json || { cat j4.json; exit 1; }
+
+step "RIS_JOBS sets the default, and a bad value is refused"
+RIS_JOBS=2 "$IYI" test --timeout 3 par > env.txt 2>&1
+diff <(grep -v 'passed,' j1.txt) <(grep -v 'passed,' env.txt) ||
+  { echo "RIS_JOBS=2 differs"; exit 1; }
+RIS_JOBS=zero "$IYI" test par > envbad.txt 2>&1
+grep -q 'RIS_JOBS takes a number' envbad.txt ||
+  { echo "RIS_JOBS=zero not refused:"; cat envbad.txt; exit 1; }
+
+step "8 small tests: -j 1 vs -j 8 (timed, never fails)"
+mkdir -p eight
+for i in 1 2 3 4 5 6 7 8; do
+  printf '__iyi_exit(0)\n' > "eight/t${i}_test.iyi"
+done
+t0=$(date +%s.%N)
+"$IYI" test -j 1 eight > e1.txt 2>&1 || { cat e1.txt; exit 1; }
+t1=$(date +%s.%N)
+"$IYI" test -j 8 eight > e8.txt 2>&1 || { cat e8.txt; exit 1; }
+t2=$(date +%s.%N)
+awk -v a="$t0" -v b="$t1" -v c="$t2" \
+  'BEGIN { printf "timing: 8 tests -j 1 %.2fs, -j 8 %.2fs\n", b-a, c-b }'
+
 echo "workdir $WORK"
 echo "test verb gate: every step held"
 exit 0

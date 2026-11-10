@@ -99,6 +99,9 @@ Needs Crystal and LLVM 23. In the clone: `make ris`, then
   --check`, `check`, `vet` and `test`, stops at the first failure with a
   `next:` line naming the fix, and exits 0 only when all pass. `--json`
   gives the verdict as data; `--affected FILE` narrows check and test.
+  check, vet and test run at once; `ris test` and `ris ok` run up to
+  `-j N` tests at once (default `RIS_JOBS`, else the CPU count), and
+  report in file and step order as if run one by one.
 * `ris doc MODULE` prints a module's exported surface: read that, not its
   body. `ris mcp` serves check, fix, context, test and ok as MCP
   tools.

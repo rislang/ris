@@ -25,6 +25,9 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
 * `ris ok`: fmt, mod tidy, check, vet and test in one verdict; exit 0
   means the work is done, `next:` names the fix. Also an MCP tool, and
   `ris init` writes an AGENTS.md that says so.
+* `ris test -j N` and `ris ok -j N` use the machine's cores (default
+  `RIS_JOBS`, else the CPU count); `ris ok` runs check, vet and test at
+  once. Output keeps file and step order.
 * Runs on Linux x86_64 and aarch64, and macOS arm64 (built from source).
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.

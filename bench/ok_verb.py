@@ -6,7 +6,9 @@
 Asserts that a fresh `ris init` project passes with exit 0, that a
 misformatted file stops the run at fmt with `next: ris fmt`, that a
 failing *_test.ri fails at test with exit 1, that `--json` parses into
-the same verdict, that `ris mcp` lists `ok`, and that `ris init` writes
+the same verdict, that -j 4 and -j 1 pass several tests with the
+steps in fixed order, that a check error beats a failing test (first in
+order wins), that `ris mcp` lists `ok`, and that `ris init` writes
 an AGENTS.md and keeps one that is already there.
 """
 
@@ -82,6 +84,38 @@ def main():
          proc.returncode == 0
          and open(os.path.join(keep, "AGENTS.md")).read() == "ours\n",
          proc.stdout + proc.stderr)
+
+    par = tempfile.mkdtemp(prefix="ris-okj")
+    run("init", "par", cwd=par)
+    for i in range(4):
+        with open(os.path.join(par, f"t{i}_test.ri"), "w") as f:
+            f.write("assert 1 == 1, \"fine\"\n")
+    for jobs in ("4", "1"):
+        proc = run("ok", "-j", jobs, cwd=par)
+        step(f"ok -j {jobs} passes a project with several tests",
+             proc.returncode == 0 and "test   ok" in proc.stdout,
+             proc.stdout + proc.stderr)
+    order = [line.split()[0] for line in proc.stdout.splitlines() if line]
+    step("ok prints its steps in fixed order",
+         order == ["fmt", "tidy", "check", "vet", "test"], proc.stdout)
+    with open(os.path.join(par, "t9_test.ri"), "w") as f:
+        f.write("assert 1 == 2, \"nope\"\n")
+    with open(os.path.join(par, "par.ri"), "a") as f:
+        f.write("undefined_thing_here\n")
+    proc = run("ok", "-j", "4", cwd=par)
+    step("a check error and a failing test: check is the failure",
+         proc.returncode == 1 and "check  FAIL" in proc.stdout
+         and [ln.split()[0] for ln in proc.stdout.splitlines()[:3]]
+         == ["fmt", "tidy", "check"]
+         and "vet " not in proc.stdout and "test " not in proc.stdout
+         and "next: ris fix" in proc.stdout,
+         proc.stdout)
+    proc = run("ok", "--json", cwd=par)
+    verdict = json.loads(proc.stdout or "{}")
+    step("ok --json names check as failed",
+         verdict.get("failed") == "check"
+         and [s["name"] for s in verdict["steps"]]
+         == ["fmt", "tidy", "check"], proc.stdout)
 
     lines = "\n".join([
         json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
