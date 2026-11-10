@@ -1373,6 +1373,17 @@ if [ "$out" = "$want" ]; then
 else
   echo "FAILED   websocket_handshake: $out"; status=1
 fi
+# HTTP.open and HTTP.open_into over loopback; open's error is a copy.
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/http_open.ri 2>&1)
+want='/one 211
+/two 200
+refused true
+ris heap: 0 allocations, 0 bytes'
+if [ "$out" = "$want" ]; then
+  echo 'runs     http_open'
+else
+  echo "FAILED   http_open: $out"; status=1
+fi
 # std/http client: coded answers decoded through BodyFeed, an io Reader.
 out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/http_coding.ri 2>&1)
 want='/gzip 200 87000 coded body, line after line.  true

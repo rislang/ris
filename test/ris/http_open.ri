@@ -1,0 +1,55 @@
+module test/http_open
+
+import std/socket::{IyiSocket, SocketError}
+import std/http::{Server, Request, Response, HTTP, HTTPError, RisHttpClientExchange}
+
+# HTTP.open over loopback: its exchange lives in open's own scope, and an
+# error it answers is a copy the caller can read. HTTP.open_into reads
+# over an exchange the caller keeps.
+
+struct Listening
+end
+
+struct Answer
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Listening.new)
+  end
+
+  def call(req : Request) : Response
+    Response.new(200, "answer " + req.path)
+  end
+end
+
+def status_of(state : RisHttpClientExchange, port : Int32, path : String) : Int32
+  got = HTTP.open_into(state, "GET", "http://127.0.0.1:#{port}#{path}") do |response|
+    response.status
+  end
+  got.is_a?(Int32) ? got : -1
+end
+
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
+closed = IyiSocket.listen(0)
+gone = closed.local_port
+closed.close
+group do |g|
+  g.spawn do
+    Server.serve("127.0.0.1", port, 0, Answer, max_connections: 2)
+    0
+  end
+  RisBoard.take(Listening).or_panic
+  got = HTTP.open("GET", "http://127.0.0.1:#{port}/one") do |response|
+    loaded = response.load
+    loaded.is_a?(Response) ? loaded.body.bytesize + loaded.status : -1
+  end
+  puts got.is_a?(Int32) ? "/one #{got}" : "open failed"
+  state = RisHttpClientExchange.new(Response.new(0))
+  puts "/two #{status_of(state, port, "/two")}"
+  failed = HTTP.open("GET", "http://127.0.0.1:#{gone}/") { |response| response.status }
+  puts failed.is_a?(SocketError) ? "refused #{failed.message.bytesize > 0}" : "no error"
+  g.cancel_children
+end
