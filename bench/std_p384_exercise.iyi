@@ -29,6 +29,7 @@
 import std/p384::{P384PrivateKey}
 import std/ecdsa::{EcdsaHash, EcdsaError, EcdsaPublicKey}
 import std/file::{File}
+import std/tuple
 
 def check(cond : Bool, label : String) : Nil
   raise "ASSERTION FAILED: #{label}" unless cond
@@ -46,9 +47,9 @@ def b(hex : String) : Array(UInt8)
 end
 
 def hex(bytes : Array(UInt8)) : String
-  begin; io = ""; bytes.each { |x| io << "0123456789abcdef"[x.to_i32 >> 4] << "0123456789abcdef"[x.to_i32 & 15] }
+  io = ""
+  bytes.each { |x| io << "0123456789abcdef"[x.to_i32 >> 4, 1] << "0123456789abcdef"[x.to_i32 & 15, 1] }
   io
-  end
 end
 
 def hash_named(name : String) : EcdsaHash
@@ -70,11 +71,11 @@ def refused_point(answer : Array(UInt8) | EcdsaError, phrase : String, label : S
 end
 
 # The nanoseconds *work* took, the median of *runs* runs of it.
-def median_ns(runs : Int32, &work : -> Nil) : Int64
+def median_ns(runs : Int32, &) : Int64
   took = [] of Int64
   runs.times do
     started = __iyi_monotonic_ns
-    work.call
+    yield
     took << __iyi_monotonic_ns - started
   end
   took.sorted[runs // 2]
@@ -254,7 +255,7 @@ if args.size > 0 && args[0] == "time"
   peer = b("04" + CAVP_CDH[0].split(' ')[3] + CAVP_CDH[0].split(' ')[4])
   runs = args.size > 1 ? args[1].to_i : 101
   puts "keygen #{median_ns(runs) { P384PrivateKey.from_bytes(d).or_panic; nil }}"
-  [{"rfc", rfc}, {"one", one}, {"last", last}].each do |entry|
+  { {"rfc", rfc}, {"one", one}, {"last", last} }.each do |entry|
     name, key = entry
     puts "ecdh-#{name} #{median_ns(runs) { key.shared_secret(peer).or_panic; nil }}"
     puts "sign-#{name} #{median_ns(runs) { key.sign(EcdsaHash::SHA384, "sample"); nil }}"
@@ -270,15 +271,15 @@ check key.public_key.x.to_s(16) == "ec3a4e415b4e19a4568618029f427fa5da9a8bc4ae92
 # The DER of each of the RFC's (r, s), written from its r and s. SHA-256
 # first: its digest is 256 bits, so the nonce takes two HMAC blocks to
 # reach P-384's 384.
-RFC6979 = [
+rfc6979 = {
   {"sample", EcdsaHash::SHA256, "SHA-256", "3065023021b13d1e013c7fa1392d03c5f99af8b30c570c6f98d4ea8e354b63a21d3daa33bde1e888e63355d92fa2b3c36d8fb2cd023100f3aa443fb107745bf4bd77cb3891674632068a10ca67e3d45db2266fa7d1feebefdc63eccd1ac42ec0cb8668a4fa0ab0"},
   {"test", EcdsaHash::SHA256, "SHA-256", "306402306d6defac9ab64dabafe36c6bf510352a4cc27001263638e5b16d9bb51d451559f918eedaf2293be5b475cc8f0188636b02302d46f3becbcc523d5f1a1256bf0c9b024d879ba9e838144c8ba6baeb4b53b47d51ab373f9845c0514eefb14024787265"},
   {"sample", EcdsaHash::SHA384, "SHA-384", "306602310094edbb92a5ecb8aad4736e56c691916b3f88140666ce9fa73d64c4ea95ad133c81a648152e44acf96e36dd1e80fabe4602310099ef4aeb15f178cea1fe40db2603138f130e740a19624526203b6351d0a3a94fa329c145786e679e7b82c71a38628ac8"},
   {"test", EcdsaHash::SHA384, "SHA-384", "30660231008203b63d3c853e8d77227fb377bcf7b7b772e97892a80f36ab775d509d7a5feb0542a7f0812998da8f1dd3ca3cf023db023100ddd0760448d42d8a43af45af836fce4de8be06b485e9b61b827c2f13173923e06a739f040649a667bf3b828246baa5a5"},
   {"sample", EcdsaHash::SHA512, "SHA-512", "3065023100ed0959d5880ab2d869ae7f6c2915c6d60f96507f9cb3e047c0046861da4a799cfe30f35cc900056d7c99cd78824337090230512c8cceee3890a84058ce1e22dbc2198f42323ce8aca9135329f03c068e5112dc7cc3ef3446defceb01a45c2667fdd5"},
   {"test", EcdsaHash::SHA512, "SHA-512", "3066023100a0d5d090c9980faf3c2ce57b7ae951d31977dd11c775d314af55f76c676447d06fb6495cd21b4b6e340fc236584fb277023100976984e59b4c77b0e8e4460dca3d9f20e07b9bb1f63beefaf576f6b2e8b224634a2092cd3792e0159ad9cee37659c736"},
-]
-RFC6979.each do |entry|
+}
+rfc6979.each do |entry|
   message, hash, name, want = entry
   signature = key.sign(hash, message)
   check hex(signature) == want, "the signature of #{message.inspect} under #{name}: #{hex(signature)}"
@@ -294,7 +295,7 @@ check hex(one.public_point)[98, 96] == "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd
 last = P384PrivateKey.from_bytes(b("ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52972")).or_panic
 check hex(last.public_point)[2, 96] == "aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7", "d = n - 1: -G's x"
 check hex(last.public_point)[98, 96] == "c9e821b569d9d390a26167406d6d23d6070be242d765eb831625ceec4a0f473ef59f4e30e2817e6285bce2846f15f1a0", "d = n - 1: -G's y, p - G's"
-[one, last].each_with_index do |k, i|
+{one, last}.each_with_index do |k, i|
   [EcdsaHash::SHA256, EcdsaHash::SHA384, EcdsaHash::SHA512].each do |hash|
     signature = k.sign(hash, "edge #{i}")
     check k.public_key.verify(hash, "edge #{i}", signature), "the edge key #{i} signs under #{hash} what std/ecdsa takes"
@@ -364,8 +365,8 @@ CAVP_KEY_PAIRS.each_with_index do |line, i|
 end
 cavp = P384PrivateKey.from_bytes(b(CAVP_CDH[0].split(' ')[0])).or_panic
 cavs_point = b("04" + CAVP_CDH[0].split(' ')[3] + CAVP_CDH[0].split(' ')[4])
-[one, last, key, cavp].each_with_index do |a, i|
-  [one, last, key, cavp].each_with_index do |c, j|
+{one, last, key, cavp}.each_with_index do |a, i|
+  {one, last, key, cavp}.each_with_index do |c, j|
     check a.shared_secret(c.public_point).or_panic == c.shared_secret(a.public_point).or_panic, "keys #{i} and #{j} agree"
   end
 end
