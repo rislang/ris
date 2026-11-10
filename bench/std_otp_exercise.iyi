@@ -7,6 +7,7 @@ module bench/std_otp_exercise
 
 import std/otp::{HOTP, TOTP, OTPAuth, OTPAlgorithm, OTPError}
 import std/time::{Time}
+import std/tuple
 
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -113,7 +114,7 @@ counted = OTPAuth.hotp(sha1_seed, "bob", 42_i64, "", OTPAlgorithm::SHA256)
 assert_str "otpauth://hotp/bob?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&counter=42&algorithm=SHA256", counted.to_s, "an HOTP URI with no issuer"
 assert_str "otpauth://totp/%C3%9Cber%20AG:z%C3%BCrich?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=%C3%9Cber%20AG", OTPAuth.totp(sha1_seed, "zürich", "Über AG").to_s, "UTF-8 escaped byte by byte"
 
-[built, full, counted].each do |auth|
+{built, full, counted}.each do |auth|
   back = OTPAuth.parse(auth.to_s)
   raise "ASSERTION FAILED: #{auth.to_s} parsed back: #{back.message}" if back.is_a?(OTPError)
   assert_str auth.to_s, back.to_s, "parsed back and written again"

@@ -8,6 +8,7 @@
 module bench/std_idna_exercise
 
 import std/idna::{Punycode, PunycodeError, IDNA, IdnaError, IdnaProperty}
+import std/tuple
 
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
@@ -74,7 +75,7 @@ end
 
 puts "== punycode rfc 3492 samples"
 # Section 7.1, every sample, the code points as the RFC lists them.
-SAMPLES = [
+samples = {
   {"A", [0x0644, 0x064A, 0x0647, 0x0645, 0x0627, 0x0628, 0x062A, 0x0643, 0x0644, 0x0645, 0x0648, 0x0634, 0x0639, 0x0631, 0x0628, 0x064A, 0x061F], "egbpdaj6bu4bxfgehfvwxn"},
   {"B", [0x4ED6, 0x4EEC, 0x4E3A, 0x4EC0, 0x4E48, 0x4E0D, 0x8BF4, 0x4E2D, 0x6587], "ihqwcrb4cv8a8dqg056pqjye"},
   {"C", [0x4ED6, 0x5011, 0x7232, 0x4EC0, 0x9EBD, 0x4E0D, 0x8AAA, 0x4E2D, 0x6587], "ihqwctvzc91f659drss3x8bo0yb"},
@@ -94,8 +95,8 @@ SAMPLES = [
   {"Q", [0x30D1, 0x30D5, 0x30A3, 0x30FC, 0x0064, 0x0065, 0x30EB, 0x30F3, 0x30D0], "de-jg4avhby1noc0d"},
   {"R", [0x305D, 0x306E, 0x30B9, 0x30D4, 0x30FC, 0x30C9, 0x3067], "d9juau41awczczp"},
   {"S", [0x002D, 0x003E, 0x0020, 0x0024, 0x0031, 0x002E, 0x0030, 0x0030, 0x0020, 0x003C, 0x002D], "-> $1.00 <--"},
-]
-SAMPLES.each do |sample|
+}
+samples.each do |sample|
   text = text_of(sample[1])
   assert_str flags_dropped(sample[2]), Punycode.encode(text), "rfc 3492 sample #{sample[0]} encodes"
   assert_str text, decoded(sample[2], "rfc 3492 sample #{sample[0]} decodes"), "rfc 3492 sample #{sample[0]} decodes"
@@ -105,7 +106,7 @@ assert_str "abc-", Punycode.encode("abc"), "an all-basic string ends with its de
 assert_str "", Punycode.encode(""), "the empty string encodes to nothing"
 assert_str "", decoded("", "nothing decodes"), "nothing decodes to the empty string"
 assert_str "bücher", decoded("bcher-KVA", "digits in either case"), "digits are read in either case"
-puts "  section 7.1's #{SAMPLES.size} samples encode and decode; digits in either case"
+puts "  section 7.1's #{samples.size} samples encode and decode; digits in either case"
 
 puts "\n== punycode refusals"
 refused Punycode.decode("bücher"), "Punycode: byte 1 is 0xC3, which is not ASCII", "a byte that is not ASCII"

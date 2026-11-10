@@ -24,6 +24,7 @@ import std/static_array
 import std/time::{Time}
 import std/file::{File}
 import std/curve25519::{Ed25519, Ed25519PublicKey, CurveError}
+import std/tuple
 
 # A PEM text's certificates, kept in *store*; a text that does not read
 # panics with the reason.
@@ -66,11 +67,6 @@ end
 
 NOW = Time.utc(2026, 6, 1)
 
-# The leaf of the scenario named *what*.
-def leaf_of(what : String) : Certificate
-  SCENARIOS.each { |s| return cert(CERTS[s[1]]) if s[0] == what }
-  raise "no scenario #{what}"
-end
 
 CERTS = [
   "308201a030820145a00302010202147e6cb33e09a4c12a0a685c1ce2404accba4a4fca300a06082a8648ce3d04030230123110300e06035504030c07496e7465722041301e170d3236303530323030303030305a170d3237303332383030303030305a300f310d300b06035504030c046c6561663059301306072a8648ce3d020106082a8648ce3d030107034200044aef5c1fad4a5e950eee58f92304b0cfcc969751f4bb3aed88d63c0ab7b198a5afd73211241fb991748dab1b3f12e937ff8d1712f29acf4e5704d27fdea91e71a37c307a300c0603551d130101ff04023000300e0603551d0f0101ff040403020780301a0603551d1104133011820f7777772e6578616d706c652e636f6d301d0603551d0e04160414cada5c21fb95d15e4b471d0d7cfd2feab6c01358301f0603551d230418301680148f7019e8331eed7667b3493c4fd11feb616b46f8300a06082a8648ce3d0403020349003046022100c8db1643e4e4a593ce73f3af5eeeed6fe486a751a30416c02633adf376d2a692022100c7d079cce44740a3d8d57c053859272172def9d01c6de664ec3b782cfffc9f82",
@@ -148,63 +144,64 @@ CERTS = [
   "308201e23082014ba00302010202140df0511cce7cc690d9378d935c8c89dd134dd739300d06092a864886f70d01010b050030153113301106035504030c0a496e746572205765616b301e170d3236303530323030303030305a170d3237303332383030303030305a300f310d300b06035504030c046c6561663059301306072a8648ce3d020106082a8648ce3d0301070342000415011f75f67bcfe21b72db6401c3744b80dd587c0e2ded866ee148f810259c792ffd71bb76dca79ed37fa5edadd6a3f1b749725d7fbaa5620650b443ad497d87a37c307a300c0603551d130101ff04023000300e0603551d0f0101ff040403020780301d0603551d0e04160414ee5a0b62cd47c7b0b19c92fcd30a6229e26cb86a301f0603551d2304183016801494e07e309d3b7a305a85778e154a9b8689fdf19f301a0603551d1104133011820f7777772e6578616d706c652e636f6d300d06092a864886f70d01010b050003818100170f1b17efa050c03a0c6d82b2d63e49f11cc3565b477cf0edee4a1871c9279896fc6beff46daff366437d706e75fdc6541e78b34ceb4c0a0a29c4eb6b6f99846822b57a65a2f0f38cb34e385c974255e6cf424114fdbe87b9236683459e6e4613bb5616566d086646737774a49eb183369ec5c619eda8f6032897143e75b4e7",
 ]
 
-# what, leaf, intermediates, roots, host, verdict, the refusal's phrase
-SCENARIOS = [
-  {"an EC chain through one intermediate", 0, [1], [2], "www.example.com", true, ""},
-  {"an RSA root and intermediate over an EC leaf", 3, [4], [5], "www.example.com", true, ""},
-  {"an intermediate signed with RSASSA-PSS", 6, [7], [5], "www.example.com", true, ""},
-  {"a leaf straight under the root", 8, [] of Int32, [2], "www.example.com", true, ""},
-  {"SHA-384 and SHA-512 signatures", 9, [10], [2], "www.example.com", true, ""},
-  {"another host", 0, [1], [2], "mail.example.com", false, "is not valid for mail.example.com"},
-  {"a wildcard for one label", 11, [1], [2], "a.example.com", true, ""},
-  {"a wildcard for the name it stands under", 11, [1], [2], "example.com", false, "is not valid for"},
-  {"a wildcard for two labels", 11, [1], [2], "a.b.example.com", false, "is not valid for"},
-  {"a host in capitals", 12, [1], [2], "www.EXAMPLE.com", true, ""},
-  {"an IPv4 address", 13, [1], [2], "192.0.2.1", true, ""},
-  {"another IPv4 address", 13, [1], [2], "192.0.2.2", false, "is not valid for 192.0.2.2"},
-  {"an IPv6 address", 13, [1], [2], "2001:db8::1", true, ""},
-  {"an IPv6 address written longer", 13, [1], [2], "2001:0db8:0:0:0:0:0:1", true, ""},
-  {"an address named as a DNS name", 14, [1], [2], "192.0.2.1", false, "is not valid for"},
-  {"a leaf past its end", 15, [1], [2], "www.example.com", false, "is not valid at"},
-  {"a leaf before its start", 16, [1], [2], "www.example.com", false, "is not valid at"},
-  {"an intermediate past its end", 0, [17], [2], "www.example.com", false, "CN=Inter A is not valid at"},
-  {"a root past its end", 0, [1], [18], "www.example.com", false, "CN=Root A is not valid at"},
-  {"an intermediate that is not a CA", 0, [19], [2], "www.example.com", false, "CN=Inter A is not a CA"},
-  {"an intermediate without basicConstraints", 0, [20], [2], "www.example.com", false, "CN=Inter A is not a CA"},
-  {"an intermediate not allowed keyCertSign", 0, [21], [2], "www.example.com", false, "not allowed to sign certificates"},
-  {"two intermediates", 22, [23, 1], [2], "www.example.com", true, ""},
-  {"a pathLenConstraint of 0 over another CA", 22, [23, 24], [2], "www.example.com", false, "allows 0 CA certificates under it"},
-  {"a pathLenConstraint of 0 over the leaf alone", 0, [25], [2], "www.example.com", true, ""},
-  {"a leaf for serverAuth", 26, [1], [2], "www.example.com", true, ""},
-  {"a leaf for clientAuth only", 27, [1], [2], "www.example.com", false, "not allowed serverAuth"},
-  {"an intermediate for clientAuth only", 0, [28], [2], "www.example.com", false, "CN=Inter A is not allowed serverAuth"},
-  {"a leaf that is a CA", 29, [1], [2], "www.example.com", false, "is a CA certificate"},
-  {"a leaf with an unknown critical extension", 30, [1], [2], "www.example.com", false, "carries critical extension 1.3.6.1.4.1.55555.1"},
-  {"an intermediate with an unknown critical extension", 0, [31], [2], "www.example.com", false, "CN=Inter A carries critical extension"},
-  {"a leaf signed by another key under the same name", 32, [1], [2], "www.example.com", false, "signature is not"},
-  {"a root not in the store", 0, [1], [5], "www.example.com", false, "no certificate here issued"},
-  {"an intermediate not given", 0, [] of Int32, [2], "www.example.com", false, "no certificate here issued"},
-  {"a decoy intermediate under the same name, tried first", 0, [33, 1], [2], "www.example.com", true, ""},
-  {"a cross-signed intermediate whose root is not trusted, beside one whose root is", 0, [34, 1], [2], "www.example.com", true, ""},
-  {"only the cross-signed intermediate", 0, [34], [2], "www.example.com", false, "no certificate here issued"},
-  {"a leaf signed under SHA-1", 35, [4], [5], "www.example.com", false, "under SHA-1"},
-  {"a name inside the permitted subtree", 0, [36], [2], "www.example.com", true, ""},
-  {"a name outside the permitted subtree", 37, [38], [2], "www.example.org", false, "outside the names CN=Inter A permits"},
-  {"a name that only ends like the permitted one", 39, [40], [2], "www.badexample.com", false, "outside the names"},
-  {"a name in the excluded subtree", 41, [42], [2], "bad.example.com", false, "among the names CN=Inter A excludes"},
-  {"an address inside the permitted range", 43, [44], [2], "192.0.2.9", true, ""},
-  {"an address outside the permitted range", 45, [46], [2], "198.51.100.9", false, "outside the addresses CN=Inter A permits"},
+# what, leaf, up to two intermediates (-1: none), root, host, verdict,
+# the refusal's phrase
+scenarios = [
+  {"an EC chain through one intermediate", 0, 1, -1, 2, "www.example.com", true, ""},
+  {"an RSA root and intermediate over an EC leaf", 3, 4, -1, 5, "www.example.com", true, ""},
+  {"an intermediate signed with RSASSA-PSS", 6, 7, -1, 5, "www.example.com", true, ""},
+  {"a leaf straight under the root", 8, -1, -1, 2, "www.example.com", true, ""},
+  {"SHA-384 and SHA-512 signatures", 9, 10, -1, 2, "www.example.com", true, ""},
+  {"another host", 0, 1, -1, 2, "mail.example.com", false, "is not valid for mail.example.com"},
+  {"a wildcard for one label", 11, 1, -1, 2, "a.example.com", true, ""},
+  {"a wildcard for the name it stands under", 11, 1, -1, 2, "example.com", false, "is not valid for"},
+  {"a wildcard for two labels", 11, 1, -1, 2, "a.b.example.com", false, "is not valid for"},
+  {"a host in capitals", 12, 1, -1, 2, "www.EXAMPLE.com", true, ""},
+  {"an IPv4 address", 13, 1, -1, 2, "192.0.2.1", true, ""},
+  {"another IPv4 address", 13, 1, -1, 2, "192.0.2.2", false, "is not valid for 192.0.2.2"},
+  {"an IPv6 address", 13, 1, -1, 2, "2001:db8::1", true, ""},
+  {"an IPv6 address written longer", 13, 1, -1, 2, "2001:0db8:0:0:0:0:0:1", true, ""},
+  {"an address named as a DNS name", 14, 1, -1, 2, "192.0.2.1", false, "is not valid for"},
+  {"a leaf past its end", 15, 1, -1, 2, "www.example.com", false, "is not valid at"},
+  {"a leaf before its start", 16, 1, -1, 2, "www.example.com", false, "is not valid at"},
+  {"an intermediate past its end", 0, 17, -1, 2, "www.example.com", false, "CN=Inter A is not valid at"},
+  {"a root past its end", 0, 1, -1, 18, "www.example.com", false, "CN=Root A is not valid at"},
+  {"an intermediate that is not a CA", 0, 19, -1, 2, "www.example.com", false, "CN=Inter A is not a CA"},
+  {"an intermediate without basicConstraints", 0, 20, -1, 2, "www.example.com", false, "CN=Inter A is not a CA"},
+  {"an intermediate not allowed keyCertSign", 0, 21, -1, 2, "www.example.com", false, "not allowed to sign certificates"},
+  {"two intermediates", 22, 23, 1, 2, "www.example.com", true, ""},
+  {"a pathLenConstraint of 0 over another CA", 22, 23, 24, 2, "www.example.com", false, "allows 0 CA certificates under it"},
+  {"a pathLenConstraint of 0 over the leaf alone", 0, 25, -1, 2, "www.example.com", true, ""},
+  {"a leaf for serverAuth", 26, 1, -1, 2, "www.example.com", true, ""},
+  {"a leaf for clientAuth only", 27, 1, -1, 2, "www.example.com", false, "not allowed serverAuth"},
+  {"an intermediate for clientAuth only", 0, 28, -1, 2, "www.example.com", false, "CN=Inter A is not allowed serverAuth"},
+  {"a leaf that is a CA", 29, 1, -1, 2, "www.example.com", false, "is a CA certificate"},
+  {"a leaf with an unknown critical extension", 30, 1, -1, 2, "www.example.com", false, "carries critical extension 1.3.6.1.4.1.55555.1"},
+  {"an intermediate with an unknown critical extension", 0, 31, -1, 2, "www.example.com", false, "CN=Inter A carries critical extension"},
+  {"a leaf signed by another key under the same name", 32, 1, -1, 2, "www.example.com", false, "signature is not"},
+  {"a root not in the store", 0, 1, -1, 5, "www.example.com", false, "no certificate here issued"},
+  {"an intermediate not given", 0, -1, -1, 2, "www.example.com", false, "no certificate here issued"},
+  {"a decoy intermediate under the same name, tried first", 0, 33, 1, 2, "www.example.com", true, ""},
+  {"a cross-signed intermediate whose root is not trusted, beside one whose root is", 0, 34, 1, 2, "www.example.com", true, ""},
+  {"only the cross-signed intermediate", 0, 34, -1, 2, "www.example.com", false, "no certificate here issued"},
+  {"a leaf signed under SHA-1", 35, 4, -1, 5, "www.example.com", false, "under SHA-1"},
+  {"a name inside the permitted subtree", 0, 36, -1, 2, "www.example.com", true, ""},
+  {"a name outside the permitted subtree", 37, 38, -1, 2, "www.example.org", false, "outside the names CN=Inter A permits"},
+  {"a name that only ends like the permitted one", 39, 40, -1, 2, "www.badexample.com", false, "outside the names"},
+  {"a name in the excluded subtree", 41, 42, -1, 2, "bad.example.com", false, "among the names CN=Inter A excludes"},
+  {"an address inside the permitted range", 43, 44, -1, 2, "192.0.2.9", true, ""},
+  {"an address outside the permitted range", 45, 46, -1, 2, "198.51.100.9", false, "outside the addresses CN=Inter A permits"},
   # Python's verifier refuses those with a final dot because it matches
   # such a name to no host; this matches it to the host it names, so the
   # constraint must hold it out. A name below the excluded one is the case
   # the wildcard rule does not also catch.
-  {"a name under the excluded subtree with a final dot", 58, [56], [55], "www.evil.example", false, "www.evil.example. is among the names CN=Inter NC4 excludes"},
-  {"a name with a final dot in the excluded subtree", 49, [48], [47], "evil.example", false, "evil.example. is among the names CN=Inter NC1 excludes"},
-  {"a name beside the excluded subtree", 52, [50], [47], "www.example.com", true, ""},
-  {"an excluded constraint with a final dot", 54, [53], [47], "evil.example", false, "constrains names by \"evil.example.\", which is no name"},
-  {"a name with two final dots under the excluded subtree", 57, [56], [55], "www.evil.example..", false, "www.evil.example.. is no host name for CN=Inter NC4's constraints to judge"},
-  {"a wildcard over a name in the excluded subtree", 51, [50], [47], "bad.example.com", false, "*.example.com is among the names CN=Inter NC2 excludes"},
-  {"a wildcard over the excluded subtree, for a host outside it", 51, [50], [47], "good.example.com", false, "*.example.com is among the names CN=Inter NC2 excludes"},
+  {"a name under the excluded subtree with a final dot", 58, 56, -1, 55, "www.evil.example", false, "www.evil.example. is among the names CN=Inter NC4 excludes"},
+  {"a name with a final dot in the excluded subtree", 49, 48, -1, 47, "evil.example", false, "evil.example. is among the names CN=Inter NC1 excludes"},
+  {"a name beside the excluded subtree", 52, 50, -1, 47, "www.example.com", true, ""},
+  {"an excluded constraint with a final dot", 54, 53, -1, 47, "evil.example", false, "constrains names by \"evil.example.\", which is no name"},
+  {"a name with two final dots under the excluded subtree", 57, 56, -1, 55, "www.evil.example..", false, "www.evil.example.. is no host name for CN=Inter NC4's constraints to judge"},
+  {"a wildcard over a name in the excluded subtree", 51, 50, -1, 47, "bad.example.com", false, "*.example.com is among the names CN=Inter NC2 excludes"},
+  {"a wildcard over the excluded subtree, for a host outside it", 51, 50, -1, 47, "good.example.com", false, "*.example.com is among the names CN=Inter NC2 excludes"},
 ]
 ALG_MISMATCH = "308201a030820145a00302010202147e6cb33e09a4c12a0a685c1ce2404accba4a4fca300a06082a8648ce3d04030230123110300e06035504030c07496e7465722041301e170d3236303530323030303030305a170d3237303332383030303030305a300f310d300b06035504030c046c6561663059301306072a8648ce3d020106082a8648ce3d030107034200044aef5c1fad4a5e950eee58f92304b0cfcc969751f4bb3aed88d63c0ab7b198a5afd73211241fb991748dab1b3f12e937ff8d1712f29acf4e5704d27fdea91e71a37c307a300c0603551d130101ff04023000300e0603551d0f0101ff040403020780301a0603551d1104133011820f7777772e6578616d706c652e636f6d301d0603551d0e04160414cada5c21fb95d15e4b471d0d7cfd2feab6c01358301f0603551d230418301680148f7019e8331eed7667b3493c4fd11feb616b46f8300a06082a8648ce3d0403030349003046022100c8db1643e4e4a593ce73f3af5eeeed6fe486a751a30416c02633adf376d2a692022100c7d079cce44740a3d8d57c053859272172def9d01c6de664ec3b782cfffc9f82"
 DUP_EXT      = "308201be30820163a00302010202147e6cb33e09a4c12a0a685c1ce2404accba4a4fca300a06082a8648ce3d04030230123110300e06035504030c07496e7465722041301e170d3236303530323030303030305a170d3237303332383030303030305a300f310d300b06035504030c046c6561663059301306072a8648ce3d020106082a8648ce3d030107034200044aef5c1fad4a5e950eee58f92304b0cfcc969751f4bb3aed88d63c0ab7b198a5afd73211241fb991748dab1b3f12e937ff8d1712f29acf4e5704d27fdea91e71a38199308196300c0603551d130101ff04023000300e0603551d0f0101ff040403020780301a0603551d1104133011820f7777772e6578616d706c652e636f6d301d0603551d0e04160414cada5c21fb95d15e4b471d0d7cfd2feab6c01358301f0603551d230418301680148f7019e8331eed7667b3493c4fd11feb616b46f8301a0603551d1104133011820f7777772e6578616d706c652e636f6d300a06082a8648ce3d0403020349003046022100c8db1643e4e4a593ce73f3af5eeeed6fe486a751a30416c02633adf376d2a692022100c7d079cce44740a3d8d57c053859272172def9d01c6de664ec3b782cfffc9f82"
@@ -245,12 +242,14 @@ end
 puts "== chains Python's cryptography made, as its verifier judges them"
 held = 0
 refusals = 0
-SCENARIOS.each do |s|
+scenarios.each do |s|
   leaf = cert(CERTS[s[1]])
-  intermediates = s[2].map { |i| cert(CERTS[i]) }
-  roots = s[3].map { |i| cert(CERTS[i]) }
-  answer = X509.verify(leaf, intermediates, roots, s[4], NOW)
-  if s[5]
+  intermediates = [] of Certificate
+  intermediates << cert(CERTS[s[2]]) if s[2] >= 0
+  intermediates << cert(CERTS[s[3]]) if s[3] >= 0
+  roots = [cert(CERTS[s[4]])]
+  answer = X509.verify(leaf, intermediates, roots, s[5], NOW)
+  if s[6]
     check !answer.is_a?(X509Error), "#{s[0]}: refused: #{answer.is_a?(X509Error) ? answer.message : ""}"
     if answer.is_a?(Array(Certificate))
       check answer[0].raw == leaf.raw && roots.any? { |r| r.raw == answer[answer.size - 1].raw }, "#{s[0]}: a chain that is not leaf to root"
@@ -259,7 +258,7 @@ SCENARIOS.each do |s|
   else
     check answer.is_a?(X509Error), "#{s[0]}: expected a refusal, got a chain"
     if answer.is_a?(X509Error)
-      check answer.message.includes?(s[6]), "#{s[0]}: refused with #{answer.message.inspect}, not #{s[6].inspect}"
+      check answer.message.includes?(s[7]), "#{s[0]}: refused with #{answer.message.inspect}, not #{s[7].inspect}"
     end
     refusals = refusals + 1
   end
@@ -267,18 +266,18 @@ end
 puts "  #{held} chains held and #{refusals} refused, each for its reason"
 
 puts "== hosts matched"
-ips = leaf_of("an IPv4 address")
+ips = cert(CERTS[(scenarios.find { |s| s[0] == "an IPv4 address" } || raise("no scenario"))[1]])
 check ips.matches_host?("[2001:db8::1]"), "an IPv6 address in brackets"
 check ips.matches_host?("2001:DB8:0::1"), "an IPv6 address in capitals with :: inside"
 check !ips.matches_host?("2001:db8::1::1"), "two :: refused"
 check !ips.matches_host?("192.0.2.01"), "an IPv4 octet with a leading zero refused"
 check !ips.matches_host?("192.0.2"), "three IPv4 octets refused"
-www = cert(CERTS[SCENARIOS[0][1]])
+www = cert(CERTS[scenarios[0][1]])
 check www.matches_host?("www.example.com."), "a final dot"
 check !www.matches_host?(""), "an empty host"
 check !www.matches_host?("www.example.com.."), "two final dots"
 check www.dns_names == ["www.example.com"], "dNSName read: #{www.dns_names}"
-wild = leaf_of("a wildcard for one label")
+wild = cert(CERTS[(scenarios.find { |s| s[0] == "a wildcard for one label" } || raise("no scenario"))[1]])
 check !wild.matches_host?(".example.com"), "a wildcard for an empty label"
 
 puts "== certificates that are not certificates"
@@ -381,11 +380,11 @@ def for_client(leaf : Int32, intermediates : Array(Int32)) : Array(Certificate) 
   X509.verify(cert(CERTS[leaf]), intermediates.map { |i| cert(CERTS[i]) }, [cert(CERTS[2])], nil, NOW, X509Purpose::Client)
 end
 
-[{27, [1], "a leaf for clientAuth only"}, {0, [28], "an intermediate for clientAuth only"}, {0, [1], "a chain with no extKeyUsage"}].each do |c|
+{ {27, [1], "a leaf for clientAuth only"}, {0, [28], "an intermediate for clientAuth only"}, {0, [1], "a chain with no extKeyUsage"} }.each do |c|
   answer = for_client(c[0], c[1])
   check answer.is_a?(Array(Certificate)), "#{c[2]}, as a client's: #{answer.is_a?(X509Error) ? answer.message : ""}"
 end
-[{26, [1], "CN=leaf is not allowed clientAuth", "a leaf for serverAuth only"}, {29, [1], "is a CA certificate, not a client's", "a CA leaf"}].each do |c|
+{ {26, [1], "CN=leaf is not allowed clientAuth", "a leaf for serverAuth only"}, {29, [1], "is a CA certificate, not a client's", "a CA leaf"} }.each do |c|
   answer = for_client(c[0], c[1])
   raise "ASSERTION FAILED: #{c[3]}, as a client's: expected a refusal, got a chain" unless answer.is_a?(X509Error)
   check answer.message.includes?(c[2]), "#{c[3]}, as a client's: refused with #{answer.message.inspect}, not #{c[2].inspect}"

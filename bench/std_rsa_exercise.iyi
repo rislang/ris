@@ -144,7 +144,7 @@ K2048            = "30820122300d06092a864886f70d01010105000382010f003082010a0282
 K1025            = "30819f300d06092a864886f70d010101050003818d003081890281810177fdde99481cf91d74e55da0e46e082c3f2903c3cb560aa1bfd1995722920ea63c1b9aa3a6566f6382db60b3b80e699cbffc25ae46bf88dfc6c05d63c498be9512d98c58894ecefaf6433135d593d21b2665305c6d35dff4ca080353133e13920baf9c7a7f459516b2b0032246afe7260003a7c15f1cac53f490b8cfe7bd27430203010001"
 K2050            = "30820122300d06092a864886f70d01010105000382010f003082010a028201010325f82028bbaab9f41d033a51ee3e5dfcf3fc29529874823ef7ec5e0bb6e72439b3f5fec15b689305f5be2beb8adbd1a3951573c7960f6e4a4fa0071682289ecb5b3194b61b6d65d99efe037bdececf4f1bb305055b89832ba06465de770e367cfcceafad8f70ef9130e0fd859fac823b75cfc088a7c8dd0b269caaa8c97b4bd40beac6192c83993a8bd42630920f192f26d5af1c0f091034092b5712ac9dfab441d1aafd9826c70c09e6e22b62bbcd99ba7ab210fbfdcc153e385dc407de04472ef39f636cb7a751eaf7f00936103bcbdc6aef78175080707416f382a5e7eef3d7aeafcf90c023861ede7ca03b9775fa7b2a6e9ed9abe518c935571651721e010203010001"
 PSS_DEFAULT_SALT = "17ed8f77db4bdcb0d29dee00970310bd6d26105c5190a045a12572a977b5d62d1c6cf46085992acd8c2e12b85f9097adabbb2c183f66cd83fc6315198e0001959e9fc6f8682b9365dd8ae15e522a38a480a1234c1377421bc140e3078b38b072bd8269001aee8e080c977ea3af99e2b2abf4592a5762c7b000a252ec4672444f8d88c80e86214e1f850f8515c29d8e91bf095c54a98c88700e723f84b85592066f4699cefa8fb136be4ceb84b646c22f501d10b7ed768fbda88024d70c0ce8fd39b5455067a0e45c7708686cec95940d52be2cefa38699b4ffe34159f2dd06dc1e8920ecb2766a14d97963f128fc8e2194568eb484c50505db987a9b557258d0"
-SIGNATURES       = [
+signatures = [
   {K2048, "v15", "SHA1", -1, "abc", "4576a496ac7251af46c68b66d2d8b40ed329383460637deb33d31d96743eea9f0df38bf3f4d6173caabe1c104a70f1bdae4d48098d321f0bf040e2d18f0c470b55eb1864649442aafabfb9b0902837c4ea91ccee32820e3e278b7ba6358824bf9d17a2888d23b3c167682436d558bcac2447f76d0bf0919b3e4b928a9bf22b20b770b75e6b92b128f6078ed8da265cfb1fced37e258c8830e0902c6df4f2055738f1b8e981849219cef10500121d87793ddda16aa528a87c725c0bca09087c79cdc9c3f481ae2f1382ee6d2110c2474f150334c966e34ffd9b94acde6a45f967e914de4b6c545780f30ab46f2cdeddb6cd70202a2911940ef40df6f798fd9352", true},
   {K2048, "v15", "SHA256", -1, "abc", "68498600baed2787ad203b9b41cecb571db2eed43118d426713c78498046ea03680b261e4f30ab6c4a5ee5a929fb295aef22b201733ac355914bf3e0724b1f52fda9483ae72140456ac6f5e43815c3e9c9886ee0ef0099bb063300b06aff11f01bb0e7ceba9f0d25e5bcc701f947bb8d18934280bd32a4e1fb64159e2fbe371318890227253a1ba59b2bb6fe35cc57baff734d96e3499c2dbe7189cf53e1ab9602d2db7869812fe1a31eeb24132c45df7036aa53ed1d547d8df18e200cf90b023befbd517780117174f68f6bff2ff26bdf87677f5b892a4a71d8a18af8e402b3a6eded538ce76159f2f02303a14c2a3c0f94bec9140f53aed3f020141cfcb724", true},
   {K2048, "v15", "SHA384", -1, "abc", "84ce563ac1d440cb0dde5f28139ec80bab9cffb91c5ec5e4955dc50247894929ff784205840b8e623fe7159857d797880510e3040009eca831d39e4ab4033285411e5c6b3309bd5c5dc3740271cb59396d66d8d90fbdad3cbdb80652e397a4823b032ce943f5bfcfeb9b8150faee2bbe71aaa3cade6739b551c5833f0a97dcb700c394b699ea0f7f8dd9e47f98bd0387644d116847c3dcfedb7d7c9f3d90514141e3912ec1696c90aca9a9512f4ea8a7042cd9cea30e0b3604ebf6bb41730c54e6e076dede14eff5e7a522ccaaa3e09e77c8b9a15cacc4f3ad42c36cea629958469486e5a302ff8680f1e28e63567f67c6a2a401cb3c8288d5ee0a33bd6206ab", true},
@@ -231,12 +231,11 @@ if args.size > 0 && args[0] == "roots"
 end
 
 if args.size > 0 && args[0] == "sign"
-  keys = {} of String => RsaPrivateKey | RsaError
   File.read(args[1]).lines.each do |line|
     next if line.empty?
     f = line.split(' ')
-    key = keys[f[0]]? || RsaPrivateKey.from_pem(File.read(f[0]))
-    keys[f[0]] = key
+    # Read for each line: a Hash cannot hold growing keys.
+    key = RsaPrivateKey.from_pem(File.read(f[0]))
     if key.is_a?(RsaError)
       puts "key: #{key.message}"
     else
@@ -264,13 +263,13 @@ k1025 = RsaPublicKey.from_spki(b(K1025)).or_panic
 k2050 = RsaPublicKey.from_spki(b(K2050)).or_panic
 check k2048.bits == 2048 && k2048.size == 256, "a 2048-bit key: #{k2048.bits} bits"
 check k1025.bits == 1025 && k1025.size == 129, "a 1025-bit key: #{k1025.bits} bits"
-SIGNATURES.each_with_index do |c, i|
+signatures.each_with_index do |c, i|
   key = c[0] == K2048 ? k2048 : (c[0] == K2050 ? k2050 : k1025)
   got = verify(key, c[1], c[2], c[3], c[4], b(c[5]))
   check got == c[6], "signature #{i} (#{c[1]} #{c[2]} salt #{c[3]} over #{c[4].inspect}): expected #{c[6]}, got #{got}"
 end
-puts "  #{SIGNATURES.count { |c| c[6] }} accepted and #{SIGNATURES.count { |c| !c[6] }} refused as they should be"
-check k2048.verify_pkcs1v15(RsaHash::SHA256, b("616263"), b(SIGNATURES[1][5])), "a message given as bytes"
+puts "  #{signatures.count { |c| c[6] }} accepted and #{signatures.count { |c| !c[6] }} refused as they should be"
+check k2048.verify_pkcs1v15(RsaHash::SHA256, b("616263"), b(signatures[1][5])), "a message given as bytes"
 check k2048.verify_pss(RsaHash::SHA256, "abc", b(PSS_DEFAULT_SALT)), "a PSS salt as long as the hash when none is named"
 check !k2048.verify_pss(RsaHash::SHA384, "abc", b(PSS_DEFAULT_SALT)), "a PSS signature under another hash refused"
 

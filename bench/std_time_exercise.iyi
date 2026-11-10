@@ -33,6 +33,7 @@ module bench/std_time_exercise
 import std/format::{printf}
 
 import std/time::{Time, Span, DayOfWeek, TimeParseError, Location, LocationError}
+import std/tuple
 
 def assert_true(cond : Bool, msg : String) : Nil
   if !cond
@@ -941,11 +942,11 @@ end
 eastern = location(Location.read_windows_zone("Eastern", windows_zone(300_i64, "Eastern Standard Time", {0, 11, 0, 1, 2}, 0_i64, "Eastern Daylight Time", {0, 3, 0, 2, 2}, -60_i64)), "Eastern, west of UTC with a summer")
 newfoundland = location(Location.read_windows_zone("Newfoundland", windows_zone(210_i64, "Newfoundland Standard Time", {0, 11, 0, 1, 2}, 0_i64, "Newfoundland Daylight Time", {0, 3, 0, 2, 2}, -60_i64)), "Newfoundland, a half hour with a summer")
 sydney_windows = location(Location.read_windows_zone("AUS Eastern", windows_zone(-600_i64, "AUS Eastern Standard Time", {0, 4, 0, 1, 3}, 0_i64, "AUS Eastern Daylight Time", {0, 10, 0, 1, 2}, -60_i64)), "AUS Eastern, a summer over New Year")
-[
+{
   {eastern, -18000, "-05", -14400, "-04", [1710054000_i64, 1730613600_i64, 1741503600_i64, 1762063200_i64, 1772953200_i64, 1793512800_i64, 1805007600_i64, 1825567200_i64, 1836457200_i64, 1857016800_i64, 1867906800_i64, 1888466400_i64, 1899356400_i64, 1919916000_i64]},
   {newfoundland, -12600, "-0330", -9000, "-0230", [1710048600_i64, 1730608200_i64, 1741498200_i64, 1762057800_i64, 1772947800_i64, 1793507400_i64, 1805002200_i64, 1825561800_i64, 1836451800_i64, 1857011400_i64, 1867901400_i64, 1888461000_i64, 1899351000_i64, 1919910600_i64]},
   {sydney_windows, 36000, "+10", 39600, "+11", [1712419200_i64, 1728144000_i64, 1743868800_i64, 1759593600_i64, 1775318400_i64, 1791043200_i64, 1806768000_i64, 1822492800_i64, 1838217600_i64, 1853942400_i64, 1869667200_i64, 1885996800_i64, 1901721600_i64, 1917446400_i64]},
-].each do |row|
+}.each do |row|
   loc = row[0]
   # Sydney's year begins in summer, the others' in winter.
   summer = loc.lookup(1704067200_i64).dst?
