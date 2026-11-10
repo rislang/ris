@@ -1,0 +1,11 @@
+module test/nil_def_drops_value
+
+# A def answering Nil drops its last value: a builder it ends on, which
+# views text made in the def, does not leave it.
+def write(io : String::Builder, n : Int32) : Nil
+  part = n.to_s
+  io << part << '!' unless part.empty?
+end
+
+text = String.build { |io| write(io, 42) }
+exit 1 unless text == "42!"
