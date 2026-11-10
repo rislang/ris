@@ -768,6 +768,25 @@ assert_str "in", File.read(ro + "/locked/in.txt"), "a read-only directory still 
 {% end %}
 File.chmod(ro + "/locked", 0o755)
 
+# How many entries the tar file at *path* holds.
+def entries_in_file(path : String) : Int32
+  io = File.open(path)
+  count = 0
+  reader = TarReader.new(io)
+  while reader.next_entry.as(TarEntry | Nil)
+    count = count + 1
+  end
+  io.close
+  count
+end
+
+# Extracts the tar in *data* into *dir*, or why it could not.
+def extract_bytes(data : String, dir : String)
+  memory = Memory.new(data)
+  reader = TarReader.new(memory)
+  reader.extract(dir)
+end
+
 if !scratch && File.exists?(work + "/index.txt")
   puts "== what python wrote"
   File.read(work + "/index.txt").lines.each do |name|
@@ -776,19 +795,11 @@ if !scratch && File.exists?(work + "/index.txt")
     stem = name.ends_with?(".gz") ? name[0, name.bytesize - 7] : (name.ends_with?(".bz2") ? name[0, name.bytesize - 8] : (name.ends_with?(".xz") ? name[0, name.bytesize - 7] : name[0, name.bytesize - 4]))
     expected = File.read(work + "/" + stem + ".expect")
     assert_str expected, expect_lines(data, name), "#{name}: entries as Python read them"
-    io = File.open(work + "/" + name)
-    from_file = 0
-    r10 = TarReader.new(io)
-    while r10.next_entry.as(TarEntry | Nil)
-      from_file = from_file + 1
-    end
-    io.close
+    from_file = entries_in_file(work + "/" + name)
     assert_true from_file == count_of(expected, "entry\t"), "#{name} from the file: every entry"
     out_dir = work + "/x-" + stem
     FileUtils.rm_rf(out_dir)
-    memory_21 = Memory.new(data)
-    tarreader_22 = TarReader.new(memory_21)
-    done = tarreader_22.extract(out_dir)
+    done = extract_bytes(data, out_dir)
     if name.includes?("special")
       assert_true done.is_a?(TarError) && done.message.includes?("\"dev/null\" is a character device"), "#{name}: a device is refused by name"
     elsif done.is_a?(TarError)

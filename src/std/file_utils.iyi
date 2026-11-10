@@ -308,10 +308,17 @@ pub struct FileUtils
   private def self.remove_entry(path : String, info : File::Info) : Nil
     if info.directory?
       # Listed whole first: the listing is not read while it shrinks.
-      Dir.children(path).each do |name|
-        child = File.join(path, name)
-        child_info = File.info?(child, follow_symlinks: false)
-        remove_entry(child, child_info) if child_info
+      names = Dir.child_names(path)
+      from = 0
+      i = 0
+      while i < names.bytesize
+        if names[i] == 0_u8
+          child = File.join(path, names[from, i - from])
+          child_info = File.info?(child, follow_symlinks: false)
+          remove_entry(child, child_info) if child_info
+          from = i + 1
+        end
+        i = i + 1
       end
       Dir.delete(path)
     else

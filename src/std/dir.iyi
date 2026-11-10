@@ -524,6 +524,12 @@ pub class Dir
     end
   end
 
+  # The names in *dirname* but `.` and `..`, each ended by a NUL byte: one
+  # String a recursive walk can hold across its own calls.
+  def self.child_names(dirname : String | Path) : String
+    Dir.listing(dirname, false)
+  end
+
   def self.children(dirname : String | Path) : Array(String)
     Dir.split_names(Dir.listing(dirname, false))
   end

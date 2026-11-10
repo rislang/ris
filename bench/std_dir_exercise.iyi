@@ -53,8 +53,12 @@ import std/file::{File}
 
 def clean_tree(dir_path : String) : Nil
   return unless Dir.exists?(dir_path)
-  Dir.children(dir_path).each do |child|
-    full = dir_path + "/" + child
+  names = Dir.child_names(dir_path)
+  from = 0
+  names.bytesize.times do |i|
+    next unless names[i] == 0_u8
+    full = dir_path + "/" + names[from, i - from]
+    from = i + 1
     if Dir.exists?(full)
       clean_tree(full)
       Dir.delete?(full)
