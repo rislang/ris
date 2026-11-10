@@ -29,27 +29,26 @@
 # (`header_values` keeps the lines apart, as a `Set-Cookie` must be
 # read), and interim 1xx answers are read past.
 #
-# **The server.** `Server.serve(host, port, config, Handler)`: N serving
-# tasks open independent SO_REUSEPORT listeners. Handler.new(config) is
-# built from a checked config copy on each task. Its #call(Request)
-# answers a Response, with each connection kept alive across
-# requests until the client or the block's answer says `Connection:
-# close`, the client closes, or sends something that is not HTTP
-# (answered 400 and closed; a body past `Server::MAX_BODY` 413, a head
-# past `Server::MAX_HEAD` 431). The block gets a `Request` - method, path
-# (an absolute-form target's own), query, headers, body - and answers a
-# `Response`. By default the body is read whole before the block runs;
-# with `stream_bodies: true` the block reads `request.body_io` itself, and
-# what it leaves unread is read past, up to a megabyte, or the connection
-# closed. An answer is a `String`, written with its length; an `IyiIO`,
-# copied out and closed (with its length when the block gave a
-# `Content-Length`, chunked otherwise); a `Response.stream { |w| ... }`
-# whose block writes as it goes; or a `Response.upgrade`, after whose 101
-# the connection belongs to the handler's `take_over` (std/websocket's).
-# With `compress: true` an answer whose type is worth compressing goes
-# `zstd` or `gzip` to a client that accepts one: zstd for a whole body
-# when the client's `q` for it is at least its `q` for gzip, gzip for a
-# stream
+# **The server.** `Server.answer(host, port, config, Handler)`: N
+# serving tasks open independent SO_REUSEPORT listeners.
+# Handler.new(config) is built from a checked config copy on each task.
+# Its #call(req : Incoming, res : Outgoing) reads the request - method,
+# path (an absolute-form target's own), query, fields, body, viewing the
+# bytes that arrived - and writes its answer into *res*, with each
+# connection kept alive across requests until the client says
+# `Connection: close` or the handler `res.close`, the client closes, or
+# sends something that is not HTTP (answered 400 and closed; a body past
+# `Server::MAX_BODY` 413, a head past `Server::MAX_HEAD` 431). By default
+# the body is read whole before the handler runs; with `stream_bodies:
+# true` it reads `req.body_io` itself, and what it leaves unread is read
+# past, up to a megabyte, or the connection closed. An answer's body is
+# written into `res.body` and sent with its length; or `res.stream { |w|
+# ... }` writes it as it goes; or `res.send(io)` copies an `IyiIO`; or
+# `res.upgrade` makes a 101 after which the connection belongs to the
+# handler's `take_over` (std/websocket's). With `compress: true` an
+# answer whose type is worth compressing goes `zstd` or `gzip` to a
+# client that accepts one: zstd for a whole body when the client's `q`
+# for it is at least its `q` for gzip, gzip for a stream
 # (`Server.coding_for`). Beside it: std/router routes requests by
 # pattern as Go's ServeMux does, std/fileserver answers them from a
 # directory, std/sse streams events, and std/websocket takes a
@@ -65,7 +64,8 @@
 # `close` and sent nothing past its request is closed at once. The
 # client closes its connections the same way.
 # The socket parks under the runtime, so a slow client costs one fiber;
-# the listener's `close` ends `serve`. With `tls:` a `TlsServerConfig`
+# cancelling the pool's group ends `answer`. A handler's `tls_config`, a
+# `TlsServerConfig`
 # (std/tls's server: TLS 1.3, and 1.2 when its `min_version` asks; an
 # Ed25519, P-256, P-384 or RSA certificate) every connection is TLS, its
 # handshake first and close_notify last; inside it, as in the clear, a
@@ -80,7 +80,7 @@
 # none with them, whatever a ticket allows. A request that runs twice
 # when replayed (a POST) must never go early, and HTTP cannot tell a GET
 # with side effects from one without. That is decided here, not left to
-# a setting. `Request#tls_resumed?` and `Response#tls_resumed?` say
+# a setting. `Incoming#tls_resumed?` and `Response#tls_resumed?` say
 # whether the connection under them was resumed.
 #
 # **Errors are values.** What the other end does wrong - a malformed head,
@@ -88,19 +88,19 @@
 # beside `Cancelled` and `SocketError`; `!` passes it up and `.or_panic`
 # refuses it with its sentence. What a program does wrong - a header with
 # a line break in it, a status of 2000 - is a panic, before anything is
-# written. `format_request`, `parse_request`, `format_response` and
+# written. `format_request`, `Server.parse_head`, `format_response` and
 # `parse_response` are the text of whole messages, pure, for a program
 # and for the gate; both halves are this one module, so what one writes
 # the other reads, and `bench/std_http_exercise.sh` runs the client
 # against the server and both against Python's.
 #
 # **HTTP/2** (RFC 9113, the section near the end of this file): the same
-# requests and answers as frames over one connection. `serve` takes a
+# requests and answers as frames over one connection. `answer` takes a
 # connection that opens with HTTP/2's preface as HTTP/2 (h2c with prior
 # knowledge) beside HTTP/1.1 on the same listener; the client speaks it
 # where TLS's ALPN chose `h2` - offered once a program lists it in
 # `HTTP.tls_config.alpn` - and over `http://` from an
-# `HTTPClient.new(prior_knowledge: true)`. A server's block, a request's
+# `HTTPClient.new(prior_knowledge: true)`. A server's handler, a request's
 # body and an answer's are what they are over HTTP/1.1; `version` says
 # `HTTP/2`. bench/http2_exercise.iyi and the gate hold it against curl,
 # Node's own HTTP/2 both ways (TLS with ALPN included, the server's own
@@ -157,7 +157,6 @@ pub import std/http_head
 
 pub alias Field = Std::HttpHead::Field
 pub alias ParsedHead = Std::HttpHead::ParsedHead
-pub alias Incoming = Std::HttpHead::Incoming
 pub alias HeadError = Std::HttpHead::HeadError
 import std/http_head::{HeadParser}
 import std/mime::{MIME}
@@ -1453,7 +1452,7 @@ pub class BodyReader
   end
 end
 
-# What a streamed body is written to: an answer's `Response.stream`
+# What a streamed body is written to: an answer's `Outgoing#stream`
 # block's, and a client's upload from an `IyiIO`. Each `write` goes out as
 # one chunk (RFC 9112 §7.1), or as it is where the connection's close ends
 # the body, so a block that writes a line a second is read a line a
@@ -1475,10 +1474,22 @@ pub class BodyWriter
   @fault_layer_size : Int32 = -1
   @written : Int64
   @done : Bool
+  # The body's stated length (`Outgoing#length=`), -1 for none: bytes past
+  # it are not sent, and `over?` says so.
+  @limit : Int64 = -1_i64
+  @over : Bool = false
 
   def initialize(@socket : IyiSocket | TlsStream | H2Out, @chunked : Bool, @deflater : Deflater? = nil)
     @written = 0_i64
     @done = false
+  end
+
+  def limit=(@limit : Int64) : Int64
+  end
+
+  # Whether a write went past the stated length: its bytes were dropped.
+  def over? : Bool
+    @over
   end
 
   # Bytes of the body written so far, before any framing or coding.
@@ -1495,6 +1506,10 @@ pub class BodyWriter
     return fault_now unless @fault_kind == 0
     raise "BodyWriter: a write after the body's end" if @done
     return nil if text.bytesize == 0
+    if @limit >= 0_i64 && @written + text.bytesize.to_i64 > @limit
+      @over = true
+      return nil
+    end
     @written = @written + text.bytesize.to_i64
     if deflater = @deflater
       put(deflater.compress(text))
@@ -1585,127 +1600,6 @@ pub class BodyWriter
   end
 end
 
-# What a server's block is handed: one request. Its body is `body`, read
-# whole before the block ran, or under `stream_bodies` read by the block
-# from `body_io` as it arrives; `body` then reads the rest itself, and a
-# body that cannot be read - the client went, or sent one that is not
-# HTTP - ends the connection with that sentence rather than be answered as
-# if it were whole.
-# Request-owned certificate slots, made with the request.
-class RisHttpRequestState
-  property peer_certificates : Array(Certificate) = [] of Certificate
-end
-
-pub class Request
-  getter method : String
-  getter path : String
-  getter query : String?
-  getter headers : Hash(String, String)
-  getter version : String
-  # The client's address, as the server's socket saw it (no port): nil
-  # for a request a program made, or when the client had already gone. A
-  # proxy in front is what this names; `X-Forwarded-For` is the proxy's
-  # word, and a header any client can write.
-  getter remote_address : String?
-  # The client's certificate chain, leaf first, as std/tls checked it:
-  # under `serve(tls:)` with `client_roots` set, the certificate the
-  # client presented; empty otherwise.
-  @state : RisHttpRequestState
-
-  def peer_certificates : Array(Certificate)
-    @state.peer_certificates
-  end
-
-  def peer_certificates=(chain : Array(Certificate)) : Nil
-    @state.peer_certificates.concat(chain)
-    nil
-  end
-
-  @tls_resumed : Bool = false
-  @reader : BodyReader
-  @text : String?
-
-  # A request whose body is in hand: what `parse_request` answers.
-  def initialize(@method : String, @path : String, @query : String?, @headers : Hash(String, String), body : String, @version : String = "HTTP/1.1", @remote_address : String? = nil)
-    @reader = BodyReader.text(String::Builder.new(256), body)
-    state = RisHttpRequestState.new
-    @state = state
-    @text = body
-  end
-
-  # A request whose body is still on the connection.
-  def initialize(@method : String, @path : String, @query : String?, @headers : Hash(String, String), @version : String, @reader : BodyReader, @remote_address : String? = nil)
-    state = RisHttpRequestState.new
-    @state = state
-    @text = nil
-  end
-
-  # Whether the TLS connection the request came over resumed a session by
-  # a ticket, under `serve(tls:)`: its `peer_certificates` are then the
-  # ticket's. False in the clear.
-  def tls_resumed? : Bool
-    @tls_resumed
-  end
-
-  def tls_resumed=(resumed : Bool) : Bool
-    @tls_resumed = resumed
-  end
-
-  def header(name : String) : String?
-    @headers.each do |key, value|
-      return value if HTTP.same_name?(key, name)
-    end
-    nil
-  end
-
-  def body_io : BodyReader
-    @reader
-  end
-
-  def body : String
-    if text = @text
-      return text
-    end
-    got = @reader.read_all(Server::MAX_BODY.to_i64)
-    raise got.message unless got.is_a?(String)
-    held = @reader.hold(got)
-    @text = held
-    held
-  end
-
-  # The pairs of the request's `Cookie` header, the first of a name kept.
-  def cookies : Hash(String, String)
-    found = header("Cookie")
-    found ? HTTP.cookie_pairs(found) : {} of String => String
-  end
-
-  # The fields of a form: the query's, and an
-  # `application/x-www-form-urlencoded` body's after them. The body is
-  # read for it.
-  def form : Params
-    fields = Params.parse(@query || "")
-    type = header("Content-Type")
-    if type
-      parsed = MIME.parse?(type)
-      if parsed && parsed.essence == "application/x-www-form-urlencoded"
-        Params.parse(body).each { |name, value| fields.add(name, value) }
-      end
-    end
-    fields
-  end
-
-  # The body as `multipart/form-data` parts, read as they arrive; nil when
-  # the `Content-Type` is not multipart or names no boundary
-  # (`Multipart.boundary`).
-  def multipart : Multipart?
-    type = header("Content-Type")
-    return nil unless type
-    boundary = Multipart.boundary(type)
-    return nil unless boundary
-    Multipart.new(@text ? BodyReader.text(String::Builder.new(256), @text || "") : @reader, boundary)
-  end
-end
-
 # What `HTTP.request`'s `jar:` keeps cookies in: the `Cookie` header a
 # request to a URL carries, and an answer's `Set-Cookie` lines taken in.
 # std/cookie's `CookieJar` is one; std/http itself reads no clock, so the
@@ -1715,18 +1609,12 @@ pub trait CookieStore
   abstract def update(url : String, response : Response) : Nil
 end
 
-# A response: what a server's block answers, and what a client is handed.
-#
-# To write one: `Response.new(200, "hello")`, a status and a string;
-# `Response.new(200, io)`, a stream the server copies out and closes, with
-# the caller's `Content-Length` when it gives one and chunked otherwise;
-# `Response.stream(200) { |w| w.write("...") }`, whose block writes as it
-# goes; `Response.upgrade(headers)`, a 101 after which the connection is
-# the handler's `take_over(socket, leftover, response)`. `add_header`
-# writes a field on a line of its own, as each `Set-Cookie` must be.
-#
-# What a client is handed: the status, reason and headers, and the body -
-# `body` whole, or `body_io` as it arrives inside `HTTP.open`'s block.
+# A response: what a client is handed - the status, reason and headers,
+# and the body, `body` whole or `body_io` as it arrives inside
+# `HTTP.open`'s block. A server answers with `Outgoing`, not this.
+# `Response.new(200, "hello")` makes one, as for a `CookieStore` test;
+# `add_header` writes a field on a line of its own, as each `Set-Cookie`
+# is.
 class RisHttpResponseBody
   getter headers : Hash(String, String)
   property apart : Hash(String, Array(String)) | Hash(String, Array::View(String)) | Nil
@@ -1818,9 +1706,6 @@ pub class Response
   # The values of each field on more than one line, by its name in
   # `headers`, one entry a line.
   @body : String
-  @source : IyiIO?
-  @writer : Proc(BodyWriter, Nil)?
-  @upgrading : Bool = false
   @reader : BodyReader?
   # Where a body read from `@reader` is kept: made with the response.
   @held : RisHttpResponseBody
@@ -1831,8 +1716,6 @@ pub class Response
   def initialize(@status : Int32, @reason : String, headers : Hash(String, String), @body : String, apart : Hash(String, Array(String)) | Hash(String, Array::View(String)) | Nil = nil)
     held = RisHttpResponseBody.new(headers, apart)
     @held = held
-    @source = nil
-    @writer = nil
     @reader = nil
     @url = nil
     @decoded = false
@@ -1846,8 +1729,6 @@ pub class Response
     @body = ""
     held = RisHttpResponseBody.new(Hash(String, String).new)
     @held = held
-    @source = nil
-    @writer = nil
     @reader = nil
     @url = nil
     @decoded = false
@@ -1906,129 +1787,19 @@ pub class Response
     held = RisHttpResponseBody.new(headers, apart)
     @held = held
     @body = ""
-    @source = nil
-    @writer = nil
     @reader = reader
     @url = url
   end
 
-  # A response to write: the reason is the status's own, the headers the
-  # caller's. `Response.new(200, "hello")` is the common shape.
+  # A response a program makes, as a client would have read it: the
+  # reason is the status's own, the headers the caller's.
   def initialize(@status : Int32, @body : String = "", headers : Hash(String, String) = {} of String => String)
     held = RisHttpResponseBody.new(headers)
     @held = held
     @reason = HTTP.reason_for(@status)
-    @source = nil
-    @writer = nil
     @reader = nil
     @url = nil
     @decoded = false
-  end
-
-  # A response whose body is *source*, copied out by the server and
-  # closed after.
-  def initialize(@status : Int32, source : IyiIO, headers : Hash(String, String) = {} of String => String)
-    held = RisHttpResponseBody.new(headers)
-    @held = held
-    @reason = HTTP.reason_for(@status)
-    @body = ""
-    @source = source
-    @writer = nil
-    @reader = nil
-    @url = nil
-    @decoded = false
-  end
-
-  # A response whose body the block writes as it goes, chunked. A
-  # *content_type* given is the stream's own: *headers* naming one is
-  # refused. A *cache_control* given is sent unless *headers* names its
-  # own. std/sse's are `text/event-stream` and `no-cache`.
-  def self.stream(status : Int32, headers : Hash(String, String) = {} of String => String, content_type : String? = nil, cache_control : String? = nil, &writer : BodyWriter -> Nil) : Response
-    Response.new(status, headers, content_type, cache_control, writer)
-  end
-
-  # A response whose body *writer* writes as it goes: `Response.stream`'s.
-  # The headers are a copy made here, so the answer holds nothing of its
-  # caller's scratch.
-  def initialize(@status : Int32, headers : Hash(String, String), content_type : String?, cache_control : String?, writer : BodyWriter -> Nil)
-    sent = Hash(String, String).new
-    cached = false
-    headers.each do |name, value|
-      if HTTP.same_name?(name, "Content-Type") && (type = content_type)
-        raise "Response.stream: Content-Type is the stream's own, #{type}"
-      end
-      cached = true if HTTP.same_name?(name, "Cache-Control")
-      sent[name] = value
-    end
-    if type = content_type
-      sent["Content-Type"] = type
-    end
-    if cache = cache_control
-      sent["Cache-Control"] = cache unless cached
-    end
-    held = RisHttpResponseBody.new(sent)
-    @held = held
-    @reason = HTTP.reason_for(@status)
-    @body = ""
-    @source = nil
-    @writer = writer
-    @reader = nil
-    @url = nil
-    @decoded = false
-  end
-
-  # A 101 Switching Protocols with *headers* (`Upgrade` and the
-  # protocol's own), after which the connection is the handler's: the
-  # server calls its `take_over(socket, leftover, response)` with the
-  # connection - the socket, or under TLS the `TlsStream` over it - the
-  # bytes the client sent after its request, and this 101. It runs in
-  # the connection's own scope, a call the tape checks follow; the
-  # connection closes when it returns.
-  def self.upgrade(headers : Hash(String, String)) : Response
-    Response.new(headers)
-  end
-
-  def initialize(headers : Hash(String, String))
-    @status = 101
-    @reason = HTTP.reason_for(101)
-    @body = ""
-    held = RisHttpResponseBody.new(headers)
-    @held = held
-    @source = nil
-    @writer = nil
-    @reader = nil
-    @url = nil
-    @decoded = false
-    @upgrading = true
-  end
-
-  # A block kept in the response would run where no check can follow
-  # what it keeps of the connection.
-  def self.upgrade(headers : Hash(String, String), &takeover : (IyiSocket | TlsStream, String, Response) -> Nil) : Response
-    {% raise "Response.upgrade takes no block: return Response.upgrade(headers)\n" +
-             "and give the handler take_over(socket, leftover, response),\n" +
-             "which the server calls with the connection after the 101." %}
-  end
-
-  protected def writer=(writer : Proc(BodyWriter, Nil)) : Proc(BodyWriter, Nil)
-    @writer = writer
-  end
-
-  protected def upgrading=(@upgrading : Bool) : Bool
-  end
-
-  def source : IyiIO?
-    @source
-  end
-
-  def writer : Proc(BodyWriter, Nil)?
-    @writer
-  end
-
-  # Whether this is `Response.upgrade`'s 101: the handler's
-  # `take_over` gets the connection after it.
-  def upgrading? : Bool
-    @upgrading
   end
 
   # The URL the answer came from, after any redirects; nil for one a
@@ -2143,33 +1914,6 @@ pub class Response
     end
   end
 
-  # The headers of a body coded in *coding* (`gzip`, `zstd`), changed in
-  # place: the coding, and `Vary` so that a cache keeps the answers apart.
-  # A `Content-Length` the block gave is the plain body's, and goes.
-  protected def code_as(coding : String) : Nil
-    headers = @held.headers
-    headers.reject_in_place { |name, _| HTTP.same_name?(name, "Content-Length") }
-    vary = nil.as(String?)
-    headers.each { |name, _| vary = name if HTTP.same_name?(name, "Vary") }
-    if found = vary
-      # Copies: no key or value of the table is held while it changes.
-      name = @held.note(found)
-      value = @held.note(headers[name] + ", Accept-Encoding")
-      headers[name] = value unless HTTP.has_token?(headers[name], "Accept-Encoding")
-    else
-      headers["Vary"] = "Accept-Encoding"
-    end
-    headers["Content-Encoding"] = @held.note(coding)
-    nil
-  end
-
-  # *coded* as the body, copied into this response's own builder.
-  protected def body_coded(coded : String) : Nil
-    @held.coded << coded
-    @body = @held.coded.finish
-    nil
-  end
-
   def success? : Bool
     @status >= 200 && @status < 300
   end
@@ -2214,22 +1958,6 @@ struct RisHttpHeaderCopy
   end
 end
 
-# The pieces of one request as they came off the wire, or why not: a
-# request line and headers, the body they promise, and whether the
-# client asked for the connection to close after. `consumed` is where it
-# ends in the text it was read from; `status` the answer an error gets.
-@[OnTape]
-struct ParsedRequest
-  getter request : Request?
-  getter error : String?
-  getter close : Bool
-  getter consumed : Int32
-  getter status : Int32
-
-  def initialize(@request : Request?, @error : String?, @close : Bool, @consumed : Int32, @status : Int32 = 400)
-  end
-end
-
 # A request's head, read and checked: everything but the body, and how
 # the body is framed - `length` bytes, chunks, or none.
 @[OnTape]
@@ -2237,39 +1965,129 @@ struct RequestHead
   getter method : String
   getter path : String
   getter query : String?
-  getter headers : Hash(String, String)
   getter version : String
   getter close : Bool
   getter chunked : Bool
   getter length : Int64
   getter expects : Bool
 
-  def initialize(@method : String, @path : String, @query : String?, @headers : Hash(String, String), @version : String, @close : Bool, @chunked : Bool, @length : Int64, @expects : Bool)
+  def initialize(@method : String, @path : String, @query : String?, @version : String, @close : Bool, @chunked : Bool, @length : Int64, @expects : Bool)
   end
 end
 
-# The answer `Server.answer`'s block writes: a status, 200 until set, up
-# to `LINES` header lines, and its body, written into `body`. Each line is
-# copied into the answer's own text, so a value made in the block's def
-# need not outlive it; `header(name) { |w| ... }` writes a computed value
-# there directly. `length=` states the length of an answer to HEAD, which
-# sends no body. The server adds `Content-Length` and `Connection`, and
-# refuses the block's own.
+# A request as `Server.answer`'s handler is handed it: views into the
+# bytes that arrived, on the request's tape, nothing copied. `copy_to`
+# keeps what the handler retains past its answer.
+#
+# `version` is "HTTP/1.1", "HTTP/1.0" or "HTTP/2". `remote_address` is
+# the client's address as the socket saw it (no port), nil for a request
+# a program made. Under TLS, `tls_resumed?` says whether the session was
+# resumed by a ticket and `peer_certificates` holds the client's chain,
+# leaf first, as std/tls checked it (empty in the clear). Under
+# `Server.answer`'s *stream_bodies* the body is read from `body_io` as it
+# arrives and `body` is empty; otherwise `body` is whole and `body_io`
+# reads it.
+@[OnTape]
+pub struct Incoming
+  getter method : String
+  getter path : String
+  getter query : String?
+  getter fields : Array(Field)
+  getter body : String
+  getter version : String
+  getter remote_address : String?
+  @resumed : Bool
+  @peer : Array(Certificate)?
+  @reader : BodyReader?
+
+  def initialize(@method : String, @path : String, @query : String?,
+                 @fields : Array(Field), @body : String,
+                 @version : String = "HTTP/1.1",
+                 @remote_address : String? = nil, @resumed : Bool = false,
+                 @peer : Array(Certificate)? = nil,
+                 @reader : BodyReader? = nil)
+  end
+
+  # The value of the first field called *name*, in any case.
+  def header(name : String) : String?
+    i = 0
+    while i < @fields.size
+      f = @fields[i]
+      return f.value if HTTP.same_name?(f.name, name)
+      i = i + 1
+    end
+    nil
+  end
+
+  # The query's parameters, read on the request's tape (`Query.parse`).
+  def params : Query
+    Query.parse(@query || @path[0, 0])
+  end
+
+  def tls_resumed? : Bool
+    @resumed
+  end
+
+  def peer_certificates : Array(Certificate)
+    if peer = @peer
+      return peer
+    end
+    [] of Certificate
+  end
+
+  # The body as it arrives: the connection's under *stream_bodies*,
+  # else a reader of `body`.
+  def body_io : BodyReader
+    if reader = @reader
+      BodyReader.borrow(reader)
+    else
+      BodyReader.text(String::Builder.new(256), @body)
+    end
+  end
+end
+
+# The answer `Server.answer`'s handler writes: a status, 200 until set, up
+# to `LINES` header lines, and how its body goes. Each line is copied into
+# the answer's own text, so a value made in the handler's def need not
+# outlive it; `header(name) { |w| ... }` writes a computed value there
+# directly. The server adds `Content-Length`, `Transfer-Encoding` and
+# `Connection`, and refuses the handler's own.
+#
+# The body ends one of four ways, once:
+#
+# * written into `body`, the common case, sent whole after `call`;
+# * `stream { |w| ... }`: the head goes now, then what the block writes,
+#   chunked over HTTP/1.1, as DATA over HTTP/2, to the close for an
+#   HTTP/1.0 client;
+# * `send(io)`: the same, copying *io* to its end;
+# * `upgrade`: a 101, after which the server hands the connection to the
+#   handler's `take_over(socket, leftover, res)`.
+#
+# `length=` before `stream` or `send` states the body's length: the head
+# says `Content-Length`, and a body of another length cuts the connection
+# (HTTP/1.1) or resets the stream (HTTP/2). Without them `length=` is for
+# an answer to HEAD alone. `close` closes the connection after this
+# answer.
 @[OnTape]
 pub struct Outgoing
   LINES = 32
 
-  # The status, the number of lines, 1 while a header block runs, and
-  # the length `length=` set or -1. An @[OnTape] struct is passed by
-  # value: a field a method changes is a slot the copies share.
+  # [0] the status, [1] the number of lines, [2] 1 while a header block
+  # runs, [3] the length `length=` set or -1, [4] how the answer ends (0
+  # whole, 1 stream, 2 send, 3 upgrade), [5] 1 when `close` was asked.
+  # An @[OnTape] struct is passed by value: a field a method changes is
+  # a slot the copies share.
   @state : Array(Int32)
   # Each line's name and value, as spans of @text.
   @spans : Array(String::Span)
   @text : String::Builder
   getter body : String::Builder
+  # The server's: where `stream` and `send` write. Nil for one a program
+  # made.
+  @sink : RisAnswerSink?
 
-  def initialize
-    @state = Array(Int32).new(4) { |i| i == 0 ? 200 : (i == 3 ? -1 : 0) }
+  def initialize(@sink : RisAnswerSink? = nil)
+    @state = Array(Int32).new(6) { |i| i == 0 ? 200 : (i == 3 ? -1 : 0) }
     @spans = Array(String::Span).new(LINES * 2) { String::Span.new(0, 0) }
     @text = String::Builder.new(1024)
     @body = String::Builder.new
@@ -2284,10 +2102,9 @@ pub struct Outgoing
     @state[0] = code
   end
 
-  # A header line, copied into this answer's own text and checked as
-  # `format_response` checks one: a name that is a token, a value with
-  # no line break or control character, and none of the lines the server
-  # writes itself.
+  # A header line, copied into this answer's own text and checked: a
+  # name that is a token, a value with no line break or control
+  # character, and none of the lines the server writes itself.
   def header(name : String, value : String) : Nil
     header(name) { |w| w << value }
   end
@@ -2297,6 +2114,9 @@ pub struct Outgoing
   # inside the block raises: its bytes would land in this value.
   def header(name : String, & : String::Builder -> Nil) : Nil
     raise "HTTP: a header inside a header block" if @state[2] == 1
+    if @state[4] == 1 || @state[4] == 2
+      raise "HTTP: a header after the head was sent; write it before stream or send"
+    end
     count = @state[1]
     raise "HTTP: more than #{LINES} header lines" if count == LINES
     if HTTP.same_name?(name, "Content-Length") || HTTP.same_name?(name, "Connection") || HTTP.same_name?(name, "Transfer-Encoding")
@@ -2321,6 +2141,18 @@ pub struct Outgoing
     @state[2] = 0
   end
 
+  # The value of the first line called *name* the handler wrote, in any
+  # case; nil when there is none.
+  def header(name : String) : String?
+    text = @text.to_s
+    i = 0
+    while i < @state[1]
+      return text[@spans[i * 2 + 1]] if HTTP.same_name?(text[@spans[i * 2]], name)
+      i = i + 1
+    end
+    nil
+  end
+
   # 0 for a good line, else what is wrong: 1 the name, 2 a line break,
   # 3 a control character (`Server.check_line`'s rules).
   protected def self.refusal(text : String, named : String::Span,
@@ -2331,9 +2163,9 @@ pub struct Outgoing
     0
   end
 
-  # The Content-Length of an answer to HEAD, which sends no body. Unless
-  # the answer is to HEAD, it must equal the body's bytes, or writing the
-  # head raises.
+  # The Content-Length of an answer to HEAD, or of the body `stream` or
+  # `send` writes. For a whole body it must equal the body's bytes
+  # unless the answer is to HEAD, or writing the head raises.
   def length=(count : Int64) : Int64
     unless count >= 0_i64 && count <= 2147483647_i64
       raise "HTTP: not a length: #{count}"
@@ -2348,6 +2180,80 @@ pub struct Outgoing
     given < 0 ? @body.length.to_i64 : given.to_i64
   end
 
+  # The length `length=` set, or -1.
+  def given_length : Int64
+    @state[3].to_i64
+  end
+
+  # How the answer ends: 0 whole, 1 `stream`, 2 `send`, 3 `upgrade`.
+  def ending : Int32
+    @state[4]
+  end
+
+  # Whether `upgrade` was asked.
+  def upgrading? : Bool
+    @state[4] == 3
+  end
+
+  # The connection closes after this answer.
+  def close : Nil
+    @state[5] = 1
+    nil
+  end
+
+  def closing? : Bool
+    @state[5] == 1
+  end
+
+  # The body written as it goes: the head now, then what the block writes
+  # through *w*, then the body's end. An answer to HEAD runs no block.
+  # A block that raises after the head went cuts the body: the client
+  # never sees a second head.
+  def stream(& : BodyWriter -> Nil) : Nil
+    sink = take_end(1)
+    sink.stream(self) { |w| yield w }
+  end
+
+  # The body copied from *io* to its end, as `stream` writes one. The
+  # caller closes *io*.
+  def send(io : IyiIO) : Nil
+    sink = take_end(2)
+    sink.stream(self) do |w|
+      held = String::Builder.new(65536)
+      while true
+        held.clear
+        io.read_str(65536, held)
+        piece = held.finish
+        break if piece.bytesize == 0
+        break unless w.write(piece).nil?
+      end
+    end
+  end
+
+  # A 101 Switching Protocols with this answer's lines (`Upgrade` and the
+  # protocol's own). After `call` returns the server writes it and calls
+  # the handler's `take_over(socket, leftover, res)` with the connection
+  # - the socket, or under TLS the `TlsStream` - the bytes the client sent
+  # after its request, and this answer. HTTP/2 answers it 501.
+  def upgrade : Nil
+    if @state[4] != 0 || @body.length > 0
+      raise "HTTP: write the body inside stream, or only into body"
+    end
+    @state[0] = 101
+    @state[4] = 3
+    nil
+  end
+
+  private def take_end(kind : Int32) : RisAnswerSink
+    if @state[4] != 0 || @body.length > 0
+      raise "HTTP: write the body inside stream, or only into body"
+    end
+    sink = @sink
+    raise "HTTP: this Outgoing is not a server's" unless sink
+    @state[4] = kind
+    sink
+  end
+
   # Each header line the block wrote, in order, viewing the answer's text.
   def each_line(& : Field -> Nil) : Nil
     text = @text.to_s
@@ -2356,6 +2262,84 @@ pub struct Outgoing
       yield Field.new(text[@spans[i * 2]], text[@spans[i * 2 + 1]])
       i = i + 1
     end
+  end
+
+  # The number of header lines written.
+  def line_count : Int32
+    @state[1]
+  end
+end
+
+# Where an `Outgoing`'s streamed body goes: the server makes one per
+# request, on the request's tape, for its connection - an HTTP/1 socket
+# or TLS stream, or an HTTP/2 stream - and the request's facts the head
+# depends on. `going` is whether the connection goes on after it.
+class RisAnswerSink
+  getter going : Bool = true
+  # Set when a streamed answer's head was written.
+  getter wrote : Bool = false
+  @socket : IyiSocket | TlsStream | Nil
+  @h2 : H2Connection?
+  @id : Int32
+  @head : Bool
+  @old : Bool
+  @close : Bool
+  @accept : String?
+  @compress : Bool
+
+  def initialize(@socket : IyiSocket | TlsStream | Nil, @h2 : H2Connection?,
+                 @id : Int32, @head : Bool, @old : Bool, @close : Bool,
+                 @accept : String?, @compress : Bool)
+  end
+
+  # The head of *res* now, then the block's body. A stream's coding is
+  # gzip's or none (`Server.coding_for`); a body of a stated length goes
+  # as it is.
+  def stream(res : Outgoing, & : BodyWriter -> Nil) : Nil
+    given = res.given_length
+    coding = @compress && given < 0 ? Server.coding_for(@accept, res) : nil
+    gzip = !coding.nil?
+    bodiless = HTTP.bodiless?(res.status)
+    if h2 = @h2
+      @wrote = true
+      fields = Std::Hpack::TapeHeaders.new(H2Connection.answer_capacity(res))
+      texts = String::Builder.new(256)
+      H2Connection.answer_fields_on_tape(res, given < 0 ? nil : given,
+        gzip ? "gzip" : nil, fields, texts)
+      unless h2.send_headers(@id, fields, @head || bodiless)
+        @going = false
+        return
+      end
+      return if @head || bodiless
+      writer = H2Connection.writer_for(h2, @id, gzip)
+      writer.limit = given
+      yield writer
+      writer.finish
+      @going = h2.end_answer(@id, given < 0 || (!writer.over? && writer.written == given))
+      return
+    end
+    socket = @socket
+    raise "HTTP: this Outgoing is not a server's" unless socket
+    chunked = given < 0 && !@old && !@head && !bodiless
+    closing = @close || res.closing? ||
+              (given < 0 && !chunked && !@head && !bodiless)
+    framing = given >= 0 ? Server::FRAME_LENGTH : (chunked ? Server::FRAME_CHUNKED : Server::FRAME_NONE)
+    @wrote = true
+    top = Server.head_text(res, closing, framing, given, gzip ? "gzip" : nil)
+    unless socket.write(top).is_a?(Int32)
+      @going = false
+      return
+    end
+    if @head || bodiless
+      @going = !closing
+      return
+    end
+    writer = Server.writer_for(socket, chunked, gzip)
+    writer.limit = given
+    yield writer
+    ok = writer.finish.nil?
+    ok = false if given >= 0 && (writer.over? || writer.written != given)
+    @going = ok && !closing
   end
 end
 
@@ -2371,12 +2355,14 @@ end
 
 @[OnTape]
 pub struct Server
-  # `serve` on the tape: the block reads the request where it arrived and
-  # writes its answer into *res*, on the request's tape, freed when the
-  # answer is written. No `Request`, `Response` or header `Hash` is made
-  # for a plain request; one the fast path does not take (chunked, `Expect`,
-  # an absolute-form target, HTTP/1.0) is read as `serve` reads it, then
-  # handed on the same way.
+  # A pool of workers answering HTTP on the tape: the handler reads the
+  # request where it arrived and writes its answer into *res*, on the
+  # request's tape, freed when the answer is written. No header `Hash` is
+  # made. Cleartext HTTP/1.1 without *stream_bodies* or *compress* takes
+  # the fast path, which reads plain requests where they lie; one it does
+  # not take (chunked, `Expect`, an absolute-form target, HTTP/1.0) is read
+  # whole first, then handed on the same way. TLS, HTTP/2, compression and
+  # streamed request bodies go through the full connection path.
   #
   #   struct Handler
   #     def initialize(config : Int32)
@@ -2394,34 +2380,111 @@ pub struct Server
              "Cancel its enclosing group to stop." %}
   end
 
-  # Each worker constructs Handler.new with its own checked config copy.
-  # Handler#call receives the same request and response as the old block.
+  # Each worker constructs Handler.new with its own checked config copy
+  # and calls Handler#call(Incoming, Outgoing) for each request.
+  #
+  # *stream_bodies*: the handler reads each request's body from
+  # `body_io` rather than being handed it whole. *compress*: an answer
+  # whose type std/mime calls compressible goes zstd or gzip to a client
+  # that accepts one (`coding_for`).
+  #
+  # *timeout_ms*: a request's head must have arrived within it, counted
+  # from when the server starts waiting for one - a kept-alive connection's
+  # idle time included - and no read of a body nor write of an answer may
+  # wait longer; a connection that does is closed. Without it, a client
+  # that sends a byte of its head every few seconds (Slowloris) holds a
+  # connection and its fiber for as long as it likes, and so does one that
+  # reads none of its answer. A minute by default, nginx's
+  # `client_header_timeout`; 0 for none. A connection handed over by
+  # `Outgoing#upgrade` waits as its protocol likes.
+  #
+  # *request_timeout_ms*: the whole request - head and body - must have
+  # arrived within it, counted from the same moment as *timeout_ms*, as
+  # Go's `ReadTimeout` beside its `ReadHeaderTimeout`; the head is held to
+  # the sooner of the two. A handler that reads the body itself
+  # (*stream_bodies*) reads under it until it returns, and what it leaves
+  # unread is read past under it too. Over HTTP/2 the wait for each
+  # request and its body is held to it on the connection the same way.
+  # Five minutes by default, which a 64 MiB body (`MAX_BODY`) meets at
+  # 224 KB/s. 0 for none. A connection past it is closed, unanswered.
+  #
+  # *max_connections*: the number N of serving tasks, 1024 by default
+  # (macOS: 1, the only value it takes; a larger N is refused), and the
+  # maximum number of connections served simultaneously. It must be
+  # positive. Each listener has a kernel queue; SO_REUSEPORT assigns
+  # connections to listeners, without a promise of even distribution. A
+  # busy worker keeps its own queue waiting while it serves its current
+  # connection, including all keep-alive requests.
+  #
+  # TLS: implement Handler#tls_config to construct task-local TLS state
+  # (std/tls's `TlsServerConfig`, 1.3 or 1.2), read once per worker. The
+  # handshake is held to *timeout_ms* too. Inside it a connection that
+  # opens with HTTP/2's preface - as a client whose ALPN chose `h2` does -
+  # is served HTTP/2, and any other HTTP/1.1; in the clear a connection
+  # with the preface (prior knowledge) is served HTTP/2 as well. After an
+  # `Outgoing#upgrade` the handler's `take_over(socket, leftover, res)` is
+  # handed the socket, or over TLS the `TlsStream`: a WebSocket is
+  # `wss://`.
+  #
+  # Configuration must be Copyable (the board's checked packed form). A
+  # handler may implement #listening(port) to announce startup. Cancel
+  # the enclosing group to stop: accepts stop and in-flight IO is
+  # cancelled; defers close clients and listeners before join. A request
+  # panic closes its connection and listener; its supervisor replaces
+  # that worker with fresh local state. Port zero is refused.
   def self.answer(host : String, port : Int32, config : C,
-                  factory : F.class,
+                  factory : F.class, stream_bodies : Bool = false,
+                  compress : Bool = false, timeout_ms : Int32 = 60000,
+                  request_timeout_ms : Int32 = REQUEST_TIMEOUT,
                   max_connections : Int32 = MAX_CONNECTIONS) : Nil forall C, F
-    prefork(host, port, config, factory, Incoming, max_connections,
-      false, false, 60000, REQUEST_TIMEOUT)
+    {% for m in F.methods %}
+      {% if m.name == "call" && m.args.size != 2 %}
+        {% raise "#{F}#call(#{m.args.map(&.stringify).join(", ").id}) is the old server form.\n" +
+                 "Write def call(req : Incoming, res : Outgoing) : Nil: read the\n" +
+                 "request from req and write the answer into res." %}
+      {% end %}
+      {% if m.name == "call" && m.body.stringify.includes?("upgrade") && !F.has_method?("take_over") %}
+        {% raise "#{F}#call upgrades, but #{F} has no take_over.\n" +
+                 "Give it def take_over(socket : IyiSocket | TlsStream,\n" +
+                 "leftover : String, res : Outgoing) : Nil, which the server\n" +
+                 "calls with the connection after the 101." %}
+      {% end %}
+    {% end %}
+    prefork(host, port, config, factory, max_connections,
+      stream_bodies, compress, timeout_ms, request_timeout_ms)
   end
 
   @[TaskClosureUnsafe("Only defers retain this connection frame")]
-  private def self.tape_connection(client : IyiSocket,
-                                   answerer,
+  private def self.tape_connection(client : IyiSocket, handler,
                                    listener : IyiSocket?,
-                                   idle : IdleConns?) : Nil
+                                   idle : IdleConns?, timeout_ms : Int32,
+                                   request_timeout_ms : Int32) : Nil
     defer client.close
     conn = Conn.new(client, listener, idle, task_owned: true)
-    conn.gap = 60000
+    conn.gap = timeout_ms if timeout_ms > 0
+    remote = client.remote_address
+    started = Time.monotonic_nanoseconds.to_i64
+    conn.deadline_at(until_head(started, timeout_ms, until_whole(started, request_timeout_ms)))
+    if h2_preface?(conn)
+      conn.no_deadline
+      wrote = serve_h2(conn, handler, false, false, remote,
+        [] of Certificate, timeout_ms, request_timeout_ms)
+      wrote ? conn.close : conn.close_now
+      return
+    end
+    conn.no_deadline
     while true
       going = false
       # One request's head, parse and answer are its own scratch, freed
       # when it ends, as in serve_h1: the connection's tape stays flat.
       tape do
-        conn.deadline_in(60000)
+        started = Time.monotonic_nanoseconds.to_i64
+        conn.deadline_at(until_head(started, timeout_ms, until_whole(started, request_timeout_ms)))
         return unless conn.available > 0 || conn.fill
         result = nil.as(Int32 | Bool | Nil)
         loop do
           tape do
-            result = answered_in_place(client, answerer, conn.tape_copy)
+            result = answered_in_place(conn, handler, conn.tape_copy, remote)
           end
           break unless result == -1
           # A read boundary is not a request boundary. Keep partial bytes
@@ -2431,44 +2494,20 @@ pub struct Server
         conn.no_deadline
         case result
         in Int32
+          if result < 0
+            # Upgraded: the connection was the handler's, and is over.
+            return
+          end
           conn.consume(result)
           going = true
         in Bool
           return
         in Nil
-          conn.deadline_in(60000)
-          got = conn.read_head(MAX_HEAD, "request", true)
-          conn.no_deadline
-          return if got.nil?
-          if got.is_a?(HTTPError)
-            refuse(client, got)
-            return
-          end
-          head_fields = {} of String => String
-          texts = String::Builder.new(256)
-          head = request_head(got, head_fields, texts)
-          if head.is_a?(HTTPError)
-            refuse(client, head)
-            return
-          end
-          reader = body_reader(conn, head)
-          body = reader.read_all(MAX_BODY.to_i64)
-          unless body.is_a?(String)
-            refuse(client, body) if body.is_a?(HTTPError)
-            return
-          end
-          tape do
-            fields = Array(Field).new(head.headers.size)
-            head.headers.each do |name, value|
-              fields.push(Field.new(name.as_tape,
-                value.as_tape))
-            end
-            query = head.query
-            req = Incoming.new(head.method.as_tape,
-              head.path.as_tape,
-              query ? query.as_tape : nil,
-              fields, body.as_tape)
-            going = answered_on_tape?(client, answerer, req, head.close)
+          # Not the fast path's: read as serve_h1 reads a request.
+          case h1_request(conn, handler, false, false, remote, timeout_ms, request_timeout_ms)
+          when 0 then going = true
+          when 1 then return
+          else        return
           end
         end
       end
@@ -2476,12 +2515,13 @@ pub struct Server
     end
   end
 
-  # A plain request at *start* in *buffer*, answered where it lies: the
-  # next request's start, -1 when more bytes are needed, false when the
-  # connection ends, nil for one the fast path does not take - chunked,
-  # `Expect`, HTTP/1.0, an absolute-form target, not HTTP - which
-  # `parse_request` reads.
-  private def self.answered_in_place(client : IyiSocket, answerer, bytes : String) : Int32 | Bool | Nil
+  # A plain request at the start of *bytes*, answered where it lies: the
+  # next request's start, -1 when more bytes are needed, -2 when the
+  # handler took the connection over, false when the connection ends, nil
+  # for one the fast path does not take - chunked, `Expect`, HTTP/1.0, an
+  # absolute-form target, not HTTP - which `h1_request` reads.
+  private def self.answered_in_place(conn : Conn, handler, bytes : String, remote : String?) : Int32 | Bool | Nil
+    client = conn.socket
     result = nil.as(Int32 | Bool | Nil)
     tape do
       # The three-argument form: the one-argument parse_head answers a
@@ -2497,23 +2537,63 @@ pub struct Server
         return -1 if bytes.bytesize - head.body_start < length
         size = length.to_i32
         close = false
-        if conn = head.field("Connection")
-          close = HTTP.has_token?(conn, "close")
+        if said = head.field("Connection")
+          close = HTTP.has_token?(said, "close")
         end
         target = head.target
         q = HTTP.byte_in(target, 0, target.bytesize, 63_u8)
         query = q < target.bytesize ? target[q + 1, target.bytesize - q - 1] : nil
-        incoming = Incoming.new(head.method, target[0, q], query, head.fields, bytes[head.body_start, size])
-        result = answered_on_tape?(client, answerer, incoming, close) ? head.body_start + size : false
+        incoming = Incoming.new(head.method, target[0, q], query, head.fields,
+          bytes[head.body_start, size], head.version, remote)
+        is_head = HTTP.same_name?(head.method, "HEAD")
+        sink = RisAnswerSink.new(client, nil, 0, is_head, false, close, nil, false)
+        res = Outgoing.new(sink)
+        handler.call(incoming, res)
+        next_at = head.body_start + size
+        if res.upgrading?
+          rest = bytes[next_at, bytes.bytesize - next_at]
+          conn.unlimited
+          conn.held { handed_over(client, handler, rest, res) }
+          result = -2
+        else
+          result = answered?(client, sink, res, is_head, close, false, nil) ? next_at : false
+        end
       end
     end
     result
   end
 
-  # The tape response's wire head, shared by measurement and serving.
+  # The wire head of a whole answer, shared by measurement and serving.
   # Unless *head*, a length set with `length=` must be the body's.
   def self.format_head(res : Outgoing, close : Bool,
                        head : Bool = false) : String
+    given = res.length
+    unless head || HTTP.bodiless?(res.status) || given == res.body.length.to_i64
+      raise "HTTP: length= #{given} with a body of #{res.body.length} " +
+            "bytes; length= is for a HEAD answer, or before stream or send"
+    end
+    head_text(res, close, FRAME_LENGTH, given, nil)
+  end
+
+  def self.format_response(res : Outgoing, head : Bool, close : Bool) : String
+    top = format_head(res, close, head)
+    head || HTTP.bodiless?(res.status) ? top : top + res.body.finish
+  end
+
+  # How a head frames its body: `Content-Length` *length*, chunks, none
+  # (to the close), or a 101's `Connection: Upgrade`.
+  FRAME_LENGTH  = 0
+  FRAME_CHUNKED = 1
+  FRAME_NONE    = 2
+  FRAME_UPGRADE = 3
+
+  # *res*'s wire head: its status line and lines, the coding's
+  # `Content-Encoding` and `Vary` when *coding*, the framing *framing*
+  # names, and `Connection`. A 1xx, 204 or 304 has no content (RFC 9110
+  # §15) and writes no length (§8.6). These server lines do not count
+  # against `Outgoing::LINES`.
+  def self.head_text(res : Outgoing, close : Bool, framing : Int32,
+                     length : Int64, coding : String?) : String
     status = res.status
     raise "HTTP: not a status: #{status}" unless status >= 100 && status <= 999
     w = String::Builder.new
@@ -2528,38 +2608,73 @@ pub struct Server
       w << line.value
       w << "\r\n"
     end
-    bodiless = (status >= 100 && status < 200) || status == 204 || status == 304
-    unless bodiless
-      given = res.length
-      if !head && given != res.body.length.to_i64
-        raise "HTTP: length= #{given} with a body of #{res.body.length} " +
-              "bytes; length= is for a HEAD answer"
-      end
-      w << "Content-Length: "
-      w.append_int(given)
-      w << "\r\n"
+    if c = coding
+      w << "Content-Encoding: " << c << "\r\nVary: Accept-Encoding\r\n"
     end
-    w << (close ? "Connection: close\r\n\r\n" : "Connection: keep-alive\r\n\r\n")
+    unless HTTP.bodiless?(status)
+      if framing == FRAME_LENGTH
+        w << "Content-Length: "
+        w.append_int(length)
+        w << "\r\n"
+      elsif framing == FRAME_CHUNKED
+        w << "Transfer-Encoding: chunked\r\n"
+      end
+    end
+    if framing == FRAME_UPGRADE
+      w << "Connection: Upgrade\r\n\r\n"
+    else
+      w << (close ? "Connection: close\r\n\r\n" : "Connection: keep-alive\r\n\r\n")
+    end
     w.finish
   end
 
-  def self.format_response(res : Outgoing, head : Bool, close : Bool) : String
-    top = format_head(res, close, head)
-    head || HTTP.bodiless?(res.status) ? top : top + res.body.finish
+  # The handler's answer, sent unless it went already (`stream`, `send`):
+  # whether the connection goes on. A whole body of `COMPRESS_FROM` bytes
+  # or more goes in the coding `coding_for` chooses.
+  private def self.answered?(socket : IyiSocket | TlsStream,
+                             sink : RisAnswerSink, res : Outgoing,
+                             head : Bool, close : Bool, compress : Bool,
+                             accept : String?) : Bool
+    closing = close || res.closing?
+    if res.ending != 0
+      if res.body.length > 0
+        raise "HTTP: write the body inside stream, or only into body"
+      end
+      return sink.going && !closing
+    end
+    body = res.body.finish
+    coding = compress && !head ? coding_for(accept, res) : nil
+    if (c = coding) && body.bytesize >= COMPRESS_FROM
+      coded = c == "zstd" ? Zstd.compress(body) : HTTP.gzip(body)
+      top = head_text(res, closing, FRAME_LENGTH, coded.bytesize.to_i64, c)
+      return Server.wrote_both?(socket, top, coded) && !closing
+    end
+    top = format_head(res, closing, head)
+    sends = !HTTP.bodiless?(res.status) && !head
+    Server.wrote_both?(socket, top, sends ? body : "".as_tape) && !closing
   end
 
-  # *answerer*'s answer to *req*, written from the tape: its head, then
-  # its body, in one write. Whether the connection goes on.
-  private def self.answered_on_tape?(client : IyiSocket, answerer, req : Incoming, close : Bool) : Bool
-    res = Outgoing.new
-    answerer.call(req, res)
-    body = res.body.finish
-    top = format_head(res, close, HTTP.same_name?(req.method, "HEAD"))
-    bodiless = HTTP.bodiless?(res.status)
-    method = req.method
-    sends = !bodiless && !HTTP.same_name?(method, "HEAD")
-    wrote = client.write(top, sends ? body : "".as_tape)
-    wrote.is_a?(Int32) && !close
+  # *top* and then *body*, in one write on a socket.
+  protected def self.wrote_both?(socket : IyiSocket | TlsStream,
+                                 top : String, body : String) : Bool
+    if socket.is_a?(IyiSocket)
+      return socket.write(top, body).is_a?(Int32)
+    end
+    return false unless socket.write(top).is_a?(Int32)
+    body.bytesize == 0 || socket.write(body).is_a?(Int32)
+  end
+
+  # An upgrade's 101, then the connection is the handler's
+  # `take_over(socket, leftover, res)`. The request's tape block ends
+  # after it returns, so *res* and its views live through it.
+  private def self.handed_over(socket : IyiSocket | TlsStream, handler,
+                               leftover : String, res : Outgoing) : Nil
+    if handler.responds_to?(:take_over)
+      return unless socket.write(head_text(res, false, FRAME_UPGRADE, 0_i64, nil)).is_a?(Int32)
+      handler.take_over(socket, leftover, res)
+    else
+      raise "HTTP: res.upgrade needs the handler's take_over(socket, leftover, res)"
+    end
   end
 
   # The head at *from* in *bytes*; its fields go into *fields*, the
@@ -2611,7 +2726,7 @@ pub struct Server
   # A string body shorter than this goes uncompressed: the gzip envelope
   # and the fixed code cost more than they save under it.
   COMPRESS_FROM = 1024
-  # The defaults of `serve`'s *max_connections* and *request_timeout_ms*.
+  # The defaults of `answer`'s *max_connections* and *request_timeout_ms*.
   # macOS gives a SO_REUSEPORT port's connections to one listener (SPEC 5).
   {% if flag?(:darwin) %}
     MAX_CONNECTIONS = 1
@@ -2620,100 +2735,12 @@ pub struct Server
   {% end %}
   REQUEST_TIMEOUT = 300000
 
-  # Serve on N independent SO_REUSEPORT listeners. Each accepting task
-  # serves its own connection through keep-alive and closes it before its
-  # next accept. Cancel the enclosing group to stop accepting, cancel
-  # in-flight IO and close every client and listener before returning.
-  #
-  # *stream_bodies*: the block reads each request's body from `body_io`
-  # rather than being handed it whole. *compress*: an answer whose type
-  # std/mime calls compressible goes zstd or gzip to a client that
-  # accepts one (`coding_for`).
-  #
-  # *timeout_ms*: a request's head must have arrived within it, counted
-  # from when the server starts waiting for one - a kept-alive connection's
-  # idle time included - and no read of a body nor write of an answer may
-  # wait longer; a connection that does is closed. Without it, a client
-  # that sends a byte of its head every few seconds (Slowloris) holds a
-  # connection and its fiber for as long as it likes, and so does one that
-  # reads none of its answer. A minute by default, nginx's
-  # `client_header_timeout`; 0 for none. A connection handed over by
-  # `Response.upgrade` waits as its protocol likes.
-  #
-  # *request_timeout_ms*: the whole request - head and body - must have
-  # arrived within it, counted from the same moment as *timeout_ms*, as
-  # Go's `ReadTimeout` beside its `ReadHeaderTimeout`; the head is held to
-  # the sooner of the two. Without it a body sent a byte every few seconds
-  # was bounded per read alone, and held its connection for as long as it
-  # dripped. A block that reads the body itself (*stream_bodies*) reads
-  # under it until the block returns, and what it leaves unread is read
-  # past under it too. Over HTTP/2 the wait for each request and its body
-  # is held to it on the connection the same way, the head to the sooner
-  # of the two. Five minutes by default, which a 64 MiB body (`MAX_BODY`)
-  # meets at 224 KB/s; a server taking large uploads over slow links
-  # raises it. 0 for none. A connection past it is closed, unanswered, as
-  # one past *timeout_ms* is.
-  #
-  # *max_connections*: the number N of serving tasks, 1024 by default
-  # (macOS: 1, the only value it takes; a larger N is refused),
-  # and the maximum number of connections served simultaneously. It must
-  # be positive; 0 no longer requests an unlimited number of tasks.
-  # Each listener has a kernel queue. SO_REUSEPORT assigns connections to
-  # listeners, without a promise of even distribution or FIFO service
-  # across listeners. A busy worker keeps its own queue waiting while it
-  # serves its current connection, including all keep-alive requests.
-  # The process's descriptor limit may come first.
-  #
-  # *tls*: implement Handler#tls_config to construct task-local TLS state
-  # (std/tls's `TlsServer`, 1.3 or 1.2). The handshake is held to
-  # *timeout_ms* too; one whose
-  # handshake fails is closed, the client told why by an alert. Inside
-  # it a connection that opens with HTTP/2's preface - as a client whose
-  # ALPN chose `h2` does, when `tls_config.alpn` offers it - is served HTTP/2,
-  # and any other HTTP/1.1. After a `Response.upgrade` over TLS the
-  # handler's `take_over` is handed the `TlsStream`: a WebSocket is
-  # `wss://`.
-  #
-  # N task-owned listeners, each serving one complete connection at a
-  # time. There is no unlimited mode: max_connections must be positive.
-  # The factory is a type, not a captured proc. F.new(config) constructs
-  # mutable handler state and optional #tls_config inside each worker.
-  # Configuration must be Copyable (the board's checked packed form).
-  # A handler may implement #listening(port) to announce startup.
-  #
-  # Cancel the enclosing group to stop. Cancellation stops accepts and
-  # cancels in-flight IO; defers close clients and listeners before join.
-  # A request panic closes its connection and listener; its supervisor
-  # consumes Panicked and replaces that worker with fresh local state.
-  # A failed listener setup is fatal, never a shared-listener fallback.
-  # Port zero is refused: choose one port before starting the pool.
-  def self.serve(host : String, port : Int32, config : C,
-                 factory : F.class, stream_bodies : Bool = false,
-                 compress : Bool = false, timeout_ms : Int32 = 60000,
-                 request_timeout_ms : Int32 = REQUEST_TIMEOUT,
-                 max_connections : Int32 = MAX_CONNECTIONS) : Nil forall C, F
-    prefork(host, port, config, factory, Request, max_connections,
-      stream_bodies, compress, timeout_ms, request_timeout_ms)
-  end
-
-  def self.serve(listener : IyiSocket, stream_bodies : Bool = false,
-                 compress : Bool = false, timeout_ms : Int32 = 60000,
-                 tls : TlsServerConfig? = nil,
-                 request_timeout_ms : Int32 = REQUEST_TIMEOUT,
-                 max_connections : Int32 = MAX_CONNECTIONS,
-                 &handler : Request -> Response) : Nil
-    {% raise "Server.serve refuses an open socket or captured handler.\n" +
-             "Use Server.serve(host, port, config, Handler), with\n" +
-             "Handler.new(config), Handler#call(Request), and optional\n" +
-             "Handler#tls_config. Cancel its enclosing group to stop." %}
-  end
-
   @[TaskClosureUnsafe("serve joins supervisors before releasing packed config")]
   private def self.prefork(host : String, port : Int32, config : C,
-                           factory : F.class, style : S.class,
+                           factory : F.class,
                            count : Int32, stream_bodies : Bool,
                            compress : Bool, timeout_ms : Int32,
-                           request_timeout_ms : Int32) : Nil forall C, F, S
+                           request_timeout_ms : Int32) : Nil forall C, F
     {% unless flag?(:linux) || flag?(:darwin) %}
       raise "HTTP requires SO_REUSEPORT; use a Linux or Darwin target"
     {% end %}
@@ -2743,7 +2770,7 @@ pub struct Server
     group do |workers|
       count.times do
         supervise(workers, image, typeof({host.as_tape, port, config}),
-          factory, style, stream_bodies, compress, timeout_ms,
+          factory, stream_bodies, compress, timeout_ms,
           request_timeout_ms)
       end
       0
@@ -2753,15 +2780,15 @@ pub struct Server
   @[TaskClosureUnsafe("serve joins supervisors and their packed config readers")]
   private def self.supervise(workers : IyiGroup, image : RisTaskConfig,
                              configuration_type : C.class,
-                             factory : F.class, style : S.class,
+                             factory : F.class,
                              stream_bodies : Bool, compress : Bool,
                              timeout_ms : Int32,
-                             request_timeout_ms : Int32) : Nil forall C, F, S
+                             request_timeout_ms : Int32) : Nil forall C, F
     workers.spawn do
       while !IyiScheduler.current.cancelled
         outcome = group do |own|
           task = own.spawn do
-            run_worker(image.read(C), factory, style, stream_bodies,
+            run_worker(image.read(C), factory, stream_bodies,
               compress, timeout_ms, request_timeout_ms)
           end
           task.value
@@ -2785,11 +2812,12 @@ pub struct Server
     raise message
   end
 
+
   private def self.run_worker(settings : Tuple(String, Int32, C),
-                              factory : F.class, style : S.class,
+                              factory : F.class,
                               stream_bodies : Bool, compress : Bool,
                               timeout_ms : Int32,
-                              request_timeout_ms : Int32) forall C, F, S
+                              request_timeout_ms : Int32) forall C, F
     host, port, config = settings
     # Build state on this task, never in the supervisor.
     handler = F.new(config)
@@ -2801,6 +2829,9 @@ pub struct Server
     handler.listening(port) if handler.responds_to?(:listening)
     idle = IdleConns.new
     tls = handler.responds_to?(:tls_config) ? handler.tls_config : nil
+    # The fast path reads requests where they lie; TLS, compression and
+    # streamed bodies take the full connection path.
+    fast = tls.nil? && !stream_bodies && !compress
     pause = 5
     while !IyiScheduler.current.cancelled
       stopped = false
@@ -2813,18 +2844,20 @@ pub struct Server
           pause = pause * 2 if pause < 1000
         in IyiSocket
           pause = 5
-          {% if S == Incoming %}
-            tape_connection(client, handler, listener, idle)
-          {% else %}
+          if fast
+            tape_connection(client, handler, listener, idle, timeout_ms,
+              request_timeout_ms)
+          else
             handle(client, handler, listener, idle, stream_bodies, compress,
               timeout_ms, tls, request_timeout_ms)
-          {% end %}
+          end
         end
       end
       break if stopped
     end
     0
   end
+
 
   # One connection: requests until the client is done. A request that is
   # not HTTP is answered with why and the connection closed, since the
@@ -2882,8 +2915,6 @@ pub struct Server
     wrote_last ? conn.close : conn.close_now
   end
 
-  # HTTP/1.1's requests on *conn*, one after another: whether this side
-  # wrote last - an answer or a refusal - when they end.
   # The client's certificates, read anew for each request: a view of the
   # TLS connection held across a takeover, whose protocol reads on, could
   # outlive what it views.
@@ -2891,95 +2922,120 @@ pub struct Server
     stream ? stream.peer_certificates : [] of Certificate
   end
 
+
+  # HTTP/1.1's requests on *conn*, one after another: whether this side
+  # wrote last - an answer or a refusal - when they end.
   private def self.serve_h1(conn : Conn, handler, stream_bodies : Bool, compress : Bool, remote : String?, timeout_ms : Int32, request_timeout_ms : Int32) : Bool
     while true
       # One request's head, parse and answer are its own scratch,
       # freed when it ends: the connection's tape stays flat however
       # many requests a keep-alive connection carries.
+      outcome = 0
       tape do
-        started = Time.monotonic_nanoseconds.to_i64
-        whole = until_whole(started, request_timeout_ms)
-        conn.deadline_at(until_head(started, timeout_ms, whole))
-        got = conn.read_head(MAX_HEAD, "request", true)
-        conn.no_deadline
-        case got
-        in Nil
-          return false
-        in HTTPError
-          refuse(conn.transport, got)
-          return true
-        in String
-          head_fields = {} of String => String
-          texts = String::Builder.new(256)
-          parsed = request_head(got, head_fields, texts)
-          if parsed.is_a?(HTTPError)
-            refuse(conn.transport, parsed)
-            return true
-          end
-          head = parsed
-          # The body, read here or by the block, is the request's too.
-          conn.deadline_at(whole, true) if whole > 0_i64
-          reader = body_reader(conn, head)
-          req = Request.new(head.method, head.path, head.query, head.headers, head.version, reader, remote)
-          unless stream_bodies
-            body = reader.read_all(MAX_BODY.to_i64)
-            conn.no_deadline
-            case body
-            in String
-              req = Request.new(head.method, head.path, head.query, head.headers, body, head.version, remote)
-            in HTTPError
-              # A client that went is not answered; one that sent a body that
-              # is not one is told why.
-              return false if conn.ended?
-              refuse(conn.transport, body)
-              return true
-            in Cancelled
-              return false
-            in SocketError
-              return false
-            end
-          end
-          req.tls_resumed = conn.resumed?
-          req.peer_certificates = peer_of(conn.transport.as?(TlsStream))
-          going = false
-          # Read before answering: a takeover's protocol reads on, and may
-          # refill the buffer the head's views sit in.
-          last = said_close?(head, req)
-          tape do
-            response = handler.call(req)
-            # Writing the answer waits as the client reads it, a pause at a time.
-            conn.no_deadline
-            if response.upgrading?
-              taken_over(conn, response, handler)
-              return false
-            end
-            going = answered?(conn, response, req, head.close, compress)
-          end
-          unless going
-            # A client that said `close` sends no further request (RFC 9112
-            # section 9.6): its request read whole and nothing after it,
-            # nothing of the client's is left to come, and the close waits
-            # for nothing - as nginx's lingering_close waits only where more
-            # may come. Any other close, the server's own choice, may meet a
-            # client still sending.
-            return !(last && reader.finished? && conn.available == 0)
-          end
-          unless reader.finished?
-            conn.deadline_at(whole, true) if whole > 0_i64
-            drained = reader.drain(MAX_DRAIN.to_i64)
-            conn.no_deadline
-            return true unless drained
-          end
-        end
+        outcome = h1_request(conn, handler, stream_bodies, compress, remote,
+          timeout_ms, request_timeout_ms)
       end
+      return outcome == 1 if outcome != 0
     end
   end
 
-  # Whether the client said this request is its last: `Connection: close`,
-  # or HTTP/1.0 without keep-alive.
-  private def self.said_close?(head : RequestHead, req : Request) : Bool
-    said = req.header("Connection") || ""
-    HTTP.has_token?(said, "close") || (head.version == "HTTP/1.0" && !HTTP.has_token?(said, "keep-alive"))
+  # One HTTP/1 request on *conn*, read and answered: 0 when the
+  # connection goes on, 1 when it ends and this side wrote last, 2 when
+  # it ends otherwise. The head is copied onto the request's tape first:
+  # the handler's views of it outlive a refill of the connection's
+  # buffer - a streamed body's read, a takeover's protocol.
+  private def self.h1_request(conn : Conn, handler, stream_bodies : Bool,
+                              compress : Bool, remote : String?,
+                              timeout_ms : Int32,
+                              request_timeout_ms : Int32) : Int32
+    started = Time.monotonic_nanoseconds.to_i64
+    whole = until_whole(started, request_timeout_ms)
+    conn.deadline_at(until_head(started, timeout_ms, whole))
+    got = conn.read_head(MAX_HEAD, "request", true)
+    conn.no_deadline
+    case got
+    in Nil
+      return 2
+    in HTTPError
+      refuse(conn.transport, got)
+      return 1
+    in String
+      text = got.copy_to(RisCurrentTape.new)
+      fields = Array(Field).new(16)
+      texts = String::Builder.new(256)
+      parsed = HTTPError.new("incomplete request")
+      case seen = parse_head(text.as_tape, 0, true, fields)
+      in ParsedHead
+        parsed = request_head_view(seen, fields, texts)
+      in HeadError
+        parsed = HTTPError.new(Server.held(texts, seen.message), seen.status)
+      in Nil
+        nil
+      end
+      if parsed.is_a?(HTTPError)
+        refuse(conn.transport, parsed)
+        return 1
+      end
+      head = parsed
+      # The body, read here or by the handler, is the request's too.
+      conn.deadline_at(whole, true) if whole > 0_i64
+      reader = body_reader(conn, head)
+      body = "".as_tape
+      unless stream_bodies
+        read = reader.read_all(MAX_BODY.to_i64)
+        conn.no_deadline
+        case read
+        in String
+          body = read
+        in HTTPError
+          # A client that went is not answered; one that sent a body that
+          # is not one is told why.
+          return 2 if conn.ended?
+          refuse(conn.transport, read)
+          return 1
+        in Cancelled
+          return 2
+        in SocketError
+          return 2
+        end
+      end
+      req = Incoming.new(head.method, head.path, head.query, fields, body,
+        head.version, remote, conn.resumed?,
+        peer_of(conn.transport.as?(TlsStream)),
+        stream_bodies ? reader : nil)
+      is_head = HTTP.same_name?(head.method, "HEAD")
+      socket = conn.transport
+      accept = req.header("Accept-Encoding")
+      sink = RisAnswerSink.new(socket, nil, 0, is_head,
+        head.version == "HTTP/1.0", head.close, accept, compress)
+      res = Outgoing.new(sink)
+      handler.call(req, res)
+      # Writing the answer waits as the client reads it, a pause at a time.
+      conn.no_deadline
+      if res.upgrading?
+        leftover = conn.leftover.copy_to(RisCurrentTape.new)
+        conn.unlimited
+        conn.held { handed_over(socket, handler, leftover, res) }
+        return 2
+      end
+      going = answered?(socket, sink, res, is_head, head.close, compress, accept)
+      unless going
+        # A client that said `close` sends no further request (RFC 9112
+        # section 9.6): its request read whole and nothing after it,
+        # nothing of the client's is left to come, and the close waits
+        # for nothing - as nginx's lingering_close waits only where more
+        # may come. Any other close, the server's own choice, may meet a
+        # client still sending.
+        return head.close && reader.finished? && conn.available == 0 ? 2 : 1
+      end
+      unless reader.finished?
+        conn.deadline_at(whole, true) if whole > 0_i64
+        drained = reader.drain(MAX_DRAIN.to_i64)
+        conn.no_deadline
+        return 1 unless drained
+      end
+      0
+    end
   end
 
   # Whether the connection opens with HTTP/2's preface, taken if it does:
@@ -3017,6 +3073,7 @@ pub struct Server
     true
   end
 
+
   private def self.serve_h2_request(conn : Conn, h2 : H2Connection,
                                     handler,
                                     stream_bodies : Bool,
@@ -3031,25 +3088,24 @@ pub struct Server
       id = h2.next_request
       conn.no_deadline
       return false unless id
-      headers = {} of String => String
-      texts = String::Builder.new(1024)
-      parts = h2.request_head(id, headers, texts)
+      fields = Array(Field).new(16)
+      parts = h2.request_head(id, fields)
       if parts.nil?
         h2.done(id)
         return true
       end
       method, path, query = parts
       reader = h2.body_reader(id)
-      req = Request.new(method, path, query, headers, "HTTP/2", reader, remote)
       conn.deadline_at(whole, true) if whole > 0_i64
+      body = "".as_tape
       unless stream_bodies
-        body = req.body_io.read_all(MAX_BODY.to_i64)
+        read = reader.read_all(MAX_BODY.to_i64)
         conn.no_deadline
-        case body
+        case read
         in String
-          req = Request.new(req.method, req.path, req.query, req.headers, body, "HTTP/2", remote)
+          body = read
         in HTTPError
-          h2.refuse_request(id, 413, body.reason) if body.status == 413
+          h2.refuse_request(id, 413, read.reason) if read.status == 413
           h2.done(id)
           return true
         in Cancelled
@@ -3058,17 +3114,21 @@ pub struct Server
           return false
         end
       end
-      req.tls_resumed = conn.resumed?
-      req.peer_certificates = peer
-      response = handler.call(req)
+      req = Incoming.new(method, path, query, fields, body, "HTTP/2", remote,
+        conn.resumed?, peer, stream_bodies ? reader : nil)
+      is_head = HTTP.same_name?(method, "HEAD")
+      accept = req.header("Accept-Encoding")
+      sink = RisAnswerSink.new(nil, h2, id, is_head, false, false, accept,
+        compress)
+      res = Outgoing.new(sink)
+      handler.call(req, res)
       conn.no_deadline
-      answered = h2.answer(id, response, req, compress)
+      answered = h2.answer(id, sink, res, is_head, compress, accept)
       h2.done(id)
       return answered
     end
     false
   end
-
   # The body *head* promises, read from *conn*: under the server's limit,
   # and with `Expect: 100-continue` answered the first time the body is
   # waited for - not before it is wanted, and not when it has already
@@ -3084,188 +3144,48 @@ pub struct Server
     end
   end
 
+
   private def self.refuse(client : IyiSocket | TlsStream, error : HTTPError) : Nil
-    response = Response.new(error.status, error.reason + "\n")
-    client.write(format_response(response, false, true))
+    w = String::Builder.new(128)
+    w << "HTTP/1.1 "
+    w.append_int(error.status)
+    w << " " << HTTP.reason_for(error.status) << "\r\n"
+    w << "Content-Length: "
+    w.append_int(error.reason.bytesize + 1)
+    w << "\r\nConnection: close\r\n\r\n" << error.reason << "\n"
+    client.write(w.finish)
   end
 
-  # The block's answer to *req*, written: whether the connection goes on.
-  # A client that went away before its answer is gone; its connection ends
-  # here, and the server goes on. An answer whose own `Connection` says
-  # `close` closes the connection after it, as Go's server and Python's
-  # do: the line was dropped, `keep-alive` written in its place, and the
-  # next request served on a connection the block had ended.
-  # A takeover: the 101 head, then the connection is the handler's. The
-  # caller returns at once after it: the protocol after it reads on and
-  # may refill the buffer the request's views sit in.
-  private def self.taken_over(conn : Conn, response : Response, handler) : Nil
-    unless handler.responds_to?(:take_over)
-      raise "HTTP: Response.upgrade's 101 needs the handler's take_over(socket, leftover, response)"
-    end
-    socket = conn.transport
-    return unless socket.write(format_head(response, false, false, nil, false, true)).is_a?(Int32)
-    leftover = conn.leftover.copy_to(RisCurrentTape.new)
-    conn.unlimited
-    conn.held { handler.take_over(socket, leftover, response) }
-  end
-
-  private def self.answered?(conn : Conn, response : Response, req : Request, close : Bool, compress : Bool) : Bool
-    closing = close
-    if said = response.header("Connection")
-      closing = true if HTTP.has_token?(said, "close")
-    end
-    socket = conn.transport
-    head = HTTP.same_name?(req.method, "HEAD")
-    coding = compress ? Server.coding_for(req, response) : nil
-    if source = response.source
-      defer source.close
-      return send_source(socket, response, source, head, closing, req.version == "HTTP/1.0", !coding.nil?)
-    end
-    if writer = response.writer
-      return send_stream(socket, response, writer, head, closing, req.version == "HTTP/1.0", !coding.nil?)
-    end
-    response = Server.compressed(response, coding) if coding && response.body.bytesize >= COMPRESS_FROM
-    socket.write(format_response(response, head, closing)).is_a?(Int32) && !closing
-  end
-
-  # A stream copied out: *length* bytes of it when the block gave a
-  # `Content-Length`, which closes the connection if the stream has fewer;
-  # chunked otherwise, or to the close for an HTTP/1.0 client, which reads
-  # no chunks.
-  private def self.send_source(socket : IyiSocket | TlsStream, response : Response, source : IyiIO, head : Bool, close : Bool, old : Bool, gzip : Bool) : Bool
-    length = nil.as(Int64?)
-    if declared = response.header("Content-Length")
-      n = HTTP.content_length(declared)
-      raise "HTTP: Content-Length #{declared.inspect} is not a number" unless n
-      length = n
-    end
-    gzip = false if length
-    bodiless = HTTP.bodiless?(response.status)
-    chunked = length.nil? && !old && !head && !bodiless
-    closing = close || (length.nil? && !chunked && !head && !bodiless)
-    response = Server.coded(response, "gzip") if gzip
-    return false unless socket.write(format_head(response, head, closing, length, chunked)).is_a?(Int32)
-    return !closing if head || bodiless
-    # Each piece is read into one builder, cleared and refilled a round.
-    held = String::Builder.new(65536)
-    if want = length
-      left = want
-      while left > 0_i64
-        held.clear
-        source.read_str(left > 65536_i64 ? 65536 : left.to_i32, held)
-        piece = held.finish
-        return false if piece.bytesize == 0
-        return false unless socket.write(piece).is_a?(Int32)
-        left = left - piece.bytesize.to_i64
-      end
-      return !closing
-    end
-    writer = Server.writer_for(socket, chunked, gzip)
-    while true
-      held.clear
-      source.read_str(65536, held)
-      piece = held.finish
-      break if piece.bytesize == 0
-      return false unless writer.write(piece).nil?
-    end
-    writer.finish.nil? && !closing
-  end
-
-  # A body the block writes as it goes: chunked, or to the close for an
-  # HTTP/1.0 client. A HEAD is answered without running the block.
-  private def self.send_stream(socket : IyiSocket | TlsStream, response : Response, writer_block : Proc(BodyWriter, Nil), head : Bool, close : Bool, old : Bool, gzip : Bool) : Bool
-    bodiless = HTTP.bodiless?(response.status)
-    chunked = !old && !head && !bodiless
-    closing = close || (!chunked && !head && !bodiless)
-    response = Server.coded(response, "gzip") if gzip
-    return false unless socket.write(format_head(response, head, closing, nil, chunked)).is_a?(Int32)
-    return !closing if head || bodiless
-    writer = Server.writer_for(socket, chunked, gzip)
-    writer_block.call(writer)
-    writer.finish.nil? && !closing
-  end
-
-  # The coding *response* goes in to the client of *req*, or nil: one the
-  # client takes (RFC 9110 §12.5.3, a `q` of 0 refusing it), for an
-  # answer with a body and a type worth compressing, and no coding of its
-  # own. A whole body goes `zstd` when the client's `q` for it is at least
-  # its `q` for gzip, and `gzip` otherwise. The tie goes to zstd for the
-  # server's time: measured on this machine, release builds, on
-  # src/std/http.iyi (199,134 bytes) `Gzip.compress` wrote 54,484 bytes in
-  # 5 ms and `Zstd.compress` 61,753 in 1 ms, and on CHANGELOG.md (1.5 MB)
-  # 552,446 in 58 ms against 589,785 in 13 ms - a quarter of the time, for
-  # an eighth more bytes at most. A stream - an `IyiIO` or a
-  # `Response.stream` - goes gzip or as it is: std/compress's `Deflater`
+  # The coding *res* goes in to a client whose `Accept-Encoding` is
+  # *accept*, or nil: one the client takes (RFC 9110 §12.5.3, a `q` of 0
+  # refusing it), for an answer with a body and a type worth compressing,
+  # and no `Content-Encoding` of the handler's own. A whole body goes
+  # `zstd` when the client's `q` for it is at least its `q` for gzip, and
+  # `gzip` otherwise. The tie goes to zstd for the server's time: measured
+  # on this machine, release builds, on src/std/http.iyi (199,134 bytes)
+  # `Gzip.compress` wrote 54,484 bytes in 5 ms and `Zstd.compress` 61,753
+  # in 1 ms, and on CHANGELOG.md (1.5 MB) 552,446 in 58 ms against 589,785
+  # in 13 ms - a quarter of the time, for an eighth more bytes at most. A
+  # `stream` or `send` goes gzip or as it is: std/compress's `Deflater`
   # writes each piece as it comes, where std/zstd's compressor takes its
-  # input whole, and a frame a write would code each piece alone.
-  def self.coding_for(req : Request, response : Response) : String?
-    return nil if response.header("Content-Encoding")
-    status = response.status
+  # input whole.
+  def self.coding_for(accept : String?, res : Outgoing) : String?
+    return nil if res.header("Content-Encoding")
+    status = res.status
     return nil if status < 200 || HTTP.bodiless?(status) || status == 206
-    type = response.header("Content-Type")
+    type = res.header("Content-Type")
     return nil unless type && MIME.compressible?(type)
-    accepted = req.header("Accept-Encoding")
-    return nil unless accepted
+    return nil unless accepted = accept
     gzip = HTTP.coding_weight(accepted, "gzip")
-    if response.source.nil? && response.writer.nil?
+    if res.ending == 0
       zstd = HTTP.coding_weight(accepted, "zstd")
       return "zstd" if zstd > 0 && zstd >= gzip
     end
     gzip > 0 ? "gzip" : nil
   end
 
-  # *response* with the headers a coded body goes with (`code_as`),
-  # changed in place.
-  protected def self.coded(response : Response, coding : String) : Response
-    response.code_as(coding)
-    response
-  end
-
-  # A string body compressed whole in *coding*, `zstd` or `gzip`, with
-  # the headers that say so, in place. `Zstd.compress`'s frame needs a
-  # window of 1 MiB at most, inside the 8 MB RFC 9659 §3 holds an encoder
-  # to.
-  protected def self.compressed(response : Response, coding : String) : Response
-    response.code_as(coding)
-    response.body_coded(coding == "zstd" ? Zstd.compress(response.body) : HTTP.gzip(response.body))
-    response
-  end
-
   protected def self.writer_for(socket : IyiSocket | TlsStream, chunked : Bool, gzip : Bool) : BodyWriter
     gzip ? HTTP.gzip_writer(socket, chunked) : BodyWriter.new(socket, chunked)
-  end
-
-  # A request at *from* in `text`, if a whole one is there. No request and
-  # no error means "not yet". `consumed` counts from the start of `text`.
-  def self.parse_request(text : String, from : Int32 = 0) : ParsedRequest
-    from = HTTP.past_empty_lines(text, from)
-    split_at = HTTP.find_headers_end(text, from)
-    unless split_at
-      return ParsedRequest.new(nil, "request headers past #{MAX_HEAD} bytes", true, 0, 431) if text.bytesize - from > MAX_HEAD
-      return ParsedRequest.new(nil, nil, false, 0)
-    end
-    head_fields = {} of String => String
-    texts = String::Builder.new(256)
-    parsed = request_head(text[from, split_at - from], head_fields, texts)
-    return ParsedRequest.new(nil, parsed.reason, true, 0, parsed.status) if parsed.is_a?(HTTPError)
-    head = parsed
-    body_start = split_at + 4
-    if head.chunked
-      # Its end is looked for where it lies in what has arrived.
-      case done = HTTP.chunked_end(text, body_start)
-      in Nil
-        return ParsedRequest.new(nil, nil, head.close, 0)
-      in String
-        return ParsedRequest.new(nil, "chunked body: #{done}", true, 0)
-      in Int32
-        return ParsedRequest.new(nil, "chunked body past #{MAX_BODY} bytes", true, 0, 413) if done - body_start > MAX_BODY
-        body = HTTP.decode_chunked(text[body_start, done - body_start])
-        return ParsedRequest.new(Request.new(head.method, head.path, head.query, head.headers, body), nil, head.close, done)
-      end
-    end
-    length = head.length.to_i32
-    return ParsedRequest.new(nil, nil, false, 0) if text.bytesize - body_start < length
-    ParsedRequest.new(Request.new(head.method, head.path, head.query, head.headers, text[body_start, length]), nil, head.close, body_start + length)
   end
 
   # The one-argument form answered a RequestHead, never a ParsedHead: a
@@ -3276,22 +3196,6 @@ pub struct Server
              "ParsedHead | HeadError | Nil, its fields views into bytes." %}
   end
 
-  # A request's head - the text before its blank line - read and checked,
-  # or why it is not one, as the server's handlers take it.
-  # Its fields go into *headers* and the texts it makes into *texts*, the
-  # caller's: what it answers views them and *text*.
-  private def self.request_head(text : String, headers : Hash(String, String), texts : String::Builder) : RequestHead | HTTPError
-    fields = Array(Field).new(16)
-    case head = parse_head(text.as_tape, 0, true, fields)
-    in ParsedHead
-      request_head_view(head, headers, texts)
-    in HeadError
-      HTTPError.new(Server.held(texts, head.message), head.status)
-    in Nil
-      HTTPError.new("incomplete request")
-    end
-  end
-
   # *text* copied into *texts*: a view of the caller's builder.
   protected def self.held(texts : String::Builder, text : String) : String
     from = texts.bytesize
@@ -3299,48 +3203,56 @@ pub struct Server
     texts.finish[from, text.bytesize]
   end
 
-  private def self.request_head_view(head : ParsedHead, headers : Hash(String, String), texts : String::Builder) : RequestHead | HTTPError
+  # The values of every line called *name* in *fields*, joined with ", "
+  # in *texts* when there are several (RFC 9110 §5.3); nil for none.
+  protected def self.joined(fields : Array(Field), name : String,
+                            texts : String::Builder) : String?
+    found = nil.as(String?)
+    from = -1
+    fields.each do |f|
+      next unless HTTP.same_name?(f.name, name)
+      if first = found
+        if from < 0
+          from = texts.bytesize
+          texts << first
+        end
+        texts << ", " << f.value
+      else
+        found = f.value
+      end
+    end
+    from < 0 ? found : texts.finish[from, texts.bytesize - from]
+  end
+
+  private def self.request_head_view(head : ParsedHead, fields : Array(Field), texts : String::Builder) : RequestHead | HTTPError
     method = head.method
     target = head.target
     version = head.version
     # The absolute form (RFC 9112 §3.2.2), which a server must accept,
     # names the path after the authority: `http://h/x?q` is path `/x` and
-    # query `q`, as the other library reads it, where the block was handed
-    # `http://h/x` as the path.
+    # query `q`.
     origin = target
-    host = nil.as(String?)
     if authority = HTTP.absolute_form(target)
       after_authority = authority
       while after_authority < target.bytesize && target.byte_at(after_authority) != 47_u8 && target.byte_at(after_authority) != 63_u8
         after_authority = after_authority + 1
       end
       # And its authority is the host, whatever the Host line says: `GET
-      # http://b/` under `Host: a` asks b. The block reads it as the Host;
-      # it was handed the line's, and had no way to the target's.
+      # http://b/` under `Host: a` asks b.
       named = target[authority, after_authority - authority]
       return HTTPError.new(held(texts, "not a host: #{named.inspect}")) unless named.bytesize > 0 && HTTP.host?(named)
-      host = named
       origin = target[after_authority, target.bytesize - after_authority]
       origin = held(texts, "/" + origin) if origin.bytesize == 0 || origin.starts_with?("?")
-    end
-    # The table is filled once, the Host line's value replaced by the
-    # target's authority: no key of the table is held while it grows.
-    named_host = false
-    field = 0
-    while field < head.field_count
-      name = head.field_name(field)
-      if value = head.field_held(field, texts)
-        if host && HTTP.same_name?(name, "Host")
+      named_host = false
+      i = 0
+      while i < fields.size
+        if HTTP.same_name?(fields[i].name, "Host")
+          fields[i] = Field.new(fields[i].name, named)
           named_host = true
-          headers[name] = host
-        else
-          headers[name] = value
         end
+        i = i + 1
       end
-      field = field + 1
-    end
-    if host && !named_host
-      headers["Host"] = host
+      fields.push(Field.new(held(texts, "Host"), named)) unless named_host
     end
     path = origin
     query = nil.as(String?)
@@ -3348,128 +3260,30 @@ pub struct Server
       path = origin[0, q]
       query = origin[q + 1, origin.bytesize - q - 1]
     end
-    stub = Request.new(method, path, query, headers, "")
     # `Connection` is a list of options (RFC 9110 §7.6.1), and `close`
-    # among them closes (RFC 9112 §9.6): read as one value, `close, TE` and
-    # two `Connection: close` lines, joined to `close, close`, kept the
-    # connection open and were answered `keep-alive`.
+    # among them closes (RFC 9112 §9.6), on any of its lines.
     close = version == "HTTP/1.0"
-    if conn = stub.header("Connection")
-      close = HTTP.has_token?(conn, "close") || (version == "HTTP/1.0" && !HTTP.has_token?(conn, "keep-alive"))
+    if said = joined(fields, "Connection", texts)
+      close = HTTP.has_token?(said, "close") || (version == "HTTP/1.0" && !HTTP.has_token?(said, "keep-alive"))
     end
-    expects = version == "HTTP/1.1" && HTTP.same_name?(HTTP.trim(stub.header("Expect") || ""), "100-continue")
-    if te = stub.header("Transfer-Encoding")
+    expects = version == "HTTP/1.1" && HTTP.same_name?(HTTP.trim(joined(fields, "Expect", texts) || ""), "100-continue")
+    if te = joined(fields, "Transfer-Encoding", texts)
       return HTTPError.new(held(texts, "transfer encoding #{te.inspect} is not chunked")) unless HTTP.same_name?(HTTP.trim(te), "chunked")
       # A length beside the chunks, or chunks in HTTP/1.0, is framing that
       # a reader ahead of this one may have taken otherwise (RFC 9112 §6.1,
-      # §6.3): the connection closes after the answer, where what followed
-      # was read as the next request.
-      close = true if stub.header("Content-Length") || version == "HTTP/1.0"
-      return RequestHead.new(method, path, query, headers, version, close, true, 0_i64, expects)
+      # §6.3): the connection closes after the answer.
+      close = true if joined(fields, "Content-Length", texts) || version == "HTTP/1.0"
+      return RequestHead.new(method, path, query, version, close, true, 0_i64, expects)
     end
     length = 0_i64
-    if cl = stub.header("Content-Length")
+    if cl = joined(fields, "Content-Length", texts)
       n = HTTP.content_length(cl)
       return HTTPError.new(held(texts, "Content-Length is not a number: #{cl.inspect}")) unless n
-      # A length past 2147483647 is one too, read as one past it: it was
-      # answered "not a number", where it is a body too large.
+      # A length past 2147483647 is one too, read as one past it.
       return HTTPError.new(held(texts, "body past #{MAX_BODY} bytes"), 413) if n > MAX_BODY.to_i64
       length = n
     end
-    RequestHead.new(method, path, query, headers, version, close, false, length, expects)
-  end
-
-  # The response as it goes on the wire, whole: `format_head` for its
-  # string body, and the body.
-  def self.format_response(response : Response, head : Bool, close : Bool) : String
-    text = format_head(response, head, close, response.body.bytesize.to_i64, false)
-    head || HTTP.bodiless?(response.status) ? text : text + response.body
-  end
-
-  # A response's head. `Content-Length` is *length*'s - the caller's own
-  # line is checked against it, and kept only where no body follows it: a
-  # HEAD, or a 304 that names the length a 200 would have (RFC 9110 §8.6) -
-  # or `Transfer-Encoding: chunked` when *chunked*, or neither for a body
-  # the connection's close ends. `Connection` says what the connection will
-  # do next, except on an *upgrade*, whose own line says it. A 1xx, 204 or
-  # 304 has no content (RFC 9110 §15), and writes neither a body nor a
-  # length of its own (§8.6): the body was read by the client as the start
-  # of the next answer, and `Content-Length: 0` on a 304 told a cache that
-  # the resource had become empty. A field added on lines of its own
-  # (`add_header`) is written a line each.
-  def self.format_head(response : Response, head : Bool, close : Bool, length : Int64?, chunked : Bool, upgrade : Bool = false) : String
-    # A status line the client half reads as written, refused otherwise as
-    # a request's lines are: `Response.new(200, "OK\r\nSet-Cookie: a=1",
-    # ...)` went out with a header of its own in the reason, and 2000 as
-    # `HTTP/1.1 2000 Server Error`, which `parse_response` refuses.
-    raise "HTTP: not a status: #{response.status}" unless response.status >= 100 && response.status <= 999
-    raise "HTTP: the reason contains a line break" if HTTP.has_break?(response.reason)
-    raise "HTTP: the reason contains a control character" if HTTP.control?(response.reason)
-    text = String::Builder.new
-    text << "HTTP/1.1 "
-    text.append_int(response.status)
-    text << " "
-    text << response.reason
-    text << "\r\n"
-    has_length = false
-    apart = response.apart
-    response.headers.each do |name, value|
-      raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
-      lines = nil.as(Array(String)?)
-      if split = apart
-        lines = split[name]?
-      end
-      raise "HTTP: header #{name} contains a line break" if HTTP.has_break?(value)
-      raise "HTTP: header #{name} contains a control character" if HTTP.control?(value)
-      next if HTTP.same_name?(name, "Connection") && !upgrade
-      # The body goes with its length or its chunks, which are the server's
-      # to write: a caller's chunked framing went out beside
-      # `Content-Length` (RFC 9112 §6.1), and a caller's length was written
-      # whatever the body was, so "2" on "hello" was read as "he" and "llo"
-      # began the next answer.
-      raise "HTTP: #{name} is not written; the body goes with its length" if HTTP.same_name?(name, "Transfer-Encoding")
-      if HTTP.same_name?(name, "Content-Length")
-        unless head || response.status == 304 || length.nil?
-          n = HTTP.content_length(value)
-          raise "HTTP: #{name} #{value.inspect} is not the body's #{length} bytes" unless n && n == length
-        end
-        has_length = true
-      end
-      if each_line = lines
-        each_line.each do |line|
-          text << name
-          text << ": "
-          text << line
-          text << "\r\n"
-          # The block's value is nil, not the builder it wrote to.
-          nil
-        end
-      else
-        text << name
-        text << ": "
-        text << value
-        text << "\r\n"
-      end
-      nil
-    end
-    unless has_length || HTTP.bodiless?(response.status)
-      if chunked
-        text << "Transfer-Encoding: chunked\r\n"
-      elsif written = length
-        text << "Content-Length: "
-        text.append_int(written)
-        text << "\r\n"
-      end
-    end
-    unless upgrade
-      if close
-        text << "Connection: close\r\n"
-      else
-        text << "Connection: keep-alive\r\n"
-      end
-    end
-    text << "\r\n"
-    text.finish
+    RequestHead.new(method, path, query, version, close, false, length, expects)
   end
 end
 
@@ -7652,32 +7466,31 @@ class H2Connection
     end
   end
 
-  # The request stream *id* carries, its body to be read as it comes; nil
-  # when its head is not one (it has been reset already).
   # Stream *id*'s request head: its method, path and query, its fields
-  # put into *headers*, the caller's; nil when it has none. A field on
-  # several lines is joined into *texts*, the caller's builder.
-  def request_head(id : Int32, headers : Hash(String, String),
-                   texts : String::Builder) : {String, String, String?}?
+  # pushed into *fields*, the caller's, in order and repeats kept, a
+  # `host` from `:authority` when there is none; nil when it has none.
+  def request_head(id : Int32, fields : Array(Field)) : {String, String, String?}?
     s = @streams[id]?
     return nil unless s
-    fields = s.fields
-    return nil unless fields
+    lines = s.fields
+    return nil unless lines
     method = ""
     target = ""
     authority = nil.as(String?)
-    fields.each do |f|
+    has_host = false
+    lines.each do |f|
       case f.name
       when ":method"    then method = f.value
       when ":path"      then target = f.value
       when ":authority" then authority = f.value
       when ":scheme"    then nil
       else
-        H2Connection.join(headers, f.name, f.value, texts)
+        has_host = true if f.name == "host"
+        fields.push(Field.new(f.name, f.value))
       end
     end
     if host = authority
-      headers["host"] = host unless headers.has_key?("host")
+      fields.push(Field.new("host".as_tape, host)) unless has_host
     end
     path = target
     query = nil.as(String?)
@@ -7701,79 +7514,67 @@ class H2Connection
     body_done?(id) ? BodyReader.new(String::Builder.new(256), nil, BodyReader::EMPTY, 0_i64, @limit) : BodyReader.frames(String::Builder.new(256), self, id, @limit)
   end
 
-  # The block's answer to stream *id*: its head, then its body as the
-  # windows allow. False when the connection is over.
-  def answer(id : Int32, response : Response, req : Request, compress : Bool) : Bool
+  # The handler's answer to stream *id*, unless it went already
+  # (`stream`, `send`): its head, then its body as the windows allow. An
+  # upgrade is answered 501: RFC 8441's WebSocket over HTTP/2 is not
+  # served. False when the connection is over.
+  def answer(id : Int32, sink : RisAnswerSink, res : Outgoing, head : Bool,
+             compress : Bool, accept : String?) : Bool
     result = false
     tape do
-      result = answer_on_tape(id, response, req, compress)
+      result = answer_on_tape(id, sink, res, head, compress, accept)
     end
     result
   end
 
-  private def answer_on_tape(id : Int32, response : Response,
-                             req : Request, compress : Bool) : Bool
+  private def answer_on_tape(id : Int32, sink : RisAnswerSink, res : Outgoing,
+                             head : Bool, compress : Bool,
+                             accept : String?) : Bool
     s = @streams[id]?
     return @fault == FAULT_NONE if s.nil? || s.reset >= 0
-    # 101 has no meaning here (§8.6): the client is told to use HTTP/1.1.
-    if response.upgrading?
-      refuse(id, HTTP_1_1_REQUIRED)
+    if res.upgrading?
+      refuse_request(id, 501, "an upgrade is not served over HTTP/2")
       return @fault == FAULT_NONE
     end
-    head = HTTP.same_name?(req.method, "HEAD")
-    bodiless = HTTP.bodiless?(response.status)
-    coding = compress ? Server.coding_for(req, response) : nil
-    # A stream's coding is gzip's, or none (`coding_for`).
-    gzip = !coding.nil?
-    if source = response.source
-      defer source.close
-      length = nil.as(Int64?)
-      if declared = response.header("Content-Length")
-        n = HTTP.content_length(declared)
-        raise "HTTP: Content-Length #{declared.inspect} is not a number" unless n
-        length = n
+    if res.ending != 0
+      if res.body.length > 0
+        raise "HTTP: write the body inside stream, or only into body"
       end
-      gzip = false if length
-      shown = gzip ? Server.coded(response, "gzip") : response
-      texts = String::Builder.new(256)
-      fields = Std::Hpack::TapeHeaders.new(H2Connection.answer_capacity(shown))
-      H2Connection.answer_fields_on_tape(shown, length, head, fields, texts)
-      return false unless send_headers(id, fields, head || bodiless)
-      return @fault == FAULT_NONE if head || bodiless
-      sink = H2Out.new(@conn, id)
-      writer = gzip ? HTTP.gzip_writer(sink, false) : BodyWriter.new(sink, false)
-      held = String::Builder.new(16384)
-      while true
-        held.clear
-        source.read_str(16384, held)
-        piece = held.finish
-        break if piece.bytesize == 0
-        break unless writer.write(piece).nil?
-      end
-      writer.finish
-      return finish_answer(id)
+      return sink.going && @fault == FAULT_NONE
     end
-    if block = response.writer
-      shown = gzip ? Server.coded(response, "gzip") : response
-      texts = String::Builder.new(256)
-      fields = Std::Hpack::TapeHeaders.new(H2Connection.answer_capacity(shown))
-      H2Connection.answer_fields_on_tape(shown, nil, head, fields, texts)
-      return false unless send_headers(id, fields, head || bodiless)
-      return @fault == FAULT_NONE if head || bodiless
-      H2Connection.stream_body(self, id, gzip, block)
-      return finish_answer(id)
+    bodiless = HTTP.bodiless?(res.status)
+    body = res.body.finish
+    unless head || bodiless || res.given_length < 0 || res.given_length == body.bytesize.to_i64
+      raise "HTTP: length= #{res.given_length} with a body of #{body.bytesize} " +
+            "bytes; length= is for a HEAD answer, or before stream or send"
     end
-    response = Server.compressed(response, coding) if coding && response.body.bytesize >= Server::COMPRESS_FROM
-    body = response.body
+    coding = compress && !head ? Server.coding_for(accept, res) : nil
+    if (c = coding) && body.bytesize >= Server::COMPRESS_FROM
+      body = c == "zstd" ? Zstd.compress(body) : HTTP.gzip(body)
+    else
+      coding = nil
+    end
     empty = head || bodiless || body.bytesize == 0
-    length = bodiless ? nil : body.bytesize.to_i64
+    length = bodiless ? nil : (head ? res.length : body.bytesize.to_i64)
     texts = String::Builder.new(256)
-    fields = Std::Hpack::TapeHeaders.new(H2Connection.answer_capacity(response))
-    H2Connection.answer_fields_on_tape(response, length, head, fields, texts)
+    fields = Std::Hpack::TapeHeaders.new(H2Connection.answer_capacity(res))
+    H2Connection.answer_fields_on_tape(res, length, coding, fields, texts)
     return false unless send_headers(id, fields, empty)
     return @fault == FAULT_NONE if empty
     send_data(id, body, true)
     @fault == FAULT_NONE
+  end
+
+  # The end of a streamed answer on stream *id*: END_STREAM when *whole*,
+  # RST_STREAM when the body was not the length its head said. False
+  # when the connection is over.
+  def end_answer(id : Int32, whole : Bool) : Bool
+    unless whole
+      s = @streams[id]?
+      refuse(id, INTERNAL_ERROR) if s && s.reset < 0
+      return @fault == FAULT_NONE
+    end
+    finish_answer(id)
   end
 
   # Looked up by id: the body's frames, read while it was sent, may have
@@ -8048,89 +7849,50 @@ class H2Connection
   # The writer of stream *id*'s body: a choice of two calls, made in the
   # caller's scope.
   def self.writer_for(h2 : H2Connection, id : Int32, gzip : Bool) : BodyWriter
-    gzip ? HTTP.gzip_writer(H2Out.new(h2.conn, id), false) : BodyWriter.new(H2Out.new(h2.conn, id), false)
-  end
-
-  # Stream *id*'s body, written by *block* as it goes.
-  def self.stream_body(h2 : H2Connection, id : Int32, gzip : Bool, block : Proc(BodyWriter, Nil)) : Nil
-    writer = H2Connection.writer_for(h2, id, gzip)
-    block.call(writer)
-    writer.finish
-    nil
+    gzip ? HTTP.gzip_writer(H2Out.new(h2, id), false) : BodyWriter.new(H2Out.new(h2, id), false)
   end
 
   # How many fields `answer_fields_on_tape` pushes at most.
-  def self.answer_capacity(response : Response) : Int32
-    capacity = 2
-    response.headers.each do |name, _value|
-      lines = response.apart
-      split = lines ? lines[name]? : nil
-      capacity = capacity + (split ? split.size : 1)
-    end
-    capacity
+  def self.answer_capacity(res : Outgoing) : Int32
+    res.line_count + 4
   end
 
   # The answer's fields pushed into *fields*, made with room for
-  # `answer_capacity`; the texts made for them go into *texts*.
-  def self.answer_fields_on_tape(response : Response, length : Int64?,
-                                 head : Bool, fields : Std::Hpack::TapeHeaders,
+  # `answer_capacity`; the texts made for them go into *texts*. Names are
+  # lowered and connection-specific lines dropped (RFC 9113 §8.2.2);
+  # `content-length` is *length*, and *coding*'s `content-encoding` and
+  # `vary` go with a coded body.
+  def self.answer_fields_on_tape(res : Outgoing, length : Int64?,
+                                 coding : String?,
+                                 fields : Std::Hpack::TapeHeaders,
                                  texts : String::Builder) : Nil
-    unless response.status >= 100 && response.status <= 999
-      raise "HTTP: not a status: #{response.status}"
-    end
+    status = res.status
+    raise "HTTP: not a status: #{status}" unless status >= 100 && status <= 999
     from = texts.bytesize
-    texts.append_int(response.status)
-    status = texts.finish[from, texts.bytesize - from]
-    fields.push(Std::Hpack::TapeHeaderField.new(
-      ":status".as_tape, status))
-    has_length = false
-    apart = response.apart
-    response.headers.each do |name, value|
-      raise "HTTP: not a header name: #{name.inspect}" unless HTTP.token?(name)
-      if HTTP.has_break?(value)
-        raise "HTTP: header #{name} contains a line break"
-      end
-      if HTTP.control?(value)
-        raise "HTTP: header #{name} contains a control character"
-      end
+    texts.append_int(status)
+    shown = texts.finish[from, texts.bytesize - from]
+    fields.push(Std::Hpack::TapeHeaderField.new(":status".as_tape, shown))
+    res.each_line do |line|
       at = texts.bytesize
-      name.each_byte do |b|
+      line.name.each_byte do |b|
         texts.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b)
       end
-      lower = texts.finish[at, name.bytesize]
-      if lower == "transfer-encoding"
-        raise "HTTP: #{name} is not written; the body goes with its length"
-      end
-      next if connection_specific?(lower)
-      if lower == "content-length"
-        unless head || response.status == 304 || length.nil?
-          n = HTTP.content_length(value)
-          unless n && n == length
-            raise "HTTP: #{name} #{value.inspect} is not the body's " +
-                  "#{length} bytes"
-          end
-        end
-        has_length = true
-      end
-      lines = nil.as(Array(String)?)
-      if split = apart
-        lines = split[name]?
-      end
-      if each_line = lines
-        each_line.each { |line| fields.push(Std::Hpack::TapeHeaderField.new(
-          lower, H2Connection.trimmed(line.as_tape))) }
-      else
-        fields.push(Std::Hpack::TapeHeaderField.new(
-          lower, H2Connection.trimmed(value.as_tape)))
+      lower = texts.finish[at, line.name.bytesize]
+      unless connection_specific?(lower)
+        fields.push(Std::Hpack::TapeHeaderField.new(lower,
+          H2Connection.trimmed(line.value)))
       end
     end
-    if !has_length && !HTTP.bodiless?(response.status)
+    if c = coding
+      fields.push(Std::Hpack::TapeHeaderField.new("content-encoding".as_tape, c))
+      fields.push(Std::Hpack::TapeHeaderField.new("vary".as_tape, "accept-encoding".as_tape))
+    end
+    if !HTTP.bodiless?(status)
       if written = length
         at = texts.bytesize
         texts.append_int(written)
         size = texts.finish[at, texts.bytesize - at]
-        fields.push(Std::Hpack::TapeHeaderField.new(
-          "content-length".as_tape, size))
+        fields.push(Std::Hpack::TapeHeaderField.new("content-length".as_tape, size))
       end
     end
     nil
@@ -8235,16 +7997,15 @@ end
 
 # What a `BodyWriter` writes to for an HTTP/2 answer: DATA frames on one
 # stream, as its windows allow.
-# It reaches the connection through its `Conn`, a resource handle.
+# It holds the server's connection, which outlives the answer.
 class H2Out
-  def initialize(@conn : Conn, @id : Int32)
+  def initialize(@h2 : H2Connection, @id : Int32)
   end
 
   # Each write goes out at once: a block writing as it goes (events, a
   # progress line) is read as it writes.
   def write(text : String) : Int32 | Cancelled | SocketError
-    h2 = @conn.h2
-    raise "H2Out: the connection speaks no HTTP/2" unless h2
+    h2 = @h2
     return text.bytesize if h2.send_data(@id, text, false) && h2.flush
     fault = h2.failure
     return fault if fault.is_a?(Cancelled) || fault.is_a?(SocketError)

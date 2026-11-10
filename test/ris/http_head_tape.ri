@@ -1,5 +1,6 @@
 module test/ris/http_head_tape
-import std/http_head::{HeadParser, ParsedHead, HeadError, Incoming, Field}
+import std/http_head::{HeadParser, ParsedHead, HeadError, Field}
+import std/http::{Incoming}
 
 def refused(text : String, expected : String) : Nil
   fields = Array(Field).new(4)

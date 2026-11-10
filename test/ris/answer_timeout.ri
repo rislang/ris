@@ -1,0 +1,91 @@
+# The fast path honours both of `Server.answer`'s timeouts: a client that
+# sends part of a head and stops is closed after *timeout_ms*, and one
+# that drips its head a byte at a time, each inside *timeout_ms*, is
+# closed after *request_timeout_ms*. A whole request is answered first.
+module test/ris/answer_timeout
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Incoming, Outgoing}
+import std/time::{Time}
+
+struct Ready
+end
+
+struct Handler
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.body << "ok"
+  end
+end
+
+def free_port : Int32
+  probe = IyiSocket.listen(0)
+  port = probe.local_port
+  probe.close
+  port
+end
+
+# Milliseconds until the server closed a connection on which *drip*
+# bytes of a head that never ends are sent, one each 50 ms, after
+# *first*; -1 when it stayed open for 5 s.
+def closed_after(port : Int32, first : String, drip : Bool) : Int64
+  client = IyiSocket.connect("127.0.0.1", port).or_panic
+  client.read_timeout_ms = 50
+  started = Time.monotonic_nanoseconds
+  client.write(first).or_panic
+  into = String::Builder.new(256)
+  100.times do
+    client.write("a") if drip
+    got = client.read(into, 256)
+    if got.is_a?(Int32)
+      if got == 0
+        client.close
+        return (Time.monotonic_nanoseconds - started).to_i64 // 1000000_i64
+      end
+    elsif got.is_a?(Cancelled)
+      break
+    end
+  end
+  client.close
+  -1_i64
+end
+
+idle_port = free_port
+drip_port = free_port
+group do |g|
+  g.spawn do
+    Server.answer("127.0.0.1", idle_port, 0, Handler, timeout_ms: 300,
+      max_connections: 1)
+    0
+  end
+  g.spawn do
+    Server.answer("127.0.0.1", drip_port, 0, Handler, timeout_ms: 5000,
+      request_timeout_ms: 600, max_connections: 1)
+    0
+  end
+  2.times { RisBoard.take(Ready).or_panic }
+  answered = String::Builder.new(256)
+  client = IyiSocket.connect("127.0.0.1", idle_port).or_panic
+  client.write("GET / HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n").or_panic
+  while true
+    got = client.read(answered, 256)
+    break unless got.is_a?(Int32) && got > 0
+  end
+  client.close
+  idle = closed_after(idle_port, "GET /", false)
+  drip = closed_after(drip_port, "GET /", true)
+  whole = answered.finish.ends_with?("\r\n\r\nok")
+  ok = whole && idle >= 250 && idle < 2000 && drip >= 500 && drip < 3000
+  if ok
+    puts "PASS: answered, idle head closed, dripped head closed"
+  else
+    puts "FAILED: answered #{whole}, idle #{idle} ms, drip #{drip} ms"
+  end
+  g.cancel_children
+end

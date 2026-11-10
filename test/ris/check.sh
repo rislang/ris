@@ -435,7 +435,8 @@ expect select_gone 'ris has no select'
 expect channel_gone 'undefined constant Channel'
 expect mutex_gone 'ris has no std/mutex'
 expect http_tls_config_gone 'HTTPClient.new(tls: config)'
-expect http_upgrade_block 'take_over(socket, leftover, response)'
+expect answer_no_take_over 'leftover : String, res : Outgoing) : Nil'
+expect answer_old_call 'Write def call(req : Incoming, res : Outgoing) : Nil'
 expect http_parse_head_text 'Server.parse_head(bytes, 0, true, fields)'
 
 # Timed joins broadcast completion without cancelling the retained task.
@@ -1269,7 +1270,7 @@ if [ "$?" -eq 0 ] &&
 else
   echo "FAILED   http_continue: $out"; status=1
 fi
-expect http_server_listener 'Server.serve(host, port, config, Handler)'
+expect http_server_listener 'Server.answer(host, port, config, Handler)'
 expect http_server_resource_config 'open and use resources'
 out=$(RIS="$RIS" python3 test/ris/http_prefork.py 2>&1)
 if [ "$?" -eq 0 ]; then
@@ -1279,6 +1280,57 @@ else
 fi
 out=$("$RIS" run test/ris/answer.ri 2>&1)
 if [ "$out" = 'PASS: read and answered on the tape, fast path and not' ]; then echo "runs     answer"; else echo "FAILED   answer: $out"; status=1; fi
+# Server.answer's features (doc/drafts/server-answer-features.md):
+# timeouts on the fast path, streamed and sent bodies, compression.
+out=$("$RIS" run test/ris/answer_timeout.ri 2>&1)
+if [ "$out" = 'PASS: answered, idle head closed, dripped head closed' ]; then
+  echo "runs     answer_timeout"
+else
+  echo "FAILED   answer_timeout: $out"; status=1
+fi
+# The raise mid-stream is the test's own panic, on stderr before PASS.
+out=$("$RIS" run test/ris/answer_stream.ri 2>&1)
+if [ "$(tail -n1 <<<"$out")" = 'PASS: stream, length=, send, HEAD, HTTP/1.0, body_io, a raise mid-stream' ]; then
+  echo "runs     answer_stream"
+else
+  echo "FAILED   answer_stream: $out"; status=1
+fi
+out=$("$RIS" run test/ris/answer_compress.ri 2>&1)
+want='/big gzip: gzip vary=Accept-Encoding smaller=true same=true
+/big zstd, gzip: zstd vary=Accept-Encoding smaller=true same=true
+/big gzip;q=1, zstd;q=0.5: gzip vary=Accept-Encoding smaller=true same=true
+/small gzip, zstd: none vary=- smaller=false same=true
+/stream zstd, gzip: gzip vary=Accept-Encoding smaller=true same=true
+/own gzip, zstd: identity vary=- smaller=false same=true'
+if [ "$out" = "$want" ]; then
+  echo "runs     answer_compress"
+else
+  echo "FAILED   answer_compress: $out"; status=1
+fi
+# Server.answer over TLS (resumed by a ticket) and HTTP/2 in the clear.
+out=$("$RIS" run test/ris/answer_tls.ri 2>&1)
+want='HTTP/1.1 200 HTTP/1.0 resumed=false
+HTTP/1.1 200 HTTP/1.0 resumed=true
+HTTP/1.1 200 one two
+h2c statuses true: HTTP/2 resumed=false | one two'
+if [ "$out" = "$want" ]; then
+  echo "runs     answer_tls"
+else
+  echo "FAILED   answer_tls: $out"; status=1
+fi
+# An echo over take_over, a WebSocket over TLS, an ACME challenge.
+out=$("$RIS" run test/ris/answer_upgrade.ri 2>&1)
+want='HTTP/1.1 101 true true
+GET /nothing: 404 not found
+POST /.well-known/acme-challenge/tok: 405  GET, HEAD
+GET /.well-known/acme-challenge/tok: 200 tok.print
+GET /.well-known/acme-challenge/other: 404
+HTTP/1.1 101 true echo hi'
+if [ "$out" = "$want" ]; then
+  echo "runs     answer_upgrade"
+else
+  echo "FAILED   answer_upgrade: $out"; status=1
+fi
 # Outgoing's length= and block-header refusals, raised at run time.
 out=$(RIS="$RIS" bash test/ris/outgoing_refusals.sh 2>&1)
 if [ "$?" -eq 0 ] &&
