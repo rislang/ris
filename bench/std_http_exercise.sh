@@ -511,11 +511,11 @@ echo "== https:// against Python's own TLS server"
 # TLS, a 303 followed on the same scheme, a kept connection used twice, a
 # host the certificate does not name refused, and an upgrade over https://
 # reaching the server, whose 404 it names.
-# A kept connection is not handed to a request made after `HTTP.tls_config=`
-# names roots that do not reach the server's (a root made beside the
-# first): that request makes a connection of its own and is refused; a new
-# configuration over the same roots makes a new connection too, which the
-# next request under it reuses.
+# A kept connection is not handed to a request made after the client's
+# own `tls:` takes roots in place that do not reach the server's (a root
+# made beside the first): that request makes a connection of its own and
+# is refused; the first roots assigned back make a new connection too,
+# which the next request under them reuses.
 # A redirect from https:// to http:// at the same host and port - the
 # server reads TLS or plain HTTP on one port, by the first byte - carries
 # no Authorization, Proxy-Authorization or Cookie the caller wrote, and
@@ -591,23 +591,21 @@ import std/file::{File}
 
 config = TlsConfig.new
 config.roots = Certificate.from_pem(File.read(Program.args[1])).or_panic
-HTTP.tls_config = config
 base = "https://localhost:#{Program.args[0]}"
-r = HTTP.get(base + "/gzip").or_panic
+once = HTTPClient.new(tls: config)
+r = once.get(base + "/gzip").or_panic
 puts "gzip #{r.decoded?} #{r.body == "python's own words " * 1000}"
-hop = HTTP.post(base + "/hop", "dropped").or_panic
+hop = once.post(base + "/hop", "dropped").or_panic
 puts "hop #{hop.status} #{hop.body} #{hop.url}"
-client = HTTPClient.new
+once.close
+client = HTTPClient.new(tls: config)
 2.times { client.get(base + "/landed").or_panic }
 puts "kept #{client.connections_made} made, #{client.connections_reused} reused"
-elsewhere = TlsConfig.new
-elsewhere.roots = Certificate.from_pem(File.read(Program.args[2])).or_panic
-HTTP.tls_config = elsewhere
+first = config.roots
+config.roots = Certificate.from_pem(File.read(Program.args[2])).or_panic
 moved = client.get(base + "/landed")
 puts "other roots #{moved.is_a?(HTTPError) ? moved.message : "answered #{moved.inspect}"}"
-again = TlsConfig.new
-again.roots = config.roots
-HTTP.tls_config = again
+config.roots = first
 2.times { client.get(base + "/landed").or_panic }
 puts "a new configuration, the same roots: #{client.connections_made} made, #{client.connections_reused} reused"
 client.close
@@ -2902,22 +2900,28 @@ secure = "https://localhost:#{args[2]}"
 config = TlsConfig.new
 config.roots = Certificate.from_pem(File.read(args[3])).or_panic
 config.alpn = args[4].split(',')
-HTTP.tls_config = config
+# One request through *gate* by a client trusting *config*'s roots.
+def through(gate : String, config : TlsConfig, url : String, headers : Hash(String, String) = {} of String => String) : String
+  once = HTTPClient.new(proxy: gate, timeout_ms: 20000, tls: config)
+  got = said(once.get(url, headers))
+  once.close
+  got
+end
 puts "http: " + said(HTTP.request("GET", plain + "/echo?x=1", proxy: proxy, timeout_ms: 20000))
 puts "post: " + said(HTTP.request("POST", plain + "/echo", body: "hello", proxy: proxy, timeout_ms: 20000))
-puts "https: " + said(HTTP.request("GET", secure + "/echo?x=2", proxy: proxy, timeout_ms: 20000))
-puts "https, the caller's credential: " + said(HTTP.request("GET", secure + "/echo?x=3", {"Proxy-Authorization" => "Basic Z2F0ZTpzM2NyZXQ="}, proxy: bare, timeout_ms: 20000))
+puts "https: " + through(proxy, config, secure + "/echo?x=2")
+puts "https, the caller's credential: " + through(bare, config, secure + "/echo?x=3", {"Proxy-Authorization" => "Basic Z2F0ZTpzM2NyZXQ="})
 # The tunnel first, kept, then http:// through the same proxy: which must
 # not be written into the tunnel, to the https:// server.
-client = HTTPClient.new(proxy: proxy, timeout_ms: 20000)
+client = HTTPClient.new(proxy: proxy, timeout_ms: 20000, tls: config)
 puts "client https: " + said(client.get(secure + "/echo?k=2"))
 puts "client https again: " + said(client.get(secure + "/echo?k=3"))
 puts "client http: " + said(client.get(plain + "/echo?k=1"))
 puts "client: #{client.connections_made} made, #{client.connections_reused} reused"
 client.close
-puts "https, no credential: " + said(HTTP.request("GET", secure + "/echo?x=4", proxy: bare, timeout_ms: 20000))
+puts "https, no credential: " + through(bare, config, secure + "/echo?x=4")
 puts "http, no credential: " + said(HTTP.request("GET", plain + "/echo?x=5", proxy: bare, timeout_ms: 20000))
-puts "https, a wrong credential: " + said(HTTP.request("GET", secure + "/echo?x=6", proxy: "http://gate:wrong@127.0.0.1:#{args[0]}", timeout_ms: 20000))
+puts "https, a wrong credential: " + through("http://gate:wrong@127.0.0.1:#{args[0]}", config, secure + "/echo?x=6")
 # WebSockets through the proxy: a CONNECT tunnel for ws:// as for wss://.
 puts "ws: " + talked(WebSocket.connect("ws://127.0.0.1:#{args[1]}/ws", proxy: proxy))
 puts "wss: " + talked(WebSocket.connect("wss://localhost:#{args[2]}/ws", proxy: proxy))

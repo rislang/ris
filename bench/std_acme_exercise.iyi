@@ -351,7 +351,7 @@ import std/p256::{P256PrivateKey}
 import std/p384::{P384PrivateKey}
 import std/curve25519::{Ed25519PublicKey}
 import std/asn1::{Der, DerValue, Asn1Error}
-import std/http::{HTTP, Request, Response, Server}
+import std/http::{HTTP, HTTPClient, Request, Response, Server}
 import std/socket::{IyiSocket}
 import std/tls::{TlsServer, TlsServerConfig, TlsConfig, TlsError}
 import std/json::{JSON, Any}
@@ -970,9 +970,21 @@ def counters(script : RisAcmeView, step : String) : Nil
   check script.not_empty == 0, "POST-as-GET's payload empty and a challenge's {} (at #{step})"
 end
 
+# A client whose `https://` requests trust *pem*'s roots alone, held in
+# the caller's *store*.
+def trusting(store : RisCertificateStore, pem : String) : HTTPClient
+  trust = TlsConfig.new
+  trust.roots = pem_certs(store, pem)
+  trust.alpn = ["http/1.1"]
+  HTTPClient.new(tls: trust)
+end
+
 def scripted(script : RisAcmeView, certificate_pem : String) : Nil
+  store = RisCertificateStore.new
+  http = trusting(store, ROOT_PEM)
+  defer http.close
   account = SigningKey.p256
-  client = AcmeClient.new("#{script.base}/dir", account, 5000).or_panic
+  client = AcmeClient.new("#{script.base}/dir", account, 5000, http: http).or_panic
   check client.directory.terms_of_service == "https://iyi-acme.example/terms", "the directory's termsOfService read"
   client.poll_ms = 500
   registered = client.register(["mailto:admin@iyi-acme.example"], terms_agreed: true)
@@ -1061,14 +1073,14 @@ def scripted(script : RisAcmeView, certificate_pem : String) : Nil
   # request it is asked.
   plain = script.plain
   asked = script.requests
-  bare = AcmeClient.new("#{plain}/dir", SigningKey.p256, 5000)
+  bare = AcmeClient.new("#{plain}/dir", SigningKey.p256, 5000, http: http)
   check bare.is_a?(AcmeError) && bare.message.includes?("\"#{plain}/dir\" is not https://") && script.requests == asked,
     "an http:// directory is refused by name, nothing sent to it: #{bare}"
-  named = AcmeClient.new("#{script.base}/dir-plain", SigningKey.p256, 5000)
+  named = AcmeClient.new("#{script.base}/dir-plain", SigningKey.p256, 5000, http: http)
   check named.is_a?(AcmeError) && named.message.includes?("newNonce \"#{plain}/nonce\" is not https://"), "a directory naming an http:// URL is refused by name: #{named}"
-  kept = AcmeClient.new("#{script.base}/dir", SigningKey.p256, 5000, account_url: "#{plain}/acct/1")
+  kept = AcmeClient.new("#{script.base}/dir", SigningKey.p256, 5000, account_url: "#{plain}/acct/1", http: http)
   check kept.is_a?(AcmeError) && kept.message.includes?("\"#{plain}/acct/1\" is not https://"), "an http:// account URL given is refused by name: #{kept}"
-  fresh = AcmeClient.new("#{script.base}/dir", SigningKey.p256, 5000).or_panic
+  fresh = AcmeClient.new("#{script.base}/dir", SigningKey.p256, 5000, http: http).or_panic
   account = fresh.register(["mailto:plain@iyi-acme.example"], terms_agreed: true)
   check account.is_a?(AcmeError) && account.message.includes?("Location \"#{plain}/acct/") && fresh.account_url.nil?, "an http:// account Location is refused by name: #{account}"
   located = client.new_order(["f.example"])
@@ -1093,11 +1105,6 @@ def scripted_checks : Nil
   pem = "-----BEGIN CERTIFICATE-----\n#{lines.join("\n")}\n-----END CERTIFICATE-----\n"
   listener = RisExerciseServer.port
   base = "https://localhost:#{listener}"
-  trust = TlsConfig.new
-  pem_store_1 = RisCertificateStore.new
-  trust.roots = pem_certs(pem_store_1, ROOT_PEM)
-  trust.alpn = ["http/1.1"]
-  HTTP.tls_config = trust
   group do |g|
     g.spawn do
       RisExerciseServer.serve(listener, {base.as_tape, pem.as_tape}, RisAcmeScriptHandler, max_connections: 1)
@@ -1222,12 +1229,10 @@ end
 def pebble(args : Array(String)) : Nil
   directory, minica, management, challtestsrv, http_port, tls_port, folder, reject = args[1], args[2], args[3], args[4], args[5].to_i, args[6].to_i, args[7], args[8].to_i
   rsa_pems = args.size > 10 ? [args[9], args[10]] : [] of String
-  config = TlsConfig.new
   pem_store_3 = RisCertificateStore.new
-  config.roots = pem_certs(pem_store_3, File.read(minica))
-  config.alpn = ["http/1.1"]
-  HTTP.tls_config = config
-  root = HTTP.get("#{management}/roots/0")
+  management_client = trusting(pem_store_3, File.read(minica))
+  root = management_client.get("#{management}/roots/0")
+  management_client.close
   check root.is_a?(Response) && root.status == 200, "Pebble's root read from its management interface: #{root}"
   root_pem = root.as(Response).body
   File.write("#{folder}/root.pem", root_pem)
@@ -1272,7 +1277,7 @@ def pebble(args : Array(String)) : Nil
       0
     end
     task = g.spawn do
-      run_pebble(directory, challtestsrv, folder, roots, RisAcmeResponder.new, rsa_pems)
+      run_pebble(directory, minica, challtestsrv, folder, roots, RisAcmeResponder.new, rsa_pems)
     end
     got = task.value
     g.cancel_children
@@ -1290,10 +1295,13 @@ def pebble(args : Array(String)) : Nil
   puts "PEBBLE HELD"
 end
 
-def run_pebble(directory : String, challtestsrv : String, folder : String, roots : Array(Certificate), responder : RisAcmeResponder,
+def run_pebble(directory : String, minica : String, challtestsrv : String, folder : String, roots : Array(Certificate), responder : RisAcmeResponder,
                rsa_pems : Array(String)) : Int32
   retries = 0
-  acme = AcmeClient.new(directory, SigningKey.p256)
+  store = RisCertificateStore.new
+  http = trusting(store, File.read(minica))
+  defer http.close
+  acme = AcmeClient.new(directory, SigningKey.p256, http: http)
   check acme.is_a?(AcmeClient), "Pebble's directory read over HTTPS, its certificate checked against Pebble's test root: #{acme}"
   acme = acme.as(AcmeClient)
   account = acme.register(["mailto:acme@iyi-acme.example"], terms_agreed: true)
@@ -1308,7 +1316,7 @@ def run_pebble(directory : String, challtestsrv : String, folder : String, roots
   puts "  a blocked name refused by its problem document: #{blocked}"
   retries = retries + acme.bad_nonce_retries
 
-  wide = AcmeClient.new(directory, SigningKey.p384).or_panic
+  wide = AcmeClient.new(directory, SigningKey.p384, http: http).or_panic
   check wide.register(terms_agreed: true).is_a?(String), "an ES384 account made at Pebble"
   domain_key = rsa_pems.empty? ? SigningKey.p256 : SigningKey.from_pem(File.read(rsa_pems[1])).or_panic
   obtain(wide, "es384.iyi-acme.example", "dns-01", domain_key, responder, challtestsrv, roots, folder)
@@ -1317,20 +1325,20 @@ def run_pebble(directory : String, challtestsrv : String, folder : String, roots
   if rsa_pems.empty?
     puts "  no RSA keys given, so RS256 and the rollover from it go unasked"
   else
-    rsa = AcmeClient.new(directory, SigningKey.from_pem(File.read(rsa_pems[0])).or_panic).or_panic
+    rsa = AcmeClient.new(directory, SigningKey.from_pem(File.read(rsa_pems[0])).or_panic, http: http).or_panic
     made = rsa.register(terms_agreed: true)
     check made.is_a?(String), "an RS256 account made at Pebble: #{made}"
     rolled = rsa.roll_key(SigningKey.p256)
     check rolled.nil?, "the RS256 account's key rolled over to P-256 at Pebble: #{rolled}"
     obtain(rsa, "rollover.iyi-acme.example", "dns-01", SigningKey.p256, responder, challtestsrv, roots, folder)
-    again = AcmeClient.new(directory, SigningKey.from_pem(File.read(rsa_pems[0])).or_panic).or_panic
+    again = AcmeClient.new(directory, SigningKey.from_pem(File.read(rsa_pems[0])).or_panic, http: http).or_panic
     gone = again.register(only_existing: true)
     check gone.is_a?(AcmeError) && gone.problem_type == "urn:ietf:params:acme:error:accountDoesNotExist", "after the rollover the old key finds no account: #{gone}"
     puts "  an RS256 account rolled over to P-256, and its old key refused: #{gone}"
     retries = retries + rsa.bad_nonce_retries + again.bad_nonce_retries
   end
 
-  ed = AcmeClient.new(directory, ed_key).or_panic
+  ed = AcmeClient.new(directory, ed_key, http: http).or_panic
   refused = ed.register(terms_agreed: true)
   check refused.is_a?(AcmeError) && refused.problem_type == "urn:ietf:params:acme:error:badSignatureAlgorithm", "Pebble refuses EdDSA by its problem document: #{refused}"
   puts "  EdDSA refused, as Pebble takes RS256 and ECDSA alone: #{refused}"

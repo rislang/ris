@@ -315,9 +315,10 @@ if mode == "close-client"
     pem_store_2 = RisCertificateStore.new
     roots.roots = pem_certs(pem_store_2, File.read(args[2]))
     roots.alpn = ["http/1.1"]
-    HTTP.tls_config = roots
+    client = HTTPClient.new(tls: roots)
+  else
+    client = HTTPClient.new
   end
-  client = HTTPClient.new
   got = fetched(client.get(args[1] + "/x"), "a GET to the closing server")
   started = Time.monotonic_nanoseconds
   client.close
@@ -331,8 +332,7 @@ if mode == "tls-get"
   pem_store_3 = RisCertificateStore.new
   config.roots = pem_certs(pem_store_3, File.read(args[2]))
   config.alpn = args.size > 3 ? args[3].split(',') : ["h2", "http/1.1"]
-  HTTP.tls_config = config
-  client = HTTPClient.new
+  client = HTTPClient.new(tls: config)
   echo = fetched(client.get(base + "/echo?x=1", {"X-Test" => "iyi"}), "GET over TLS")
   puts "echo #{echo.status} #{echo.body}"
   big = fetched(client.get(base + "/big?n=1000000"), "a megabyte over TLS")
@@ -353,8 +353,7 @@ if mode == "whoami"
     config.roots = pem_certs(pem_store_4, File.read(args[2]))
     config.alpn = alpn.split(',')
     config.identity = TlsIdentity.from_pem(File.read(args[3]), File.read(args[4])).or_panic if args.size > 4
-    HTTP.tls_config = config
-    client = HTTPClient.new
+    client = HTTPClient.new(tls: config)
     got = client.get(base + "/whoami")
     case got
     in Response
@@ -368,11 +367,19 @@ if mode == "whoami"
     end
     client.close
   end
-  upgraded = HTTP.upgrade(base + "/whoami-upgrade", "x")
+  # The upgrade goes under the loop's last configuration, HTTP/1.1's.
+  config = TlsConfig.new
+  pem_store_6 = RisCertificateStore.new
+  config.roots = pem_certs(pem_store_6, File.read(args[2]))
+  config.alpn = ["http/1.1"]
+  config.identity = TlsIdentity.from_pem(File.read(args[3]), File.read(args[4])).or_panic if args.size > 4
+  client = HTTPClient.new(tls: config)
+  up = Upgraded.new
+  upgraded = up.connect(base + "/whoami-upgrade", "x", client: client)
   case upgraded
-  in Upgraded
-    puts "upgrade: #{upgraded.response.status} #{upgraded.response.header("x-peer") || "?"}"
-    upgraded.socket.close
+  in Nil
+    puts "upgrade: #{up.response.status} #{up.response.header("x-peer") || "?"}"
+    up.socket.close
   in HTTPError
     puts "upgrade: #{upgraded.message}"
   in SocketError
@@ -380,6 +387,7 @@ if mode == "whoami"
   in Cancelled
     puts "upgrade: cancelled"
   end
+  client.close
   exit 0
 end
 
@@ -390,9 +398,10 @@ if mode == "fetch"
     pem_store_5 = RisCertificateStore.new
     config.roots = pem_certs(pem_store_5, File.read(args[2]))
     config.alpn = ["h2", "http/1.1"]
-    HTTP.tls_config = config
+    client = HTTPClient.new(prior_knowledge: base.starts_with?("http://"), tls: config)
+  else
+    client = HTTPClient.new(prior_knowledge: base.starts_with?("http://"))
   end
-  client = HTTPClient.new(prior_knowledge: base.starts_with?("http://"))
   ["/echo?x=1", "/big?n=1000000", "/trailers", "/early", "/headers", "/padded?n=50000", "/gzip", "/cookies"].each do |path|
     got = client.get(base + path, {"X-Test" => "fetch"})
     case got
