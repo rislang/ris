@@ -85,7 +85,7 @@ module RisExerciseServer
     raise "stop queue full" unless RisBoard.post(RisStop(H).new)
   end
 
-  def self.serve(port : Int32, config : C, handler : H.class,
+  def self.answer(port : Int32, config : C, handler : H.class,
                  stream_bodies : Bool = false, compress : Bool = false,
                  timeout_ms : Int32 = 60000,
                  request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
@@ -97,7 +97,7 @@ module RisExerciseServer
       pool.spawn do
         copied = RisBoard.take(RisConfig(C, H))
         unless copied.is_a?(Cancelled)
-          Server.serve("127.0.0.1", port, copied.value, handler,
+          Server.answer("127.0.0.1", port, copied.value, handler,
             stream_bodies: stream_bodies, compress: compress,
             timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
             max_connections: max_connections)
@@ -145,27 +145,26 @@ class RisH2Handler
     @tls
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/quit"
       RisExerciseServer.stop(RisH2Handler)
-      Response.new(200, "bye")
+      res.body << "bye"
     elsif @closing && req.path == "/ignore"
-      r = Response.new(200, pattern(param(req, "n")))
-      r.headers["Connection"] = "close" if param(req, "close") == 1
-      r
+      res.close if param(req, "close") == 1
+      res.body << pattern(param(req, "n"))
     else
-      answer(req)
+      answer(req, res)
     end
   end
 
   # An upgrade's connection ends at once: the 101 is what is checked.
-  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
   end
 end
 
 import std/text
 
-import std/http::{HTTP, HTTPClient, Response, Request, Server, HTTPError, Upgraded, TlsStream}
+import std/http::{HTTP, HTTPClient, Response, Incoming, Outgoing, Server, HTTPError, Upgraded, TlsStream}
 import std/socket::{IyiSocket, SocketError}
 import std/io
 import std/tls::{TlsConfig, TlsIdentity, TlsServerConfig}
@@ -216,7 +215,7 @@ def fnv(text : String) : String
   h.to_s(16)
 end
 
-def param(req : Request, name : String) : Int32
+def param(req : Incoming, name : String) : Int32
   query = req.query || ""
   query.split('&').each do |pair|
     kv = pair.split('=')
@@ -226,16 +225,18 @@ def param(req : Request, name : String) : Int32
 end
 
 # The server every mode runs.
-def answer(req : Request) : Response
+def answer(req : Incoming, res : Outgoing) : Nil
   case req.path
   when "/echo"
     body = req.body
-    Response.new(200, "#{req.method} #{req.path} #{req.query} #{req.version} host=#{req.header("Host")} length=#{body.bytesize} fnv=#{fnv(body)} x=#{req.header("X-Test")}")
+    res.body << req.method << " " << req.path << " " << req.query << " " <<
+      req.version << " host=" << req.header("Host") << " length=" <<
+      body.bytesize << " fnv=" << fnv(body) << " x=" << req.header("X-Test")
   when "/big"
-    Response.new(200, pattern(param(req, "n")))
+    res.body << pattern(param(req, "n"))
   when "/stream"
     n = param(req, "n")
-    Response.stream(200) do |w|
+    res.stream do |w|
       whole = pattern(n)
       at = 0
       while at < n
@@ -254,38 +255,43 @@ def answer(req : Request) : Response
       at = at + take
     end
     writer.close
-    Response.new(200, reader.io)
+    res.send(reader.io)
+    reader.close
   when "/text"
-    r = Response.new(200, "hello, compressible world. " * 400)
-    r.headers["Content-Type"] = "text/plain"
-    r
+    res.header("Content-Type", "text/plain")
+    res.body << "hello, compressible world. " * 400
   when "/text-gzip"
     # The block's own gzip, which the server leaves as it is: a gzip
     # answer whatever the client takes.
-    r = Response.new(200, Gzip.compress("hello, compressible world. " * 400))
-    r.headers["Content-Type"] = "text/plain"
-    r.headers["Content-Encoding"] = "gzip"
-    r
+    res.header("Content-Type", "text/plain")
+    res.header("Content-Encoding", "gzip")
+    res.body << Gzip.compress("hello, compressible world. " * 400)
   when "/cookie"
-    r = Response.new(200, "two cookies")
-    r.add_header("Set-Cookie", "a=1")
-    r.add_header("Set-Cookie", "b=2; Path=/")
-    r
+    res.header("Set-Cookie", "a=1")
+    res.header("Set-Cookie", "b=2; Path=/")
+    res.body << "two cookies"
   when "/redirect"
-    r = Response.new(302, "")
-    r.headers["Location"] = "/echo?from=redirect"
-    r
+    res.status = 302
+    res.header("Location", "/echo?from=redirect")
   when "/upgrade"
-    Response.upgrade({"Upgrade" => "x"})
+    res.header("Upgrade", "x")
+    res.upgrade
   when "/whoami"
-    Response.new(200, req.peer_certificates.empty? ? "peer=-" : "peer=#{req.peer_certificates[0].subject_name} #{req.version}")
+    if req.peer_certificates.empty?
+      res.body << "peer=-"
+    else
+      res.body << "peer=" << req.peer_certificates[0].subject_name << " " << req.version
+    end
   when "/whoami-upgrade"
     peer = req.peer_certificates.empty? ? "-" : req.peer_certificates[0].subject_name
-    Response.upgrade({"Upgrade" => "x", "X-Peer" => peer})
+    res.header("Upgrade", "x")
+    res.header("X-Peer", peer)
+    res.upgrade
   when "/empty"
-    Response.new(204, "")
+    res.status = 204
   else
-    Response.new(404, "no #{req.path}\n")
+    res.status = 404
+    res.body << "no " << req.path << "\n"
   end
 end
 
@@ -297,7 +303,7 @@ if mode == "serve" || mode == "serve-tls" || mode == "serve-guarded" || mode == 
   chain = mode != "serve" && args.size > 3 ? File.read(args[2]).as_tape : "".as_tape
   key = mode != "serve" && args.size > 3 ? File.read(args[3]).as_tape : "".as_tape
   roots = mode == "serve-tls" && args.size > 4 ? File.read(args[4]).as_tape : "".as_tape
-  RisExerciseServer.serve(port, {chain, key, roots, mode == "serve-close"}, RisH2Handler,
+  RisExerciseServer.answer(port, {chain, key, roots, mode == "serve-close"}, RisH2Handler,
     compress: mode != "serve-close", stream_bodies: mode == "serve-close",
     max_connections: mode == "serve-guarded" ? args[4].to_i : 64,
     timeout_ms: mode == "serve-guarded" ? args[5].to_i : 60000,
@@ -420,7 +426,7 @@ end
 port = RisExerciseServer.port
 group do |http_group|
   server = http_group.spawn do
-    RisExerciseServer.serve(port, {"".as_tape, "".as_tape, "".as_tape, false}, RisH2Handler, compress: true)
+    RisExerciseServer.answer(port, {"".as_tape, "".as_tape, "".as_tape, false}, RisH2Handler, compress: true)
     0
   end
   RisExerciseServer.wait(RisH2Handler)

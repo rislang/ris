@@ -3,7 +3,7 @@
 # for public validation, or forward those ports to the chosen listeners.
 # Config is built independently on the manager and server tasks.
 import std/autocert::{Autocert, AutocertConfig, AutocertView}
-import std/http::{Server, Request, Response}
+import std/http::{Server, Incoming, Outgoing}
 import std/tls::{TlsServerConfig}
 import std/signal::{Signal}
 
@@ -15,8 +15,8 @@ class HttpHandler
     @view = AutocertView.new(config)
   end
 
-  def call(request : Request) : Response
-    @view.answer(request) || Response.new(200, "hello from ris\n")
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.body << "hello from ris\n" unless @view.answer(req, res)
   end
 end
 
@@ -55,7 +55,7 @@ group do |g|
   g.spawn do
     args = Program.arguments
     port = args.size > 6 ? args[6].to_i : 80
-    Server.serve("0.0.0.0", port, configuration, HttpHandler)
+    Server.answer("0.0.0.0", port, configuration, HttpHandler)
     0
   end
   g.spawn do
@@ -65,6 +65,6 @@ group do |g|
   end
   args = Program.arguments
   port = args.size > 5 ? args[5].to_i : 443
-  Server.serve("0.0.0.0", port, configuration, TlsHandler)
+  Server.answer("0.0.0.0", port, configuration, TlsHandler)
   0
 end

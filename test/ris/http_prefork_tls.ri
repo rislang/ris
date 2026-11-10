@@ -1,7 +1,7 @@
 # TLS configuration and ticket state are constructed within each worker.
 module test/ris/http_prefork_tls
 
-import std/http::{Server, Request, Response}
+import std/http::{Server, Incoming, Outgoing}
 import std/tls::{TlsIdentity, TlsServerConfig, TlsError}
 import std/socket::{IyiSocket}
 import std/signal::{Signal}
@@ -27,19 +27,14 @@ class Handler
     RisBoard.post(Ready.new)
   end
 
-  def call(req : Request) : Response
-    Response.new(200, answer_text(req))
-  end
-
-  def answer_text(req : Request) : String
+  def call(req : Incoming, res : Outgoing) : Nil
     raise "TLS request panic" if req.path == "/panic"
     @calls += 1
     started = Time.monotonic_nanoseconds
     sleep(100) if req.path == "/hold"
-    "#{IyiScheduler.current.object_id} #{@calls} " +
-      "#{started} #{Time.monotonic_nanoseconds}"
+    res.body << IyiScheduler.current.object_id << " " << @calls << " " <<
+      started << " " << Time.monotonic_nanoseconds
   end
-
 end
 
 port = Program.arguments[0].to_i
@@ -47,7 +42,7 @@ count = Program.arguments[1].to_i
 group do |g|
   g.spawn do
     args = Program.arguments
-    Server.serve("127.0.0.1", port, {args[2], args[3]}, Handler,
+    Server.answer("127.0.0.1", port, {args[2], args[3]}, Handler,
       max_connections: count)
     0
   end

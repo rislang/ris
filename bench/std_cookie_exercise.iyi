@@ -46,7 +46,7 @@ module RisExerciseServer
     raise "stop queue full" unless RisBoard.post(RisStop(H).new)
   end
 
-  def self.serve(port : Int32, config : C, handler : H.class,
+  def self.answer(port : Int32, config : C, handler : H.class,
                  stream_bodies : Bool = false, compress : Bool = false,
                  timeout_ms : Int32 = 60000,
                  request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
@@ -58,7 +58,7 @@ module RisExerciseServer
       pool.spawn do
         copied = RisBoard.take(RisConfig(C, H))
         unless copied.is_a?(Cancelled)
-          Server.serve("127.0.0.1", port, copied.value, handler,
+          Server.answer("127.0.0.1", port, copied.value, handler,
             stream_bodies: stream_bodies, compress: compress,
             timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
             max_connections: max_connections)
@@ -90,23 +90,22 @@ class RisCookie1Handler
     RisExerciseServer.ready(RisCookie1Handler)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/stop"
       RisExerciseServer.stop(RisCookie1Handler)
-      Response.new(200, "bye")
+      res.body << "bye"
     elsif req.path == "/login"
-      r = Response.new(200, "in")
-      r.add_header("Set-Cookie", Cookie.new("session", "s3cr3t", path: "/", http_only: true).to_set_cookie)
-      r.add_header("Set-Cookie", Cookie.new("theme", "dark", path: "/", max_age: 3600_i64).to_set_cookie)
-      r.add_header("Set-Cookie", Cookie.new("deep", "1", path: "/deep").to_set_cookie)
-      r
+      res.header("Set-Cookie") { |w| Cookie.new("session", "s3cr3t", path: "/", http_only: true).to_set_cookie(w) }
+      res.header("Set-Cookie") { |w| Cookie.new("theme", "dark", path: "/", max_age: 3600_i64).to_set_cookie(w) }
+      res.header("Set-Cookie") { |w| Cookie.new("deep", "1", path: "/deep").to_set_cookie(w) }
+      res.body << "in"
     elsif req.path == "/logout"
-      r = Response.new(200, "out")
-      r.add_header("Set-Cookie", Cookie.new("session", "", path: "/", max_age: 0_i64).to_set_cookie)
-      r
+      res.header("Set-Cookie") { |w| Cookie.new("session", "", path: "/", max_age: 0_i64).to_set_cookie(w) }
+      res.body << "out"
     else
-      cookies = req.cookies
-      Response.new(200, "#{cookies["session"]? || "-"} #{cookies["theme"]? || "-"} #{cookies["deep"]? || "-"}")
+      cookies = Cookie.parse_header(req.header("Cookie") || "")
+      res.body << (cookies["session"]? || "-") << " " <<
+        (cookies["theme"]? || "-") << " " << (cookies["deep"]? || "-")
     end
   end
 end
@@ -119,16 +118,17 @@ class RisCookie2Handler
     RisExerciseServer.ready(RisCookie2Handler)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/stop"
       RisExerciseServer.stop(RisCookie2Handler)
-      Response.new(200, "bye")
+      res.body << "bye"
     elsif req.path == "/login"
-      r = Response.new(302, "", {"Location" => "/home"})
-      r.add_header("Set-Cookie", Cookie.new("session", "abc", path: "/").to_set_cookie)
-      r
+      res.status = 302
+      res.header("Location", "/home")
+      res.header("Set-Cookie") { |w| Cookie.new("session", "abc", path: "/").to_set_cookie(w) }
     else
-      Response.new(200, "session=#{req.cookies["session"]? || "-"}")
+      cookies = Cookie.parse_header(req.header("Cookie") || "")
+      res.body << "session=" << (cookies["session"]? || "-")
     end
   end
 end
@@ -142,7 +142,7 @@ def assert_str(expected : String, actual : String, msg : String) : Nil
 end
 
 import std/cookie::{Cookie, CookieJar}
-import std/http::{HTTP, Response, Server}
+import std/http::{HTTP, Incoming, Outgoing, Response, Server}
 import std/socket::{IyiSocket}
 import std/time::{Time}
 
@@ -174,7 +174,7 @@ if args.size > 0 && args[0] == "lines"
 end
 if args.size > 0 && args[0] == "serve"
   serving = RisExerciseServer.port
-  RisExerciseServer.serve(serving, 0, RisCookie1Handler, print_port: true)
+  RisExerciseServer.answer(serving, 0, RisCookie1Handler, print_port: true)
   __iyi_exit(0)
 end
 
@@ -237,7 +237,7 @@ jar_l = RisExerciseServer.port
 jar_base = "http://127.0.0.1:#{jar_l}"
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(jar_l, 0, RisCookie2Handler)
+    RisExerciseServer.answer(jar_l, 0, RisCookie2Handler)
     0
   end
   RisExerciseServer.wait(RisCookie2Handler)

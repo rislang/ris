@@ -58,7 +58,7 @@ module RisExerciseServer
     raise "stop queue full" unless RisBoard.post(RisStop(H).new)
   end
 
-  def self.serve(port : Int32, config : C, handler : H.class,
+  def self.answer(port : Int32, config : C, handler : H.class,
                  stream_bodies : Bool = false, compress : Bool = false,
                  timeout_ms : Int32 = 60000,
                  request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
@@ -70,7 +70,7 @@ module RisExerciseServer
       pool.spawn do
         copied = RisBoard.take(RisConfig(C, H))
         unless copied.is_a?(Cancelled)
-          Server.serve("127.0.0.1", port, copied.value, handler,
+          Server.answer("127.0.0.1", port, copied.value, handler,
             stream_bodies: stream_bodies, compress: compress,
             timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
             max_connections: max_connections)
@@ -147,12 +147,12 @@ class RisWs1Handler
     @tls
   end
 
-  def call(req) : Response
-    WebSocket.upgrade(req, ["chat", "superchat"])
+  def call(req : Incoming, res : Outgoing) : Nil
+    WebSocket.upgrade(req, res, ["chat", "superchat"])
   end
 
-  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
-    WebSocket.serve(socket, leftover, response) { |ws| echo(ws, RisWs1Handler) }
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
+    WebSocket.serve(socket, leftover, res) { |ws| echo(ws, RisWs1Handler) }
   end
 end
 
@@ -169,37 +169,37 @@ class RisWs2Handler
     RisExerciseServer.ready(RisWs2Handler)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     @route = 0
     if req.path == "/plain"
-      Response.new(200, "plain")
+      res.body << "plain"
     elsif req.path == "/nodeflate"
       @route = 4
-      WebSocket.upgrade(req, deflate: false)
+      WebSocket.upgrade(req, res, deflate: false)
     elsif req.path == "/small" || req.path == "/bye" || req.path == "/greet"
       @route = req.path == "/small" ? 1 : req.path == "/bye" ? 2 : 3
-      WebSocket.upgrade(req)
+      WebSocket.upgrade(req, res)
     else
       # The request is read here: the connection outlives its tape
       # (SPEC 5.1).
       raise "header queue full" unless RisBoard.post(RisWsHeader.new((req.header("X-Test") || "-").as_tape))
-      WebSocket.upgrade(req, ["chat", "superchat"])
+      WebSocket.upgrade(req, res, ["chat", "superchat"])
     end
   end
 
-  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
     case @route
     when 1
-      WebSocket.serve(socket, leftover, response, max_message: 1000) { |ws| echo(ws, RisWs2Handler) }
+      WebSocket.serve(socket, leftover, res, max_message: 1000) { |ws| echo(ws, RisWs2Handler) }
     when 2
-      WebSocket.serve(socket, leftover, response) { |ws| ws.close(4001, "server done") }
+      WebSocket.serve(socket, leftover, res) { |ws| ws.close(4001, "server done") }
     when 3
-      WebSocket.serve(socket, leftover, response) do |ws|
+      WebSocket.serve(socket, leftover, res) do |ws|
         ws.send("first")
         echo(ws, RisWs2Handler)
       end
     else
-      WebSocket.serve(socket, leftover, response) do |ws|
+      WebSocket.serve(socket, leftover, res) do |ws|
         raise "deflate queue full" unless RisBoard.post(RisWsAgreed.new(((d = ws.deflate) ? terms(d) : "none").as_tape))
         echo(ws, RisWs2Handler)
       end
@@ -215,13 +215,13 @@ class RisWs3Handler
     RisExerciseServer.ready(RisWs3Handler)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     raise "origin queue full" unless RisBoard.post(RisWsOrigin.new("#{req.path} proxy-auth=#{req.header("Proxy-Authorization") || "-"}".as_tape))
-    WebSocket.upgrade(req)
+    WebSocket.upgrade(req, res)
   end
 
-  def take_over(socket : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
-    WebSocket.serve(socket, leftover, response) { |ws| echo(ws, RisWs3Handler) }
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
+    WebSocket.serve(socket, leftover, res) { |ws| echo(ws, RisWs3Handler) }
   end
 end
 
@@ -229,7 +229,7 @@ import std/int
 
 import std/websocket::{WebSocket, WebSocketError, Message, PerMessageDeflate}
 import std/compress::{Deflater, Inflater, Envelope}
-import std/http::{HTTP, HTTPClient, Request, Response, Server, HTTPError, TlsStream}
+import std/http::{HTTP, HTTPClient, Incoming, Outgoing, Field, Response, Server, HTTPError, TlsStream}
 import std/socket::{IyiSocket, SocketError}
 import std/tls::{TlsConfig, TlsServerConfig}
 import std/x509::{RisCertificateStore, Certificate}
@@ -665,18 +665,22 @@ def fake_server(lines : String, after : String = "", accept : String = "right", 
   result
 end
 
-def handshake(extra : Hash(String, String) = {} of String => String, without : String = "", method : String = "GET", version : String = "HTTP/1.1") : Request
+def handshake(extra : Hash(String, String) = {} of String => String, without : String = "", method : String = "GET", version : String = "HTTP/1.1") : Incoming
   h = {"Host" => "x", "Upgrade" => "websocket", "Connection" => "keep-alive, Upgrade",
        "Sec-WebSocket-Version" => "13", "Sec-WebSocket-Key" => "dGhlIHNhbXBsZSBub25jZQ=="}
   h.delete(without)
   extra.each { |k, v| h[k] = v }
-  Request.new(method, "/chat", nil, h, "", version)
+  fields = Array(Field).new(h.size)
+  h.each { |k, v| fields << Field.new(k, v) }
+  Incoming.new(method, "/chat", nil, fields, "", version)
 end
 
 # The status, the body and the headers named of `upgrade`'s answer.
-def upgraded(req : Request, protocols : Array(String) = [] of String) : String
-  r = WebSocket.upgrade(req, protocols)
-  text = "#{r.status} #{r.body.inspect}"
+# `Connection` is the server's own line, written with the 101.
+def upgraded(req : Incoming, protocols : Array(String) = [] of String) : String
+  r = Outgoing.new
+  WebSocket.upgrade(req, r, protocols)
+  text = "#{r.status} #{r.body.to_s.inspect}"
   ["Upgrade", "Connection", "Sec-WebSocket-Accept", "Sec-WebSocket-Protocol", "Sec-WebSocket-Version", "Sec-WebSocket-Extensions"].each do |name|
     if v = r.header(name)
       text = text + " #{name}=#{v}"
@@ -688,8 +692,9 @@ end
 # The permessage-deflate `upgrade` accepts of *offer*: the 101's
 # extension, "declined", or a refusal's status and body.
 def extension_answer(offer : String, deflate : Bool = true) : String
-  r = WebSocket.upgrade(handshake({"Sec-WebSocket-Extensions" => offer}), deflate: deflate)
-  return "#{r.status} #{r.body.inspect}" unless r.status == 101
+  r = Outgoing.new
+  WebSocket.upgrade(handshake({"Sec-WebSocket-Extensions" => offer}), r, deflate: deflate)
+  return "#{r.status} #{r.body.to_s.inspect}" unless r.status == 101
   r.header("Sec-WebSocket-Extensions") || "declined"
 end
 
@@ -795,7 +800,7 @@ end
 # given (`wss://`).
 def serve(chain : String, key : String) : Nil
   listener = RisExerciseServer.port
-  RisExerciseServer.serve(listener, {chain, key}, RisWs1Handler, print_port: true)
+  RisExerciseServer.answer(listener, {chain, key}, RisWs1Handler, print_port: true)
   puts "stopped"
 end
 
@@ -1402,7 +1407,7 @@ def section_program_refused : Nil
   assert_str "refused: WebSocket: a max_window_bits is 8 to 15, not 16", answer { PerMessageDeflate.new(server_max_window_bits: 16); "made" }, "a window of 2^16"
   assert_str "refused: WebSocket: a deflate level is 0 to 9, not 10", answer { PerMessageDeflate.new(level: 10); "made" }, "a deflate level of 10"
   assert_str "refused: WebSocket: a deflate level is 0 to 9, not -1", answer { WebSocket.connect("ws://127.0.0.1:1/", deflate_level: -1); "sent" }, "connect at level -1"
-  assert_str "refused: WebSocket: a deflate level is 0 to 9, not 10", answer { WebSocket.serve(IyiSocket.listen("127.0.0.1", 0), "", WebSocket.upgrade(handshake), deflate_level: 10) { |w| w.close }; "answered" }, "serve at level 10"
+  assert_str "refused: WebSocket: a deflate level is 0 to 9, not 10", answer { WebSocket.serve(IyiSocket.listen("127.0.0.1", 0), "", Outgoing.new, deflate_level: 10) { |w| w.close }; "answered" }, "serve at level 10"
   assert_str "refused: Inflater: read on a flushed stream; inflate decodes its pieces", answer { Inflater.flushed.read; "read" }, "a flushed stream read as a whole one"
   puts "  text that is not UTF-8, a long ping, close 1005, a long reason, the handshake's own header, a bad protocol, a window of 2^16, deflate levels of -1 and 10"
   nil
@@ -1414,7 +1419,7 @@ listener = RisExerciseServer.port
 port = listener
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(listener, 0, RisWs2Handler)
+    RisExerciseServer.answer(listener, 0, RisWs2Handler)
     0
   end
   RisExerciseServer.wait(RisWs2Handler)
@@ -1524,7 +1529,7 @@ echo_port = echo_l
 proxy_port = proxy_l.local_port
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(echo_l, 0, RisWs3Handler)
+    RisExerciseServer.answer(echo_l, 0, RisWs3Handler)
     0
   end
   RisExerciseServer.wait(RisWs3Handler)

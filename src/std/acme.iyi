@@ -56,8 +56,8 @@
 #
 # **Challenges.** http-01 (section 8.3): `AcmeHttp01` holds the key
 # authorizations by token and answers GET
-# `/.well-known/acme-challenge/<token>` from a std/http `Server.serve`
-# block (`responder.answer(request) || ...`). dns-01 (section 8.4):
+# `/.well-known/acme-challenge/<token>` from a std/http `Server.answer`
+# handler (`responder.answer(req, res) || ...`). dns-01 (section 8.4):
 # `dns_txt(token)` is the TXT record's value, base64url of the key
 # authorization's SHA-256, for `AcmeClient.dns_name(domain)`; putting it
 # in the zone is the caller's. tls-alpn-01 (RFC 8737): `AcmeTlsAlpn01`
@@ -116,7 +116,7 @@ import std/rsa::{RsaPublicKey}
 import std/ecdsa::{EcdsaPublicKey, EcdsaCurve}
 import std/curve25519::{Ed25519PublicKey}
 import std/asn1::{Der, Asn1Error}
-import std/http::{HTTP, HTTPClient, HTTPError, Request, Response}
+import std/http::{HTTP, HTTPClient, HTTPError, Incoming, Outgoing}
 import std/socket::{SocketError}
 import std/tls::{TlsIdentity, TlsError}
 import std/json::{JSON, Any, RisJsonFields}
@@ -885,14 +885,14 @@ end
 
 # http-01's answers (section 8.3), by token, for a std/http server: GET
 # `/.well-known/acme-challenge/<token>` is answered with the token's key
-# authorization, a token not held with 404, any other path with nil - the
-# server's own to answer.
+# authorization, a token not held with 404; `answer` is false for any
+# other path - the handler's own to answer.
 #
 #     responder = AcmeHttp01.new
 #     # Build responder and app in Handler.new(copied_config).
-#     # Handler#call(request) first asks @responder.answer(request), then
-#     # falls back to @app.call(request).
-#     Server.serve("0.0.0.0", 80, config, Handler)
+#     # Handler#call(req, res) first asks @responder.answer(req, res),
+#     # then falls back to @app.call(req, res).
+#     Server.answer("0.0.0.0", 80, config, Handler)
 pub class AcmeHttp01
   PATH = "/.well-known/acme-challenge/"
   @answers : Hash(String, String) = {} of String => String
@@ -908,13 +908,25 @@ pub class AcmeHttp01
     @answers.delete(token)
   end
 
-  def answer(request : Request) : Response?
-    path = request.path
-    return nil unless path.starts_with?(PATH)
-    return Response.new(405, "", {"Allow" => "GET, HEAD"}) unless request.method == "GET" || request.method == "HEAD"
+  # Whether *req* was an http-01 challenge, then answered into *res*: the
+  # key authorization, 404 for a token not held, 405 for a method not GET
+  # or HEAD. False for any other path, which is the handler's to answer.
+  def answer(req : Incoming, res : Outgoing) : Bool
+    path = req.path
+    return false unless path.starts_with?(PATH)
+    unless req.method == "GET" || req.method == "HEAD"
+      res.status = 405
+      res.header("Allow", "GET, HEAD")
+      return true
+    end
     found = @answers[path[PATH.bytesize, path.bytesize - PATH.bytesize]]?
-    return Response.new(404, "") unless found
-    Response.new(200, found, {"Content-Type" => "application/octet-stream"})
+    unless found
+      res.status = 404
+      return true
+    end
+    res.header("Content-Type", "application/octet-stream")
+    res.body << found
+    true
   end
 end
 

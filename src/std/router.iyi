@@ -1,6 +1,6 @@
-# A request router for std/http: `Router#handle(pattern) { |req, params|
-# Response }` registers a handler, and `router.call(req)` is what a
-# `Server.serve` block answers with. The patterns, their precedence and
+# A request router for std/http: `Router#handle(pattern) { |req, res,
+# params| ... }` registers a handler, and `router.call(req, res)` is what
+# a `Server.answer` handler's `call` runs. The patterns, their precedence and
 # the answers when none applies are Go's `http.ServeMux` - its 1.22
 # patterns, its 1.26 redirects - implemented from its documentation
 # (pkg.go.dev/net/http#ServeMux), so a table of routes reads the same in
@@ -80,7 +80,7 @@
 
 module std/router
 
-import std/http::{HTTP, Request, Response}
+import std/http::{HTTP, Incoming, Outgoing}
 import std/uri::{URI}
 
 # Why a pattern is refused: `Pattern.parse`'s answer for text that is not
@@ -523,32 +523,31 @@ end
 # Requests sent to handlers by pattern, Go 1.22's `ServeMux`:
 #
 #     router = Router.new
-#     router.handle("GET /users/{id}") { |req, params| Response.new(200, params["id"]) }
-#     # Files: call FileServer.serve(root, req, res) from a Server.answer
-#     # block; Router is not ported to Outgoing yet.
-#     # Build this router inside Handler.new(copied_config), then use:
-#     # Handler#call(req) = @router.call(req)
-#     Server.serve("0.0.0.0", 3000, config, Handler)
+#     router.handle("GET /users/{id}") { |req, res, params| res.body << params["id"] }
+#     # Files: FileServer.serve(root, req, res) inside a handler.
+#     # Build this router inside Handler.new(copied_config), and in
+#     # Handler#call(req, res) run @router.call(req, res).
+#     Server.answer("0.0.0.0", 3000, config, Handler)
 #
 # `handle` panics on a pattern that is not one, on one that conflicts with
 # a pattern already registered, and after the router has answered a
-# request. `call` answers with the most specific pattern's handler, or a
-# 307 (to the cleaned path, or to a subtree's `/`), a 405 with `Allow`, a
-# 400 for a malformed escape, a 404.
+# request. `call` answers with the most specific pattern's handler, or
+# writes a 307 (to the cleaned path, or to a subtree's `/`), a 405 with
+# `Allow`, a 400 for a malformed escape, a 404 into *res*.
 pub class Router
   @patterns : Array(Pattern)
-  @handlers : Array(Proc(Request, Hash(String, String), Response))
+  @handlers : Array(Proc(Incoming, Outgoing, Hash(String, String), Nil))
   @answering : Bool
 
   def initialize
     @patterns = [] of Pattern
-    @handlers = [] of Proc(Request, Hash(String, String), Response)
+    @handlers = [] of Proc(Incoming, Outgoing, Hash(String, String), Nil)
     @answering = false
   end
 
-  # Sends the requests *pattern* matches to the block, with the request
-  # and the wildcards' values by name.
-  def handle(pattern : String, &handler : Request, Hash(String, String) -> Response) : Nil
+  # Sends the requests *pattern* matches to the block, with the request,
+  # the answer to write and the wildcards' values by name.
+  def handle(pattern : String, &handler : Incoming, Outgoing, Hash(String, String) -> Nil) : Nil
     raise "Router: #{pattern.inspect} is registered after the router answered a request; patterns are registered before it serves" if @answering
     parsed = Pattern.parse(pattern).or_panic
     @patterns.each do |known|
@@ -565,13 +564,13 @@ pub class Router
     @patterns.dup
   end
 
-  # The answer to *req*: its handler's, or the router's own 307, 400, 404
-  # or 405.
-  def call(req : Request) : Response
+  # The answer to *req*, written into *res*: its handler's, or the
+  # router's own 307, 400, 404 or 405.
+  def call(req : Incoming, res : Outgoing) : Nil
     @answering = true
     raw = req.path
-    return Router.plain(404, "not found\n") unless raw.starts_with?("/")
-    return Router.plain(400, "bad request\n") unless URI.decode?(raw)
+    return Router.plain(res, 404, "not found\n") unless raw.starts_with?("/")
+    return Router.plain(res, 400, "bad request\n") unless URI.decode?(raw)
     path = Router.clean(raw)
     host = Router.host_of(req.header("Host") || "")
     pieces = Pattern.pieces(path) || [""]
@@ -583,18 +582,23 @@ pub class Router
     unless exact || path.ends_with?("/")
       slashed = Pattern.pieces(path + "/") || [""]
       if (again = find(host, req.method, slashed)) && @patterns[again[0]].exact?(slashed)
-        return Router.redirect(path + "/", req.query)
+        return Router.redirect(res, path + "/", req.query)
       end
     end
-    return Router.redirect(path, req.query) unless path == raw
+    return Router.redirect(res, path, req.query) unless path == raw
     if found
-      return @handlers[found[0]].call(req, found[1])
+      @handlers[found[0]].call(req, res, found[1])
+      return
     end
     allowed = allowed(host, path, pieces)
     unless allowed.empty?
-      return Response.new(405, "method not allowed\n", {"Allow" => allowed.join(", "), "Content-Type" => "text/plain; charset=utf-8"})
+      res.status = 405
+      res.header("Allow", allowed.join(", "))
+      res.header("Content-Type", "text/plain; charset=utf-8")
+      res.body << "method not allowed\n"
+      return
     end
-    Router.plain(404, "not found\n")
+    Router.plain(res, 404, "not found\n")
   end
 
   # The pattern that takes the request, and its wildcards: of the host's
@@ -656,20 +660,19 @@ pub class Router
 
   def self.clean(path : String,
                  writer : String::Builder) : Nil
-    tape do
-      kept = Array(String).new
-      path.split('/').each do |segment|
-        if segment == ".."
-          kept.pop?
-        elsif !segment.empty? && segment != "."
-          kept << segment
-        end
+    kept = Array(String).new
+    path.split('/').each do |segment|
+      if segment == ".."
+        kept.pop?
+      elsif !segment.empty? && segment != "."
+        kept << segment
       end
-      writer << "/"
-      kept.join(writer, "/")
-      writer << "/" if path.bytesize > 0 && path[path.bytesize - 1] == 47_u8 &&
-                       !kept.empty?
     end
+    writer << "/"
+    kept.join(writer, "/")
+    writer << "/" if path.bytesize > 0 && path[path.bytesize - 1] == 47_u8 &&
+                     !kept.empty?
+    nil
   end
 
   # A `Host` value without its port, as Go's `stripHostPort` has it: an
@@ -686,15 +689,21 @@ pub class Router
     rest.index(':') ? value : value[0, colon]
   end
 
-  def self.redirect(path : String, query : String?) : Response
-    target = path
-    if (q = query) && !q.empty?
-      target = target + "?" + q
+  # A 307 to *path* and *query*, written into *res*.
+  def self.redirect(res : Outgoing, path : String, query : String?) : Nil
+    res.status = 307
+    res.header("Location") do |w|
+      w << path
+      if (q = query) && !q.empty?
+        w << "?" << q
+      end
     end
-    Response.new(307, "", {"Location" => target})
   end
 
-  def self.plain(status : Int32, text : String) : Response
-    Response.new(status, text, {"Content-Type" => "text/plain; charset=utf-8"})
+  # *status* with *text* as a plain body, written into *res*.
+  def self.plain(res : Outgoing, status : Int32, text : String) : Nil
+    res.status = status
+    res.header("Content-Type", "text/plain; charset=utf-8")
+    res.body << text
   end
 end

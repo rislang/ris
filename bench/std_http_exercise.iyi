@@ -52,7 +52,7 @@ module RisExerciseServer
     raise "stop queue full" unless RisBoard.post(RisStop(H).new)
   end
 
-  def self.serve(port : Int32, config : C, handler : H.class,
+  def self.answer(port : Int32, config : C, handler : H.class,
                  stream_bodies : Bool = false, compress : Bool = false,
                  timeout_ms : Int32 = 60000,
                  request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
@@ -64,7 +64,7 @@ module RisExerciseServer
       pool.spawn do
         copied = RisBoard.take(RisConfig(C, H))
         unless copied.is_a?(Cancelled)
-          Server.serve("127.0.0.1", port, copied.value, handler,
+          Server.answer("127.0.0.1", port, copied.value, handler,
             stream_bodies: stream_bodies, compress: compress,
             timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
             max_connections: max_connections)
@@ -139,9 +139,9 @@ class RisHttp1Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisHttpFactory) if req.path == "/stop"
-    Response.new(200, "ok")
+    res.body << "ok"
   end
 end
 
@@ -153,21 +153,24 @@ class RisHttp2Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     raise "request observation queue full" unless RisBoard.post(RisHttpSeen.new((req.method + " " + req.path).as_tape))
     if req.path == "/echo"
-      Response.new(200, req.body, {"X-Query" => req.query || "-", "X-Agent" => req.header("user-agent") || "-"})
+      res.header("X-Query", req.query || "-")
+      res.header("X-Agent", req.header("user-agent") || "-")
+      res.body << req.body
     elsif req.path == "/nothing"
-      Response.new(204)
+      res.status = 204
     elsif req.path == "/size"
-      Response.new(200, req.body.bytesize.to_s)
+      res.body << req.body.bytesize.to_s
     elsif req.path == "/stop"
       RisExerciseServer.stop(RisHttpFactory)
-      Response.new(200, "bye")
+      res.body << "bye"
     elsif req.path == "/fail"
       raise "the block failed on /fail"
     else
-      Response.new(404, "no #{req.path}\n")
+      res.status = 404
+      res.body << "no #{req.path}\n"
     end
   end
 end
@@ -180,12 +183,13 @@ class RisHttp3Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/bye"
-      Response.new(200, "bye", {"Connection" => "close"})
+      res.close
+      res.body << "bye"
     else
       RisExerciseServer.stop(RisHttpFactory)
-      Response.new(200, "stopped")
+      res.body << "stopped"
     end
   end
 end
@@ -198,8 +202,8 @@ class RisHttp4Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
-    Response.new(200, req.query || "-")
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.body << (req.query || "-")
   end
 end
 
@@ -211,9 +215,9 @@ class RisHttp5Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisHttpFactory) if req.path == "/stop"
-    Response.new(200, "#{req.method} #{req.path} #{req.body}")
+    res.body << "#{req.method} #{req.path} #{req.body}"
   end
 end
 
@@ -228,10 +232,10 @@ class RisHttp6Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/stop"
       RisExerciseServer.stop(RisHttpFactory)
-      Response.new(200, "bye")
+      res.body << "bye"
     elsif req.path == "/count"
       total = 0_i64
       pieces = 0
@@ -245,24 +249,32 @@ class RisHttp6Handler
         total = total + piece.bytesize.to_i64
         pieces = pieces + 1
       end
-      Response.new(200, "#{total}")
+      res.body << "#{total}"
     elsif req.path == "/whole"
-      Response.new(200, req.body)
+      res.body << req.body
     elsif req.path == "/ignore"
-      Response.new(200, "ignored")
+      res.body << "ignored"
     elsif req.path == "/slow"
-      Response.stream(200, {"Content-Type" => "text/plain"}) do |w|
+      res.header("Content-Type", "text/plain")
+      res.stream do |w|
         w.write("first,")
         sleep(400)
         w.write("second")
         nil
       end
     elsif req.path == "/file"
-      Response.new(200, File.open(@stream_dir + "/up.bin"), {"Content-Type" => "application/octet-stream"})
+      res.header("Content-Type", "application/octet-stream")
+      file = File.open(@stream_dir + "/up.bin")
+      res.send(file)
+      file.close
     elsif req.path == "/file-sized"
-      Response.new(200, File.open(@stream_dir + "/up.bin"), {"Content-Length" => "300000"})
+      res.length = 300000_i64
+      file = File.open(@stream_dir + "/up.bin")
+      res.send(file)
+      file.close
     else
-      Response.new(404, "no")
+      res.status = 404
+      res.body << "no"
     end
   end
 end
@@ -278,34 +290,46 @@ class RisHttp7Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/stop"
       RisExerciseServer.stop(RisHttpFactory)
-      Response.new(200, "bye")
+      res.body << "bye"
     elsif req.path == "/text"
-      Response.new(200, @long_text, {"Content-Type" => "text/plain"})
+      res.header("Content-Type", "text/plain")
+      res.body << @long_text
     elsif req.path == "/short"
-      Response.new(200, "short", {"Content-Type" => "text/plain"})
+      res.header("Content-Type", "text/plain")
+      res.body << "short"
     elsif req.path == "/png"
-      Response.new(200, @long_text, {"Content-Type" => "image/png"})
+      res.header("Content-Type", "image/png")
+      res.body << @long_text
     elsif req.path == "/own"
-      Response.new(200, Gzip.compress("mine"), {"Content-Type" => "text/plain", "Content-Encoding" => "gzip"})
+      res.header("Content-Type", "text/plain")
+      res.header("Content-Encoding", "gzip")
+      res.body << Gzip.compress("mine")
     elsif req.path == "/zstd-own"
-      Response.new(200, Zstd.compress("mine"), {"Content-Type" => "text/plain", "Content-Encoding" => "zstd"})
+      res.header("Content-Type", "text/plain")
+      res.header("Content-Encoding", "zstd")
+      res.body << Zstd.compress("mine")
     elsif req.path == "/accept"
-      Response.new(200, req.header("Accept-Encoding") || "-")
+      res.body << (req.header("Accept-Encoding") || "-")
     elsif req.path == "/zstd-corrupt"
       bad = Zstd.compress(@long_text)
-      Response.new(200, bad[0, 40] + "garbage" + bad[47, bad.bytesize - 47], {"Content-Encoding" => "zstd"})
+      res.header("Content-Encoding", "zstd")
+      res.body << bad[0, 40] + "garbage" + bad[47, bad.bytesize - 47]
     elsif req.path == "/zstd-16mib"
-      Response.new(200, zstd_hello(0x70), {"Content-Encoding" => "zstd"})
+      res.header("Content-Encoding", "zstd")
+      res.body << zstd_hello(0x70)
     elsif req.path == "/zstd-8mib"
-      Response.new(200, zstd_hello(0x68), {"Content-Encoding" => "zstd"})
+      res.header("Content-Encoding", "zstd")
+      res.body << zstd_hello(0x68)
     elsif req.path == "/zstd-frames"
       # Two frames, a hundred bytes a chunk: the frames' ends and the
       # chunks' fall where they fall.
       zframes = Zstd.compress(@long_text[0, 9000]) + Zstd.compress(@long_text[9000, @long_text.bytesize - 9000])
-      Response.stream(200, {"Content-Type" => "text/plain", "Content-Encoding" => "zstd"}) do |w|
+      res.header("Content-Type", "text/plain")
+      res.header("Content-Encoding", "zstd")
+      res.stream do |w|
         at = 0
         while at < zframes.bytesize
           n = zframes.bytesize - at < 100 ? zframes.bytesize - at : 100
@@ -315,23 +339,31 @@ class RisHttp7Handler
         nil
       end
     elsif req.path == "/vary"
-      Response.new(200, @long_text, {"Content-Type" => "text/html", "Vary" => "Cookie"})
+      res.header("Content-Type", "text/html")
+      res.header("Vary", "Cookie")
+      res.body << @long_text
     elsif req.path == "/stream"
-      Response.stream(200, {"Content-Type" => "application/json"}) do |w|
+      res.header("Content-Type", "application/json")
+      res.stream do |w|
         5.times { |i| w.write("{\"n\":#{i}}\n") }
         nil
       end
     elsif req.path == "/zlib"
-      Response.new(200, Zlib.compress(@long_text), {"Content-Encoding" => "deflate"})
+      res.header("Content-Encoding", "deflate")
+      res.body << Zlib.compress(@long_text)
     elsif req.path == "/raw-deflate"
-      Response.new(200, Deflate.compress(@long_text), {"Content-Encoding" => "deflate"})
+      res.header("Content-Encoding", "deflate")
+      res.body << Deflate.compress(@long_text)
     elsif req.path == "/corrupt"
       bad = Gzip.compress(@long_text)
-      Response.new(200, bad[0, 40] + "garbage" + bad[47, bad.bytesize - 47], {"Content-Encoding" => "gzip"})
+      res.header("Content-Encoding", "gzip")
+      res.body << bad[0, 40] + "garbage" + bad[47, bad.bytesize - 47]
     elsif req.path == "/br"
-      Response.new(200, "pretend", {"Content-Encoding" => "br"})
+      res.header("Content-Encoding", "br")
+      res.body << "pretend"
     else
-      Response.new(404, "no")
+      res.status = 404
+      res.body << "no"
     end
   end
 end
@@ -347,25 +379,31 @@ class RisHttp8Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     case req.path
     when "/stop"
       RisExerciseServer.stop(RisHttpFactory)
-      Response.new(200, "bye")
+      res.body << "bye"
     when "/301", "/302", "/303", "/307", "/308"
-      Response.new(req.path[1, 3].to_i, "", {"Location" => "/echo?from=#{req.path[1, 3]}"})
+      res.status = req.path[1, 3].to_i
+      res.header("Location", "/echo?from=#{req.path[1, 3]}")
     when "/away"
-      Response.new(302, "", {"Location" => @other_base + "/echo"})
+      res.status = 302
+      res.header("Location", @other_base + "/echo")
     when "/relative"
-      Response.new(302, "", {"Location" => "sub/../echo"})
+      res.status = 302
+      res.header("Location", "sub/../echo")
     when "/loop"
-      Response.new(302, "", {"Location" => "/loop"})
+      res.status = 302
+      res.header("Location", "/loop")
     when "/ftp"
-      Response.new(302, "", {"Location" => "ftp://127.0.0.1/"})
+      res.status = 302
+      res.header("Location", "ftp://127.0.0.1/")
     when "/echo"
-      Response.new(200, "#{req.method} #{req.query || "-"} #{req.body} auth=#{req.header("Authorization") || "-"} type=#{req.header("Content-Type") || "-"}")
+      res.body << ("#{req.method} #{req.query || "-"} #{req.body} auth=#{req.header("Authorization") || "-"} type=#{req.header("Content-Type") || "-"}")
     else
-      Response.new(404, "no")
+      res.status = 404
+      res.body << "no"
     end
   end
 end
@@ -378,9 +416,9 @@ class RisHttp9Handler
     RisExerciseServer.ready(RisHttpOtherFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisHttpOtherFactory) if req.path == "/stop"
-    Response.new(200, "other auth=#{req.header("Authorization") || "-"} cookie=#{req.header("Cookie") || "-"}")
+    res.body << ("other auth=#{req.header("Authorization") || "-"} cookie=#{req.header("Cookie") || "-"}")
   end
 end
 
@@ -392,15 +430,19 @@ class RisHttp10Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/stop"
       RisExerciseServer.stop(RisHttpFactory)
-      Response.new(200, "bye")
+      res.body << "bye"
     elsif req.path == "/form"
-      Response.new(200, req.form.to_s)
+      form = Params.parse(req.query || "")
+      Params.parse(req.body).each { |name, value| form.add(name, value) }
+      res.body << form.to_s
     elsif req.path == "/parts"
       said = ""
-      if parts = req.multipart
+      boundary = Multipart.boundary(req.header("Content-Type") || "")
+      if boundary
+        parts = Multipart.new(req.body_io, boundary)
         while true
           part = parts.next_part
           break if part.nil?
@@ -415,9 +457,10 @@ class RisHttp10Handler
       else
         said = "not multipart"
       end
-      Response.new(200, said)
+      res.body << said
     else
-      Response.new(404, "no")
+      res.status = 404
+      res.body << "no"
     end
   end
 end
@@ -430,22 +473,26 @@ class RisHttp11Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/stop"
       RisExerciseServer.stop(RisHttpFactory)
-      Response.new(200, "bye")
+      res.body << "bye"
     elsif req.path == "/close"
-      Response.new(200, "closing", {"Connection" => "close"})
+      res.close
+      res.body << "closing"
     elsif req.path == "/who"
-      Response.new(200, req.remote_address || "-")
+      res.body << (req.remote_address || "-")
     elsif req.path == "/mid"
-      Response.new(200, "m" * 30000, {"Content-Type" => "image/png"})
+      res.header("Content-Type", "image/png")
+      res.body << "m" * 30000
     elsif req.path == "/big"
-      Response.new(200, "b" * 200000, {"Content-Type" => "image/png"})
+      res.header("Content-Type", "image/png")
+      res.body << "b" * 200000
     elsif req.path == "/text"
-      Response.new(200, "t" * 200000, {"Content-Type" => "text/plain"})
+      res.header("Content-Type", "text/plain")
+      res.body << "t" * 200000
     else
-      Response.new(200, req.method + " " + req.path + " " + req.body)
+      res.body << req.method + " " + req.path + " " + req.body
     end
   end
 end
@@ -458,18 +505,19 @@ class RisHttp12Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/stop"
       RisExerciseServer.stop(RisHttpFactory)
-      Response.new(200, "bye")
+      res.body << "bye"
     elsif req.header("Upgrade") == "echo"
-      Response.upgrade({"Upgrade" => "echo", "Connection" => "Upgrade"})
+      res.header("Upgrade", "echo")
+      res.upgrade
     else
-      Response.new(200, "ok")
+      res.body << "ok"
     end
   end
 
-  def take_over(sock : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+  def take_over(sock : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
     got = sock.read(100)
     sock.write("echo:" + got) if got.is_a?(String)
   end
@@ -483,9 +531,9 @@ class RisHttp13Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     RisExerciseServer.stop(RisHttpFactory) if req.path == "/stop"
-    Response.new(200, "ok")
+    res.body << "ok"
   end
 end
 
@@ -497,18 +545,21 @@ class RisHttp14Handler
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
+  def call(req : Incoming, res : Outgoing) : Nil
     if req.path == "/stop"
       RisExerciseServer.stop(RisHttpFactory)
-      Response.new(200, "bye")
+      res.body << "bye"
     elsif req.header("Upgrade") == "echo"
-      Response.upgrade({"Upgrade" => "echo", "Connection" => "Upgrade"})
+      res.header("Upgrade", "echo")
+      res.upgrade
     else
-      Response.new(426, "upgrade to echo\n", {"Upgrade" => "echo"})
+      res.status = 426
+      res.header("Upgrade", "echo")
+      res.body << "upgrade to echo\n"
     end
   end
 
-  def take_over(sock : IyiSocket | TlsStream, leftover : String, response : Response) : Nil
+  def take_over(sock : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
     said = leftover
     while said.bytesize < 4
       got = sock.read(100)
@@ -571,8 +622,8 @@ class RisHttpFactory
     RisExerciseServer.ready(RisHttpFactory)
   end
 
-  def call(req) : Response
-    @handler.call(req)
+  def call(req : Incoming, res : Outgoing) : Nil
+    @handler.call(req, res)
   end
 end
 
@@ -587,13 +638,14 @@ class RisHttpOtherFactory
     RisExerciseServer.ready(RisHttpOtherFactory)
   end
 
-  def call(req) : Response
-    @handler.call(req)
+  def call(req : Incoming, res : Outgoing) : Nil
+    @handler.call(req, res)
   end
 end
 
-import std/http::{HTTP, HTTPClient, Response, Request, Server, HTTPError, MultipartBuilder, Part, TlsStream}
+import std/http::{HTTP, HTTPClient, Response, Incoming, Outgoing, Server, HTTPError, Multipart, MultipartBuilder, Part, TlsStream}
 import std/socket::{IyiSocket, SocketError}
+import std/uri::{Params}
 import std/compress::{Gzip, Zlib, Deflate}
 import std/zstd::{Zstd}
 import std/file::{File}
@@ -715,6 +767,17 @@ def server_reads(text : String) : String
       "more"
     end
   end
+end
+
+# The wire text of an answer of *status* and *body* with one line *name*
+# (none when empty), as `Server.format_response` writes it.
+def formatted(status : Int32, body : String, name : String, value : String,
+              head : Bool, close : Bool) : String
+  res = Outgoing.new
+  res.status = status
+  res.header(name, value) unless name.empty?
+  res.body << body
+  ris_heap_text(Server.format_response(res, head, close))
 end
 
 # What the client makes of an answer: "<status> <reason> <headers> <body>".
@@ -863,21 +926,20 @@ assert_str "400 not a request target: \"/?a\\nb\"", server_reads("GET /?a\nb HTT
 assert_str "400 header User-Agent contains a control character", server_reads("GET / HTTP/1.1\r\nUser-Agent: a\rb\r\n\r\n"), "a value with a bare CR is a 400"
 assert_str "refused: HTTP: header X-A contains a control character", client_reads("HTTP/1.1 200 OK\r\nX-A: a\u0000b\r\n\r\n"), "an answer's value with a NUL is refused"
 assert_str "refused: HTTP: header X-A contains a control character", answer { HTTP.format_request("GET", "/", "127.0.0.1", "", {"X-A" => "a\u0000b"}) }, "a value with a NUL is not written"
-assert_str "refused: HTTP: header X-A contains a control character", answer { ris_heap_text(Server.format_response(Response.new(200, "", {"X-A" => "a\u0000b"}), false, false)) }, "an answer's value with a NUL is not written"
+assert_str "refused: HTTP: header X-A contains a control character", answer { formatted(200, "", "X-A", "a\u0000b", false, false) }, "an answer's value with a NUL is not written"
 assert_str "refused: HTTP: not a status line: HTTP/1.1 200 O\rK", client_reads("HTTP/1.1 200 O\rK\r\n\r\n"), "a reason with a bare CR is refused"
 puts "  control characters in values, targets and reasons are refused"
 
-# A caller's length is the body's, or a HEAD's or a 304's own: "2" on
+# A caller's length was the body's, or a HEAD's or a 304's own: "2" on
 # "hello" was read as "he", and "llo" began the next answer on the
-# connection. The body goes with its length, so a caller's chunked framing
-# went out beside `Content-Length: 5` and was refused by the client.
-assert_str "refused: HTTP: Content-Length \"2\" is not the body's 5 bytes", answer { ris_heap_text(Server.format_response(Response.new(200, "hello", {"Content-Length" => "2"}), false, false)) }, "a length short of the body is not written"
-assert_str "refused: HTTP: content-length \"100\" is not the body's 5 bytes", answer { ris_heap_text(Server.format_response(Response.new(200, "hello", {"content-length" => "100"}), false, false)) }, "a length past the body is not written"
-assert_str "refused: HTTP: Transfer-Encoding is not written; the body goes with its length", answer { ris_heap_text(Server.format_response(Response.new(200, "hello", {"Transfer-Encoding" => "chunked"}), false, false)) }, "a caller's chunked framing is not written"
-assert_str "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: keep-alive\r\n\r\nhello", ris_heap_text(Server.format_response(Response.new(200, "hello", {"Content-Length" => "5"}), false, false)), "the body's own length is written once"
-assert_str "HTTP/1.1 200 OK\r\nContent-Length: 99\r\nConnection: keep-alive\r\n\r\n", ris_heap_text(Server.format_response(Response.new(200, "", {"Content-Length" => "99"}), true, false)), "a HEAD's length is the caller's"
-assert_str "HTTP/1.1 304 Not Modified\r\nContent-Length: 99\r\nConnection: keep-alive\r\n\r\n", ris_heap_text(Server.format_response(Response.new(304, "", {"Content-Length" => "99"}), false, false)), "and a 304's"
-puts "  a caller's Content-Length is the body's except on a HEAD or a 304, and its Transfer-Encoding is refused"
+# connection. Content-Length and Transfer-Encoding are the server's lines
+# now; a HEAD's length is `length=`.
+assert_str "refused: HTTP: Content-Length is the server's own line", answer { formatted(200, "hello", "Content-Length", "2", false, false) }, "a handler's Content-Length is refused"
+assert_str "refused: HTTP: content-length is the server's own line", answer { formatted(200, "hello", "content-length", "100", false, false) }, "in any case"
+assert_str "refused: HTTP: Transfer-Encoding is the server's own line", answer { formatted(200, "hello", "Transfer-Encoding", "chunked", false, false) }, "and its Transfer-Encoding"
+assert_str "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: keep-alive\r\n\r\nhello", formatted(200, "hello", "", "", false, false), "the body's own length"
+assert_str "HTTP/1.1 200 OK\r\nContent-Length: 99\r\nConnection: keep-alive\r\n\r\n", answer { res = Outgoing.new; res.length = 99_i64; ris_heap_text(Server.format_response(res, true, false)) }, "a HEAD's length is length="
+puts "  Content-Length and Transfer-Encoding are the server's lines; a HEAD's length is length="
 
 # A field on several lines is one field, its values in order (RFC 9110
 # §5.3). The Hash kept the last line of a name spelled the same and the
@@ -918,8 +980,8 @@ puts "  status lines are three digits under an HTTP version, and interim answers
 
 # A 1xx, 204 or 304 carries no content and writes no length of its own
 # (RFC 9110 §8.6, §15): the body was the next answer's first bytes.
-assert_str "HTTP/1.1 204 No Content\r\nConnection: keep-alive\r\n\r\n", ris_heap_text(Server.format_response(Response.new(204, "x"), false, false)), "a 204 writes no body and no length"
-assert_str "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n", ris_heap_text(Server.format_response(Response.new(304, "x"), false, true)), "a 304 writes no body and no length"
+assert_str "HTTP/1.1 204 No Content\r\nConnection: keep-alive\r\n\r\n", formatted(204, "x", "", "", false, false), "a 204 writes no body and no length"
+assert_str "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n", formatted(304, "x", "", "", false, true), "a 304 writes no body and no length"
 # The absolute form a server must accept (RFC 9112 §3.2.2) is read for
 # its path, as the other library reads it.
 assert_str "GET /a/b ?x=1 Host=example.com; \"\" keep", server_reads("GET http://example.com/a/b?x=1 HTTP/1.1\r\nHost: example.com\r\n\r\n"), "an absolute-form target's path"
@@ -940,15 +1002,13 @@ assert_str "GET /echo ?q Host=other:8080; \"\" keep", server_reads("GET http://o
 assert_str "400 not a host: \"u@h\"", server_reads("GET http://u@h/ HTTP/1.1\r\nHost: a\r\n\r\n"), "and an authority with a user in it is none"
 puts "  a request names one host, an HTTP/1.1 one must, and an absolute-form target's authority is it"
 
-# A status line is written only as the client half reads it: a reason
-# with a CRLF went out as a header of its own, `Set-Cookie: admin=1`, and
-# 2000 as `HTTP/1.1 2000 Server Error`, which `parse_response` refuses.
-assert_str "refused: HTTP: the reason contains a line break", answer { ris_heap_text(Server.format_response(Response.new(200, "OK\r\nSet-Cookie: admin=1", {} of String => String, "hi"), false, false)) }, "a reason with a CRLF is not written"
-assert_str "refused: HTTP: the reason contains a control character", answer { ris_heap_text(Server.format_response(Response.new(200, "O\u0000K", {} of String => String, ""), false, false)) }, "a reason with a NUL is not written"
-assert_str "refused: HTTP: not a status: 2000", answer { ris_heap_text(Server.format_response(Response.new(2000, "x"), false, false)) }, "a four-digit status is not written"
-assert_str "refused: HTTP: not a status: 99", answer { ris_heap_text(Server.format_response(Response.new(99, "x"), false, false)) }, "a status under 100 is not written"
-assert_str "999 Server Error Content-Length=1;Connection=close; \"x\"", client_reads(ris_heap_text(Server.format_response(Response.new(999, "x"), false, true))), "999 is a status, and read back as written"
-puts "  a status outside 100 to 999, or a reason with a line break, is not written"
+# A status line is written only as the client half reads it: 2000 went
+# out as `HTTP/1.1 2000 Server Error`, which `parse_response` refuses. An
+# Outgoing has no reason of its own: the status's is written.
+assert_str "refused: HTTP: not a status: 2000", answer { formatted(2000, "x", "", "", false, false) }, "a four-digit status is not written"
+assert_str "refused: HTTP: not a status: 99", answer { formatted(99, "x", "", "", false, false) }, "a status under 100 is not written"
+assert_str "999 Server Error Content-Length=1;Connection=close; \"x\"", client_reads(formatted(999, "x", "", "", false, true)), "999 is a status, and read back as written"
+puts "  a status outside 100 to 999 is not written"
 
 puts "\n== over a socket"
 # The server runs on a thread, and a thread's block may capture only what
@@ -1149,7 +1209,7 @@ idle_closed = 0_i64
 idle_returned = 0_i64
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(idle_listener, {1, "".as_tape}, RisHttpFactory)
+    RisExerciseServer.answer(idle_listener, {1, "".as_tape}, RisHttpFactory)
     raise "timing queue full" unless RisBoard.post(RisHttpIdleReturned.new(__iyi_monotonic_ns))
     0
   end
@@ -1192,7 +1252,7 @@ sport = listener
 seen_paths = [] of String
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(listener, {2, "".as_tape}, RisHttpFactory)
+    RisExerciseServer.answer(listener, {2, "".as_tape}, RisHttpFactory)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
@@ -1411,7 +1471,7 @@ closer = RisExerciseServer.port
 closer_port = closer
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(closer, {3, "".as_tape}, RisHttpFactory)
+    RisExerciseServer.answer(closer, {3, "".as_tape}, RisHttpFactory)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
@@ -1437,7 +1497,7 @@ burst_listener = RisExerciseServer.port
 burst_port = burst_listener
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(burst_listener, {4, "".as_tape}, RisHttpFactory)
+    RisExerciseServer.answer(burst_listener, {4, "".as_tape}, RisHttpFactory)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
@@ -1467,7 +1527,7 @@ blank = RisExerciseServer.port
 blank_port = blank
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(blank, {5, "".as_tape}, RisHttpFactory)
+    RisExerciseServer.answer(blank, {5, "".as_tape}, RisHttpFactory)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
@@ -1500,7 +1560,7 @@ stream_base = "http://127.0.0.1:#{stream_port}"
 first_piece_seen = false
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(stream_l, {6, stream_dir.as_tape}, RisHttpFactory, stream_bodies: true)
+    RisExerciseServer.answer(stream_l, {6, stream_dir.as_tape}, RisHttpFactory, stream_bodies: true)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
@@ -1633,7 +1693,7 @@ coding_base = "http://127.0.0.1:#{coding_port}"
 long_text = "the quick brown fox jumps over the lazy dog. " * 400
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(coding_l, {7, "".as_tape}, RisHttpFactory, compress: true)
+    RisExerciseServer.answer(coding_l, {7, "".as_tape}, RisHttpFactory, compress: true)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
@@ -1735,12 +1795,12 @@ other_l = RisExerciseServer.port
 other_base = "http://127.0.0.1:#{other_l}"
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(hop_l, {8, other_base.as_tape}, RisHttpFactory)
+    RisExerciseServer.answer(hop_l, {8, other_base.as_tape}, RisHttpFactory)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
   g.spawn do
-    RisExerciseServer.serve(other_l, {9, "".as_tape}, RisHttpOtherFactory)
+    RisExerciseServer.answer(other_l, {9, "".as_tape}, RisHttpOtherFactory)
     0
   end
   RisExerciseServer.wait(RisHttpOtherFactory)
@@ -1780,7 +1840,7 @@ form_port = form_l
 form_base = "http://127.0.0.1:#{form_port}"
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(form_l, {10, "".as_tape}, RisHttpFactory, stream_bodies: true)
+    RisExerciseServer.answer(form_l, {10, "".as_tape}, RisHttpFactory, stream_bodies: true)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
@@ -1842,7 +1902,7 @@ kept_l = RisExerciseServer.port
 kept_base = "http://127.0.0.1:#{kept_l}"
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(kept_l, {11, "".as_tape}, RisHttpFactory, compress: true)
+    RisExerciseServer.answer(kept_l, {11, "".as_tape}, RisHttpFactory, compress: true)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
@@ -1929,7 +1989,7 @@ slow_l = RisExerciseServer.port
 slow_port = slow_l
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(slow_l, {12, "".as_tape}, RisHttpFactory, timeout_ms: 1000)
+    RisExerciseServer.answer(slow_l, {12, "".as_tape}, RisHttpFactory, timeout_ms: 1000)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
@@ -1993,7 +2053,7 @@ end
 none_l = RisExerciseServer.port
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(none_l, {13, "".as_tape}, RisHttpFactory, timeout_ms: 0)
+    RisExerciseServer.answer(none_l, {13, "".as_tape}, RisHttpFactory, timeout_ms: 0)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
@@ -2043,7 +2103,7 @@ up_stopped = 0_i64
 up_returned = 0_i64
 group do |g|
   g.spawn do
-    RisExerciseServer.serve(up_l, {14, "".as_tape}, RisHttpFactory)
+    RisExerciseServer.answer(up_l, {14, "".as_tape}, RisHttpFactory)
     raise "timing queue full" unless RisBoard.post(RisHttpUpReturned.new(__iyi_monotonic_ns))
     0
   end
