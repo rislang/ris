@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# spec: 2.2@67a6a6f1, 1.9@3f448e8c, 3.5@4513f7df, 3.6@47d91b08, 1.1@fdc7907b,
-# 5.1@610b0d22, 1.5@9935f4c7, 3.2@9533bb9c, 7.1@e54681fa ris's own checks: every
+# spec: 2.2@67a6a6f1, 1.9@3f448e8c, 3.5@4513f7df, 3.6@47d91b08, 1.1@fdc7907b
+# spec: 5.1@610b0d22, 1.5@9935f4c7, 3.2@9533bb9c, 7.1@e54681fa
+# ris's own checks: every
 # program under test/ris/refused must be refused by the compiler with the
 # expected message, test/ris/allowed.ri must compile and run, the fibers test
 # must read back what each fiber wrote, a tape must grow past its first mapping

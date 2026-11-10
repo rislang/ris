@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# spec: 6.7@dfe294f2, 6.8@e818aa3e, 6.9@889c99fe
+# spec: 6.7@0845721d, 6.8@9832e912, 6.9@889c99fe
 """`ris spec`: the spec's clauses linked to the tests that name them.
 
     IYI=./bin/ris python3 test/cli/spec_verb.py
@@ -343,9 +343,9 @@ def part_d():
         "clauses": ["1.2"], "file": "test/posts_test.ri",
         "reason": "posts are not created yet"}]}, tj)
     code, out = check(root)
-    step("2.1 has no test: ris check spec fails naming it",
-         code == 1 and "2.1: no test names it" in out and
-         f"# spec: 2.1@{V21}" in out, out)
+    step("2.1 has no proof: ris check spec fails naming it",
+         code == 1 and "2.1 has no proof" in out and
+         "add `spec 2.1` at the end of the module" in out, out)
     write(root, "test/more_test.ri",
           f"# spec: 2.1@{V21}\ntodo \"later\"\n")
     code, out = check(root)

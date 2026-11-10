@@ -791,6 +791,12 @@ web through site. Step 6 builds it.
    does not clear "to review". The 5.16 hint: a block calling `get`
    in a file that imports web (directly or through site) without
    web/spec names the import.
+   Done (test/cli/spec_blocks_lock.sh). The 5.16 hint comes from
+   `ris test`, which reads the build's "undefined" lines, not from the
+   type check: the same text where an agent runs a block. `ris spec
+   ack` locks only clauses with proofs. ris's own test/ris/check.sh had
+   a tag broken by a rewrap; it is fixed. SPEC 6.9's `ris init`
+   sentence waits for step 7.
 7. `ris init` (5.11). Gate: `ris init demo`, then `ris check` is
    green with 1.1 covered by `demo == "hello from demo\n"` (4.5), and
    no test/ exists.

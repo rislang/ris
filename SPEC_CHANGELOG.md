@@ -4,6 +4,20 @@ Every change to SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one. Entries before 2026-10-31 name the file by its old name, TAPE_SPEC.md.
 
+## 2026-11-11 · 6.7@0845721d, 6.8@9832e912
+
+* Was: `ris spec` read only tags under test/, so a `spec N.M` block in
+  src/ proved nothing; a tag carried its clause's version, so every
+  test file was rewritten when a clause changed.
+* Now: 6.7 a spec block in any module under the root is a proof;
+  spec.lock holds each reviewed clause's version, written by `ris spec
+  ack` (`--from-tags` moves a project over). 6.8 `ris check spec` fails
+  on an unreviewed or orphan lock entry and on a stale block label,
+  which `ris check --fix` writes.
+* Why: proofs live beside the code they prove (spec blocks); one lock
+  file records the review. Design and EGM review:
+  doc/drafts/spec-blocks/ (spec-blocks.md 5.9-5.15, step 6).
+
 ## 2026-11-10 · 6.7@dfe294f2, 6.8@e818aa3e, 6.9@889c99fe
 
 * Was: no tool read the clause numbers tests cite in prose, so a clause

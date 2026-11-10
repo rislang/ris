@@ -122,7 +122,7 @@ class Iyi::Command
       options.replace(fix ? [] of String : ["--check"])
       mod_tidy
     when "spec"
-      spec_check
+      spec_check(fix)
     when "types"
       if fix
         # A named file or directory is fixed as given: fix.cr walks one.

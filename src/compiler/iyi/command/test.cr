@@ -389,6 +389,49 @@ class Iyi::Command
     nil
   end
 
+  # ris: an undefined name in a spec build that the `p/spec` module of a
+  # package in *file*'s import closure defines (5.16): the import to add.
+  private def spec_vocabulary_hint(file : String, output : String) : String?
+    names = [] of String
+    output.each_line do |line|
+      next unless at = line.index("undefined ")
+      open = line.index('\'', at) || next
+      close = line.index('\'', open + 1) || next
+      names << line[(open + 1)...close]
+    end
+    return if names.empty?
+    entry = File.expand_path(file)
+    entry_dir = closure_root_of(entry)
+    table = Mod::Installer.table_for(entry_dir)
+    packages = [] of String
+    seen = Set(String).new
+    queue = [entry]
+    while path = queue.shift?
+      next unless seen.add?(path)
+      (test_imports_of(path, keep_spec: path == entry) || [] of String).each do |written|
+        segments = written.split('/')
+        packages << segments[0] if segments.size > 1 && segments[0] != "std"
+        named, _ = mod_context_names(written, entry_dir, table)
+        queue << File.expand_path(named)
+      end
+    end
+    packages.uniq.each do |package|
+      vocabulary = "#{package}/spec"
+      named, _ = mod_context_names(vocabulary, entry_dir, table)
+      source = File.file?(named) ? File.read(named) : next
+      name = names.find do |undefined|
+        source.each_line.any? do |line|
+          words = line.tr("(:", "  ").split
+          words.shift if words.first? == "pub"
+          words[0]? == "def" && words[1]?.try(&.lchop("self.")) == undefined
+        end
+      end
+      next unless name
+      return "#{vocabulary} defines `#{name}`; add `import #{vocabulary}::*` after the first `spec` block"
+    end
+    nil
+  end
+
   # IV.6 read backwards, which is the build's own rule: one reading of it,
   # because a selection that placed a test differently from the build that
   # compiles it would discount the wrong tests.
@@ -466,6 +509,9 @@ class Iyi::Command
         output: output, error: output,
       )
       unless build_status.success?
+        if spec && (hint = spec_vocabulary_hint(file, output.to_s))
+          output << hint << '\n'
+        end
         return {file: file, status: "does not build", seconds: elapsed(started), output: output.to_s, blocks: blocks}
       end
 
