@@ -21,7 +21,7 @@ module Iyi
       # Process regular args
       # (skip the splat index because we need to create an array for it)
       a_macro.match(call.args) do |macro_arg, macro_arg_index, call_arg, call_arg_index|
-        vars[macro_arg.name] = call_arg if macro_arg_index != splat_index
+        vars[macro_arg.name] = macro_argument(call_arg) if macro_arg_index != splat_index
       end
 
       # Gather splat args into an array
@@ -30,7 +30,7 @@ module Iyi
         unless splat_arg.name.empty?
           splat_elements = if splat_index < call.args.size
                              splat_size = Splat.size(a_macro, call.args)
-                             call.args[splat_index, splat_size]
+                             call.args[splat_index, splat_size].map { |arg| macro_argument(arg) }
                            else
                              [] of ASTNode
                            end
@@ -46,7 +46,7 @@ module Iyi
             # Skip an argument that's already there as a positional argument
             next if a_macro.args.any? &.external_name.==(named_arg.name)
 
-            named_tuple_elems << NamedTupleLiteral::Entry.new(named_arg.name, named_arg.value)
+            named_tuple_elems << NamedTupleLiteral::Entry.new(named_arg.name, macro_argument(named_arg.value))
           end
         end
 
@@ -68,7 +68,7 @@ module Iyi
       call.named_args.try &.each do |named_arg|
         arg = a_macro.args.find { |arg| arg.external_name == named_arg.name }
         arg_name = arg.try(&.name) || named_arg.name
-        vars[arg_name] = named_arg.value
+        vars[arg_name] = macro_argument(named_arg.value)
       end
 
       # The block arg
@@ -79,6 +79,15 @@ module Iyi
       end
 
       new(program, scope, path_lookup, a_macro.location, vars, call.block, a_def, in_macro, call)
+    end
+
+    # Runtime literal lowering must not change the AST a macro reflects on.
+    # Forwarding through another macro can have normalized it more than once.
+    private def self.macro_argument(node : ASTNode) : ASTNode
+      while node.is_a?(Call) && node.tape_literal?
+        node = node.args.first
+      end
+      node
     end
 
     record MacroVarKey, name : String, exps : Array(ASTNode)?

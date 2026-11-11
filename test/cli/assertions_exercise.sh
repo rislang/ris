@@ -50,6 +50,26 @@ esac
 
 trap 'rm -rf "$WORK"' EXIT
 
+# A program literal stays a StringLiteral to macros, also when forwarded.
+# Runtime tape lowering used to expose String.view calls to reflection.
+cat > "$WORK/macro_literal.iyi" <<'IYI'
+macro literal(value)
+  {% unless value.is_a?(StringLiteral) && value == "page.eiy" %}
+    {% raise "macro lost its string literal" %}
+  {% end %}
+  {{ value.upcase }}
+end
+macro forward(value)
+  literal({{ value }})
+end
+assert_eq "PAGE.EIY", forward("page.eiy")
+IYI
+"$IYI" run "$WORK/macro_literal.iyi" > "$WORK/literal.out" 2>&1 || {
+  tail -20 "$WORK/literal.out"
+  exit 1
+}
+echo "  macro string literal: held"
+
 status=0
 # The library a build reads: the repository's, or a patched copy ahead of it.
 LIBRARY="${IYI_PATH:-$REPO/src}"
