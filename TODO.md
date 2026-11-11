@@ -193,8 +193,9 @@ Unknown must be refused (SPEC 3.6).
 
   PNG, cookie, netip and process now pass --no-codegen. PNG and netip
   also build with code generation and run to ALL CHECKS PASSED. Cookie
-  builds with code generation, but its exercise still faults at runtime;
-  it is not runtime-green. Process has not been run this round.
+  now runs to ALL CHECKS PASSED too: its fault was a typed group reading
+  task values after its join had freed their result regions
+  (test/ris/typed_group_results.ri). Process has not been run this round.
   Final minitest `bash test/ris/check.sh`: PASS: all ris checks;
   359 runs, 343 refusals, 13 heap cases, zero FAILED lines.
   The checker, SPEC.md and CHANGELOG.md are unchanged.

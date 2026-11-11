@@ -4034,7 +4034,10 @@ class RisGroupSlot
     IyiSchedLock.unlock
   end
 
-  private def release_results : Nil
+  # :nodoc: — a `group do` frees them at its scope's end
+  # (`IyiGroup.close_scoped`), not at a join: a typed group (iyi SPEC
+  # III.4.9) joins, then reads its tasks' values.
+  def release_results : Nil
     node = @results
     @results = 0_u64
     saved = RisRegion.tape
@@ -4325,7 +4328,7 @@ class RisGroupSlot
       me.joining = nil
     end
     @ended = true
-    release_results
+    release_results unless @scoped
     me.open_group = @outer
     # The boundary owes a re-raise for any panic *nobody read*: a bug
     # observed through its handle already became a `Panicked` value
@@ -4423,6 +4426,7 @@ struct IyiGroup
     me.scoped_group = slot.outer_scoped
     slot.outer_scoped = nil
     defer slot.recycle
+    defer slot.release_results
     slot.join(slot.early)
   end
 
