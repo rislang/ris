@@ -77,6 +77,8 @@ expect() {
   fi
 }
 
+expect byte_char_equal 'A String index is a UInt8 byte'
+
 # Yielded holders retain the provenance of their borrowed owner fields.
 for name in yield_owner_field yield_clone_attrs svcb_store; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?

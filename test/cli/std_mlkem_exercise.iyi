@@ -130,8 +130,8 @@ if args.size > 0 && args[0] == "cost"
   ek = key.encapsulation_key
   sent = MlKem768.encapsulate(ek, m).or_panic
   ok = true
-  keygen = best_of { MlKem768PrivateKey.from_seed(seed) }
-  encaps = best_of { MlKem768.encapsulate(ek, m).or_panic }
+  keygen = best_of { MlKem768PrivateKey.from_seed(seed); nil }
+  encaps = best_of { MlKem768.encapsulate(ek, m).or_panic; nil }
   decaps = best_of { ok = ok && key.decapsulate(sent[0]).or_panic == sent[1] }
   raise "the timed decapsulation did not agree" unless ok
   puts "iyi: ML-KEM-768 key pair #{keygen} us, encapsulation #{encaps} us, decapsulation #{decaps} us"
@@ -278,18 +278,18 @@ puts "  a key pair, an encapsulation, a modified ciphertext implicitly rejected,
 # is answered with J(z || c), computed here from its definition.
 puts "\n== round trips and the implicit rejection"
 50.times do |n|
-  seed = drawn("seed #{n}", 64)
-  key = MlKem768PrivateKey.from_seed(seed)
-  sent = MlKem768.encapsulate(key.encapsulation_key, drawn("m #{n}", 32)).or_panic
-  check key.decapsulate(sent[0]).or_panic == sent[1], "round trip #{n}: the secret decapsulated"
-  again = MlKem768PrivateKey.from_bytes(key.decapsulation_key).or_panic
-  check again.encapsulation_key == key.encapsulation_key && again.decapsulation_key == key.decapsulation_key, "round trip #{n}: the decapsulation key read back"
-  check again.decapsulate(sent[0]).or_panic == sent[1], "round trip #{n}: the key read back decapsulates"
+  round_seed = drawn("seed #{n}", 64)
+  round_key = MlKem768PrivateKey.from_seed(round_seed)
+  round_sent = MlKem768.encapsulate(round_key.encapsulation_key, drawn("m #{n}", 32)).or_panic
+  check round_key.decapsulate(round_sent[0]).or_panic == round_sent[1], "round trip #{n}: the secret decapsulated"
+  round_again = MlKem768PrivateKey.from_bytes(round_key.decapsulation_key).or_panic
+  check round_again.encapsulation_key == round_key.encapsulation_key && round_again.decapsulation_key == round_key.decapsulation_key, "round trip #{n}: the decapsulation key read back"
+  check round_again.decapsulate(round_sent[0]).or_panic == round_sent[1], "round trip #{n}: the key read back decapsulates"
   [0, 1087, 7 * n + 3].each do |at|
-    bad = sent[0].dup
-    bad[at] = bad[at] ^ (1_u8 << (n % 8))
-    rejection = SHAKE256.new.update(seed[32, 32]).update(bad).read(32)
-    check key.decapsulate(bad).or_panic == rejection, "a ciphertext changed at byte #{at} is answered with J(z || c)"
+    round_bad = round_sent[0].dup
+    round_bad[at] = round_bad[at] ^ (1_u8 << (n % 8))
+    rejection = SHAKE256.new.update(round_seed[32, 32]).update(round_bad).read(32)
+    check round_key.decapsulate(round_bad).or_panic == rejection, "a ciphertext changed at byte #{at} is answered with J(z || c)"
   end
 end
 puts "  50 key pairs: encapsulated, decapsulated, read back; 150 changed ciphertexts rejected"

@@ -312,7 +312,7 @@ end
 def serial_hex(bytes : Array(UInt8) | Array::View(UInt8)) : String
   text = hex_of(bytes)
   at = 0
-  while at < text.size - 1 && text[at] == '0'
+  while at < text.size - 1 && text[at] == 48_u8
     at = at + 1
   end
   text[at, text.size - at]

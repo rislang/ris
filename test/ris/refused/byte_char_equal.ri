@@ -1,0 +1,3 @@
+module test/ris/refused/byte_char_equal
+host = "[::1]"
+puts host[0] == '['
