@@ -1,9 +1,10 @@
-# ris: `ris spec` — the spec's clauses and the tests that prove them
-# (SPEC 6.7-6.9; design: doc/drafts/spec-cli/spec-cli.md).
+# ris: `ris spec` — the spec's clauses and the proofs that keep them
+# (SPEC 6.7-6.9; design: doc/drafts/spec-cli/spec-cli.md, spec blocks
+# and spec.lock: doc/drafts/spec-blocks/spec-blocks.md 5.9-5.15).
 #
 #     ris spec              # one line per clause: status and tests
 #     ris spec 1 / 1.3      # one chapter or clause, for an agent's context
-#     ris spec ack 1.3      # tags naming 1.3 take its current version
+#     ris spec ack 1.3      # spec.lock (and tags) take 1.3's version
 #     ris spec todo         # every todo test
 #
 # A clause is `* N.M text` under `## N. Title`; its version is the first 8
@@ -41,6 +42,16 @@ class Iyi::Command
 
   private record SpecEntry, heading : String, versions : Array(String)
 
+  # ris: one `spec N.M` block in a module under the root (spec blocks
+  # draft 5.9, 5.14): where it is, whether its body says `todo`, and the
+  # clause label its line ends in (5.15), whitespace-collapsed.
+  private record SpecBlock, path : String, line : Int32, number : String,
+    todo : Bool, label : String?
+
+  # Read by spec_status; set by spec_load_or_abort.
+  @spec_blocks = [] of SpecBlock
+  @spec_lock = {} of String => String
+
   private def spec_command
     case options.first?
     when "--help", "-h"
@@ -75,12 +86,35 @@ class Iyi::Command
     exit
   end
 
+  # ris: `build --spec`: the clauses a spec block may name are ROOT's
+  # (doc/drafts/spec-blocks, 5.1). No spec there: the block's refusal
+  # names the file to create.
+  private def ris_spec_setup(compiler : Compiler) : Nil
+    compiler.ris_spec = true
+    root = spec_root
+    unless root
+      compiler.ris_spec_file = File.join(Dir.current, "SPEC.md")
+      return
+    end
+    files = spec_files(root)
+    compiler.ris_spec_file = files.size == 1 ? Iyi.relative_filename(files[0]) : "spec/*.md"
+    if files.empty?
+      compiler.ris_spec_file = Iyi.relative_filename(File.join(root, "SPEC.md"))
+      return
+    end
+    compiler.ris_spec_clauses = spec_clauses(root).map(&.number).to_set
+  rescue ex : SpecError
+    abort! "build --spec: #{ex.message}", :FAILURE
+  end
+
   # --- loading -------------------------------------------------------------
 
   private def spec_load_or_abort : {String, Array(SpecClause), Array(SpecTest)}
     root = spec_root || abort!("spec: no SPEC.md here: none in the root (the nearest directory with ris.mod or " \
                                "iyi.mod) nor in the current directory", :USAGE_ERROR)
     begin
+      @spec_blocks = spec_blocks_of(root)
+      @spec_lock = spec_lock_of(root)
       {root, spec_clauses(root), spec_tests(root)}
     rescue ex : SpecError
       abort! "spec: #{ex.message}", :FAILURE
@@ -247,6 +281,94 @@ class Iyi::Command
     test
   end
 
+  # ris: every spec block in a `.ri` / `.iyi` file under *root*, walked
+  # as `ris test` walks (5.9): blocks in src/ count too (bug B2).
+  private def spec_blocks_of(root : String) : Array(SpecBlock)
+    files = [] of String
+    project_walk(root, files) do |name|
+      lower = name.downcase
+      lower.ends_with?(".ri") || lower.ends_with?(".iyi")
+    end
+    blocks = [] of SpecBlock
+    files.sort!.each do |file|
+      lines = begin
+        File.read_lines(file)
+      rescue IO::Error
+        next
+      end
+      shown = ::Path[file].relative_to(root).to_s
+      open = false
+      lines.each_with_index do |line, index|
+        if head = spec_block_head(line)
+          blocks << SpecBlock.new(shown, index + 1, head[0], false, head[1])
+          open = true
+        elsif open && line.rstrip == "end"
+          open = false
+        elsif open && spec_todo_reason(line)
+          blocks[-1] = blocks[-1].copy_with(todo: true)
+        end
+      end
+    end
+    blocks
+  end
+
+  # `spec 1.5  # label` at a line's start -> {"1.5", "label"}.
+  private def spec_block_head(line : String) : {String, String?}?
+    return nil unless line.starts_with?("spec ") && line[5]?.try(&.ascii_number?)
+    rest = line[5..]
+    number = rest.each_char.take_while { |c| c.ascii_number? || c == '.' }.join
+    return nil unless spec_number?(number, chapter_ok: false)
+    after = rest[number.size..]
+    return {number, nil} if after.blank?
+    return nil unless after[0].whitespace?
+    after = after.lstrip
+    return nil unless after.starts_with?('#')
+    {number, after[1..].split.join(" ").presence}
+  end
+
+  # The line a block's head should be (5.15): `spec N.M  # clause text`,
+  # the text cut at the last whole word that fits 80 columns, then `…`.
+  private def spec_label_line(number : String, text : String) : String
+    head = "spec #{number}  # "
+    full = head + text
+    return full if full.size <= 80
+    line = head
+    text.split(' ').each_with_index do |word, index|
+      candidate = index == 0 ? line + word : "#{line} #{word}"
+      break if candidate.size + 1 > 80
+      line = candidate
+    end
+    line + "…"
+  end
+
+  # ROOT/spec.lock (5.10): `N.M HASH` per reviewed clause.
+  private def spec_lock_of(root : String) : Hash(String, String)
+    lock = {} of String => String
+    file = File.join(root, "spec.lock")
+    return lock unless File.file?(file)
+    File.read_lines(file).each_with_index do |line, index|
+      next if line.blank?
+      parts = line.split
+      unless parts.size == 2 && spec_number?(parts[0], chapter_ok: false) && parts[1].size == 8
+        raise SpecError.new("spec.lock:#{index + 1}: a line is `N.M HASH`, not '#{line}'; " \
+                            "`#{Command.program_name} spec ack N.M` writes it")
+      end
+      lock[parts[0]] = parts[1]
+    end
+    lock
+  end
+
+  # Writes *lock* sorted, dropping lines for clauses the spec no longer has.
+  private def spec_lock_write(root : String, lock : Hash(String, String),
+                              clauses : Array(SpecClause)) : Nil
+    known = clauses.map(&.number).to_set
+    lines = lock.select { |number, _| known.includes?(number) }.to_a.sort_by! do |number, _|
+      major, minor = number.split('.').map(&.to_i)
+      {major, minor}
+    end
+    File.write(File.join(root, "spec.lock"), lines.map { |number, hash| "#{number} #{hash}\n" }.join)
+  end
+
   # The indexes of the leading comment block: after a `#!` line and blank
   # lines, the consecutive lines starting with `#`.
   private def spec_leading_block(lines : Array(String)) : Array(Int32)
@@ -373,22 +495,34 @@ class Iyi::Command
   # --- reports -------------------------------------------------------------
 
   # A clause's files and status, worst first.
+  # ris: a spec.lock line decides review (5.10, 5.14): with one, the
+  # tags' `@V` is ignored; without one, a block is not reviewed yet and a
+  # tag's `@V` decides as before.
   private def spec_status(clause : SpecClause, tests : Array(SpecTest)) : {String, Array(SpecTest)}
     files = tests.select(&.names?(clause.number))
+    named = spec_blocks_naming(clause)
     versions = files.flat_map { |test| test.items.select { |item| item[0] == clause.number }.map(&.[1]) }
+    todo = files.all?(&.todo) && named.all?(&.todo)
+    locked = @spec_lock[clause.number]?
     status =
-      if versions.any? { |version| version && version != clause.version }
-        "to review"
-      elsif files.empty?
+      if files.empty? && named.empty?
         "uncovered"
+      elsif locked
+        locked != clause.version ? "to review" : todo ? "todo" : "ok"
+      elsif !named.empty? || versions.any? { |version| version && version != clause.version }
+        "to review"
       elsif versions.any?(&.nil?)
         "unversioned"
-      elsif files.all?(&.todo)
+      elsif todo
         "todo"
       else
         "ok"
       end
     {status, files}
+  end
+
+  private def spec_blocks_naming(clause : SpecClause) : Array(SpecBlock)
+    @spec_blocks.select { |block| block.number == clause.number }
   end
 
   private SPEC_STATUSES = ["ok", "todo", "to review", "uncovered", "unversioned"]
@@ -428,7 +562,8 @@ class Iyi::Command
       return
     end
     rows.each do |clause, status, files|
-      head = "#{clause.number.ljust(6)}#{status.ljust(12)}#{files.size.to_s.rjust(3)}  "
+      proofs = files.size + spec_blocks_naming(clause).size
+      head = "#{clause.number.ljust(6)}#{status.ljust(12)}#{proofs.to_s.rjust(3)}  "
       room = 80 - head.size
       words = clause.text.size > room ? clause.text[0, room - 1] + "…" : clause.text
       puts head + words
@@ -450,6 +585,13 @@ class Iyi::Command
           builder.field "version", test.items.find { |item| item[0] == clause.number }.try(&.[1])
           builder.field "todo", test.todo
           builder.field "own", test.items.size == 1
+        end
+      end
+      spec_blocks_naming(clause).each do |block|
+        builder.object do
+          builder.field "file", "#{block.path}:#{block.line}"
+          builder.field "block", true
+          builder.field "todo", block.todo
         end
       end
     end
@@ -502,6 +644,12 @@ class Iyi::Command
         todo = test.todo ? ", todo: #{test.todo}" : ""
         puts "  test: #{test.path} (#{kind}, #{state}#{todo})"
       end
+      spec_blocks_naming(clause).each do |block|
+        puts "  block: #{block.path}:#{block.line}#{block.todo ? " (todo)" : ""}"
+      end
+      if locked = @spec_lock[clause.number]?
+        puts "  spec.lock: #{locked}#{locked == clause.version ? "" : " (to review)"}"
+      end
     end
   end
 
@@ -509,13 +657,32 @@ class Iyi::Command
     entries.select { |entry| entry.versions.any?(&.starts_with?("#{clause.number}@")) }
   end
 
-  # `ris spec ack N[.M]`: every tag item naming the clause takes its
-  # current version; a prose-only file citing it gets a tag line naming
-  # every clause its prose names, so nothing it named is dropped.
+  # `ris spec ack N[.M]`: spec.lock takes the clause's current hash
+  # (5.10) and drops lines for clauses the spec no longer has; every tag
+  # item naming it takes its current version too; a prose-only file citing
+  # it gets a tag line naming every clause its prose names.
+  # `ris spec ack --from-tags` locks each clause whose versioned tags all
+  # match it, so a project moves from tags to spec.lock.
   private def spec_ack : NoReturn
     target = options.shift?
+    if target == "--from-tags" && options.empty?
+      root, clauses, tests = spec_load_or_abort
+      lock = @spec_lock.dup
+      seeded = 0
+      clauses.each do |clause|
+        versions = tests.flat_map { |test| test.items.select { |item| item[0] == clause.number }.map(&.[1]) }.compact
+        next if versions.empty? || versions.any? { |version| version != clause.version }
+        next if lock[clause.number]? == clause.version
+        lock[clause.number] = clause.version
+        seeded += 1
+      end
+      spec_lock_write(root, lock, clauses)
+      puts "spec.lock: #{seeded} clause#{seeded == 1 ? "" : "s"} locked from tags"
+      exit
+    end
     unless target && spec_number?(target, chapter_ok: true) && options.empty?
-      abort! "spec ack takes one clause or chapter: `#{Command.program_name} spec ack 1.3` or `ack 1`", :USAGE_ERROR
+      abort! "spec ack takes one clause or chapter: `#{Command.program_name} spec ack 1.3` or `ack 1`; " \
+             "`ack --from-tags` locks the clauses whose tags match", :USAGE_ERROR
     end
     root, clauses, tests = spec_load_or_abort
     chosen = clauses.select { |clause| clause.number == target || clause.major.to_s == target }
@@ -523,6 +690,13 @@ class Iyi::Command
       abort! "spec ack: #{target} is no clause or chapter of the spec; `#{Command.program_name} spec` lists them", :USAGE_ERROR
     end
     current = chosen.to_h { |clause| {clause.number, clause.version} }
+    lock = @spec_lock.dup
+    chosen.each do |clause|
+      next if spec_status(clause, tests)[0] == "uncovered"
+      lock[clause.number] = clause.version
+      puts "spec.lock: #{clause.number} #{clause.version}"
+    end
+    spec_lock_write(root, lock, clauses)
     written = 0
     tests.each do |test|
       next unless test.items.any? { |item| current[item[0]]? && item[1] != current[item[0]] }
@@ -547,11 +721,41 @@ class Iyi::Command
     exit
   end
 
+  # ris: `ris check --fix`'s spec step writes a missing clause label and
+  # refreshes a stale one (5.15). It never touches spec.lock: a label is
+  # not a review.
+  private def spec_fix_labels(root : String, clauses : Array(SpecClause)) : Nil
+    by_number = clauses.to_h { |clause| {clause.number, clause} }
+    @spec_blocks.group_by(&.path).each do |path, blocks|
+      file = File.join(root, path)
+      lines = File.read_lines(file, chomp: false)
+      changed = false
+      blocks.each do |block|
+        clause = by_number[block.number]? || next
+        next if spec_label_ok?(block, clause)
+        lines[block.line - 1] = spec_label_line(clause.number, clause.text) + "\n"
+        changed = true
+      end
+      next unless changed
+      File.write(file, lines.join)
+      puts "labelled #{path}"
+    end
+    @spec_blocks = spec_blocks_of(root)
+  end
+
+  # A label matches the clause text, whole or cut as spec_label_line cuts it.
+  private def spec_label_ok?(block : SpecBlock, clause : SpecClause) : Bool
+    label = block.label || return false
+    head = "spec #{clause.number}  # "
+    label == clause.text || label == spec_label_line(clause.number, clause.text)[head.size..]
+  end
+
   # `ris check spec` (SPEC 6.8): every failure with its next command,
   # then the counts. Unversioned and untagged files are reported only.
-  private def spec_check : NoReturn
+  private def spec_check(fix = false) : NoReturn
     name = Command.program_name
     root, clauses, tests = spec_load_or_abort
+    spec_fix_labels(root, clauses) if fix
     by_number = clauses.to_h { |clause| {clause.number, clause} }
     recorded = spec_changelog(root).flat_map(&.versions).to_set
     failures = [] of {String, String}
@@ -563,13 +767,41 @@ class Iyi::Command
                      "name a clause `#{name} spec` lists, or drop #{number} from the tag"}
       end
     end
+    @spec_blocks.each do |block|
+      site = "#{block.path}:#{block.line}"
+      unless clause = by_number[block.number]?
+        failures << {"#{site}: spec #{block.number} names no clause of the spec",
+                     "name a clause `#{name} spec` lists"}
+        next
+      end
+      if block.label && !spec_label_ok?(block, clause)
+        failures << {"the label of spec #{block.number} at #{site} differs from SPEC.md",
+                     "run `#{name} check --fix`"}
+      end
+    end
+    @spec_lock.each_key do |number|
+      next if by_number[number]?
+      failures << {"spec.lock holds #{number}, which is no clause of the spec",
+                   "any `#{name} spec ack` drops the line"}
+    end
     clauses.each do |clause|
       status, files = spec_status(clause, tests)
-      files.each do |test|
-        test.items.each do |number, version|
-          next unless number == clause.number && version && version != clause.version
-          failures << {"#{clause.number}: #{test.path} tag holds #{version}, clause is now #{clause.version}",
-                       "review the test against `#{name} spec #{clause.number}`, then `#{name} spec ack #{clause.number}`"}
+      if status == "to review"
+        locked = @spec_lock[clause.number]?
+        blocks = spec_blocks_naming(clause)
+        if locked || !blocks.empty?
+          sites = blocks.map { |block| "#{block.path}:#{block.line}" } + files.map(&.path)
+          what = locked ? "changed since its proofs were reviewed" : "has proofs not reviewed yet"
+          failures << {"#{clause.number} #{what}",
+                       "review #{sites.join(", ")}, then `#{name} spec ack #{clause.number}`"}
+        else
+          files.each do |test|
+            test.items.each do |number, version|
+              next unless number == clause.number && version && version != clause.version
+              failures << {"#{clause.number}: #{test.path} tag holds #{version}, clause is now #{clause.version}",
+                           "review the test against `#{name} spec #{clause.number}`, then `#{name} spec ack #{clause.number}`"}
+            end
+          end
         end
       end
       unless recorded.includes?("#{clause.number}@#{clause.version}")
@@ -577,8 +809,8 @@ class Iyi::Command
                      "add `## #{Time.local.to_s("%Y-%m-%d")} · #{clause.number}@#{clause.version}` to SPEC_CHANGELOG.md with the reason"}
       end
       if status == "uncovered"
-        failures << {"#{clause.number}: no test names it",
-                     "write a test tagged `# spec: #{clause.number}@#{clause.version}` (`todo \"reason\"` until it passes)"}
+        failures << {"#{clause.number} has no proof",
+                     "add `spec #{clause.number}` at the end of the module that keeps it"}
       end
     end
     failures.each do |failure, step|
@@ -631,23 +863,28 @@ class Iyi::Command
     name = Command.program_name
     <<-USAGE
       Usage: #{name} spec [N | N.M] [--json]
-             #{name} spec ack N[.M]
+             #{name} spec ack N[.M] | --from-tags
              #{name} spec todo [--json]
 
-      Link the spec's clauses (SPEC.md or spec/*.md at the root) to the
-      tests under test/ that name them with `# spec: N.M@VERSION`.
+      Link the spec's clauses (SPEC.md or spec/*.md at the root) to their
+      proofs: `spec N.M` blocks in the root's modules, and old files under
+      test/ tagged `# spec: N.M@VERSION`.
 
-          (none)     one line per clause: status, test files, first words;
+          (none)     one line per clause: status, proofs, first words;
                      then the counts. Status: ok, todo, to review,
                      uncovered, unversioned
           N, N.M     that chapter or clause: text, version, changelog
-                     entries, the tests naming it
-          ack N[.M]  after reviewing the tests: tags naming the clause
-                     take its current version
+                     entries, the proofs naming it
+          ack N[.M]  after reviewing the proofs: spec.lock takes the
+                     clause's version (tags naming it too)
+          ack --from-tags
+                     lock each clause whose tags all match it
           todo       every todo test: clause, file, reason
 
-      `#{name} check spec` fails on a stale tag, a tag naming no clause,
-      a version no SPEC_CHANGELOG.md entry records and an untested clause.
+      `#{name} check spec` fails on an unreviewed clause, a tag, block or
+      lock line naming no clause, a version no SPEC_CHANGELOG.md entry
+      records, a clause with no proof and a stale block label
+      (`#{name} check --fix` writes labels).
       USAGE
   end
 end

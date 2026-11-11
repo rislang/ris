@@ -120,6 +120,7 @@ module Iyi
       parser = Parser.new(source)
       parser.filename = filename
       parser.iyi_source_only = true
+      parser.ris_keep_spec = true
       nodes = parser.parse
 
       formatter = new(source, flags: flags)
@@ -3745,6 +3746,20 @@ module Iyi
       write_keyword :module, " "
       format_iyi_module_path node.path
 
+      false
+    end
+
+    # ris: a spec block (doc/drafts/spec-blocks, 5.1) is written back as
+    # the source has it: its clause line and label are not code to format.
+    def visit(node : SpecBlock)
+      source = @lexer.string
+      write source.byte_slice(node.source_start, node.source_end - node.source_start)
+      @lexer.current_pos = node.source_end
+      if to = node.end_location
+        @lexer.line_number = to.line_number
+        @lexer.column_number = to.column_number + 1
+      end
+      next_token
       false
     end
 

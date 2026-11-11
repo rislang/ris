@@ -188,6 +188,13 @@ module Iyi
     # and can later be used to generate API docs.
     property? wants_doc = false
 
+    # ris: `build --spec` keeps the entry file's spec section and lowers it
+    # to a test program (doc/drafts/spec-blocks, 5.8). The clauses of
+    # ROOT's spec (nil: none there) and the spec file to name.
+    property? ris_spec = false
+    property ris_spec_clauses : Set(String)? = nil
+    property ris_spec_file = "SPEC.md"
+
     # Warning settings and all detected warnings.
     property warnings = WarningCollection.new
 
@@ -500,7 +507,7 @@ module Iyi
 
     # Re-applied by the adopt path above. `new_program` is what would otherwise
     # have set them, and adoption skips it.
-    APPLIED_ON_ADOPT = %w(use_iyimod iyi_prefers_source no_codegen emit_iyimod warnings color stdout show_error_trace iyi_mod_table iyi_file_overrides iyi_project_root iyi_header_root)
+    APPLIED_ON_ADOPT = %w(use_iyimod iyi_prefers_source no_codegen emit_iyimod warnings color stdout show_error_trace iyi_mod_table iyi_file_overrides iyi_project_root iyi_header_root ris_spec ris_spec_clauses ris_spec_file)
     # Neither, and two of these are judgements rather than facts. `mcpu`,
     # `mattr` and `mcmodel` reach the target machine and the target machine
     # reaches codegen, not analysis — a prelude analysed for one `-mcpu` is the
@@ -2894,11 +2901,11 @@ module Iyi
 
     private def parse(program, sources : Array)
       @progress_tracker.stage("Parse") do
-        nodes = sources.map do |source|
+        nodes = sources.map_with_index do |source, index|
           # We add the source to the list of required file,
           # so it can't be required again
           program.requires.add source.filename
-          parse(program, source).as(ASTNode)
+          parse(program, source, entry: index == 0).as(ASTNode)
         end
         nodes = Expressions.from(nodes)
 
@@ -2911,10 +2918,16 @@ module Iyi
       end
     end
 
-    private def parse(program, source : Source)
+    private def parse(program, source : Source, entry = false)
       parser = program.new_parser(source.code)
       parser.filename = source.filename
       parser.wants_doc = program.wants_doc?
+      if entry && ris_spec?
+        parser.ris_keep_spec = true
+        parser.ris_spec_main = true
+        parser.ris_spec_clauses = ris_spec_clauses
+        parser.ris_spec_file = ris_spec_file
+      end
       # The entry is a module of the program's own package as much as a
       # file it imports is (`SemanticVisitor#import_file`).
       if module_path = Compiler.module_header_of(source.code)

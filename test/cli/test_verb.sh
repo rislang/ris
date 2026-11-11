@@ -223,8 +223,7 @@ step "an assertion's failure is its evidence, and named cases keep going"
 # `assert(a == b)` failed with "assertion failed" alone. The prelude's
 # assertions name the values and the line, and that is what the verb
 # shows under the file it names (`test/cli/assertions_exercise.sh` drives
-# each assertion; this is the verb's side of the contract). Named cases
-# run past a failure, and the program's exit is still the one verdict read.
+# each assertion; this is the verb's side of the contract).
 printf 'module eq_test\n\nsum = 2 + 3\nassert_eq 4, sum, "the sum"\n' > eq_test.iyi
 "$IYI" test eq_test.iyi > eq.txt 2>&1
 [ $? -eq 1 ] || { echo "a failed assert_eq did not fail the run:"; cat eq.txt; exit 1; }
@@ -232,15 +231,12 @@ grep -q 'eq_test.iyi: fail' eq.txt && grep -q 'assert_eq failed: the sum' eq.txt
   grep -q 'expected: 4' eq.txt && grep -q 'actual: 5' eq.txt && grep -qE 'at .*eq_test.iyi:4$' eq.txt ||
   { echo "the failure does not name its values and its line:"; cat eq.txt; exit 1; }
 rm eq_test.iyi
-printf 'module cases_test\n\ntest "first" { assert_eq 1, 1 }\ntest "second" { assert_includes [1, 2], 3 }\ntest "third" { assert_nil nil }\n' > cases_test.iyi
-"$IYI" test --json cases_test.iyi > cases.json 2>&1
-[ $? -eq 1 ] || { echo "a failed named case did not fail the run:"; cat cases.json; exit 1; }
-grep -q '"status":"fail"' cases.json && grep -q 'FAIL - second' cases.json && grep -q 'ok - third' cases.json &&
-  grep -q '3 named tests: 2 passed, 1 failed' cases.json ||
-  { echo "the named cases did not all run, or did not say so:"; cat cases.json; exit 1; }
-printf 'module cases_test\n\ntest "first" { assert_eq 1, 1 }\ntest "second" { assert_ne 1, 2 }\n' > cases_test.iyi
-"$IYI" test cases_test.iyi > cases.txt 2>&1 ||
-  { echo "named cases that all pass failed the run:"; cat cases.txt; exit 1; }
+# iyi's named `test "x" do` cases are gone (spec blocks, D9): refused.
+printf 'module cases_test\n\ntest "first" { assert_eq 1, 1 }\n' > cases_test.iyi
+"$IYI" test cases_test.iyi > cases.txt 2>&1 &&
+  { echo "a named test case was accepted:"; cat cases.txt; exit 1; }
+grep -q 'write `spec N.M`' cases.txt ||
+  { echo "the refusal does not name spec N.M:"; cat cases.txt; exit 1; }
 rm cases_test.iyi
 
 step "a test leaves nothing in the temporary directory"

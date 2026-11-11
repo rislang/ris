@@ -73,6 +73,46 @@ jobs:
         run: python3 test/cli/spec_verb.py
         env:
           IYI: ./bin/ris
+      - name: ris test walks only the project's files
+        if: matrix.shard == 'heap'
+        run: bash test/cli/test_walk.sh
+        env:
+          IYI: ./bin/ris
+      - name: spec blocks parse, are refused and stripped
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_grammar.sh
+        env:
+          IYI: ./bin/ris
+      - name: spec blocks run as a module test program
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_run.sh
+        env:
+          IYI: ./bin/ris
+      - name: spec blocks get tmp and run the program
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_program.sh
+        env:
+          IYI: ./bin/ris
+      - name: spec blocks have test-only imports
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_imports.sh
+        env:
+          IYI: ./bin/ris
+      - name: spec blocks are reviewed in spec.lock
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_lock.sh
+        env:
+          IYI: ./bin/ris
+      - name: ris init proves its clause with a spec block
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_init.sh
+        env:
+          IYI: ./bin/ris
+      - name: iyi's test "x" do is refused
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_old_test.sh
+        env:
+          IYI: ./bin/ris
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:

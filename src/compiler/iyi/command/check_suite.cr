@@ -100,7 +100,11 @@ class Iyi::Command
     when "unused"
       "nothing to check" if ok_targets(paths).empty?
     when "test"
-      "no *_test.ri" unless ok_sources(paths).any? { |file| file.ends_with?("_test.ri") || file.ends_with?("_test.iyi") }
+      # ris: a module with spec blocks is a test too (5.9): `ris init`
+      # writes no *_test.ri, only a block at the end of NAME.ri.
+      "no *_test.ri or spec block" unless ok_sources(paths).any? do |file|
+        file.ends_with?("_test.ri") || file.ends_with?("_test.iyi") || spec_module?(file)
+      end
     end
   end
 
@@ -122,7 +126,7 @@ class Iyi::Command
       options.replace(fix ? [] of String : ["--check"])
       mod_tidy
     when "spec"
-      spec_check
+      spec_check(fix)
     when "types"
       if fix
         # A named file or directory is fixed as given: fix.cr walks one.

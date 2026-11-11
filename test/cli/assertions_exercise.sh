@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # The prelude's assertions: `assert_eq`, `assert_ne`, `assert_nil`,
 # `assert_in_delta`, `assert_includes`, `assert_error`, `assert_ok`,
-# `assert_panics` and named `test` cases (src/iyi/testing.iyi).
+# and `assert_panics` (src/iyi/testing.iyi).
 #
 #     bash test/cli/assertions_exercise.sh
 #
 # `test/cli/assertions_exercise.iyi` is the program, run plain and optimised:
 # every assertion holding, and failing with the message it documents. Then
 # what a program cannot see of itself is driven here - the site a failure
-# names, which `raise` prints beside the message, and the exit status
-# named cases leave, which is the one thing `iyi test` reads. Then each
+# names, which `raise` prints beside the message, and the exit status,
+# which is the one thing `iyi test` reads. Then each
 # check is proved capable of failing by patching a *copy of the prelude*
 # and building against it through `IYI_PATH`. A check that cannot fail is
 # not a check.
@@ -49,6 +49,26 @@ case "$(uname -s)" in
 esac
 
 trap 'rm -rf "$WORK"' EXIT
+
+# A program literal stays a StringLiteral to macros, also when forwarded.
+# Runtime tape lowering used to expose String.view calls to reflection.
+cat > "$WORK/macro_literal.iyi" <<'IYI'
+macro literal(value)
+  {% unless value.is_a?(StringLiteral) && value == "page.eiy" %}
+    {% raise "macro lost its string literal" %}
+  {% end %}
+  {{ value.upcase }}
+end
+macro forward(value)
+  literal({{ value }})
+end
+assert_eq "PAGE.EIY", forward("page.eiy")
+IYI
+"$IYI" run "$WORK/macro_literal.iyi" > "$WORK/literal.out" 2>&1 || {
+  tail -20 "$WORK/literal.out"
+  exit 1
+}
+echo "  macro string literal: held"
 
 status=0
 # The library a build reads: the repository's, or a patched copy ahead of it.
@@ -159,45 +179,12 @@ error_site_check() {
   has_site error_site 18 || return 1
 }
 
-cases_check() {
-  run_program cases 'module main\n\ntest "first" { assert_eq 1, 1 }\ntest "second" do\n  assert_eq [1, 2], [2, 1], "order"\nend\ntest "third" { assert_includes "abc", "b" }\n'
-  local code=$?
-  [ "$code" -eq 1 ] || { echo "  cases: a program with a failed named case exited $code, not 1"; return 1; }
-  has_lines cases "ok - first" "iyi: panic: assert_eq failed: order" "  expected: [1, 2]" "    actual: [2, 1]" \
-    "FAIL - second" "ok - third" "3 named tests: 2 passed, 1 failed" || return 1
-  has_site cases 5 || return 1
-}
-
-passing_cases_check() {
-  run_program passing_cases 'module main\n\ntest "one" { assert_eq 1, 1 }\ntest "two" { assert_nil nil }\n'
-  local code=$?
-  [ "$code" -eq 0 ] || { echo "  passing cases: every named case passed and the program exited $code"; return 1; }
-  has_lines passing_cases "ok - one" "ok - two" "2 named tests: 2 passed, 0 failed" || return 1
-}
-
-no_cases_check() {
-  run_program no_cases 'module main\n\nputs "plain"\n'
-  local code=$?
-  [ "$code" -eq 0 ] || { echo "  no cases: a program with no named case exited $code"; return 1; }
-  if grep -q "named tests" "$WORK/no_cases.out"; then
-    echo "  no cases: a program with no named case printed a summary of them"
-    return 1
-  fi
-}
-
 echo
 echo "== what a program cannot see of itself: the site, and the exit"
 site_check && echo "  a failed assert_eq: exits 1 and names expected, actual and the line"
 [ $? -eq 0 ] || status=1
 error_site_check && echo "  a failed assert_ok: exits 1 and names the error and the line"
 [ $? -eq 0 ] || status=1
-cases_check && echo "  named cases: a failure is reported, the cases after it run, and the program exits 1"
-[ $? -eq 0 ] || status=1
-passing_cases_check && echo "  named cases that all pass: exit 0"
-[ $? -eq 0 ] || status=1
-no_cases_check && echo "  a program with no named case: exit 0 and no summary"
-[ $? -eq 0 ] || status=1
-
 echo
 echo "== proving the checks can fail, one broken assertion at a time"
 
@@ -279,14 +266,6 @@ prove_fails "assert_panics that ignores the words" panics_wordless "assert_panic
 
 prove_driver_fails "a failure that names the library's line" no_site site_check \
   's/^  raise(headline + "\\n" + evidence, file, line)$/  raise(headline + "\\n" + evidence)/'
-prove_driver_fails "named cases that count no failure" uncounted cases_check \
-  's/^    @@failed = @@failed + 1 unless passed$/    @@failed = @@failed + 0/'
-prove_driver_fails "a named case that ends the program" no_task cases_check \
-  '/^  def test(name/,/^  end$/s/^        block.call$/        block.call; __iyi_exit(1)/'
-prove_driver_fails "named cases that exit 1 with none failed" always_fails passing_cases_check \
-  's/^    @@failed == 0 ? 0 : 1$/    1/'
-prove_driver_fails "a summary when no case ran" always_summary no_cases_check \
-  's/^    return 0 if @@ran == 0$/    puts "0 named tests"; return 0 if @@ran == 0/'
 
 echo
 if [ "$status" -eq 0 ]; then

@@ -7,8 +7,8 @@
 # registry — a program that prints what failed and exits 1 is a failing
 # test, and one that exits 0 passed. The prelude's `assert` is that in one
 # word, and `assert_eq` and its family say more of it: a failed check
-# panics with the values and the site. `test "name" { }` runs named cases
-# to the same exit code, so this verb still reads nothing but that.
+# panics with the values and the site. (ris: a module's checks are spec
+# blocks, `spec N.M`; iyi's `test "name" { }` is refused.)
 #
 #     iyi test              # every *_test.iyi under the current directory
 #     iyi test dir file.iyi # these, recursing into directories
@@ -36,6 +36,12 @@ class Iyi::Command
   # each hung a test that ends at once past a minute in one run on
   # Windows, and did not in the next.
   private MAX_TEST_WAIT = (Int64::MAX // 10_000_000 - 1).to_f
+
+  # One run: a test program, or (ris) a module built with `build --spec`,
+  # whose blocks are the JSON lines it wrote (doc/drafts/spec-blocks, 5.8);
+  # `blocks` is nil for a test program.
+  private alias TestResult = {file: String, status: String, seconds: Float64,
+                              output: String, blocks: Array(JSON::Any)?}
 
   private def test
     as_json = false
@@ -98,15 +104,18 @@ class Iyi::Command
       # path at all means the working directory on purpose; "" is not that.
       abort! "test takes paths, and '' is not one (no path at all runs the working directory)", :USAGE_ERROR if path.empty?
       if File.directory?(path)
-        # The pattern is built in posix form because a backslash is an escape
-        # character in a glob, not a separator: `C:\dir\**\*_test.iyi` matched
-        # nothing, so `iyi test` in a directory of tests found no tests.
-        # The extension in any case, so that `x_test.IYI` is refused below
-        # rather than walked past: "no *_test.iyi found" in a directory of
-        # one test (`Lexer.iyi_miscased?`).
-        Dir.glob(Iyi.glob_root(path).join("**", "*_test.[iI][yY][iI]")) { |file| files << file }
-        # ris: and its own `.ri` tests.
-        Dir.glob(Iyi.glob_root(path).join("**", "*_test.[rR][iI]")) { |file| files << file }
+        # ris: one walk (project_walk.cr) that skips lib/, mods/ and dot
+        # directories; a glob ran the tests under lib/ (bug B1). The suffix
+        # matches in any case, so `x_test.IYI` is refused below rather than
+        # walked past (`Lexer.iyi_miscased?`).
+        project_walk(path, files) { |name| test_program_name?(name) }
+        # ris: and every module whose file holds spec blocks (5.9).
+        candidates = [] of String
+        project_walk(path, candidates) do |name|
+          lower = name.downcase
+          !test_program_name?(name) && (lower.ends_with?(".ri") || lower.ends_with?(".iyi"))
+        end
+        candidates.each { |file| files << file if spec_module?(file) }
       elsif File.file?(path)
         # As stored: `X_TEST.IYI` typed on Windows for `x_test.iyi` is it.
         files << Lexer.stored_name(path)
@@ -123,7 +132,7 @@ class Iyi::Command
     end
 
     if files.empty?
-      abort! "no *_test.ri or *_test.iyi found. A test is a plain iyi program that exits non-zero to fail", :USAGE_ERROR
+      abort! "no spec blocks, *_test.ri or *_test.iyi found. A proof is a `spec N.M` block at the end of a module", :USAGE_ERROR
     end
 
     skipped = 0
@@ -198,6 +207,11 @@ class Iyi::Command
                   json.field "status", result[:status]
                   json.field "seconds", result[:seconds]
                   json.field "output", result[:output] unless result[:output].empty?
+                  if blocks = result[:blocks]
+                    json.field "blocks" do
+                      json.array { blocks.each(&.to_json(json)) }
+                    end
+                  end
                 end
               end
             end
@@ -229,6 +243,11 @@ class Iyi::Command
       STDOUT.puts
     else
       results.each do |result|
+        if blocks = result[:blocks]
+          # ris: one line per block, its failed lines under it (5.8).
+          blocks.each { |block| print_spec_block(block) }
+          next if blocks.size > 0 && result[:status].in?("pass", "todo", "fail")
+        end
         next if result[:status] == "pass"
         STDOUT << result[:file] << ": " << result[:status] << '\n'
         result[:output].each_line { |line| STDOUT << "  " << line << '\n' }
@@ -245,9 +264,27 @@ class Iyi::Command
         puts "#{discount_off.join(", ")} is not there, so every test ran: " \
              "a file that is gone cannot be proven untouched by anything"
       end
-      tail = todos.zero? ? "" : ", #{todos} todo"
-      tail += skipped.zero? ? "" : ", #{skipped} skipped"
-      puts "#{results.size - failed - todos} passed, #{failed} failed#{tail}" + (failed.zero? ? "" : " — a failing test prints above")
+      modules = results.select(&.[:blocks])
+      programs = results.reject(&.[:blocks])
+      parts = [] of String
+      unless modules.empty?
+        blocks = modules.flat_map { |result| result[:blocks].not_nil! }
+        count = ->(status : String) { blocks.count { |block| block["status"]?.try(&.as_s?) == status } }
+        unbuilt = modules.count { |result| !result[:status].in?("pass", "todo", "fail") }
+        part = "#{modules.size} module#{modules.size == 1 ? "" : "s"}, #{blocks.size} blocks: " \
+               "#{count.call("ok")} ok, #{count.call("broken")} broken, #{count.call("todo")} todo"
+        part += ", #{unbuilt} not run" unless unbuilt.zero?
+        parts << part
+      end
+      unless programs.empty?
+        p_todos = programs.count { |result| result[:status] == "todo" }
+        p_failed = programs.count { |result| !result[:status].in?("pass", "todo") }
+        tail = p_todos.zero? ? "" : ", #{p_todos} todo"
+        parts << "#{programs.size - p_failed - p_todos} passed, #{p_failed} failed#{tail}"
+      end
+      line = parts.join("; ")
+      line += ", #{skipped} skipped" unless skipped.zero?
+      puts line + (failed.zero? ? "" : " — a failing test prints above")
     end
 
     exit 1 unless failed.zero?
@@ -290,7 +327,9 @@ class Iyi::Command
     entry_dir = closure_root_of(entry)
     table = Mod::Installer.table_for(entry_dir)
     closure = Set(String).new
-    entry_imports = test_imports_of(entry)
+    # ris: the entry's spec section too: its test-only imports (5.6) are
+    # in the test program, so a change to one is a change under it.
+    entry_imports = test_imports_of(entry, keep_spec: true)
     return nil unless entry_imports
     closure << entry
     queue = entry_imports.map do |written|
@@ -307,14 +346,89 @@ class Iyi::Command
     closure
   end
 
-  private def test_imports_of(path : String) : Array(String)?
+  private def test_imports_of(path : String, keep_spec = false) : Array(String)?
     parser = Parser.new(File.read(path))
     parser.filename = path
+    parser.ris_keep_spec = keep_spec
     nodes = parser.parse
     imports = [] of String
     mod_context_collect(nodes, imports)
     imports.uniq!
   rescue CodeError | IO::Error
+    nil
+  end
+
+  # ris: a test-only import (5.6) of a module that imports *file* back:
+  # the proof belongs in that module. The refusal, or nil.
+  private def spec_import_cycle(file : String) : String?
+    entry = File.expand_path(file)
+    entry_dir = closure_root_of(entry)
+    table = Mod::Installer.table_for(entry_dir)
+    plain = test_imports_of(entry) || return
+    section = (test_imports_of(entry, keep_spec: true) || return) - plain
+    key = Iyi.file_key(entry)
+    section.each do |written|
+      named, _ = mod_context_names(written, entry_dir, table)
+      start = File.expand_path(named)
+      seen = Set(String).new
+      queue = [start]
+      while path = queue.pop?
+        next unless seen.add?(path)
+        if Iyi.file_key(path) == key
+          own = File.basename(entry).rchop(".ri").rchop(".iyi")
+          other = written.rpartition('/')[2]
+          return "the proof of #{own} imports #{other}, which imports " \
+                 "#{own}; prove it in #{File.basename(start)}"
+        end
+        (test_imports_of(path) || [] of String).each do |next_written|
+          next_named, _ = mod_context_names(next_written, entry_dir, table)
+          queue << File.expand_path(next_named)
+        end
+      end
+    end
+    nil
+  end
+
+  # ris: an undefined name in a spec build that the `p/spec` module of a
+  # package in *file*'s import closure defines (5.16): the import to add.
+  private def spec_vocabulary_hint(file : String, output : String) : String?
+    names = [] of String
+    output.each_line do |line|
+      next unless at = line.index("undefined ")
+      open = line.index('\'', at) || next
+      close = line.index('\'', open + 1) || next
+      names << line[(open + 1)...close]
+    end
+    return if names.empty?
+    entry = File.expand_path(file)
+    entry_dir = closure_root_of(entry)
+    table = Mod::Installer.table_for(entry_dir)
+    packages = [] of String
+    seen = Set(String).new
+    queue = [entry]
+    while path = queue.shift?
+      next unless seen.add?(path)
+      (test_imports_of(path, keep_spec: path == entry) || [] of String).each do |written|
+        segments = written.split('/')
+        packages << segments[0] if segments.size > 1 && segments[0] != "std"
+        named, _ = mod_context_names(written, entry_dir, table)
+        queue << File.expand_path(named)
+      end
+    end
+    packages.uniq.each do |package|
+      vocabulary = "#{package}/spec"
+      named, _ = mod_context_names(vocabulary, entry_dir, table)
+      source = File.file?(named) ? File.read(named) : next
+      name = names.find do |undefined|
+        source.each_line.any? do |line|
+          words = line.tr("(:", "  ").split
+          words.shift if words.first? == "pub"
+          words[0]? == "def" && words[1]?.try(&.lchop("self.")) == undefined
+        end
+      end
+      next unless name
+      return "#{vocabulary} defines `#{name}`; add `import #{vocabulary}::*` after the first `spec` block"
+    end
     nil
   end
 
@@ -342,7 +456,7 @@ class Iyi::Command
   # on which test ended first.
   private def run_tests(files : Array(String), deadline : Float64, jobs : Int32)
     return files.map { |file| run_one_test(file, deadline) } if jobs <= 1 || files.size <= 1
-    results = Array({file: String, status: String, seconds: Float64, output: String}?).new(files.size, nil)
+    results = Array(TestResult?).new(files.size, nil)
     next_index = 0
     finished = ::Channel(Nil).new
     workers = Math.min(jobs, files.size)
@@ -360,26 +474,50 @@ class Iyi::Command
     results.map(&.not_nil!)
   end
 
-  private def run_one_test(file : String, deadline : Float64) : {file: String, status: String, seconds: Float64, output: String}
+  private def run_one_test(file : String, deadline : Float64) : TestResult
     started = Time.instant
     output = IO::Memory.new
+    # ris: a module with spec blocks, not a test program: built with
+    # `build --spec`, its blocks read from the JSON lines it writes (5.8).
+    spec = !test_program_name?(File.basename(file))
+    stdout = spec ? IO::Memory.new : output
+    blocks = spec ? [] of JSON::Any : nil
 
     # With the executable's extension, which `build -o` appends to a name
     # that has none: without it the delete below asked for a name nothing
     # had, and on Windows every test left its program and its `.pdb` in
     # %TEMP%.
     binary = File.tempname("iyi-test", {{ flag?(:win32) ? ".exe" : nil }})
+    # ris: a program file's blocks run its plain binary (5.7), built
+    # first as `ris build` builds it.
+    plain = spec && spec_program_file?(file) ? File.tempname("ris-program", {{ flag?(:win32) ? ".exe" : nil }}) : nil
     begin
+      if spec && (cycle = spec_import_cycle(file))
+        output << cycle << '\n'
+        return {file: file, status: "does not build", seconds: elapsed(started), output: output.to_s, blocks: blocks}
+      end
+      if plain
+        built = Process.run(Process.executable_path.not_nil!, ["build", file, "-o", plain],
+          output: output, error: output)
+        unless built.success?
+          return {file: file, status: "does not build", seconds: elapsed(started), output: output.to_s, blocks: blocks}
+        end
+      end
       build_status = Process.run(
         Process.executable_path.not_nil!,
-        ["build", file, "-o", binary],
+        spec ? ["build", "--spec", file, "-o", binary] : ["build", file, "-o", binary],
         output: output, error: output,
       )
       unless build_status.success?
-        return {file: file, status: "does not build", seconds: elapsed(started), output: output.to_s}
+        if spec && (hint = spec_vocabulary_hint(file, output.to_s))
+          output << hint << '\n'
+        end
+        return {file: file, status: "does not build", seconds: elapsed(started), output: output.to_s, blocks: blocks}
       end
 
-      process = Process.new(binary, output: output, error: output)
+      env = spec ? {"RIS_SPEC_JSON" => "1"} : nil
+      env["RIS_SPEC_PROGRAM"] = plain if env && plain
+      process = Process.new(binary, env: env, output: stdout, error: output)
       tree = TestTree.new(process)
       running = tree
       done = ::Channel(Process::Status).new
@@ -391,12 +529,13 @@ class Iyi::Command
         # A test the kernel killed printed "fail" and nothing under it -
         # the one failure with no evidence of its own, and the one an
         # infinite recursion produces. The death is the evidence.
+        spec_blocks(stdout, output, blocks) if blocks
         evidence = output.to_s
         unless status.success? || todo || status.exit_reason.normal?
           evidence += "\n" unless evidence.empty? || evidence.ends_with?('\n')
           evidence += Command.death_sentence(status) + "\n"
         end
-        {file: file, status: verdict, seconds: elapsed(started), output: status.success? ? "" : evidence}
+        {file: file, status: verdict, seconds: elapsed(started), output: status.success? ? "" : evidence, blocks: blocks}
       when timeout(deadline.seconds)
         # The test and whatever it started: its output is copied through
         # a pipe, and `wait` waits for that pipe's end, which a child the
@@ -406,11 +545,13 @@ class Iyi::Command
         # child never ends hung `iyi test` for good.
         tree.terminate
         done.receive
-        {file: file, status: "hung: killed at #{deadline}s", seconds: elapsed(started), output: output.to_s}
+        spec_blocks(stdout, output, blocks) if blocks
+        {file: file, status: "hung: killed at #{deadline}s", seconds: elapsed(started), output: output.to_s, blocks: blocks}
       end
     ensure
       running.try &.close
       File.delete?(binary)
+      plain.try { |path| File.delete?(path) }
       # And what the link wrote beside it: MSVC's `.pdb`, and on darwin the
       # `.dwarf` dsymutil makes, which the new check found there too.
       {% if flag?(:win32) %}
@@ -418,6 +559,59 @@ class Iyi::Command
       {% elsif flag?(:darwin) %}
         File.delete?("#{binary}.dwarf")
       {% end %}
+    end
+  end
+
+  # ris: whether *file* is a program file (5.5): top-level code before its
+  # spec section. One that does not parse is built as a module, whose
+  # build then reports it.
+  private def spec_program_file?(file : String) : Bool
+    parser = Parser.new(File.read(file))
+    parser.filename = file
+    parser.ris_raw_top = true
+    nodes = parser.parse
+    Parser.ris_program_file?(nodes.is_a?(Expressions) ? nodes.expressions : [nodes] of ASTNode)
+  rescue
+    false
+  end
+
+  # ris: whether *file* holds a spec section: a line that starts `spec N`
+  # (5.9; `build --spec` then parses it and refuses a wrong shape).
+  private def spec_module?(file : String) : Bool
+    File.each_line(file) do |line|
+      return true if line.starts_with?("spec ") && line[5]?.try(&.ascii_number?)
+    end
+    false
+  rescue File::Error
+    false
+  end
+
+  # The JSON lines a spec build wrote, one per block; any other line the
+  # program printed goes to its output.
+  private def spec_blocks(stdout : IO::Memory, output : IO::Memory, blocks : Array(JSON::Any)) : Nil
+    stdout.to_s.each_line do |line|
+      if line.starts_with?("{\"clause\":")
+        begin
+          blocks << JSON.parse(line)
+          next
+        rescue JSON::ParseException
+        end
+      end
+      output << line << '\n'
+    end
+  end
+
+  # `ok|BROKEN|todo  spec N.M  file:line`, then each failure (5.2).
+  private def print_spec_block(block : JSON::Any) : Nil
+    status = block["status"]?.try(&.as_s?) || "?"
+    word = status == "broken" ? "BROKEN" : status
+    STDOUT << word << "  spec " << block["clause"]? << "  " << block["file"]? << ':' << block["line"]?
+    if status == "todo" && (reason = block["reason"]?.try(&.as_s?))
+      STDOUT << "  " << reason
+    end
+    STDOUT << '\n'
+    block["failures"]?.try(&.as_a?).try &.each do |failure|
+      failure.as_s.each_line { |line| STDOUT << "  " << line << '\n' }
     end
   end
 

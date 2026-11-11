@@ -141,27 +141,6 @@ end
     end
     __iyi_assert_fail("assert_panics", message, "  expected: a panic" + (containing.is_a?(String) ? " saying " + containing.inspect : "") + "\n    actual: the block ended without one", file, line)
   end
-
-  # A named case, run as a task of its own so that a failing assertion ends
-  # the case and not the program: the cases after it still run, each says
-  # `ok - name` or `FAIL - name`, and the program exits 1 when it ends if
-  # any failed (`fun main` asks `IyiTestCases.verdict`), which is the one
-  # thing `iyi test` reads. The failure's evidence is the panic's own lines,
-  # printed above the case's verdict.
-  def test(name : String, &block : -> _) : Nil
-    STDOUT.flush
-    said = nil
-    group do |g|
-      task = g.spawn do
-        block.call
-        0
-      end
-      outcome = task.value
-      said = outcome.message if outcome.is_a?(Panicked)
-      0
-    end
-    IyiTestCases.record(name, said.nil?)
-  end
 {% else %}
   # Where no task can end alone, a panic ends the program, and there is no
   # boundary to read one at: a test of a panic cannot be written, so a build
@@ -172,35 +151,153 @@ end
   macro assert_panics(*args, **kwargs, &block)
     \{% raise "assert_panics needs a task to catch the panic in, and this target has no concurrency runtime (iyi SPEC III.4): a panic here ends the program" %}
   end
-
-  # The case runs in the program itself: a failing assertion ends the
-  # program, exit 1, which is still the verdict `iyi test` reads - the
-  # cases after it do not run.
-  def test(name : String, &block : -> _) : Nil
-    STDOUT.flush
-    block.call
-    IyiTestCases.record(name, true)
-  end
 {% end %}
 
-# What the named cases came to, read by `fun main` once the program's own
-# code has ended: a program that ran no `test` answers as it always did.
-class IyiTestCases
-  @@ran = 0
-  @@failed = 0
+# ris: the runtime of a module's spec blocks (doc/drafts/spec-blocks, 5.2,
+# 5.3, 5.8). `ris build --spec` lowers each block to a private def and each
+# asserting line to a call here; the generated main runs every block with
+# `block` and ends with `finish`. A failed line is recorded and the block
+# goes on; a panic ends only its block where a task can end alone.
+class RisSpecRun
+  # Made on first use: every program carries this class, and an array
+  # made at start costs a plain `ris run` a mapping (check.sh counts them).
+  @@failures : Array(String)? = nil
 
-  def self.record(name : String, passed : Bool) : Nil
-    @@ran = @@ran + 1
-    @@failed = @@failed + 1 unless passed
-    STDOUT.puts((passed ? "ok - " : "FAIL - ") + name)
+  protected def self.failures : Array(String)
+    @@failures ||= [] of String
+  end
+  @@reason : String? = nil
+  @@ok = 0
+  @@broken = 0
+  @@todo = 0
+
+  def self.line(value : Bool, text : String, file : String, line : Int32, hint : Bool) : Bool
+    unless value
+      said = "  " + file + ":" + line.to_s + "  " + text
+      if hint
+        said += "\n    line " + line.to_s + " is a Bool, so it is checked; write `_ = ...` to run it without checking"
+      end
+      RisSpecRun.failures << said.copy_to(Program.tape)
+    end
+    value
+  end
+
+  def self.line(value, text : String, file : String, line : Int32, hint : Bool)
+    value
+  end
+
+  def self.compare(value : Bool, left, right, text : String, file : String, line : Int32) : Bool
+    unless value
+      RisSpecRun.failures << ("  " + file + ":" + line.to_s + "  " + text + "\n    left:  " + left.inspect + "\n    right: " + right.inspect).copy_to(Program.tape)
+    end
+    value
+  end
+
+  def self.compare(value, left, right, text : String, file : String, line : Int32)
+    value
+  end
+
+  # `text =~ %r{...}`, either side the Regex (std/regex, not named here:
+  # the prelude does not load it). Fails when the match is nil.
+  def self.match(left, right, text : String, file : String, line : Int32) : Bool
+    return true unless (left =~ right).nil?
+    # The pattern is the side that is not the text: a String, or a
+    # RisRun's stdout (5.7) on the left.
+    pattern, subject = right.is_a?(String) ? {left, right} : {right, left}
+    RisSpecRun.failures << ("  " + file + ":" + line.to_s + "  " + text + "\n    pattern: " + pattern.inspect + "\n    text:    " + subject.inspect).copy_to(Program.tape)
+    false
+  end
+
+  def self.todo(reason : String) : Nil
+    @@reason = reason.copy_to(Program.tape)
+  end
+
+  {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
+    def self.block(clause : String, ordinal : Int32, file : String, line : Int32, &body : -> _) : Nil
+      STDOUT.flush
+      RisSpecRun.failures.clear
+      @@reason = nil
+      said = nil
+      group do |g|
+        task = g.spawn do
+          body.call
+          0
+        end
+        outcome = task.value
+        said = outcome.message if outcome.is_a?(Panicked)
+        0
+      end
+      report(clause, ordinal, file, line, said)
+    end
+  {% else %}
+    # No task here: a panic ends the program (5.8, wasm32).
+    def self.block(clause : String, ordinal : Int32, file : String, line : Int32, &body : -> _) : Nil
+      STDOUT.flush
+      RisSpecRun.failures.clear
+      @@reason = nil
+      body.call
+      report(clause, ordinal, file, line, nil)
+    end
+  {% end %}
+
+  private def self.report(clause : String, ordinal : Int32, file : String, line : Int32, panic : String?) : Nil
+    failures = RisSpecRun.failures
+    if panic
+      failures << "  panic: " + panic
+    end
+    reason = @@reason
+    status = !failures.empty? ? "broken" : reason ? "todo" : "ok"
+    case status
+    when "broken" then @@broken = @@broken + 1
+    when "todo"   then @@todo = @@todo + 1
+    else               @@ok = @@ok + 1
+    end
+    if Program.env("RIS_SPEC_JSON") == "1"
+      said = "{\"clause\":" + json(clause) + ",\"ordinal\":" + ordinal.to_s + ",\"file\":" + json(file) +
+             ",\"line\":" + line.to_s + ",\"status\":" + json(status) + ",\"failures\":["
+      failures.each_with_index do |failure, index|
+        said += "," if index > 0
+        said += json(failure.lstrip)
+      end
+      said += "],\"reason\":" + (reason ? json(reason) : "null") + "}"
+      STDOUT.puts said
+    else
+      word = status == "broken" ? "BROKEN" : status
+      head = word + "  spec " + clause + "  " + file + ":" + line.to_s
+      head += "  " + reason if reason && status == "todo"
+      STDOUT.puts head
+      failures.each { |failure| STDOUT.puts failure }
+    end
     STDOUT.flush
   end
 
-  # The program's exit status for its named cases: 0 when none failed, so
-  # a program without one is untouched, and 1 with a count when any did.
-  def self.verdict : Int32
-    return 0 if @@ran == 0
-    STDOUT.puts(@@ran.to_s + " named tests: " + (@@ran - @@failed).to_s + " passed, " + @@failed.to_s + " failed")
-    @@failed == 0 ? 0 : 1
+  private def self.json(text : String) : String
+    quoted = "\""
+    text.each_char do |char|
+      case char
+      when '"'  then quoted += "\\\""
+      when '\\' then quoted += "\\\\"
+      when '\n' then quoted += "\\n"
+      when '\t' then quoted += "\\t"
+      when '\r' then quoted += "\\r"
+      else
+        if char.ord < 0x20
+          hex = char.ord.to_s(16)
+          quoted += "\\u" + "0" * (4 - hex.size) + hex
+        else
+          quoted += char.to_s
+        end
+      end
+    end
+    quoted + "\""
+  end
+
+  # The program's verdict: 1 if a block broke, else 77 if one was todo.
+  def self.finish : NoReturn
+    unless Program.env("RIS_SPEC_JSON") == "1"
+      STDOUT.puts((@@ok + @@broken + @@todo).to_s + " blocks: " + @@ok.to_s + " ok, " + @@broken.to_s + " broken, " + @@todo.to_s + " todo")
+    end
+    STDOUT.flush
+    exit(@@broken > 0 ? 1 : @@todo > 0 ? 77 : 0)
   end
 end
