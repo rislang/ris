@@ -367,7 +367,7 @@ class Iyi::TapeProgramChecker
           result = value(block.body, env)
           @program_context = saved
         end
-      elsif runtime && node.name == TapeScopeChecker::RESULT
+      elsif runtime && TapeScopeChecker.result?(node.name)
         result = args[1]? || Origin::Unknown
       elsif runtime && node.name == "copy_to"
         # Only a copy onto the program's tape writes program storage.

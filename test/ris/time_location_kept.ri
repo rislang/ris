@@ -1,0 +1,71 @@
+# A Location read from TZif bytes keeps its zones after another location
+# is read: the copy a def ends with must outlive its scratch reset.
+import std/time::{Time, Location, LocationError}
+
+# 2 header and block with 64-bit times, then the footer's rule.
+def tzif_be(sink : Array(UInt8), n : Int64, width : Int32) : Nil
+  shift = (width - 1) * 8
+  while shift >= 0
+    sink << ((n >> shift) & 255_i64).to_u8
+    shift -= 8
+  end
+end
+
+def tzif_header(sink : Array(UInt8), version : UInt8, count : Int64, type_count : Int64, char_count : Int64) : Nil
+  sink << 84_u8 << 90_u8 << 105_u8 << 102_u8 << version
+  15.times { sink << 0_u8 }
+  [0_i64, 0_i64, 0_i64, count, type_count, char_count].each { |n| tzif_be(sink, n, 4) }
+end
+
+def tzif_block(sink : Array(UInt8), times : Array(Int64), indexes : Array(UInt8), types : Array({Int64, UInt8, UInt8}), chars : String, width : Int32) : Nil
+  times.each { |t| tzif_be(sink, t, width) }
+  indexes.each { |i| sink << i }
+  types.each do |type|
+    tzif_be(sink, type[0], 4)
+    sink << type[1] << type[2]
+  end
+  tzif_text(sink, chars)
+end
+
+def tzif_text(sink : Array(UInt8), text : String) : Nil
+  text.bytesize.times { |i| sink << text.byte_at(i) }
+end
+
+def tzif_bytes(version : UInt8, times : Array(Int64), indexes : Array(UInt8), types : Array({Int64, UInt8, UInt8}), chars : String, footer : String) : String
+  bytes = [] of UInt8
+  if version == 0_u8
+    tzif_header(bytes, version, times.size.to_i64, types.size.to_i64, chars.bytesize.to_i64)
+    tzif_block(bytes, times, indexes, types, chars, 4)
+  else
+    tzif_header(bytes, version, 0_i64, 1_i64, 4_i64)
+    tzif_be(bytes, 0_i64, 4)
+    bytes << 0_u8 << 0_u8
+    tzif_text(bytes, "UTC\u0000")
+    tzif_header(bytes, version, times.size.to_i64, types.size.to_i64, chars.bytesize.to_i64)
+    tzif_block(bytes, times, indexes, types, chars, 8)
+    bytes << 10_u8
+    tzif_text(bytes, footer)
+    bytes << 10_u8
+  end
+  String.from_bytes(bytes.size) { |buf| (bytes.size).times { |k_| buf[k_] = bytes[k_] } }
+end
+
+def location(result : Location | LocationError) : Location
+  case result
+  when LocationError
+    raise "refused: #{result.message}"
+  else
+    result
+  end
+end
+
+types = [{3208_i64, 0_u8, 0_u8}, {3600_i64, 0_u8, 4_u8}, {7200_i64, 1_u8, 8_u8}]
+cet = location(Location.read_zoneinfo("Test/CET", tzif_bytes(50_u8, [-2429830408_i64], [1_u8], types, "LMT\u0000CET\u0000CEST\u0000", "CET-1CEST,M3.5.0,M10.5.0/3")))
+sydney = location(Location.read_zoneinfo("Test/Sydney", tzif_bytes(51_u8, [] of Int64, [] of UInt8, [{36000_i64, 0_u8, 0_u8}], "AEST\u0000", "AEST-10AEDT,M10.1.0,M4.1.0/3")))
+raise "AEDT" unless sydney.lookup(1705320000_i64).offset == 39600
+3.times do |i|
+  junk = tzif_bytes(50_u8, [i.to_i64], [1_u8], types, "XXXXXXXXXXXXXXXXXXXXXXXX", "YYYYYYYYYYYYYYYYYYYYYY")
+  raise "junk" if junk.bytesize == 0
+end
+zone = cet.lookup(1719835200_i64)
+raise "CEST is #{zone.offset}" unless zone.offset == 7200 && zone.name == "CEST"

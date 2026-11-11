@@ -81,7 +81,7 @@ expect byte_char_equal 'A String index is a UInt8 byte'
 
 # Yielded holders retain the provenance of their borrowed owner fields.
 for name in yield_owner_field yield_clone_attrs svcb_store \
-  rsa_pem_lifetime; do
+  rsa_pem_lifetime current_copy_result time_location_kept; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
   if [ "$code" -eq 0 ] && [ -z "$out" ]; then
     echo "runs     $name"

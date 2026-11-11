@@ -2720,6 +2720,21 @@ def __iyi_scope_result(mark : RisScopeMark, value : T) : T forall T
   {% end %}
 end
 
+# A def's result that is `x.copy_to(RisCurrentTape.new)`: that copy is in
+# the def's own scratch, which the reset frees, and a struct or class of
+# Arrays does not move down as a String does. It is copied to a side
+# region, the scratch is reset, and it is copied back onto the caller's
+# tape; the side region is released.
+def __iyi_scope_keep(mark : RisScopeMark, value : T) : T forall T
+  return value if mark.region == 0
+  side = RisResultRegion.new(RisRegion.acquire(Tape::CAPACITY))
+  held = Tape.task_copy(value, side)
+  __iyi_scope_reset(mark)
+  kept = Tape.task_copy(held, RisCurrentTape.new)
+  RisRegion.release(side.region)
+  kept
+end
+
 # A block's value, in its slot: as `__iyi_scope_result`.
 def __iyi_scope_result_at(mark : RisScopeMark, slot : Pointer(T)) : Nil forall T
   slot.value = __iyi_scope_result(mark, slot.value)

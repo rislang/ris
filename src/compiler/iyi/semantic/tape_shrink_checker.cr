@@ -2023,7 +2023,7 @@ class Iyi::TapeShrinkChecker
         target = exp.target
         call = result.value
         next unless target.is_a?(Var) && result.target == target
-        next unless call.is_a?(Call) && call.name == TapeScopeChecker::RESULT
+        next unless call.is_a?(Call) && TapeScopeChecker.result?(call.name)
         return exp.value
       end
       nil
@@ -3150,7 +3150,7 @@ class Iyi::TapeShrinkChecker
     # Scope reception preserves borrowed identities; fresh results may
     # be copied, so forwarding the original is conservative. The global
     # wrapper must not turn an implicit self into a result dependency.
-    if node.global? && node.name == TapeScopeChecker::RESULT &&
+    if node.global? && TapeScopeChecker.result?(node.name) &&
        !@text_only && node.type?.try(&.remove_typedef).is_a?(UnionType) &&
        flat_result?(node.type?)
       # A flat union result (a String or an Array member) moves down
@@ -3159,7 +3159,7 @@ class Iyi::TapeShrinkChecker
       return args.last? || EMPTY
     end
     if @text_only && node.global?
-      return args.last? || EMPTY if node.name == TapeScopeChecker::RESULT
+      return args.last? || EMPTY if TapeScopeChecker.result?(node.name)
       return EMPTY if node.name.in?(TapeScopeChecker::MARK,
         TapeScopeChecker::RESET, TapeScopeChecker::RESULT_AT)
     end
