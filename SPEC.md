@@ -253,8 +253,8 @@ section; a removed one leaves its number unused.
   parse, a tag or block naming no clause, a clause with proofs whose
   version .spec.lock lacks, a lock line for no clause, a version no
   CHANGELOG.md entry records (`## DATE` or, under a release, `### DATE`;
-  a left-over SPEC_CHANGELOG.md or spec.lock fails), a clause with no proof, and a block
-  label that differs from its clause: `spec 1.5  # text` (the text cut
+  a left-over SPEC_CHANGELOG.md or spec.lock fails), a clause with no
+  proof, and a block label that differs from its clause: `spec 1.5  # text` (the text cut
   at a word with `…` within 80 columns). `ris check --fix` writes the
   labels; a label is no review. Each failure names the next command.
 * 6.9 `todo "reason"` ends a test with exit code 77: `ris test` reports it
