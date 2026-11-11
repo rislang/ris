@@ -3053,9 +3053,7 @@ fun main(argc : Int32, argv : UInt8**) : Int32
   {% else %}
     LibIyiMain.__iyi_main(argc, argv)
   {% end %}
-  # Named `test` cases keep going past a failure, so the program's own code
-  # ends normally and the exit status is theirs to give (testing.iyi).
-  status = IyiTestCases.verdict
+  status = 0
   # Standard stream objects belong to program storage; flush before release.
   __iyi_flush_std
   {% if (!flag?(:gc_none) || flag?(:linux) || flag?(:darwin)) && !flag?(:gc_boehm) &&
@@ -3100,9 +3098,8 @@ end
     {% else %}
       LibIyiMain.__iyi_main(argc, argv)
     {% end %}
-    status = IyiTestCases.verdict
     __iyi_flush_std
-    status
+    0
   end
 {% end %}
 

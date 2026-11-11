@@ -7,8 +7,8 @@
 # registry — a program that prints what failed and exits 1 is a failing
 # test, and one that exits 0 passed. The prelude's `assert` is that in one
 # word, and `assert_eq` and its family say more of it: a failed check
-# panics with the values and the site. `test "name" { }` runs named cases
-# to the same exit code, so this verb still reads nothing but that.
+# panics with the values and the site. (ris: a module's checks are spec
+# blocks, `spec N.M`; iyi's `test "name" { }` is refused.)
 #
 #     iyi test              # every *_test.iyi under the current directory
 #     iyi test dir file.iyi # these, recursing into directories

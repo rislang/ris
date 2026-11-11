@@ -141,27 +141,6 @@ end
     end
     __iyi_assert_fail("assert_panics", message, "  expected: a panic" + (containing.is_a?(String) ? " saying " + containing.inspect : "") + "\n    actual: the block ended without one", file, line)
   end
-
-  # A named case, run as a task of its own so that a failing assertion ends
-  # the case and not the program: the cases after it still run, each says
-  # `ok - name` or `FAIL - name`, and the program exits 1 when it ends if
-  # any failed (`fun main` asks `IyiTestCases.verdict`), which is the one
-  # thing `iyi test` reads. The failure's evidence is the panic's own lines,
-  # printed above the case's verdict.
-  def test(name : String, &block : -> _) : Nil
-    STDOUT.flush
-    said = nil
-    group do |g|
-      task = g.spawn do
-        block.call
-        0
-      end
-      outcome = task.value
-      said = outcome.message if outcome.is_a?(Panicked)
-      0
-    end
-    IyiTestCases.record(name, said.nil?)
-  end
 {% else %}
   # Where no task can end alone, a panic ends the program, and there is no
   # boundary to read one at: a test of a panic cannot be written, so a build
@@ -172,38 +151,7 @@ end
   macro assert_panics(*args, **kwargs, &block)
     \{% raise "assert_panics needs a task to catch the panic in, and this target has no concurrency runtime (iyi SPEC III.4): a panic here ends the program" %}
   end
-
-  # The case runs in the program itself: a failing assertion ends the
-  # program, exit 1, which is still the verdict `iyi test` reads - the
-  # cases after it do not run.
-  def test(name : String, &block : -> _) : Nil
-    STDOUT.flush
-    block.call
-    IyiTestCases.record(name, true)
-  end
 {% end %}
-
-# What the named cases came to, read by `fun main` once the program's own
-# code has ended: a program that ran no `test` answers as it always did.
-class IyiTestCases
-  @@ran = 0
-  @@failed = 0
-
-  def self.record(name : String, passed : Bool) : Nil
-    @@ran = @@ran + 1
-    @@failed = @@failed + 1 unless passed
-    STDOUT.puts((passed ? "ok - " : "FAIL - ") + name)
-    STDOUT.flush
-  end
-
-  # The program's exit status for its named cases: 0 when none failed, so
-  # a program without one is untouched, and 1 with a count when any did.
-  def self.verdict : Int32
-    return 0 if @@ran == 0
-    STDOUT.puts(@@ran.to_s + " named tests: " + (@@ran - @@failed).to_s + " passed, " + @@failed.to_s + " failed")
-    @@failed == 0 ? 0 : 1
-  end
-end
 
 # ris: the runtime of a module's spec blocks (doc/drafts/spec-blocks, 5.2,
 # 5.3, 5.8). `ris build --spec` lowers each block to a private def and each

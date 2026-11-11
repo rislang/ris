@@ -806,6 +806,15 @@ web through site. Step 6 builds it.
    block (its clause 1.1 is not there) and no spec.lock.
 8. Remove `test "x" do` (D9) once ris's own test/ is moved. Gate:
    `ris check` green with test/ holding only test/cli/ and test/speed/.
+   Done (test/cli/spec_blocks_old_test.sh): `test "x"` at a top-level
+   line start is refused in every .ri/.iyi file with the 5.1 message;
+   the prelude's `test` and IyiTestCases are gone; a fresh project's
+   `ris check` is green with no test/. Amended: nothing in ris's own
+   test/ used `test "x" do` (the abi `test` in test/compiler is a local
+   Crystal helper), so no file moved. Emptying test/ of compiler/,
+   std/, ris/ and the rest is a port of ~1600 Crystal and program
+   tests to spec blocks, not part of removing the form; it is left
+   to its own draft.
 
 ## 7. Alternatives rejected
 

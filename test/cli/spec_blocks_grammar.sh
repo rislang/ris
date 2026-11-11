@@ -136,6 +136,9 @@ refuse defspec '`spec` starts a spec block; name the def otherwise'
 printf '%s\ntest "x" do\nend\n\nspec 1.2\n  one == 1\nend\n' "$head" \
   > oldtest.ri
 refuse oldtest 'a check names a SPEC clause: write `spec N.M`'
+# Step 8: refused with no spec section too.
+printf '%s\ntest "x" do\nend\n' "$head" > lonetest.ri
+refuse lonetest 'a check names a SPEC clause: write `spec N.M`'
 
 echo "== the spec section"
 printf '%s\nspec 1.2\n  one == 1\nend\n\ndef render : Int32\n  2\nend\n' \

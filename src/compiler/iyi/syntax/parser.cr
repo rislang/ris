@@ -216,7 +216,7 @@ module Iyi
       nodes = parse_expressions.tap { iyi_check_eof }
       return nodes if @ris_raw_top
       ris_check_spec_imports(nodes) if @iyi && @filename.is_a?(String)
-      nodes = ris_spec_section(nodes) if @ris_spec_blocks || @ris_top_tests
+      nodes = ris_spec_section(nodes) if @ris_spec_blocks
       apply_module_header(iyi_check_depth(nodes))
     end
 
@@ -232,7 +232,6 @@ module Iyi
 
     @ris_exprs_depth = 0
     @ris_spec_blocks : Array(SpecBlock)? = nil
-    @ris_top_tests : Array(Location)? = nil
 
     # A statement of the file's own top level in a `.ri` / `.iyi` file.
     private def ris_top_level? : Bool
@@ -252,7 +251,9 @@ module Iyi
         if @token.value == "spec"
           return parse_ris_spec_block
         elsif @token.value == "test" && ris_rest_of_line.matches?(/\A[ \t]+"/)
-          (@ris_top_tests ||= [] of Location) << @token.location
+          # iyi's `test "x" do` is gone (doc/drafts/spec-blocks, D9).
+          raise "a check names a SPEC clause: write `spec N.M`; add the " \
+                "clause to SPEC.md first if none fits", @token
         elsif @token.keyword?(:def) &&
               ris_rest_of_line.matches?(/\A[ \t]+spec(?=[\s(:;]|\z)/)
           raise "`spec` starts a spec block; name the def otherwise", @token
@@ -319,10 +320,6 @@ module Iyi
       first = list.index(&.is_a?(SpecBlock))
       unless first
         return nodes
-      end
-      if test = @ris_top_tests.try(&.first?)
-        raise "a check names a SPEC clause: write `spec N.M`; add the " \
-              "clause to SPEC.md first if none fits", test
       end
       opener = list[first]
       where = "#{ris_short_file(opener.location)}:#{opener.location.try(&.line_number)}"

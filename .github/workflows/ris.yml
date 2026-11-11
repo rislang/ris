@@ -108,6 +108,11 @@ jobs:
         run: bash test/cli/spec_blocks_init.sh
         env:
           IYI: ./bin/ris
+      - name: iyi's test "x" do is refused
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_old_test.sh
+        env:
+          IYI: ./bin/ris
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:
