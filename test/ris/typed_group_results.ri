@@ -1,0 +1,34 @@
+# A typed group (`group do` ending in a spawn) joins, then reads each
+# task's value: the result regions must outlive that join. They were
+# freed by it, so a task whose own group ended in between read another
+# task's value as 0, and a server's task read unmapped memory.
+def inner : Nil
+  group do |pool|
+    pool.spawn do
+      2
+    end
+    0
+  end
+end
+
+r = group do |g|
+  g.spawn do
+    inner
+    0
+  end
+  g.spawn do
+    1
+  end
+end
+raise "typed group answered #{r}, not {0, 1}" unless r == {0, 1}
+
+s = group do |g|
+  g.spawn do
+    inner
+    "first"
+  end
+  g.spawn do
+    "second " + "text"
+  end
+end
+raise "typed group answered #{s}" unless s == {"first", "second text"}
