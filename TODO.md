@@ -192,8 +192,10 @@ Unknown must be refused (SPEC 3.6).
   (wasm32, xml and the three private http2_tape comparisons) open.
   Socket, dir, ct_timing and time now build with code generation too.
   Socket runs to `socket_exercise: all checks passed`; dir runs to
-  `ALL CHECKS PASSED`. ct_timing still crashes in its RSA self-check;
-  time still fails `noon UTC is 14:00 CEST`. Neither runtime is green.
+  `ALL CHECKS PASSED`. ct_timing and time run to `ALL CHECKS PASSED`:
+  a def ending in `copy_to(RisCurrentTape.new)` copied into its own
+  scratch, which its reset freed; `__iyi_scope_keep` now carries it out
+  (test/ris/current_copy_result.ri, time_location_kept.ri).
   Final `bash test/ris/check.sh` on minitest: PASS: all ris checks;
   zero FAILED lines. The reduced RSA lifetime gate passes.
   The checker, SPEC.md and CHANGELOG.md are unchanged.

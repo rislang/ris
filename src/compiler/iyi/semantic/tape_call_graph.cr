@@ -282,7 +282,7 @@ class Iyi::TapeCallGraph
       return false if node.name == TapeScopeChecker::MARK ||
                       node.name == TapeScopeChecker::RESET ||
                       node.name == TapeScopeChecker::RESULT_AT
-      if node.name == TapeScopeChecker::RESULT
+      if TapeScopeChecker.result?(node.name)
         # The wrapper allocates only compiler-managed result storage, but
         # an explicit return still evaluates its original expression here.
         node.args.each &.accept(self)

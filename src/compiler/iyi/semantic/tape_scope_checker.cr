@@ -12,6 +12,14 @@ class Iyi::TapeScopeChecker
   RESET  = "__iyi_scope_reset"
   RESULT = "__iyi_scope_result"
   RESULT_AT = "__iyi_scope_result_at"
+  # A def whose result is `x.copy_to(RisCurrentTape.new)` made that copy
+  # in its own scratch: KEEP carries it past the reset onto the caller's
+  # tape, where RESULT would free it under the caller.
+  KEEP = "__iyi_scope_keep"
+
+  def self.result?(name : String) : Bool
+    name == RESULT || name == KEEP
+  end
 
   def self.declares?(body : ASTNode) : Bool
     nodes = body.is_a?(Expressions) ? body.expressions : [body]
@@ -43,6 +51,50 @@ class Iyi::TapeScopeChecker
              !{body.then, body.else}.all? { |b| b.is_a?(NilLiteral) || raises?(b) }
     end
     body.is_a?(Call) && body.name != "raise"
+  end
+
+  # A body that ends with, or returns, `x.copy_to(RisCurrentTape.new)`.
+  def self.current_copy_result?(body : ASTNode) : Bool
+    finder = CurrentCopyReturn.new
+    body.accept(finder)
+    finder.found || current_copy?(body)
+  end
+
+  def self.current_copy?(node : ASTNode) : Bool
+    while node.is_a?(Expressions) && !node.expressions.empty?
+      node = node.expressions.last
+    end
+    if node.is_a?(Return)
+      exp = node.exp
+      return false unless exp
+      node = exp
+    end
+    if node.is_a?(If)
+      return current_copy?(node.then) || current_copy?(node.else)
+    end
+    return false unless node.is_a?(Call) && node.name == "copy_to" &&
+                        node.args.size == 1
+    owner = node.args.first
+    return false unless owner.is_a?(Call) && owner.name == "new"
+    path = owner.obj
+    path.is_a?(Path) && path.names.last == "RisCurrentTape"
+  end
+
+  private class CurrentCopyReturn < Visitor
+    getter found = false
+
+    def visit(node : Return) : Bool
+      @found = true if TapeScopeChecker.current_copy?(node)
+      false
+    end
+
+    def visit(node : Def) : Bool
+      false
+    end
+
+    def visit(node : ASTNode) : Bool
+      !@found
+    end
   end
 
   # A body that is one `raise`.
@@ -89,8 +141,9 @@ class Iyi::TapeScopeChecker
     # and a consumer's block inlined into it must not take them again.
     mark = program.new_temp_var(node).at(body)
     value = program.new_temp_var(node).at(body)
+    result_name = node.is_a?(Def) && current_copy_result?(body) ? KEEP : RESULT
     body = case node
-           when Def   then body.transform(Returns.new(mark))
+           when Def   then body.transform(Returns.new(mark, result_name))
            when Block then body.transform(Exits.new(mark, true))
            else            body.transform(Exits.new(mark, false))
            end
@@ -103,7 +156,7 @@ class Iyi::TapeScopeChecker
                   PointerOf.new(value.clone).at(body)] of ASTNode,
                   global: true).at(body)
               else
-                result = Call.new(nil, RESULT,
+                result = Call.new(nil, result_name,
                   [mark.clone, value.clone] of ASTNode, global: true).at(body)
                 Assign.new(value.clone, result).at(body)
               end
@@ -235,12 +288,12 @@ class Iyi::TapeScopeChecker
   # An explicit return must receive its result before the def's rollback,
   # just like its final expression. Nested defs own their own marks.
   class Returns < Transformer
-    def initialize(@mark : Var)
+    def initialize(@mark : Var, @result : String = RESULT)
     end
 
     def transform(node : Return)
       exp = node.exp || NilLiteral.new.at(node)
-      node.exp = Call.new(nil, RESULT, [@mark.clone, exp] of ASTNode,
+      node.exp = Call.new(nil, @result, [@mark.clone, exp] of ASTNode,
         global: true).at(node)
       node
     end

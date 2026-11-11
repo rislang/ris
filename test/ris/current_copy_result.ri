@@ -1,0 +1,33 @@
+# A def whose result is copy_to(RisCurrentTape.new) hands the copy to its
+# caller: the def's own scratch reset must not free it.
+@[OnTape]
+struct Kept
+  getter name : String
+  getter items : Array(Int64)
+
+  def initialize(@name : String, @items : Array(Int64))
+  end
+end
+
+def make(n : Int64) : Kept
+  items = [] of Int64
+  4.times { |i| items << n + i }
+  text = "name-#{n}"
+  Kept.new(text, items).copy_to(RisCurrentTape.new)
+end
+
+def make_or_nil(n : Int64) : Kept?
+  return nil if n < 0
+  Kept.new("other-#{n}", [n, n]).copy_to(RisCurrentTape.new)
+end
+
+kept = make(10_i64)
+other = make_or_nil(20_i64) || raise "nil"
+3.times do |r|
+  junk = [] of Int64
+  64.times { |i| junk << 999_i64 + r + i }
+  raise "junk" if junk.size == 0
+end
+raise "items #{kept.items[3]}" unless kept.items[3] == 13_i64
+raise "name" unless kept.name == "name-10"
+raise "other" unless other.name == "other-20" && other.items[1] == 20_i64
