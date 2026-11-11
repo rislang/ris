@@ -1,5 +1,0 @@
-# spec: 1.8@2ae483dc
-# SPEC 1.8 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 1.8@2ae483dc`, or write
-# one; then delete this file.
-todo "1.8 untested: Program data initializes in iyi III.5's module order"

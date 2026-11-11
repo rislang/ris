@@ -1,5 +1,0 @@
-# spec: 7.5@c5126ebb
-# SPEC 7.5 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 7.5@c5126ebb`, or write
-# one; then delete this file.
-todo "7.5 untested: A long-lived container (a constant, a class variable"

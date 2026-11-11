@@ -464,22 +464,11 @@ module Iyi
            ClassDef, ModuleDef, EnumDef, LibDef, Alias, AnnotationDef,
            Annotation, CStructOrUnionDef, FunDef, TypeDef, TraitDef, ImplDef, Nop, SpecBlock
         true
-      when MacroLiteral
-        begin
-          ris_declaration?(Parser.new(node.value).parse)
-        rescue SyntaxException
-          false
-        end
-      when MacroIf
-        ris_declaration?(node.then) && ris_declaration?(node.else)
+      when MacroLiteral, MacroIf
+        ris_macro_declarations?(node)
       when Expressions
-        if node.expressions.all?(&.is_a?(MacroLiteral))
-          text = node.expressions.map(&.as(MacroLiteral).value).join
-          begin
-            ris_declaration?(Parser.new(text).parse)
-          rescue SyntaxException
-            false
-          end
+        if node.expressions.any? { |child| child.is_a?(MacroLiteral) }
+          ris_macro_declarations?(node)
         else
           node.expressions.all? { |child| ris_declaration?(child) }
         end
@@ -487,6 +476,43 @@ module Iyi
         node.target.is_a?(Path)
       else
         false
+      end
+    end
+
+    # Parse complete alternatives, not fragments on either side of a
+    # nested macro branch (which may sit inside a class or module).
+    private def self.ris_macro_declarations?(node : ASTNode) : Bool
+      sources = ris_macro_sources(node)
+      return false unless sources
+      sources.all? do |source|
+        begin
+          ris_declaration?(Parser.new(source).parse)
+        rescue SyntaxException
+          false
+        end
+      end
+    end
+
+    private def self.ris_macro_sources(node : ASTNode) : Array(String)?
+      case node
+      when Nop
+        [""]
+      when MacroLiteral
+        [node.value]
+      when MacroIf
+        left = ris_macro_sources(node.then)
+        right = ris_macro_sources(node.else)
+        left && right ? left + right : nil
+      when Expressions
+        sources = [""]
+        node.expressions.each do |child|
+          parts = ris_macro_sources(child)
+          return nil unless parts
+          sources = sources.flat_map { |prefix| parts.map { |part| prefix + part } }
+        end
+        sources
+      else
+        nil
       end
     end
 

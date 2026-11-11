@@ -1,7 +1,8 @@
 # Draft: port test/ to spec blocks
 
 Status: reviewed 2026-11-11; decisions D1-D7 accepted.
-Phases 0-1 are committed; phase 2 batch results are recorded below.
+Phases 0-2 are committed; phases 3-5 are implemented, uncommitted.
+The final results and retained program-level reasons are below.
 
 Context: spec blocks (doc/drafts/spec-blocks/spec-blocks.md, steps
 1-8) are merged. A module file may end with `spec N.M ... end` blocks;
@@ -610,3 +611,147 @@ Additional compiler verification:
   formatting differences outside the added hunk. The unchanged HEAD
   copy also fails its formatting check. Unrelated reformatting is left
   to a separate change. `git diff --check` passes.
+
+## 11. Phase 3 results (2026-11-11)
+
+Nine more programs contribute proofs in seven modules: big_tape to
+big, std_text_tape to text, std_io_tape to io, dir_children to dir,
+time_tape_offset to time, tls_error_message to tls, and uri_legacy,
+uri_tape and params_write_tape to uri. Their existing shell cases and
+program drivers remain unchanged for output and heap checks. No library
+API changed. The actual one-import union has 56 unjudged entries, not
+the estimate of 41; all now have a verdict. Nine contribute proofs and
+47 stay program-level; with the four earlier holdouts, 51 remain. The
+final total is 46 proof sources in 44 modules.
+
+Program-level reasons (including the four phase 2 holdouts):
+
+- allowed.ri: Compiler owner alias, constructor and scope acceptance; int is
+  incidental.
+- autocert.ri: Python-generated PEM fixtures and a separate lifecycle program.
+- autocert_wire.ri: Board handoff, deep copies and bounded order integration.
+- cleanup_allocations.ri, cleanup_cancel.ri, cleanup_current.ri,
+  cleanup_exit.ri, cleanup_order.ri, cleanup_self.ri, escape.ri,
+  heap_exemptions.ri, heap_kinds.ri, hpke_owners.ri, json_buffer.ri,
+  lifetime_flow.ri, little_endian.ri, local.ri, local_cleanup.ri, log_tape.ri,
+  query_scope.ri, round_struct_kept.ri, scope_cleanup.ri, slice_dup.ri,
+  socket_kept.ri, static_array_copy.ri, string_parameters.ri, string_pool.ri,
+  svcb_store.ri, system.ri, tape_string.ri, task_reached_proc.ri,
+  text_format_tape.ri, thread_program_initializers.ri, toml_round_flags.ri,
+  zero_capacity.ri: Tape lifetime, retention or cleanup rule; import supplies
+  its fixture.
+- const_int_width.ri: Compiler constant folding regression, not std/int
+  behavior.
+- cookie.ri: Cookie.parse retains loop-local domain (SPEC 1.1).
+- debug.ri: Panic/backtrace requires a separate program. Library blocks have
+  no source-build handle for a fixture. RisProgram only runs the
+  RIS_SPEC_PROGRAM binary.
+- file_metadata.ri: Argument-selected stat failures and symlink fixture;
+  separate process statuses.
+- iterator_stop.ri: Compiler value return and union dispatch for Stop.
+- log_async.ri: Task/board lifecycle and asynchronous backend integration.
+- log_for_constant.ri: Program-rooted logger constants and initialization
+  lifetime.
+- once_in_program_init.ri: Program initialization and once storage lifetime.
+- option_parser_panics.ri: Six separate panic processes selected by program
+  arguments.
+- pipe_reuse.ri: Pipe handle reuse and task handoff integration.
+- pipe_wait.ri: Pipe parking, concurrent tasks and scheduler integration.
+- secure_dns.ri: External Python TLS/HTTPS peer and certificate fixture.
+- signal_flags.ri: Process signal delivery and flags.
+- socket_pair.ri: Connected socket/task integration and zero-heap driver.
+- socket_pieces.ri: Loopback peer, parked writes and task ownership
+  integration.
+- xpath.ri: Printed XPath selections compared with external Python oracle.
+
+Adaptations and compiler regression:
+
+- big uses an append-only String local instead of String.build, following
+  the compiler refusal. URI keeps the normalized value in a separate
+  local. No library API or lifetime rule was relaxed.
+- URI's invalid-input and resolution loops accumulate a Bool checked at
+  block level; time's three input cases each have their own block.
+- io exposed a nested conditional declaration being dropped. The new
+  conditional.ri probe in spec_blocks_run.sh failed before the fix with
+  undefined Value.new. The parser now checks complete macro alternatives,
+  preserving class/module text surrounding nested branches. It still
+  rejects program statements as declarations. io and dir then both pass.
+- Multiple ledger sources can share a destination; case arithmetic and
+  mutations count each module once. Assertions still count per source.
+
+Verification:
+
+- Before: `PASS: spec port counts (37 modules, 42 flips)`;
+  `485 old - 0 removed + 37 modules = 522 new`.
+- After: `PASS: spec port counts (44 modules, 53 flips)`;
+  `485 old - 0 removed + 44 modules = 529 new`.
+- All nine source programs' retained shell cases (including grouped
+  loops) and seven module cases: `PASS: selected ris checks`.
+- Seven spec_blocks gates pass; `spec_verb: 52 steps passed`.
+- `bin/ris check spec`: 43 clauses, 19 ok, 24 todo, 0 to review,
+  0 uncovered, 0 unversioned. Clause 8.1 reviewed and acknowledged.
+
+## 12. Phase 4 results (2026-11-11)
+
+All 24 phase-0 stub targets are markers: compiler and built-in runtime
+rules have no standalone std module. Every test/spec file is removed;
+SPEC.md now carries one todo marker beside each of those clauses. No
+stub remains, and no placeholder module was invented.
+
+The old reasons were unfinished clause excerpts. Marker reasons retain
+that untested intent as short, complete descriptions within 80 columns;
+the repeated clause number is provided by the containing clause. This
+changes no clause text or hash and requires no spec.lock update. The
+marker-only exception is recorded in AGENTS.md; this is not a semantic
+SPEC edit and adds no SPEC_CHANGELOG entry.
+
+- Before implementation, spec_marker.sh fails: the marked clause is
+  `uncovered`, and its comment changes the hash to 4a6bb4fe.
+- After: `PASS: spec marker`. Fixtures cover todo status, ack, unchanged
+  hashes across insertion/removal/reason edits, stale locks, proof and
+  todo conflicts, prose mentions, malformed/misplaced/duplicate markers,
+  the 80-column limit, JSON/text reports and --fix leaving SPEC.md alone.
+- `PASS: todo clause set unchanged (24 clauses)` before/after migration.
+- `PASS: SPEC text unchanged apart from 24 marker lines`;
+  `PASS: all 43 clause hashes still match spec.lock`.
+- Final port gate: `PASS: spec port counts (44 modules, 53 flips)`;
+  `485 old - 0 removed + 44 modules = 529 new`.
+- All seven spec_blocks gates pass; `spec_verb: 52 steps passed`.
+- `bin/ris check spec`: 43 clauses, 19 ok, 24 todo, 0 to review,
+  0 uncovered, 0 unversioned. Tagged files fall from 87 to 63.
+- All moved programs' retained cases and the seven added module cases:
+  `PASS: selected ris checks` after final formatting and marker support.
+
+## 13. Phase 5 close (2026-11-11)
+
+- spec-blocks step 8 now names the D1/D6 end state: cli/, speed/, ris/
+  and the Crystal suites remain. The host compiler/library suites cannot
+  become ris blocks until the compiler is written in ris. The existing
+  111 std exercise gates stay under D7.
+- Removed spec_port_counts.sh, spec_port_counts.py and their ledger,
+  after their final green gate. Removed the scanner-only probe coupled
+  to that temporary helper; the compiler regression probes remain.
+- CI replaces the temporary port job with the permanent spec_marker.sh
+  gate. No workflow names the removed scripts.
+- spec-blocks D2 and 5.14, AGENTS.md and `ris spec --help` describe
+  markers; UPSTREAM.md records both compiler/tooling changes for iyi.
+- The requested scope uses a targeted `ris check` over the seven changed
+  modules plus root `ris check spec`, never the full suite or check.sh.
+  The targeted check passes format, types, unused and test, ending
+  `ok in 14.7s` after closure (16.4s before). Formatter-only changes are
+  kept in the touched modules so that this gate is green. No library API
+  or algorithm changed.
+- No commit is made; the lead reviews and commits. Own .work files are
+  removed at completion; earlier agents' scratch remains untouched.
+
+Final diagnostic review found one more regression in the marker code:
+with multiple tag lines, the conflict pointed to the first tag rather
+than the line naming the marked clause. The added marker probe failed
+with test/proof.ri:1 instead of :2 before the fix. Tag locations are now
+stored per clause, not just per file.
+
+Final verification after that diagnostic fix: `PASS: spec marker`, all
+seven spec_blocks gates pass, `spec_verb: 52 steps passed`, and root
+`ris check spec` still reports 43 clauses, 19 ok, 24 todo, 0 to review,
+0 uncovered and 0 unversioned. The seven-module `ris check` ends
+`ok in 16.2s`. Own scratch was removed; no commit was made.

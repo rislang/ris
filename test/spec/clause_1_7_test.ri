@@ -1,5 +1,0 @@
-# spec: 1.7@1e464b38
-# SPEC 1.7 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 1.7@1e464b38`, or write
-# one; then delete this file.
-todo "1.7 untested: Build retained data on its destination (writers, in-place"

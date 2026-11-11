@@ -3423,6 +3423,55 @@ else
   echo "FAILED   spec module zip: $out"; status=1
 fi
 
+out=$("$RIS" check test src/std/big.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module big'
+else
+  echo "FAILED   spec module big: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/dir.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module dir'
+else
+  echo "FAILED   spec module dir: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/io.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module io'
+else
+  echo "FAILED   spec module io: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/text.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module text'
+else
+  echo "FAILED   spec module text: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/time.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module time'
+else
+  echo "FAILED   spec module time: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/tls.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module tls'
+else
+  echo "FAILED   spec module tls: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/uri.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module uri'
+else
+  echo "FAILED   spec module uri: $out"; status=1
+fi
+
 # Run heap workloads after the other gates to avoid compiler contention.
 # Keep their fixed timeouts: a hung census must still fail.
 python3 test/ris/heap_check.py || status=1

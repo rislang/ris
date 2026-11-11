@@ -206,3 +206,8 @@ Spec builds keep computed constant declarations and trait declarations.
 Macro lookup in nested types also searches enclosing namespaces, so an
 entry module can derive with its own exported macros just as an imported
 module can. These fixes belong upstream in iyi.
+
+Spec builds recognize complete declarations around nested macro branches,
+including platform branches inside classes. SPEC.md todo markers track
+clauses no module keeps without changing their text hashes. Both changes
+belong upstream in iyi (doc/drafts/spec-port/, phases 3-4).

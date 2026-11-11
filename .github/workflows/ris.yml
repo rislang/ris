@@ -113,9 +113,9 @@ jobs:
         run: bash test/cli/spec_blocks_old_test.sh
         env:
           IYI: ./bin/ris
-      - name: spec port preserves counts and fails when flipped
+      - name: SPEC.md todo markers
         if: matrix.shard == 'heap'
-        run: bash test/cli/spec_port_counts.sh
+        run: bash test/cli/spec_marker.sh
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:

@@ -1,3 +1,4 @@
+# standard: POSIX directory entries
 # Dir: directory stream and filesystem directory operations.
 #
 # Provides opening, reading entries, creating, deleting, traversing,
@@ -1024,4 +1025,18 @@ pub class Dir
       pattern
     end
   {% end %}
+end
+
+spec 8.1
+  data = "samples/ris/trial/data"
+  Dir.children(data).sort == ["config.json", "sales.csv", "words.txt"]
+  Dir.entries(data).size == 5
+  listing = Dir.new(data)
+  listing.children.size == 3
+  listing.entries.size == 5
+  listing.close
+  "overwrite the scratch".split.each { |word| word.size }
+  kept = [] of String
+  Dir.each_child(data) { |name| kept << name.copy_to(Program.tape) }
+  kept.sort.first == "config.json"
 end

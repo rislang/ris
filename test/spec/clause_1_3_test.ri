@@ -1,5 +1,0 @@
-# spec: 1.3@04f780a4
-# SPEC 1.3 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 1.3@04f780a4`, or write
-# one; then delete this file.
-todo "1.3 untested: Classes stay: new allocates the instance on the"

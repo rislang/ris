@@ -1,3 +1,4 @@
+# standard: Crystal IO API; Go io adapters; hexdump -C
 # std/io: byte streams beyond the standard ones.
 #
 # The prelude's `IyiIO` reads and writes a descriptor. This module adds to
@@ -455,47 +456,47 @@ end
     end
   end
 {% else %}
-# Other targets have no pipe yet: `IyiIO.pipe` panics there, and these
-# ends exist only so code that names them typechecks everywhere.
-@[OnTape]
-pub class PipeReader < IyiIO
-  def initialize
-    super(-1_i64, 4096, false)
+  # Other targets have no pipe yet: `IyiIO.pipe` panics there, and these
+  # ends exist only so code that names them typechecks everywhere.
+  @[OnTape]
+  pub class PipeReader < IyiIO
+    def initialize
+      super(-1_i64, 4096, false)
+    end
+
+    private def low_level_read(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+      raise "IyiIO.pipe is only on Linux and macOS" if count >= 0_u64
+      -1_i64
+    end
+
+    private def low_level_write(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+      raise "a pipe's reader is not written to" if count >= 0_u64
+      -1_i64
+    end
+
+    private def low_level_close(target_fd : Int64) : Nil
+    end
   end
 
-  private def low_level_read(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
-    raise "IyiIO.pipe is only on Linux and macOS" if count >= 0_u64
-    -1_i64
-  end
+  @[OnTape]
+  pub class PipeWriter < IyiIO
+    def initialize
+      super(-1_i64, 4096, true)
+    end
 
-  private def low_level_write(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
-    raise "a pipe's reader is not written to" if count >= 0_u64
-    -1_i64
-  end
+    private def low_level_write(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+      raise "IyiIO.pipe is only on Linux and macOS" if count >= 0_u64
+      -1_i64
+    end
 
-  private def low_level_close(target_fd : Int64) : Nil
-  end
-end
+    private def low_level_read(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+      raise "a pipe's writer is not read from" if count >= 0_u64
+      -1_i64
+    end
 
-@[OnTape]
-pub class PipeWriter < IyiIO
-  def initialize
-    super(-1_i64, 4096, true)
+    private def low_level_close(target_fd : Int64) : Nil
+    end
   end
-
-  private def low_level_write(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
-    raise "IyiIO.pipe is only on Linux and macOS" if count >= 0_u64
-    -1_i64
-  end
-
-  private def low_level_read(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
-    raise "a pipe's writer is not read from" if count >= 0_u64
-    -1_i64
-  end
-
-  private def low_level_close(target_fd : Int64) : Nil
-  end
-end
 {% end %}
 
 # An `IyiIO` over bytes in memory. Writes land at the cursor and grow the
@@ -721,7 +722,6 @@ pub abstract class Reader < IyiIO
     return nil if text.empty?
     chomp ? text.chomp : text
   end
-
 end
 
 # At most `limit` bytes of another stream.
@@ -1098,10 +1098,6 @@ pub struct ByteFormat
       buffer.write_byte(value)
     end
 
-
-
-
-
     def self.decode_int32(buffer : String) : Int32
       Bits.to_int32(Bits.get_little(buffer, 4))
     end
@@ -1152,10 +1148,6 @@ pub struct ByteFormat
       buffer.write_byte(value)
     end
 
-
-
-
-
     def self.decode_int32(buffer : String) : Int32
       Bits.to_int32(Bits.get_big(buffer, 4))
     end
@@ -1199,4 +1191,47 @@ pub struct ByteFormat
   {% end %}
 
   pub alias NetworkEndian = BigEndian
+end
+
+spec 8.1
+  memory = Memory.new("first\r\nsecond")
+  memory.read_line(chomp: true) == "first"
+  memory.read_all == "second"
+  memory.clear
+  memory.write("hello")
+  memory.rewind
+  memory.read_bytes(2) == "he"
+  memory.read_all == "llo"
+  memory.to_s == "hello"
+
+  sized_source = Memory.new("abcdef")
+  sized = Sized.new(sized_source, 3)
+  sized.read_all == "abc"
+  source = Memory.new("one--two")
+  delimited = Delimited.new(source, "--")
+  delimited.read_all == "one"
+  source.read_all == "two"
+
+  left = Memory.new
+  right = Memory.new
+  writer = MultiWriter.new([left.as(IyiIO), right.as(IyiIO)])
+  writer.write("both")
+  writer.flush
+  left.to_s == "both" && right.to_s == "both"
+
+  encoded = Memory.new
+  ByteFormat::LittleEndian.encode(-42_i32, encoded)
+  encoded.rewind
+  ByteFormat::LittleEndian.decode_int32(encoded) == -42
+  encoded.clear
+  ByteFormat::BigEndian.encode(18446744073709551615_u64, encoded)
+  encoded.rewind
+  ByteFormat::BigEndian.decode_uint64(encoded) == 18446744073709551615_u64
+
+  wire = String.build { |writer| ByteFormat::BigEndian.encode(255_i32, writer) }
+  ByteFormat::BigEndian.decode_int32(wire) == 255
+
+  output = Memory.new
+  Hexdump.new(output).dump("hi")
+  output.to_s.includes?("68 69")
 end

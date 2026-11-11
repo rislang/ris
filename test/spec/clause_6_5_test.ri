@@ -1,5 +1,0 @@
-# spec: 6.5@3293e333
-# SPEC 6.5 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 6.5@3293e333`, or write
-# one; then delete this file.
-todo "6.5 untested: Pool free never closes a resource: resources have"

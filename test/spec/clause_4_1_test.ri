@@ -1,5 +1,0 @@
-# spec: 4.1@06dec80c
-# SPEC 4.1 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 4.1@06dec80c`, or write
-# one; then delete this file.
-todo "4.1 untested: Errors, panics, defer and exit are iyi's: defer"

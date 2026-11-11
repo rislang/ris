@@ -90,25 +90,29 @@ EOF
 [ $? = 0 ] || { fail "module's own derive"; tail -15 derived.out; }
 rm derived.ri
 
-# A loop's nested comparisons are not top-level proof checks.
-python3 - "$REPO" <<'PYPROBE'
-import importlib.util
-import pathlib
-import sys
-sys.dont_write_bytecode = True
-root = pathlib.Path(sys.argv[1])
-spec = importlib.util.spec_from_file_location(
-    'counts', root / 'test/cli/spec_port_counts.py')
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
-p = pathlib.Path('nested.ri')
-p.write_text('spec 1.1\n  2.times do |i|\n'
-             '    raise "bad" unless i < 2\n  end\n  42 == 42\nend\n')
-checks = list(m.blocks(p))[0][2]
-assert checks == [(4, 5)], checks
-p.unlink()
-PYPROBE
-[ $? = 0 ] || fail "only top-level Bool lines are port checks"
+# A nested platform branch inside a declaration is still a declaration.
+cat > conditional.ri <<'EOF'
+module conditional
+{% if true %}
+  pub struct Value
+    {% if true %}
+      def answer : Int32
+        42
+      end
+    {% else %}
+      def answer : Int32
+        41
+      end
+    {% end %}
+  end
+{% end %}
+spec 1.1
+  Value.new.answer == 42
+end
+EOF
+"$IYI" test conditional.ri > conditional.out 2>&1
+[ $? = 0 ] || { fail "nested conditional declaration"; tail -15 conditional.out; }
+rm conditional.ri
 
 mkdir proj
 cat > proj/m.ri <<'EOF'
