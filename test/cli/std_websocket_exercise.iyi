@@ -135,9 +135,19 @@ end
 
 class RisWs1Handler
   @tls : TlsServerConfig?
+  @identity : TlsIdentity
 
   def initialize(config : {String, String})
-    @tls = config[0].empty? ? nil : TlsServerConfig.from_pem(ris_heap_text(config[0]), ris_heap_text(config[1])).or_panic
+    identity = TlsIdentity.new
+    @identity = identity
+    tls = TlsServerConfig.new(identity)
+    @tls = nil
+    unless config[0].empty?
+      if problem = identity.read_pem(config[0], config[1])
+        raise problem.message
+      end
+      @tls = tls
+    end
   end
 
   def listening(port : Int32) : Nil
@@ -232,7 +242,7 @@ import std/websocket::{WebSocket, WebSocketError, Message, PerMessageDeflate}
 import std/compress::{Deflater, Inflater, Envelope}
 import std/http::{HTTP, HTTPClient, Incoming, Outgoing, Field, Response, Server, HTTPError, TlsStream}
 import std/socket::{IyiSocket, SocketError}
-import std/tls::{TlsConfig, TlsServerConfig}
+import std/tls::{TlsIdentity, TlsConfig, TlsServerConfig}
 import std/x509::{RisCertificateStore, Certificate}
 import std/file::{File}
 
@@ -582,10 +592,8 @@ end
 # What a client's end makes of *wire*, written by a raw server.
 def client_fault(wire : String, deflate : PerMessageDeflate? = nil) : String
   a, b = pair
-  raw = Raw.new(b)
   ws = WebSocket.new(a, "", true, nil, WebSocket::MAX_MESSAGE, deflate)
   a.read_timeout_ms = 5000
-  raw.write(wire)
   # The server's part runs as a task that owns `b` and answers what it
   # read as its value (SPEC 5.1); the client reads here.
   got = "nothing"
@@ -593,6 +601,7 @@ def client_fault(wire : String, deflate : PerMessageDeflate? = nil) : String
     server = g.spawn do
       seen = "no close"
       task_raw_2 = Raw.new(b)
+      task_raw_2.write(wire)
       if f = task_raw_2.next_frame?
         seen = f.op == 8 && f.masked? ? "close #{f.code}" : "op #{f.op}"
       end
@@ -644,7 +653,8 @@ def fake_server(lines : String, after : String = "", accept : String = "right", 
       s.close
       head
     end
-    got = WebSocket.connect("ws://127.0.0.1:#{port}/", protocols: ["chat"], deflate: deflate)
+    websocket = WebSocket.new
+    got = websocket.connect("ws://127.0.0.1:#{port}/", protocols: ["chat"], deflate: deflate)
     case got
     in WebSocket
       agreed = got.deflate
@@ -811,15 +821,15 @@ end
 # roots given, `ws://127.0.0.1` without.
 def connect(port : String, roots : String?) : Nil
   url = "ws://127.0.0.1:#{port}/chat?x=1"
-  client = nil.as(HTTPClient?)
+  config = TlsConfig.new
+  pem_store_1 = RisCertificateStore.new
   if roots
-    config = TlsConfig.new
-    pem_store_1 = RisCertificateStore.new
     config.roots = pem_certs(pem_store_1, File.read(roots))
-    client = HTTPClient.new(tls: config)
     url = "wss://localhost:#{port}/chat?x=1"
   end
-  ws = WebSocket.connect(url, {"X-Test" => "1"}, ["chat", "superchat"], client: client).or_panic
+  client = HTTPClient.new(tls: config)
+  ws = WebSocket.new
+  ws.connect(url, {"X-Test" => "1"}, ["chat", "superchat"], client: client).or_panic
   puts "protocol #{ws.protocol || "-"}"
   3.times do
     got = ws.receive.or_panic
@@ -899,16 +909,20 @@ def section_server_reads : Nil
   raw.write(frame(1, bytes([0xf0, 0x9f]), fin: false) + frame(0, bytes([0x98]), fin: false) + frame(0, bytes([0x80])))
   assert_str "text \"😀\"", said(ws.receive), "a four-byte character over three fragments"
   # The three lengths: 7 bits, 16 (§5.7's 256 bytes), 64 (65536). The
-  # writing task owns `frames_a` and hands it back as its value
+  # writing task owns `lengths_a` and hands it back as its value
   # (SPEC 5.1).
+  frames_a.close
+  b.close
+  lengths_a, lengths_b = pair
+  lengths_ws = WebSocket.new(lengths_b, "", false)
   lengths_end = group do |g|
     sender = g.spawn do
-      sender_raw = Raw.new(frames_a)
+      sender_raw = Raw.new(lengths_a)
       sender_raw.write(frame(2, pattern(125)) + frame(2, pattern(126)) + frame(2, pattern(256)) + frame(2, pattern(65535)) + frame(2, pattern(65536)) + frame(2, pattern(1000000)))
-      frames_a
+      lengths_a
     end
     [125, 126, 256, 65535, 65536, 1000000].each do |n|
-      got = message(ws.receive)
+      got = message(lengths_ws.receive)
       assert_true got.binary? && got.data == pattern(n), "a binary of #{n} bytes"
     end
     sender.value
@@ -934,13 +948,13 @@ def section_server_reads : Nil
       end
       frames_back
     end
-    got = message(ws.receive)
+    got = message(lengths_ws.receive)
     assert_true got.binary? && got.data == pattern(300000), "300000 bytes in fragments of 1 to 70000"
     sender.value
   end
   raise "the writing task ended with #{fragments_end.inspect}" unless fragments_end.is_a?(IyiSocket)
   fragments_end.close
-  ws.receive
+  lengths_ws.receive
   puts "  §5.7's frames, fragments around control frames, a character across fragments, 7, 16 and 64-bit lengths"
 
   # What arrived after the handshake's head is read first: a whole frame,
@@ -1358,7 +1372,6 @@ def section_close_handshake : Nil
   # A client's close: the server answers it and ends the connection, which
   # the client waits for.
   a13, b13 = pair
-  raw13 = Raw.new(b13)
   ws13 = WebSocket.new(a13, "", true)
   group do |g|
     g.spawn do
@@ -1375,7 +1388,6 @@ def section_close_handshake : Nil
   assert_true ws13.closed? && ws13.close_code == 1000, "the client's close handshake"
   # A peer that ends the connection without answering the close.
   a14, b14 = pair
-  raw14 = Raw.new(a14)
   ws14 = WebSocket.new(b14, "", false)
   unanswered = "nothing"
   group do |g|
@@ -1403,11 +1415,11 @@ def section_program_refused : Nil
   assert_str "refused: WebSocket: a ping carries at most 125 bytes, not 126", answer { server_end.ping(pattern(126)); "sent" }, "a long ping"
   assert_str "refused: WebSocket: close code 1005 is not one an endpoint sends: 1000-1003, 1007-1014 or 3000-4999", answer { server_end.close(1005); "sent" }, "close 1005"
   assert_str "refused: WebSocket: a close reason is at most 123 bytes, not 124", answer { server_end.close(1000, String.from_bytes(124) { |p| 124.times { |i| p[i] = 120_u8 } }); "sent" }, "a long reason"
-  assert_str "refused: WebSocket: sec-websocket-key is the handshake's own header", answer { WebSocket.connect("ws://127.0.0.1:1/", {"sec-websocket-key" => "x"}); "sent" }, "a caller's key, in any case"
-  assert_str "refused: WebSocket: protocol \"a b\" is not a token", answer { WebSocket.connect("ws://127.0.0.1:1/", protocols: ["a b"]); "sent" }, "a protocol that is not a token"
+  assert_str "refused: WebSocket: sec-websocket-key is the handshake's own header", answer { socket = WebSocket.new; socket.connect("ws://127.0.0.1:1/", {"sec-websocket-key" => "x"}); "sent" }, "a caller's key, in any case"
+  assert_str "refused: WebSocket: protocol \"a b\" is not a token", answer { socket = WebSocket.new; socket.connect("ws://127.0.0.1:1/", protocols: ["a b"]); "sent" }, "a protocol that is not a token"
   assert_str "refused: WebSocket: a max_window_bits is 8 to 15, not 16", answer { PerMessageDeflate.new(server_max_window_bits: 16); "made" }, "a window of 2^16"
   assert_str "refused: WebSocket: a deflate level is 0 to 9, not 10", answer { PerMessageDeflate.new(level: 10); "made" }, "a deflate level of 10"
-  assert_str "refused: WebSocket: a deflate level is 0 to 9, not -1", answer { WebSocket.connect("ws://127.0.0.1:1/", deflate_level: -1); "sent" }, "connect at level -1"
+  assert_str "refused: WebSocket: a deflate level is 0 to 9, not -1", answer { socket = WebSocket.new; socket.connect("ws://127.0.0.1:1/", deflate_level: -1); "sent" }, "connect at level -1"
   assert_str "refused: WebSocket: a deflate level is 0 to 9, not 10", answer { WebSocket.serve(IyiSocket.listen("127.0.0.1", 0), "", Outgoing.new, deflate_level: 10) { |w| w.close }; "answered" }, "serve at level 10"
   assert_str "refused: Inflater: read on a flushed stream; inflate decodes its pieces", answer { Inflater.flushed.read; "read" }, "a flushed stream read as a whole one"
   puts "  text that is not UTF-8, a long ping, close 1005, a long reason, the handshake's own header, a bad protocol, a window of 2^16, deflate levels of -1 and 10"
@@ -1425,7 +1437,8 @@ group do |g|
   end
   RisExerciseServer.wait(RisWs2Handler)
   g.spawn do
-    ws = WebSocket.connect("ws://127.0.0.1:#{port}/echo", {"X-Test" => "yes"}, ["superchat", "chat"]).or_panic
+    ws = WebSocket.new
+    ws.connect("ws://127.0.0.1:#{port}/echo", {"X-Test" => "yes"}, ["superchat", "chat"]).or_panic
     assert_str "chat", ws.protocol || "-", "the server's protocol order"
     assert_str "s15 c15", (d = ws.deflate) ? terms(d) : "none", "permessage-deflate agreed by default"
     ws.send("hello").or_panic
@@ -1455,7 +1468,8 @@ group do |g|
     assert_true ws.close.nil? && ws.closed? && ws.close_code == 1000, "the client's close over std/http"
     assert_str "yes", ris_ws_text(RisWsHeader), "the caller's header reached the server"
     assert_str "s15 c15", ris_ws_text(RisWsAgreed), "and the server agreed to permessage-deflate"
-    nine = WebSocket.connect("ws://127.0.0.1:#{port}/echo", deflate_level: 9).or_panic
+    nine = WebSocket.new
+    nine.connect("ws://127.0.0.1:#{port}/echo", deflate_level: 9).or_panic
     nine.send_binary(big).or_panic
     echoed = message(nine.receive)
     nine_level = (d = nine.deflate) ? d.level : -1
@@ -1463,37 +1477,45 @@ group do |g|
     nine.close
     ris_ws_text(RisWsHeader)
     ris_ws_text(RisWsAgreed)
-    bare = WebSocket.connect("ws://127.0.0.1:#{port}/echo", deflate: false).or_panic
+    bare = WebSocket.new
+    bare.connect("ws://127.0.0.1:#{port}/echo", deflate: false).or_panic
     bare.send("not compressed").or_panic
     assert_str "text \"not compressed\"", said(bare.receive), "deflate: false at the client"
     assert_true bare.deflate.nil? && ris_ws_text(RisWsAgreed) == "none", "agrees to nothing at either end"
     bare.close
-    declining = WebSocket.connect("ws://127.0.0.1:#{port}/nodeflate").or_panic
+    declining = WebSocket.new
+    declining.connect("ws://127.0.0.1:#{port}/nodeflate").or_panic
     declining.send("offered and declined").or_panic
     assert_str "text \"offered and declined\"", said(declining.receive), "deflate: false at the server"
     assert_true declining.deflate.nil? && ris_ws_text(RisWsAgreed) == "none", "declines the client's offer"
     declining.close
 
     # The server's limit.
-    small = WebSocket.connect("ws://127.0.0.1:#{port}/small").or_panic
+    small = WebSocket.new
+    small.connect("ws://127.0.0.1:#{port}/small").or_panic
     small.send_binary(pattern(1001)).or_panic
     assert_str "end", said(small.receive), "a message past the server's limit"
     assert_true small.close_code == 1009, "1009 from the server, not #{small.close_code}"
     # The server closes.
-    bye = WebSocket.connect("ws://127.0.0.1:#{port}/bye").or_panic
+    bye = WebSocket.new
+    bye.connect("ws://127.0.0.1:#{port}/bye").or_panic
     assert_str "end", said(bye.receive), "the server's close"
     assert_true bye.close_code == 4001 && bye.close_reason == "server done", "the server's code and reason"
     # The server writes first.
-    greet = WebSocket.connect("ws://127.0.0.1:#{port}/greet").or_panic
+    greet = WebSocket.new
+    greet.connect("ws://127.0.0.1:#{port}/greet").or_panic
     assert_str "text \"first\"", said(greet.receive), "a message the server wrote before the client"
     greet.close
 
     # What the client refuses.
-    plain = WebSocket.connect("ws://127.0.0.1:#{port}/plain")
-    assert_true plain.is_a?(HTTPError), "a 200 is not an upgrade"
-    assert_str "HTTP: the server answered 200 OK to an upgrade to websocket, not 101 Switching Protocols", plain.as(HTTPError).message, "the 200's error"
-    assert_str "WebSocket: not a ws:// or wss:// URL: \"http://127.0.0.1/\"", WebSocket.connect("http://127.0.0.1/").as(WebSocketError).message, "http"
-    upper = WebSocket.connect("WS://127.0.0.1:#{port}/echo").or_panic
+    plain = WebSocket.new
+    plain_result = plain.connect("ws://127.0.0.1:#{port}/plain")
+    assert_true plain_result.is_a?(HTTPError), "a 200 is not an upgrade"
+    assert_str "HTTP: the server answered 200 OK to an upgrade to websocket, not 101 Switching Protocols", plain_result.as(HTTPError).message, "the 200's error"
+    invalid = WebSocket.new
+    assert_str "WebSocket: not a ws:// or wss:// URL: \"http://127.0.0.1/\"", invalid.connect("http://127.0.0.1/").as(WebSocketError).message, "http"
+    upper = WebSocket.new
+    upper.connect("WS://127.0.0.1:#{port}/echo").or_panic
     upper.close
 
     # A raw handshake with a frame in the same write: the server reads
@@ -1542,15 +1564,18 @@ group do |g|
   end
   g.spawn do
     proxy = "http://gate:s3cret@127.0.0.1:#{proxy_port}"
-    ws = WebSocket.connect("ws://127.0.0.1:#{echo_port}/through", proxy: proxy).or_panic
+    ws = WebSocket.new
+    ws.connect("ws://127.0.0.1:#{echo_port}/through", proxy: proxy).or_panic
     ws.send("through the tunnel").or_panic
     assert_str "text \"through the tunnel\"", said(ws.receive), "an echo through the proxy"
     assert_str "CONNECT 127.0.0.1:#{echo_port} HTTP/1.1 auth=ok", ris_ws_text(RisWsProxy), "the handshake through the proxy's tunnel"
     assert_str "/through proxy-auth=-", ris_ws_text(RisWsOrigin), "the credential at the proxy, and not at the server"
     ws.close
-    refused = WebSocket.connect("ws://127.0.0.1:#{echo_port}/again", proxy: "127.0.0.1:#{proxy_port}")
-    assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} answered 407 Proxy Authentication Required to CONNECT 127.0.0.1:#{echo_port}", refused.is_a?(HTTPError) ? refused.message : "answered", "a proxy that wants a credential, named"
-    stop = WebSocket.connect("ws://127.0.0.1:#{echo_port}/stop", proxy: proxy).or_panic
+    refused = WebSocket.new
+    refusal = refused.connect("ws://127.0.0.1:#{echo_port}/again", proxy: "127.0.0.1:#{proxy_port}")
+    assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} answered 407 Proxy Authentication Required to CONNECT 127.0.0.1:#{echo_port}", refusal.is_a?(HTTPError) ? refusal.message : "answered", "a proxy that wants a credential, named"
+    stop = WebSocket.new
+    stop.connect("ws://127.0.0.1:#{echo_port}/stop", proxy: proxy).or_panic
     stop.send("stop").or_panic
     assert_str "end", said(stop.receive), "the server's close on stop, through the proxy"
     proxying.cancel

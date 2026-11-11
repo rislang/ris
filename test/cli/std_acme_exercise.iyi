@@ -297,10 +297,15 @@ end
 class RisAcmeScriptHandler
   @script : Script
   @tls : TlsServerConfig
+  @identity : TlsIdentity
 
   def initialize(config : {String, String})
     @script = Script.new(ris_heap_text(config[0]), ris_heap_text(config[1]))
-    @tls = TlsServerConfig.from_pem(LEAF_PEM, KEY_PEM).or_panic
+    identity = TlsIdentity.new(LEAF_PEM, KEY_PEM)
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    config = TlsServerConfig.new(identity)
+    @tls = config
   end
 
   def listening(port : Int32) : Nil
@@ -351,8 +356,9 @@ class RisAcmeChallengeHandler
 end
 
 import std/text
+import std/tuple
 
-import std/acme::{AcmeClient, AcmeJws, AcmeError, AcmeHttp01, AcmeTlsAlpn01, AcmeOrder, AcmeAuthorization, AcmeChallenge}
+import std/acme::{AcmeClient, AcmeJws, AcmeError, AcmeHttp01, AcmeTlsAlpn01, RisAcmeTlsIdentity, AcmeOrder, AcmeAuthorization, AcmeChallenge}
 import std/x509::{RisCertificateStore, X509, X509Error, SigningKey, Certificate}
 import std/rsa::{RsaPublicKey, RsaPrivateKey, RsaHash}
 import std/ecdsa::{EcdsaPublicKey, EcdsaCurve, EcdsaHash}
@@ -362,7 +368,7 @@ import std/curve25519::{Ed25519PublicKey}
 import std/asn1::{Der, DerValue, Asn1Error}
 import std/http::{HTTP, HTTPClient, Incoming, Outgoing, Field, Response, Server}
 import std/socket::{IyiSocket}
-import std/tls::{TlsServer, TlsServerConfig, TlsConfig, TlsError}
+import std/tls::{TlsIdentity, TlsServer, TlsServerConfig, TlsConfig, TlsError}
 import std/json::{JSON, Any}
 import std/base64::{Base64}
 import std/digest::{SHA256}
@@ -415,13 +421,14 @@ end
 
 # A DER INTEGER of a big-endian number, for the Ecdsa-Sig-Value a raw
 # signature is checked as.
-def der_integer(magnitude : Array(UInt8)) : Array(UInt8)
+def der_integer(magnitude : Array::View(UInt8)) : Array(UInt8)
   at = 0
   while at < magnitude.size - 1 && magnitude[at] == 0_u8
     at = at + 1
   end
-  body = magnitude[at, magnitude.size - at]
-  body = [0_u8] + body if body[0] >= 0x80_u8
+  body = Array(UInt8).new(magnitude.size + 1)
+  body << 0_u8 if magnitude[at] >= 0x80_u8
+  (at...magnitude.size).each { |i| body << magnitude[i] }
   [2_u8, body.size.to_u8] + body
 end
 
@@ -577,14 +584,14 @@ def pure_checks : Nil
   jws = AcmeJws.sign(ed, "{\"alg\":\"EdDSA\"}", "Example of Ed25519 signing")
   check jws == "{\"protected\":\"eyJhbGciOiJFZERTQSJ9\",\"payload\":\"RXhhbXBsZSBvZiBFZDI1NTE5IHNpZ25pbmc\",\"signature\":\"#{ED_SIGNATURE}\"}", "RFC 8037 A.4's EdDSA JWS, byte for byte"
   header = JSON.parse(AcmeJws.header(a3, "nonce-1", "https://ca.example/acct", nil)).as_h
-  check header.has_key?("jwk") && !header.has_key?("kid") && field_s(header, "nonce") == "nonce-1" && field_s(header, "url") == "https://ca.example/acct", "a header without a kid carries the jwk, the nonce and the url"
+  check header.has_key?("jwk") && !header.has_key?("kid") && Bench::StdAcmeExercise.field_s(header, "nonce") == "nonce-1" && Bench::StdAcmeExercise.field_s(header, "url") == "https://ca.example/acct", "a header without a kid carries the jwk, the nonce and the url"
   header = JSON.parse(AcmeJws.header(a3, nil, "https://ca.example/key-change", "https://ca.example/acct/1")).as_h
-  check !header.has_key?("jwk") && field_s(header, "kid") == "https://ca.example/acct/1" && !header.has_key?("nonce"), "a header with a kid carries it and no jwk; no nonce when none is given"
+  check !header.has_key?("jwk") && Bench::StdAcmeExercise.field_s(header, "kid") == "https://ca.example/acct/1" && !header.has_key?("nonce"), "a header with a kid carries it and no jwk; no nonce when none is given"
   puts "  RS256 and EdDSA byte for byte, ES256 and ES384 as R || S, and the headers' jwk and kid"
 
   puts "\n== certificate requests (PKCS #10) std/x509 writes"
   names = ["www.iyi-acme.example", "iyi-acme.example"]
-  [{"P-256", SigningKey.p256}, {"P-384", SigningKey.p384}, {"RSA-2048", rs}, {"Ed25519", ed}].each do |pair|
+  { {"P-256", SigningKey.p256}, {"P-384", SigningKey.p384}, {"RSA-2048", rs}, {"Ed25519", ed} }.each do |pair|
     der = X509.request(pair[1], names).or_panic
     asked, verified, cn = request_fields(der)
     check verified, "#{pair[0]}: the CSR's signature verifies under its own key"
@@ -614,7 +621,10 @@ def pure_checks : Nil
     check found[1] == SHA256.hash_bytes(authorization), "the acmeIdentifier extension holds the key authorization's SHA-256"
   end
   check certificate.unhandled_critical == [AcmeTlsAlpn01::ACME_IDENTIFIER], "std/x509 reads the extension as critical and not its own"
-  config = AcmeTlsAlpn01.config(domain, authorization).or_panic
+  prepared = RisAcmeTlsIdentity.new(domain, authorization)
+  raise prepared.error.to_s if prepared.error
+  config = TlsServerConfig.new(prepared.identity)
+  config.alpn = [AcmeTlsAlpn01::PROTOCOL]
   check config.alpn == ["acme-tls/1"], "the tls-alpn-01 config speaks acme-tls/1 alone"
   check config.leaf.dns_names == [domain], "the tls-alpn-01 config shows the certificate for #{domain}"
   puts "  one dNSName, self-signed, the critical extension with the key authorization's digest, a config for acme-tls/1"
@@ -673,13 +683,14 @@ KEY_PEM = "-----BEGIN PRIVATE KEY-----\n" \
 
 # A request whose JWS checked: its protected header, payload, the
 # account's URL (from kid; "" for a jwk) and the key that signed.
+@[OnTape]
 struct Signed
-  getter header : Hash(String, Any)
+  getter header : Std::Json::RisJsonFields
   getter payload : String
   getter account : String
   getter key : EcdsaPublicKey
 
-  def initialize(@header : Hash(String, Any), @payload : String, @account : String, @key : EcdsaPublicKey)
+  def initialize(@header : Std::Json::RisJsonFields, @payload : String, @account : String, @key : EcdsaPublicKey)
   end
 end
 
@@ -755,7 +766,7 @@ class Script
     head = fields["protected"].as_s
     body = fields["payload"].as_s
     header = JSON.parse(Base64.decode(head)).as_h
-    nonce_text = field_s(header, "nonce")
+    nonce_text = Bench::StdAcmeExercise.field_s(header, "nonce")
     unless @nonces.has_key?(nonce_text)
       @unknown = @unknown + 1
       return problem(400, "badNonce", "a nonce this server did not issue")
@@ -766,7 +777,7 @@ class Script
     end
     @nonces[nonce_text] = true
     @retried_with_sent = true if nonce_text == @bad_nonce_value
-    unless field_s(header, "url") == @base + req.path
+    unless Bench::StdAcmeExercise.field_s(header, "url") == @base + req.path
       @wrong_urls = @wrong_urls + 1
       return problem(401, "unauthorized", "the url is not the one posted to")
     end
@@ -822,7 +833,7 @@ class Script
     case parts[1]
     when "new-acct"
       payload = JSON.parse(signed.payload).as_h
-      @terms = field_b(payload, "termsOfServiceAgreed")
+      @terms = Bench::StdAcmeExercise.field_b(payload, "termsOfServiceAgreed")
       plain = false
       if (contact = payload["contact"]?) && (items = contact.as_a?)
         plain = items.any? { |x| x.as_s? == "mailto:plain@iyi-acme.example" }
@@ -934,7 +945,7 @@ class Script
     return problem(400, "malformed", "the inner JWS carries no jwk") unless jwk
     return problem(400, "malformed", "the inner JWS carries a nonce") if header["nonce"]?
     return problem(400, "malformed", "the inner JWS carries a kid") if header["kid"]?
-    return problem(400, "malformed", "the inner url differs") unless field_s(header, "url") == "#{@base}/key-change"
+    return problem(400, "malformed", "the inner url differs") unless Bench::StdAcmeExercise.field_s(header, "url") == "#{@base}/key-change"
     key = key_of(jwk)
     signature = unb64(inner["signature"].as_s)
     return problem(400, "malformed", "the inner signature is not R || S") unless signature.size == 64
@@ -950,14 +961,14 @@ class Script
 end
 
 # A string field of a JSON object, "" when it is missing or not a string.
-def field_s(object : Hash(String, Any), key : String) : String
+pub def field_s(object : Std::Json::RisJsonFields, key : String) : String
   value = object[key]?
   return "" unless value
   value.as_s? || ""
 end
 
 # A boolean field, false when it is missing or not a boolean.
-def field_b(object : Hash(String, Any), key : String) : Bool
+pub def field_b(object : Std::Json::RisJsonFields, key : String) : Bool
   value = object[key]?
   return false unless value
   value.as_bool? || false
@@ -980,19 +991,22 @@ end
 
 # A client whose `https://` requests trust *pem*'s roots alone, held in
 # the caller's *store*.
-def trusting(store : RisCertificateStore, pem : String) : HTTPClient
-  trust = TlsConfig.new
+def trusting(trust : TlsConfig, store : RisCertificateStore, pem : String) : Nil
   trust.roots = pem_certs(store, pem)
   trust.alpn = ["http/1.1"]
-  HTTPClient.new(tls: trust)
 end
 
 def scripted(script : RisAcmeView, certificate_pem : String) : Nil
   store = RisCertificateStore.new
-  http = trusting(store, ROOT_PEM)
+  trust = TlsConfig.new
+  trusting(trust, store, ROOT_PEM)
+  http = HTTPClient.new(tls: trust)
   defer http.close
   account = SigningKey.p256
-  client = AcmeClient.new("#{script.base}/dir", account, 5000, http: http).or_panic
+  client = AcmeClient.new("#{script.base}/dir", account, 5000, http: http)
+  if problem = client.error
+    raise problem.message
+  end
   check client.directory.terms_of_service == "https://iyi-acme.example/terms", "the directory's termsOfService read"
   client.poll_ms = 500
   registered = client.register(["mailto:admin@iyi-acme.example"], terms_agreed: true)
@@ -1082,13 +1096,19 @@ def scripted(script : RisAcmeView, certificate_pem : String) : Nil
   plain = script.plain
   asked = script.requests
   bare = AcmeClient.new("#{plain}/dir", SigningKey.p256, 5000, http: http)
-  check bare.is_a?(AcmeError) && bare.message.includes?("\"#{plain}/dir\" is not https://") && script.requests == asked,
+  bare_error = bare.error
+  check bare_error.is_a?(AcmeError) && bare_error.message.includes?("\"#{plain}/dir\" is not https://") && script.requests == asked,
     "an http:// directory is refused by name, nothing sent to it: #{bare}"
   named = AcmeClient.new("#{script.base}/dir-plain", SigningKey.p256, 5000, http: http)
-  check named.is_a?(AcmeError) && named.message.includes?("newNonce \"#{plain}/nonce\" is not https://"), "a directory naming an http:// URL is refused by name: #{named}"
+  named_error = named.error
+  check named_error.is_a?(AcmeError) && named_error.message.includes?("newNonce \"#{plain}/nonce\" is not https://"), "a directory naming an http:// URL is refused by name: #{named}"
   kept = AcmeClient.new("#{script.base}/dir", SigningKey.p256, 5000, account_url: "#{plain}/acct/1", http: http)
-  check kept.is_a?(AcmeError) && kept.message.includes?("\"#{plain}/acct/1\" is not https://"), "an http:// account URL given is refused by name: #{kept}"
-  fresh = AcmeClient.new("#{script.base}/dir", SigningKey.p256, 5000, http: http).or_panic
+  kept_error = kept.error
+  check kept_error.is_a?(AcmeError) && kept_error.message.includes?("\"#{plain}/acct/1\" is not https://"), "an http:// account URL given is refused by name: #{kept}"
+  fresh = AcmeClient.new("#{script.base}/dir", SigningKey.p256, 5000, http: http)
+  if problem = fresh.error
+    raise problem.message
+  end
   account = fresh.register(["mailto:plain@iyi-acme.example"], terms_agreed: true)
   check account.is_a?(AcmeError) && account.message.includes?("Location \"#{plain}/acct/") && fresh.account_url.nil?, "an http:// account Location is refused by name: #{account}"
   located = client.new_order(["f.example"])
@@ -1098,6 +1118,15 @@ def scripted(script : RisAcmeView, certificate_pem : String) : Nil
   fetched = client.authorization(carried.authorizations[0])
   check fetched.is_a?(AcmeError) && fetched.message.includes?("\"#{plain}/authz/5\" is not https://") && script.requests == asked,
     "an http:// URL an order carries is refused by name, nothing sent to it: #{fetched}"
+end
+
+@[OnTape]
+struct RisAcmeScriptRun
+  getter base : String
+  getter pem : String
+
+  def initialize(@base, @pem)
+  end
 end
 
 def scripted_checks : Nil
@@ -1112,15 +1141,22 @@ def scripted_checks : Nil
   end
   pem = "-----BEGIN CERTIFICATE-----\n#{lines.join("\n")}\n-----END CERTIFICATE-----\n"
   listener = RisExerciseServer.port
-  base = "https://localhost:#{listener}"
+  scripted_base = "https://localhost:#{listener}"
+  2.times do
+    raise "script queue full" unless RisBoard.post(RisAcmeScriptRun.new(scripted_base, pem))
+  end
   group do |g|
     g.spawn do
-      RisExerciseServer.answer(listener, {base.as_tape, pem.as_tape}, RisAcmeScriptHandler, max_connections: 1)
+      run = RisBoard.take(RisAcmeScriptRun)
+      raise "script cancelled" if run.is_a?(Cancelled)
+      RisExerciseServer.answer(listener, {run.base, run.pem}, RisAcmeScriptHandler, max_connections: 1)
       0
     end
     RisExerciseServer.wait(RisAcmeScriptHandler)
     task = g.spawn do
-      scripted(RisAcmeView.new(base), pem)
+      run = RisBoard.take(RisAcmeScriptRun)
+      raise "script cancelled" if run.is_a?(Cancelled)
+      scripted(RisAcmeView.new(run.base), run.pem)
       "held"
     end
     got = task.value
@@ -1138,11 +1174,11 @@ end
 
 def write_artifacts(dir : String) : Nil
   names = ["www.iyi-acme.example", "iyi-acme.example"]
-  [{"p256", SigningKey.p256}, {"p384", SigningKey.p384}, {"rsa", a2_key}, {"ed25519", ed_key}].each do |pair|
+  { {"p256", SigningKey.p256}, {"p384", SigningKey.p384}, {"rsa", a2_key}, {"ed25519", ed_key} }.each do |pair|
     File.write("#{dir}/csr-#{pair[0]}.der", text(X509.request(pair[1], names).or_panic))
   end
   lines = [] of String
-  [{"ES256", a3_key}, {"ES384", SigningKey.p384}, {"RS256", a2_key}, {"EdDSA", ed_key}].each do |pair|
+  { {"ES256", a3_key}, {"ES384", SigningKey.p384}, {"RS256", a2_key}, {"EdDSA", ed_key} }.each do |pair|
     jws = AcmeJws.sign(pair[1], "{\"alg\":\"#{pair[0]}\"}", PAYLOAD)
     head, body, signature = jws_parts(jws)
     spki = X509.request(pair[1], ["x.example"]).or_panic
@@ -1158,7 +1194,10 @@ end
 
 def alpn_serve(dir : String) : Nil
   authorization = "token-alpn.#{AcmeJws.thumbprint(a3_key.public_key)}"
-  config = AcmeTlsAlpn01.config("alpn.iyi-acme.example", authorization).or_panic
+  prepared = RisAcmeTlsIdentity.new("alpn.iyi-acme.example", authorization)
+  raise prepared.error.to_s if prepared.error
+  config = TlsServerConfig.new(prepared.identity)
+  config.alpn = [AcmeTlsAlpn01::PROTOCOL]
   listener = IyiSocket.listen("127.0.0.1", 0)
   File.write("#{dir}/port", listener.local_port.to_s)
   socket = listener.accept
@@ -1167,9 +1206,9 @@ def alpn_serve(dir : String) : Nil
     return
   end
   socket.read_timeout_ms = 15000
-  conn = TlsServer.over(socket, config, 10000)
-  if conn.is_a?(TlsError)
-    puts "refused: #{conn.message}"
+  conn = TlsServer.new(socket, config)
+  if problem = conn.accept(10000)
+    puts "refused: #{problem.message}"
   else
     puts "alpn #{conn.alpn_protocol || "none"}"
     conn.close
@@ -1236,16 +1275,17 @@ end
 
 def pebble(args : Array(String)) : Nil
   directory, minica, management, challtestsrv, http_port, tls_port, folder, reject = args[1], args[2], args[3], args[4], args[5].to_i, args[6].to_i, args[7], args[8].to_i
-  rsa_pems = args.size > 10 ? [args[9], args[10]] : [] of String
   pem_store_3 = RisCertificateStore.new
-  management_client = trusting(pem_store_3, File.read(minica))
+  management_trust = TlsConfig.new
+  trusting(management_trust, pem_store_3, File.read(minica))
+  management_client = HTTPClient.new(tls: management_trust)
   root = management_client.get("#{management}/roots/0")
   management_client.close
   check root.is_a?(Response) && root.status == 200, "Pebble's root read from its management interface: #{root}"
   root_pem = root.as(Response).body
   File.write("#{folder}/root.pem", root_pem)
   pem_store_4 = RisCertificateStore.new
-  roots = pem_certs(pem_store_4, root_pem)
+  held_root_pem = root_pem.copy_to(Program.tape)
   retries = 0
   group do |g|
     g.spawn do
@@ -1256,7 +1296,10 @@ def pebble(args : Array(String)) : Nil
     g.spawn do
       tls_listener = IyiSocket.listen("127.0.0.1", tls_port)
       defer tls_listener.close
-      current = nil.as(TlsServerConfig?)
+      current_identity = TlsIdentity.new
+      current = TlsServerConfig.new(current_identity)
+      current.alpn = [AcmeTlsAlpn01::PROTOCOL]
+      has_current = false
       while true
         socket = tls_listener.accept
         break unless socket.is_a?(IyiSocket)
@@ -1265,12 +1308,18 @@ def pebble(args : Array(String)) : Nil
           break if update.is_a?(Cancelled)
           alpn_update = update[0]
           break unless alpn_update
-          current = AcmeTlsAlpn01.config(ris_heap_text(alpn_update.domain), ris_heap_text(alpn_update.authorization)).or_panic
+          prepared = RisAcmeTlsIdentity.new(alpn_update.domain, alpn_update.authorization)
+          raise prepared.error.to_s if prepared.error
+          if problem = current_identity.read_identity(prepared.identity)
+            raise problem.message
+          end
+          has_current = true
         end
-        if alpn_config = current
+        if has_current
+          alpn_config = current
           socket.read_timeout_ms = 10000
-          conn = TlsServer.over(socket, alpn_config, 10000)
-          if conn.is_a?(TlsServer)
+          conn = TlsServer.new(socket, alpn_config)
+          unless conn.accept(10000)
             if conn.alpn_protocol == AcmeTlsAlpn01::PROTOCOL
               raise "handshake queue full" unless RisBoard.post(RisAcmeHandshake.new)
             end
@@ -1285,6 +1334,10 @@ def pebble(args : Array(String)) : Nil
       0
     end
     task = g.spawn do
+      task_args = Program.args
+      rsa_pems = task_args.size > 10 ? [task_args[9], task_args[10]] : [] of String
+      root_store = RisCertificateStore.new
+      roots = pem_certs(root_store, held_root_pem)
       run_pebble(directory, minica, challtestsrv, folder, roots, RisAcmeResponder.new, rsa_pems)
     end
     got = task.value
@@ -1307,11 +1360,15 @@ def run_pebble(directory : String, minica : String, challtestsrv : String, folde
                rsa_pems : Array(String)) : Int32
   retries = 0
   store = RisCertificateStore.new
-  http = trusting(store, File.read(minica))
+  trust = TlsConfig.new
+  trusting(trust, store, File.read(minica))
+  http = HTTPClient.new(tls: trust)
   defer http.close
   acme = AcmeClient.new(directory, SigningKey.p256, http: http)
-  check acme.is_a?(AcmeClient), "Pebble's directory read over HTTPS, its certificate checked against Pebble's test root: #{acme}"
-  acme = acme.as(AcmeClient)
+  if problem = acme.error
+    raise problem.message
+  end
+  check acme.error.nil?, "Pebble's directory read over HTTPS, its certificate checked against Pebble's test root: #{acme}"
   account = acme.register(["mailto:acme@iyi-acme.example"], terms_agreed: true)
   check account.is_a?(String), "an ES256 account made at Pebble: #{account}"
   puts "  an ES256 account: #{account}"
@@ -1324,7 +1381,10 @@ def run_pebble(directory : String, minica : String, challtestsrv : String, folde
   puts "  a blocked name refused by its problem document: #{blocked}"
   retries = retries + acme.bad_nonce_retries
 
-  wide = AcmeClient.new(directory, SigningKey.p384, http: http).or_panic
+  wide = AcmeClient.new(directory, SigningKey.p384, http: http)
+  if problem = wide.error
+    raise problem.message
+  end
   check wide.register(terms_agreed: true).is_a?(String), "an ES384 account made at Pebble"
   domain_key = rsa_pems.empty? ? SigningKey.p256 : SigningKey.from_pem(File.read(rsa_pems[1])).or_panic
   obtain(wide, "es384.iyi-acme.example", "dns-01", domain_key, responder, challtestsrv, roots, folder)
@@ -1333,20 +1393,29 @@ def run_pebble(directory : String, minica : String, challtestsrv : String, folde
   if rsa_pems.empty?
     puts "  no RSA keys given, so RS256 and the rollover from it go unasked"
   else
-    rsa = AcmeClient.new(directory, SigningKey.from_pem(File.read(rsa_pems[0])).or_panic, http: http).or_panic
+    rsa = AcmeClient.new(directory, SigningKey.from_pem(File.read(rsa_pems[0])).or_panic, http: http)
+    if problem = rsa.error
+      raise problem.message
+    end
     made = rsa.register(terms_agreed: true)
     check made.is_a?(String), "an RS256 account made at Pebble: #{made}"
     rolled = rsa.roll_key(SigningKey.p256)
     check rolled.nil?, "the RS256 account's key rolled over to P-256 at Pebble: #{rolled}"
     obtain(rsa, "rollover.iyi-acme.example", "dns-01", SigningKey.p256, responder, challtestsrv, roots, folder)
-    again = AcmeClient.new(directory, SigningKey.from_pem(File.read(rsa_pems[0])).or_panic, http: http).or_panic
+    again = AcmeClient.new(directory, SigningKey.from_pem(File.read(rsa_pems[0])).or_panic, http: http)
+    if problem = again.error
+      raise problem.message
+    end
     gone = again.register(only_existing: true)
     check gone.is_a?(AcmeError) && gone.problem_type == "urn:ietf:params:acme:error:accountDoesNotExist", "after the rollover the old key finds no account: #{gone}"
     puts "  an RS256 account rolled over to P-256, and its old key refused: #{gone}"
     retries = retries + rsa.bad_nonce_retries + again.bad_nonce_retries
   end
 
-  ed = AcmeClient.new(directory, ed_key, http: http).or_panic
+  ed = AcmeClient.new(directory, ed_key, http: http)
+  if problem = ed.error
+    raise problem.message
+  end
   refused = ed.register(terms_agreed: true)
   check refused.is_a?(AcmeError) && refused.problem_type == "urn:ietf:params:acme:error:badSignatureAlgorithm", "Pebble refuses EdDSA by its problem document: #{refused}"
   puts "  EdDSA refused, as Pebble takes RS256 and ECDSA alone: #{refused}"

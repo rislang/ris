@@ -86,10 +86,12 @@ class ::IyiIO
   end
 
   # Every remaining line, `chomp` dropping the line ends.
-  def lines(chomp : Bool = false) : Array(String)
+  def lines(texts : String::Builder, chomp : Bool = false) : Array(String)
     result = [] of String
     while line = read_line(chomp)
-      result << line
+      from = texts.bytesize
+      texts << line
+      result << texts.finish[from, line.bytesize]
     end
     result
   end
