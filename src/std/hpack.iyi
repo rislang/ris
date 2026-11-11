@@ -98,17 +98,23 @@ pub struct TapeHeaders
   @capacity : Int32
   # The texts of decoded fields, copied here: they live as the list does.
   @texts : String::Builder
+  @kept : Hash(String, String)
 
   def initialize(@capacity : Int32)
     @fields = Array(HeaderField).new(@capacity)
     @texts = String::Builder.new(@capacity * 32 + 64)
+    @kept = Hash(String, String).new
   end
 
   # *text* copied into this list's own texts: a view of them.
   def keep(text : String) : String
-    from = @texts.bytesize
-    @texts << text
-    @texts.finish[from, text.bytesize]
+    unless @kept[text]?
+      from = @texts.bytesize
+      @texts << text
+      held = @texts.finish[from, text.bytesize]
+      @kept[held] = held
+    end
+    @kept[text]
   end
 
   def size : Int32
@@ -128,7 +134,6 @@ pub struct TapeHeaders
   def each(& : HeaderField -> Nil) : Nil
     @fields.each { |field| yield field }
   end
-
 end
 
 # ---------------------------------------------------------------------------
@@ -274,6 +279,7 @@ pub class DynamicTable
   getter max_size : Int32
   getter settings_max_size : Int32
   getter size : Int32
+
   # An entry's runs in `@bytes`, kept as offsets and sizes: a flat value.
   private struct StoredField
     getter name_at : Int32
@@ -318,7 +324,6 @@ pub class DynamicTable
   def entries : Array(HeaderField)
     @entries.map { |entry| view_of(entry) }
   end
-
 
   # A table is made within the limit it is resized within: made above it,
   # an encoder's table outgrew the peer's, and an Encoder made with 8192
@@ -374,8 +379,7 @@ pub class DynamicTable
     end
     # Bytes are copied at the connection's owning store, not retained
     # from the request that supplied them. Eviction returns both runs.
-    indexing = never_indexed ? IndexingMode::NeverIndexed :
-      IndexingMode::Incremental
+    indexing = never_indexed ? IndexingMode::NeverIndexed : IndexingMode::Incremental
     field = StoredField.new(@bytes.store(name), @bytes.store(value), indexing)
     @entries << field
     @entries.__rotate_slots(-1)

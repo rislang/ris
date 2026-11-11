@@ -21,7 +21,7 @@ def assert_u8(expected : UInt8, actual : UInt8, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}\n  expected #{expected}\n  got      #{actual}" unless expected == actual
 end
 
-def assert_bytes(expected : Array(UInt8), actual : Std::Slice::Bytes, msg : String) : Nil
+def assert_bytes(expected : Array(UInt8), actual : Array(UInt8) | String, msg : String) : Nil
   if expected.size != actual.size
     raise "ASSERTION FAILED: #{msg}\n  expected size #{expected.size}, got #{actual.size}"
   end
@@ -34,8 +34,20 @@ def assert_bytes(expected : Array(UInt8), actual : Std::Slice::Bytes, msg : Stri
   end
 end
 
-import std/slice::{Bytes}
-import std/hpack::{HeaderField, IndexingMode, StaticTable, DynamicTable, Table, Integer, Huffman, Encoder, Decoder, HpackError}
+import std/hpack::{Bytes}
+import std/hpack::{HeaderField, IndexingMode, StaticTable, DynamicTable, Table, Integer, Huffman, Encoder, Decoder, HpackError, TapeHeaders}
+
+# Binary input for the decoder; the caller owns decoded headers separately.
+def put_wire(bytes : Array(UInt8), into : String::Builder) : Nil
+  bytes.each { |byte| into.write_byte(byte) }
+end
+
+def wire_text(bytes : Array(UInt8) | String) : String
+  return bytes if bytes.is_a?(String)
+  text = ""
+  put_wire(bytes, text)
+  text
+end
 
 # ===========================================================================
 # 1. RFC 7541 Integer Codec
@@ -167,7 +179,10 @@ expected_c21 = [
 ]
 assert_bytes(expected_c21, wire_c21, "RFC 7541 C.2.1 wire")
 dec_c21 = Decoder.new
-res_c21 = dec_c21.decode(wire_c21)
+decoded_1_wire = wire_text(wire_c21)
+decoded_1_reader = dec_c21
+decoded_1_fields = TapeHeaders.new(decoded_1_reader.capacity(decoded_1_wire))
+res_c21 = (decoded_1_reader.decode(decoded_1_wire, decoded_1_fields) || decoded_1_fields)
 raise "C.2.1 decode failed" if res_c21.is_a?(HpackError)
 assert_int(1, res_c21.size, "C.2.1 header count")
 assert_str("custom-key", res_c21[0].name, "C.2.1 name")
@@ -182,7 +197,10 @@ wire_c22 = [
 ]
 bytes_c22 = Bytes.new(wire_c22.size) { |i| wire_c22[i] }
 dec_c22 = Decoder.new
-res_c22 = dec_c22.decode(bytes_c22)
+decoded_2_wire = wire_text(bytes_c22)
+decoded_2_reader = dec_c22
+decoded_2_fields = TapeHeaders.new(decoded_2_reader.capacity(decoded_2_wire))
+res_c22 = (decoded_2_reader.decode(decoded_2_wire, decoded_2_fields) || decoded_2_fields)
 raise "C.2.2 decode failed" if res_c22.is_a?(HpackError)
 assert_int(1, res_c22.size, "C.2.2 count")
 assert_str(":path", res_c22[0].name, "C.2.2 name")
@@ -198,7 +216,10 @@ wire_c23 = [
 ]
 bytes_c23 = Bytes.new(wire_c23.size) { |i| wire_c23[i] }
 dec_c23 = Decoder.new
-res_c23 = dec_c23.decode(bytes_c23)
+decoded_3_wire = wire_text(bytes_c23)
+decoded_3_reader = dec_c23
+decoded_3_fields = TapeHeaders.new(decoded_3_reader.capacity(decoded_3_wire))
+res_c23 = (decoded_3_reader.decode(decoded_3_wire, decoded_3_fields) || decoded_3_fields)
 raise "C.2.3 decode failed" if res_c23.is_a?(HpackError)
 assert_int(1, res_c23.size, "C.2.3 count")
 assert_str("password", res_c23[0].name, "C.2.3 name")
@@ -209,7 +230,10 @@ assert_true(res_c23[0].never_indexed, "C.2.3 never_indexed helper")
 # Appendix C.2.4: Indexed Header Field (:method: GET)
 wire_c24 = Bytes.new(1) { 0x82_u8 }
 dec_c24 = Decoder.new
-res_c24 = dec_c24.decode(wire_c24)
+decoded_4_wire = wire_text(wire_c24)
+decoded_4_reader = dec_c24
+decoded_4_fields = TapeHeaders.new(decoded_4_reader.capacity(decoded_4_wire))
+res_c24 = (decoded_4_reader.decode(decoded_4_wire, decoded_4_fields) || decoded_4_fields)
 raise "C.2.4 decode failed" if res_c24.is_a?(HpackError)
 assert_int(1, res_c24.size, "C.2.4 count")
 assert_str(":method", res_c24[0].name, "C.2.4 name")
@@ -232,7 +256,10 @@ expected_c31 = [
   0x77_u8, 0x77_u8, 0x77_u8, 0x2e_u8, 0x65_u8, 0x78_u8, 0x61_u8, 0x6d_u8, 0x70_u8, 0x6c_u8, 0x65_u8, 0x2e_u8, 0x63_u8, 0x6f_u8, 0x6d_u8,
 ]
 assert_bytes(expected_c31, w_c31, "C.3.1 encode")
-d_c31 = dec_seq_c3.decode(w_c31)
+decoded_5_wire = wire_text(w_c31)
+decoded_5_reader = dec_seq_c3
+decoded_5_fields = TapeHeaders.new(decoded_5_reader.capacity(decoded_5_wire))
+d_c31 = (decoded_5_reader.decode(decoded_5_wire, decoded_5_fields) || decoded_5_fields)
 raise "C.3.1 decode failed" if d_c31.is_a?(HpackError)
 assert_int(4, d_c31.size, "C.3.1 count")
 assert_int(1, dec_seq_c3.dynamic_table.length, "C.3.1 dynamic entries")
@@ -252,7 +279,10 @@ expected_c32 = [
   0x6e_u8, 0x6f_u8, 0x2d_u8, 0x63_u8, 0x61_u8, 0x63_u8, 0x68_u8, 0x65_u8,
 ]
 assert_bytes(expected_c32, w_c32, "C.3.2 encode")
-d_c32 = dec_seq_c3.decode(w_c32)
+decoded_6_wire = wire_text(w_c32)
+decoded_6_reader = dec_seq_c3
+decoded_6_fields = TapeHeaders.new(decoded_6_reader.capacity(decoded_6_wire))
+d_c32 = (decoded_6_reader.decode(decoded_6_wire, decoded_6_fields) || decoded_6_fields)
 raise "C.3.2 decode failed" if d_c32.is_a?(HpackError)
 assert_int(5, d_c32.size, "C.3.2 count")
 assert_int(2, dec_seq_c3.dynamic_table.length, "C.3.2 dynamic entries")
@@ -274,7 +304,10 @@ expected_c33 = [
   0x63_u8, 0x75_u8, 0x73_u8, 0x74_u8, 0x6f_u8, 0x6d_u8, 0x2d_u8, 0x76_u8, 0x61_u8, 0x6c_u8, 0x75_u8, 0x65_u8,
 ]
 assert_bytes(expected_c33, w_c33, "C.3.3 encode")
-d_c33 = dec_seq_c3.decode(w_c33)
+decoded_7_wire = wire_text(w_c33)
+decoded_7_reader = dec_seq_c3
+decoded_7_fields = TapeHeaders.new(decoded_7_reader.capacity(decoded_7_wire))
+d_c33 = (decoded_7_reader.decode(decoded_7_wire, decoded_7_fields) || decoded_7_fields)
 raise "C.3.3 decode failed" if d_c33.is_a?(HpackError)
 assert_int(5, d_c33.size, "C.3.3 count")
 assert_int(3, dec_seq_c3.dynamic_table.length, "C.3.3 dynamic entries")
@@ -291,7 +324,10 @@ expected_c41 = [
   0xf1_u8, 0xe3_u8, 0xc2_u8, 0xe5_u8, 0xf2_u8, 0x3a_u8, 0x6b_u8, 0xa0_u8, 0xab_u8, 0x90_u8, 0xf4_u8, 0xff_u8,
 ]
 assert_bytes(expected_c41, w_c41, "C.4.1 encode")
-d_c41 = dec_seq_c4.decode(w_c41)
+decoded_8_wire = wire_text(w_c41)
+decoded_8_reader = dec_seq_c4
+decoded_8_fields = TapeHeaders.new(decoded_8_reader.capacity(decoded_8_wire))
+d_c41 = (decoded_8_reader.decode(decoded_8_wire, decoded_8_fields) || decoded_8_fields)
 raise "C.4.1 decode failed" if d_c41.is_a?(HpackError)
 assert_int(4, d_c41.size, "C.4.1 count")
 
@@ -302,7 +338,10 @@ expected_c42 = [
   0xa8_u8, 0xeb_u8, 0x10_u8, 0x64_u8, 0x9c_u8, 0xbf_u8,
 ]
 assert_bytes(expected_c42, w_c42, "C.4.2 encode")
-d_c42 = dec_seq_c4.decode(w_c42)
+decoded_9_wire = wire_text(w_c42)
+decoded_9_reader = dec_seq_c4
+decoded_9_fields = TapeHeaders.new(decoded_9_reader.capacity(decoded_9_wire))
+d_c42 = (decoded_9_reader.decode(decoded_9_wire, decoded_9_fields) || decoded_9_fields)
 raise "C.4.2 decode failed" if d_c42.is_a?(HpackError)
 assert_int(5, d_c42.size, "C.4.2 count")
 
@@ -315,7 +354,10 @@ expected_c43 = [
   0x25_u8, 0xa8_u8, 0x49_u8, 0xe9_u8, 0x5b_u8, 0xb8_u8, 0xe8_u8, 0xb4_u8, 0xbf_u8,
 ]
 assert_bytes(expected_c43, w_c43, "C.4.3 encode")
-d_c43 = dec_seq_c4.decode(w_c43)
+decoded_10_wire = wire_text(w_c43)
+decoded_10_reader = dec_seq_c4
+decoded_10_fields = TapeHeaders.new(decoded_10_reader.capacity(decoded_10_wire))
+d_c43 = (decoded_10_reader.decode(decoded_10_wire, decoded_10_fields) || decoded_10_fields)
 raise "C.4.3 decode failed" if d_c43.is_a?(HpackError)
 assert_int(5, d_c43.size, "C.4.3 count")
 
@@ -465,7 +507,10 @@ assert_u8(0x01_u8, wire_ts[2], "table size update byte 2")
 assert_u8(0x88_u8, wire_ts[3], "header follows table size update")
 
 # Decoder receives wire, applies table size update
-res_ts = dec_ts.decode(wire_ts)
+decoded_11_wire = wire_text(wire_ts)
+decoded_11_reader = dec_ts
+decoded_11_fields = TapeHeaders.new(decoded_11_reader.capacity(decoded_11_wire))
+res_ts = (decoded_11_reader.decode(decoded_11_wire, decoded_11_fields) || decoded_11_fields)
 raise "decode table size update failed" if res_ts.is_a?(HpackError)
 assert_int(1, res_ts.size, "decoded header count")
 assert_str(":status", res_ts[0].name, "decoded header name")
@@ -509,7 +554,10 @@ realistic_resp = [
 
   # Request round trip
   w_req1 = enc_r.encode(realistic_req)
-  d_req1 = dec_r.decode(w_req1)
+  decoded_12_wire = wire_text(w_req1)
+  decoded_12_reader = dec_r
+  decoded_12_fields = TapeHeaders.new(decoded_12_reader.capacity(decoded_12_wire))
+  d_req1 = (decoded_12_reader.decode(decoded_12_wire, decoded_12_fields) || decoded_12_fields)
   raise "realistic req decode failed (huff: #{use_huff})" if d_req1.is_a?(HpackError)
   assert_int(realistic_req.size, d_req1.size, "request count matches")
   k = 0
@@ -523,13 +571,19 @@ realistic_resp = [
   # Subsequent identical request on same connection should compress dramatically
   w_req2 = enc_r.encode(realistic_req)
   assert_true(w_req2.size < w_req1.size // 2, "second request is heavily compressed via dynamic table")
-  d_req2 = dec_r.decode(w_req2)
+  decoded_13_wire = wire_text(w_req2)
+  decoded_13_reader = dec_r
+  decoded_13_fields = TapeHeaders.new(decoded_13_reader.capacity(decoded_13_wire))
+  d_req2 = (decoded_13_reader.decode(decoded_13_wire, decoded_13_fields) || decoded_13_fields)
   raise "realistic req2 decode failed" if d_req2.is_a?(HpackError)
   assert_int(realistic_req.size, d_req2.size, "second request count matches")
 
   # Response round trip
   w_resp = enc_r.encode(realistic_resp)
-  d_resp = dec_r.decode(w_resp)
+  decoded_14_wire = wire_text(w_resp)
+  decoded_14_reader = dec_r
+  decoded_14_fields = TapeHeaders.new(decoded_14_reader.capacity(decoded_14_wire))
+  d_resp = (decoded_14_reader.decode(decoded_14_wire, decoded_14_fields) || decoded_14_fields)
   raise "realistic resp decode failed (huff: #{use_huff})" if d_resp.is_a?(HpackError)
   assert_int(realistic_resp.size, d_resp.size, "response count matches")
   k = 0
@@ -551,7 +605,10 @@ puts "\n== decoder refusals on malformed and truncated wire"
 dec_ref = Decoder.new
 
 def assert_refusal(dec : Decoder, payload : Bytes, expected_msg : String, label : String) : Nil
-  res = dec.decode(payload)
+  decoded_15_wire = wire_text(payload)
+  decoded_15_reader = dec
+  decoded_15_fields = TapeHeaders.new(decoded_15_reader.capacity(decoded_15_wire))
+  res = (decoded_15_reader.decode(decoded_15_wire, decoded_15_fields) || decoded_15_fields)
   if res.is_a?(HpackError)
     assert_str(expected_msg, res.message, label)
   else
@@ -625,7 +682,10 @@ assert_refusal(dec_bomb_size, wire_bomb_size,
 # The header list size of RFC 7540 6.5.2 counts 32 octets a field: two
 # `:method: GET` are 84 octets, which counted as 20 passed a limit of 70.
 dec_list_rfc = Decoder.new(max_header_list_size: 70)
-assert_true(!dec_list_rfc.decode(Bytes.new(1) { 0x82_u8 }).is_a?(HpackError), "one :method: GET, 42 octets, is within 70")
+decoded_16_wire = wire_text(Bytes.new(1) { 0x82_u8 })
+decoded_16_reader = dec_list_rfc
+decoded_16_fields = TapeHeaders.new(decoded_16_reader.capacity(decoded_16_wire))
+assert_true(!(decoded_16_reader.decode(decoded_16_wire, decoded_16_fields) || decoded_16_fields).is_a?(HpackError), "one :method: GET, 42 octets, is within 70")
 assert_refusal(dec_list_rfc, Bytes.new(2) { 0x82_u8 },
   "Decompression bomb: decoded header list exceeds 70 octets",
   "a header list counts 32 octets a field")
@@ -649,7 +709,10 @@ assert_str("Integer overflow decoding HPACK integer", ov_r.message, "integer ove
 huge = [] of UInt8
 Integer.encode(2147483648_u64, 7, 0x80_u8, huge)
 huge_bytes = Bytes.new(huge.size) { |i| huge[i] }
-huge_r = Decoder.new.decode(huge_bytes)
+decoded_17_wire = wire_text(huge_bytes)
+decoded_17_reader = Decoder.new
+decoded_17_fields = TapeHeaders.new(decoded_17_reader.capacity(decoded_17_wire))
+huge_r = (decoded_17_reader.decode(decoded_17_wire, decoded_17_fields) || decoded_17_fields)
 raise "huge index must be HpackError" unless huge_r.is_a?(HpackError)
 assert_true(huge_r.message.includes?("out of range") || huge_r.message.includes?("overflow"), "huge index refused")
 
@@ -658,13 +721,19 @@ assert_true(huge_r.message.includes?("out of range") || huge_r.message.includes?
 enc_two = Encoder.new(use_huffman: false)
 dec_two = Decoder.new
 w_fill = enc_two.encode([HeaderField.new("keep-me", "aaaa")])
-r_fill = dec_two.decode(w_fill)
+decoded_18_wire = wire_text(w_fill)
+decoded_18_reader = dec_two
+decoded_18_fields = TapeHeaders.new(decoded_18_reader.capacity(decoded_18_wire))
+r_fill = (decoded_18_reader.decode(decoded_18_wire, decoded_18_fields) || decoded_18_fields)
 raise "fill failed" if r_fill.is_a?(HpackError)
 enc_two.set_max_table_size(0)
 enc_two.set_max_table_size(4096)
 w_two = enc_two.encode([HeaderField.new("new-one", "bbbb")])
 assert_u8(0x20_u8, w_two[0], "RFC 4.2 first size update is 0")
-r_two = dec_two.decode(w_two)
+decoded_19_wire = wire_text(w_two)
+decoded_19_reader = dec_two
+decoded_19_fields = TapeHeaders.new(decoded_19_reader.capacity(decoded_19_wire))
+r_two = (decoded_19_reader.decode(decoded_19_wire, decoded_19_fields) || decoded_19_fields)
 raise "two-update decode failed" if r_two.is_a?(HpackError)
 assert_int(1, dec_two.dynamic_table.length, "decoder evicted keep-me after seeing 0")
 assert_str("new-one", dec_two.dynamic_table.entries[0].name, "only new-one remains")
@@ -696,7 +765,10 @@ expected_c51 = [
   0x65_u8, 0x78_u8, 0x61_u8, 0x6d_u8, 0x70_u8, 0x6c_u8, 0x65_u8, 0x2e_u8, 0x63_u8, 0x6f_u8, 0x6d_u8,
 ]
 assert_bytes(expected_c51, w_c51, "RFC 7541 C.5.1 encode")
-d_c51 = dec_c5.decode(w_c51)
+decoded_20_wire = wire_text(w_c51)
+decoded_20_reader = dec_c5
+decoded_20_fields = TapeHeaders.new(decoded_20_reader.capacity(decoded_20_wire))
+d_c51 = (decoded_20_reader.decode(decoded_20_wire, decoded_20_fields) || decoded_20_fields)
 raise "C.5.1 decode failed" if d_c51.is_a?(HpackError)
 assert_int(4, d_c51.size, "C.5.1 count")
 assert_str("302", d_c51[0].value, "C.5.1 status")
@@ -711,7 +783,10 @@ h_c52 = [
 w_c52 = enc_c5.encode(h_c52)
 expected_c52 = [0x48_u8, 0x03_u8, 0x33_u8, 0x30_u8, 0x37_u8, 0xc1_u8, 0xc0_u8, 0xbf_u8]
 assert_bytes(expected_c52, w_c52, "RFC 7541 C.5.2 encode")
-d_c52 = dec_c5.decode(w_c52)
+decoded_21_wire = wire_text(w_c52)
+decoded_21_reader = dec_c5
+decoded_21_fields = TapeHeaders.new(decoded_21_reader.capacity(decoded_21_wire))
+d_c52 = (decoded_21_reader.decode(decoded_21_wire, decoded_21_fields) || decoded_21_fields)
 raise "C.5.2 decode failed" if d_c52.is_a?(HpackError)
 assert_str("307", d_c52[0].value, "C.5.2 status")
 assert_int(222, dec_c5.dynamic_table.size, "C.5.2 dynamic size 222")
@@ -729,7 +804,10 @@ dec_up = Decoder.new
 dec_up.protocol_max_table_size = 8192
 up = [] of UInt8
 Integer.encode(8192_u64, 5, 0x20_u8, up)
-up_r = dec_up.decode(Bytes.new(up.size) { |i| up[i] })
+decoded_22_wire = wire_text(Bytes.new(up.size) { |i| up[i] })
+decoded_22_reader = dec_up
+decoded_22_fields = TapeHeaders.new(decoded_22_reader.capacity(decoded_22_wire))
+up_r = (decoded_22_reader.decode(decoded_22_wire, decoded_22_fields) || decoded_22_fields)
 assert_true(!up_r.is_a?(HpackError), "decoder takes a raised SETTINGS")
 assert_int(8192, dec_up.dynamic_table.max_size, "decoder takes a raised SETTINGS")
 enc_up = Encoder.new
@@ -742,13 +820,19 @@ assert_int(8192, enc_up.dynamic_table.max_size, "encoder takes a raised SETTINGS
 # since the peer's table is the size the old limit let it start at.
 enc_dn = Encoder.new(use_huffman: false)
 dec_dn = Decoder.new
-dec_dn.decode(enc_dn.encode([HeaderField.new("x-long-header-name", "some value that is long enough")]))
+decoded_23_wire = wire_text(enc_dn.encode([HeaderField.new("x-long-header-name", "some value that is long enough")]))
+decoded_23_reader = dec_dn
+decoded_23_fields = TapeHeaders.new(decoded_23_reader.capacity(decoded_23_wire))
+(decoded_23_reader.decode(decoded_23_wire, decoded_23_fields) || decoded_23_fields)
 enc_dn.protocol_max_table_size = 100
 dec_dn.protocol_max_table_size = 100
 w_dn = enc_dn.encode([HeaderField.new("x-long-header-name", "some value that is long enough")])
 assert_u8(0x3f_u8, w_dn[0], "lowered SETTINGS is signalled")
 assert_u8(0x45_u8, w_dn[1], "lowered SETTINGS is signalled")
-assert_true(!dec_dn.decode(w_dn).is_a?(HpackError), "lowered SETTINGS is signalled")
+decoded_24_wire = wire_text(w_dn)
+decoded_24_reader = dec_dn
+decoded_24_fields = TapeHeaders.new(decoded_24_reader.capacity(decoded_24_wire))
+assert_true(!(decoded_24_reader.decode(decoded_24_wire, decoded_24_fields) || decoded_24_fields).is_a?(HpackError), "lowered SETTINGS is signalled")
 assert_int(100, dec_dn.dynamic_table.max_size, "lowered SETTINGS is signalled")
 enc_sm = Encoder.new(max_table_size: 64, protocol_max_table_size: 65536)
 enc_sm.protocol_max_table_size = 4096
@@ -772,7 +856,10 @@ big << 'a'.ord.to_u8
 Integer.encode(4031_u64, 7, 0_u8, big)
 4031.times { big << 'v'.ord.to_u8 }
 600000.times { big << 0xbe_u8 }
-big_r = Decoder.new(4096, 4096, 2147483647, 2147483647).decode(Bytes.new(big.size) { |i| big[i] })
+decoded_25_wire = wire_text(Bytes.new(big.size) { |i| big[i] })
+decoded_25_reader = Decoder.new(4096, 4096, 2147483647, 2147483647)
+decoded_25_fields = TapeHeaders.new(decoded_25_reader.capacity(decoded_25_wire))
+big_r = (decoded_25_reader.decode(decoded_25_wire, decoded_25_fields) || decoded_25_fields)
 raise "ASSERTION FAILED: list past Int32 octets must be refused" unless big_r.is_a?(HpackError)
 assert_str("Decompression bomb: decoded header list exceeds 2147483647 octets", big_r.message, "list past Int32 octets refused")
 puts "  a header list past Int32 octets is counted"

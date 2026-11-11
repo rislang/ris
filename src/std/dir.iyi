@@ -497,10 +497,10 @@ pub class Dir
   def self.without_trailing_separator(dir : String) : String
     return dir if dir.bytesize <= 1
     last = dir[dir.bytesize - 1]
-    trailing = last == '/'
+    trailing = last == 47_u8
     {% if flag?(:win32) %}
-      trailing = trailing || last == '\\'
-      return dir if trailing && dir[dir.bytesize - 2] == ':'
+      trailing = trailing || last == 92_u8
+      return dir if trailing && dir[dir.bytesize - 2] == 58_u8
     {% end %}
     trailing ? dir[0, dir.bytesize - 1] : dir
   end
