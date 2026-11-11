@@ -20,8 +20,7 @@ sections below and are listed here in order:
 * Checking time per nested block (sections 1 and 2): web's examples
   must check in seconds.
 * Benches build (section 7), including `HTTP.tls_config=` callers.
-* compiler_test passes: fix its 225 failures and two segfaulting
-  groups (section 12).
+* compiler_test passes: fix its 239 failures (section 12).
 * Release: Linux tarball and its job, `install_ris.sh`, tag v0.1.0;
   `ris --version` prints 0.1.0.
 
@@ -315,8 +314,13 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
   128-byte builder (SIDE_RESERVE, region.iyi:529). Under
   `vm.overcommit_memory=2` each is charged: a FileServer answer holds
   up to eight (doc/drafts/fileserver-outgoing.md, Memory).
-* compiler_test: 225 failures and two segfaulting groups (Code gen: if,
-  Codegen: special vars), each top-level describe run apart (80fc5b354).
+* compiler_test: 239 failures, no segfaults, each top-level describe
+  run apart in parallel on minitest. Largest groups: General allocation
+  refused (35: Pointer.malloc, class new in semantic examples), Crystal
+  API ris dropped (not_nil!, Exception#message, Regex::Options, select,
+  p: ~40), tape rules on old examples (owner temporaries, scratch
+  returns, request tape: ~25), Semantic: iyi (25) and instance var (23).
+  Each needs the example deleted or rewritten to ris behaviour.
 * test/cli/concurrency_exercise.sh needs `ulimit -n 8192` and is not in
   check.sh; recheck on minitest.
 * test/cli/parallel_exercise.iyi:124 (a task value's Panicked arm) and
