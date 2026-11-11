@@ -17,8 +17,9 @@ How to work (fewer tokens, faster to the goal):
 What CHANGELOG's 0.1.0 promises must work; the items stay in their
 sections below and are listed here in order:
 
-* Checking time per nested block (sections 1 and 2): web's examples
-  must check in seconds.
+* Checking time per nested block: testing_test.ri now checks in 16 s;
+  time web/static_test.ri once it builds (it fails: web/spec import
+  before the first `spec` block, a web-side change).
 * Benches build (section 7), including `HTTP.tls_config=` callers.
 * compiler_test passes: fix its 225 failures and two segfaulting
   groups (section 12).
@@ -36,14 +37,6 @@ sections below and are listed here in order:
   back `form`, `multipart` and `cookies`, which `Request` had.
 
 * The user's own ris programs: each obstacle becomes an item here.
-
-* Checking time doubles per nested block: each loop's two final
-  rounds re-walk every inner block and keep their events, so a body d
-  blocks deep costs 4^d walks. web's examples/testing_test.ri checks
-  for 1182 s, web/static_test.ri for 11 min. Caching alone does not
-  help: events and the final pairing pass still grow 2^d. Plan, gate
-  and open questions: doc/drafts/checker-nested-blocks.md (EGM review
-  first).
 
 Breakage between steps is fine; no transition stages.
 
@@ -64,12 +57,6 @@ Unknown must be refused (SPEC 3.6).
 
 * A `tape` block's value is checked as leaving even where the tape
   call's own value is dropped: such blocks end with `nil` to pass.
-
-* The tape check takes exponential time in nested yield blocks: a def
-  nesting `wrap(text) do |text| ... end` (wrap yields its String) 8
-  deep spends 8.7 s in "Semantic (tape check)", 12 deep over 120 s.
-  checker_deep (check.sh) gates ifs, calls and operators only; add
-  blocks to it once a block's check no longer repeats per level.
 
 * An untyped class default still loses its roots at a cycle store
   when the def answers the Array it stored into: in

@@ -1,0 +1,46 @@
+# A view taken before a clear, ten blocks deep, is read in the next
+# round after the clear: refused.
+def step(x : Int32, &block : Int32 -> Nil) : Nil
+  yield x + 1
+end
+def run(acc : Array(Int32)) : Nil
+  b = String::Builder.new
+  v = ""
+  step(0) do |v1|
+    acc << v1
+    step(v1) do |v2|
+      acc << v2
+      step(v2) do |v3|
+        acc << v3
+        step(v3) do |v4|
+          acc << v4
+          step(v4) do |v5|
+            acc << v5
+            step(v5) do |v6|
+              acc << v6
+              step(v6) do |v7|
+                acc << v7
+                step(v7) do |v8|
+                  acc << v8
+                  step(v8) do |v9|
+                    acc << v9
+                    step(v9) do |v10|
+                      acc << v10
+                      2.times do
+                        acc << v.size
+                        v = b.finish
+                        b.clear
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+acc = [] of Int32
+tape { run(acc) }

@@ -125,6 +125,16 @@ else
   echo "FAILED   block_text_append: $out"; status=1
 fi
 
+# Checking time grows with nesting depth, not 4^depth: 16 nested blocks
+# check in seconds, and a refusal ten blocks deep is still found.
+out=$(timeout 60 "$RIS" run test/ris/nested_blocks_depth.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = '272' ]; then
+  echo 'runs     nested_blocks_depth'
+else
+  echo "FAILED   nested_blocks_depth: $out"; status=1
+fi
+expect nested_clear_deep 'cannot shrink tape storage with a live view'
+
 # A block value its yielder drops (`each`) is not checked as leaving.
 out=$("$RIS" run test/ris/block_value_dropped.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = '12' ]; then
@@ -3143,14 +3153,15 @@ fi
 # nesting the parser reads (126 under a def), nested ifs, calls and
 # operators must check in 3 MiB of stack: about 1.8 MiB today, 8 MiB by
 # default, so a frame that grows fails here, not in a random later change.
+# 16 nested yield blocks must check within the timeout (not 4^depth).
 for deep in "$(mktemp -d)"; do
   python3 test/ris/checker_deep.py "$deep/deep.ri"
-  out=$(bash -c 'ulimit -s 3072; exec "$0" build --no-codegen "$1"' \
+  out=$(timeout 60 bash -c 'ulimit -s 3072; exec "$0" build --no-codegen "$1"' \
     "$RIS" "$deep/deep.ri" 2>&1); code=$?
   if [ "$code" -eq 0 ]; then
-    echo "checks   checker_deep (126 levels in 3 MiB of stack)"
+    echo "checks   checker_deep (126 levels, 16 blocks, 3 MiB of stack)"
   else
-    echo "FAILED   checker_deep: needs more than 3 MiB of stack: $out" | head -c 2000
+    echo "FAILED   checker_deep: over 3 MiB of stack or 60 s: $out" | head -c 2000
     echo
     status=1
   fi

@@ -13,5 +13,11 @@ for i in reversed(range(n)):
 out += ["end", "", "def call(text : String) : String",
         "  " + "id(" * n + "text" + ")" * n, "end", "",
         "def sum(n : Int32) : Int32", "  " + "(" * n + "n" + " + 1)" * n, "end",
-        'puts pick(3, "x"), call("y"), sum(1)']
+        "def wrap(text : String, & : String -> String) : String",
+        "  yield text", "end", "", "def blocks(text : String) : String"]
+b = 16
+out += ["  " * (i + 1) + "wrap(text) do |text|" for i in range(b)]
+out.append("  " * (b + 1) + "text")
+out += ["  " * (i + 1) + "end" for i in reversed(range(b))]
+out += ["end", 'puts pick(3, "x"), call("y"), sum(1), blocks("z")']
 open(sys.argv[1], "w").write("\n".join(out) + "\n")
