@@ -260,7 +260,8 @@ section; a removed one leaves its number unused.
   as todo, neither pass nor fail, and exits 0 when the rest pass. A
   clause named only by todo tests passes `ris check spec`; `ris spec
   todo` lists them. `ris init` writes SPEC.md with one clause,
-  SPEC_CHANGELOG.md recording it and a todo test naming it.
+  SPEC_CHANGELOG.md recording it, spec.lock reviewing it and a spec
+  block proving it at the end of the root module; no test/.
 
 ## 7. Types, memory and Ruby syntax (doc/TAPE_TYPES.md; Goose §1.2, §3.7)
 

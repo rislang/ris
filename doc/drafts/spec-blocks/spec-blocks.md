@@ -800,6 +800,10 @@ web through site. Step 6 builds it.
 7. `ris init` (5.11). Gate: `ris init demo`, then `ris check` is
    green with 1.1 covered by `demo == "hello from demo\n"` (4.5), and
    no test/ exists.
+   Done (test/cli/spec_blocks_init.sh). `ris check test` skipped a
+   project with no *_test.ri, so the block never ran; it now runs when
+   any module holds a spec block. With its own SPEC.md, init writes no
+   block (its clause 1.1 is not there) and no spec.lock.
 8. Remove `test "x" do` (D9) once ris's own test/ is moved. Gate:
    `ris check` green with test/ holding only test/cli/ and test/speed/.
 

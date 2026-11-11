@@ -4,6 +4,16 @@ Every change to SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one. Entries before 2026-10-31 name the file by its old name, TAPE_SPEC.md.
 
+## 2026-11-11 · 6.9@9d41266e
+
+* Was: `ris init` wrote test/NAME_test.ri, a `# spec: 1.1@HASH` tag
+  and a todo with no `module` header, so a first `import` in it failed.
+* Now: 6.9 `ris init` writes spec.lock reviewing clause 1.1 and a spec
+  block at the end of NAME.ri that runs it; no test/.
+* Why: a new project shows the form its proofs take, and its first
+  `ris check` runs a real check. Design and EGM review:
+  doc/drafts/spec-blocks/ (spec-blocks.md 5.11, step 7).
+
 ## 2026-11-11 · 6.7@0845721d, 6.8@9832e912
 
 * Was: `ris spec` read only tags under test/, so a `spec N.M` block in

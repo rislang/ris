@@ -103,6 +103,11 @@ jobs:
         run: bash test/cli/spec_blocks_lock.sh
         env:
           IYI: ./bin/ris
+      - name: ris init proves its clause with a spec block
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_blocks_init.sh
+        env:
+          IYI: ./bin/ris
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:
