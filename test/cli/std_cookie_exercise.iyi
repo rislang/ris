@@ -103,7 +103,8 @@ class RisCookie1Handler
       res.header("Set-Cookie") { |w| Cookie.new("session", "", path: "/", max_age: 0_i64).to_set_cookie(w) }
       res.body << "out"
     else
-      cookies = Cookie.parse_header(req.header("Cookie") || "")
+      cookies = Hash(String, String).new
+      Cookie.parse_header(req.header("Cookie") || "", cookies)
       res.body << (cookies["session"]? || "-") << " " <<
         (cookies["theme"]? || "-") << " " << (cookies["deep"]? || "-")
     end
@@ -127,7 +128,8 @@ class RisCookie2Handler
       res.header("Location", "/home")
       res.header("Set-Cookie") { |w| Cookie.new("session", "abc", path: "/").to_set_cookie(w) }
     else
-      cookies = Cookie.parse_header(req.header("Cookie") || "")
+      cookies = Hash(String, String).new
+      Cookie.parse_header(req.header("Cookie") || "", cookies)
       res.body << "session=" << (cookies["session"]? || "-")
     end
   end
@@ -149,14 +151,14 @@ import std/time::{Time}
 # What `work` answers, or "refused: <why>" when it raises: run as a task,
 # whose value catches the panic.
 def answer(&work : -> String) : String
-  said = "no answer"
+  said = ""
   group do |g|
     task = g.spawn { work.call }
     case got = task.value
     in Panicked
-      said = "refused: " + got.message
+      said << "refused: " << got.message
     in String
-      said = got
+      said << got
     end
     0
   end
@@ -202,7 +204,8 @@ assert_str "a=1; Path=/x; Max-Age=30; Secure; HttpOnly; SameSite=Strict", Cookie
 assert_str "b=2; Expires=Wed, 21 Oct 2037 07:28:00 GMT", Cookie.new("b", "2", expires: Time.utc(2037, 10, 21, 7, 28, 0)).to_set_cookie, "with an Expires date"
 assert_str "refused: Cookie: a has a byte a cookie value cannot hold: \"x;y\"", answer { Cookie.new("a", "x;y").to_set_cookie }, "a value with a semicolon refused"
 assert_str "refused: Cookie: not a cookie name: \"a b\"", answer { Cookie.new("a b", "1").to_set_cookie }, "a name with a space refused"
-pairs = Cookie.parse_header("a=1; b=\"x y\"; a=2; junk")
+pairs = Hash(String, String).new
+Cookie.parse_header("a=1; b=\"x y\"; a=2; junk", pairs)
 assert_true pairs.size == 2 && pairs["a"]? == "1" && pairs["b"]? == "x y", "a Cookie header's pairs, the first of a name kept"
 jar = CookieJar.new
 set = Response.new(200, "")

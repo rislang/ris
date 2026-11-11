@@ -297,7 +297,12 @@ group do |g|
   puts "  #{sent.size} arguments came back as they went, spaces, quotes and backslashes included"
 
   puts "== input in, output out, both at once"
-  input = String.build { |text| 20000.times { |line| text << "line " << line << " of the input\n" } }
+  input = String.build do |text|
+    20000.times do |input_line|
+      text << "line " << input_line << " of the input\n"
+      nil
+    end
+  end
   echoed = ran(Process.run(me, ["cat"], input: input), "cat")
   fail("cat answered #{echoed.stdout.bytesize} bytes of #{input.bytesize}") unless echoed.stdout == input
   fail("cat's stderr was #{echoed.stderr.inspect}") unless echoed.stderr == "read #{input.bytesize} bytes\n"
@@ -608,9 +613,9 @@ group do |g|
       puts "== the child holds its three streams and nothing else of this program's"
       # An open file, and the poller's epoll, are this program's alone.
       held_path = "#{directory_of(me)}/iyi-process-held.txt"
-      held = File.open(held_path, "w")
+      descriptor_file = File.open(held_path, "w")
       holds = ran(Process.run(me, ["fds"]), "fds")
-      held.close
+      descriptor_file.close
       File.delete(held_path)
       fail("the child held #{holds.stdout.chomp('\n')} of this program's descriptors") unless holds.stdout == "0\n"
       puts "  none of this program's descriptors, an open file and the poller's included"

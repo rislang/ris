@@ -51,10 +51,12 @@ pub class CookieJar
   # back to), and the order it was made in.
   @kept : Array({Cookie, String, Int64})
   @made : Int64
+  @texts : String::Builder
 
   def initialize
     @kept = [] of {Cookie, String, Int64}
     @made = 0_i64
+    @texts = String::Builder.new(1024)
   end
 
   def size : Int32
@@ -82,15 +84,34 @@ pub class CookieJar
       return unless domain.includes?(".") && CookieJar.domain_match?(host, domain)
     end
     path = cookie.path || CookieJar.default_path(uri.path)
-    stored = Cookie.new(cookie.name, cookie.value, path, cookie.domain, cookie.expires, cookie.max_age, cookie.secure, cookie.http_only, cookie.same_site)
+    stored = Cookie.new(keep(cookie.name), keep(cookie.value), keep(path),
+      keep(cookie.domain), cookie.expires, cookie.max_age, cookie.secure,
+      cookie.http_only, keep(cookie.same_site))
+    stored_host = keep(host)
     scope = cookie.domain || host
-    @kept = @kept.reject do |entry|
+    i = 0
+    while i < @kept.size
+      entry = @kept[i]
       other = entry[0]
-      other.name == stored.name && (other.domain || entry[1]) == scope && other.path == stored.path
+      if other.name == stored.name && (other.domain || entry[1]) == scope && other.path == stored.path
+        @kept.delete_at(i)
+      else
+        i += 1
+      end
     end
     return if stored.expired?(Time.utc)
     @made = @made + 1_i64
-    @kept << {stored, host, @made}
+    @kept << {stored, stored_host, @made}
+  end
+
+  private def keep(text : String) : String
+    start = @texts.length
+    @texts << text
+    @texts.finish[start, @texts.length - start]
+  end
+
+  private def keep(text : Nil) : Nil
+    nil
   end
 
   # The cookies a request to *url* carries: domain and path matching,
@@ -104,7 +125,14 @@ pub class CookieJar
     path = uri.path
     path = "/" if path.bytesize == 0
     now = Time.utc
-    @kept = @kept.reject { |entry| entry[0].expired?(now) }
+    i = 0
+    while i < @kept.size
+      if @kept[i][0].expired?(now)
+        @kept.delete_at(i)
+      else
+        i += 1
+      end
+    end
     found = [] of {Cookie, Int64}
     @kept.each do |entry|
       cookie = entry[0]
@@ -199,9 +227,12 @@ pub struct Cookie
   end
 
   def self.parse(line : String) : Cookie?
-    parts = line.split(';')
-    return nil if parts.empty?
-    pair = parts[0]
+    parse(line, String::Builder.new(line.bytesize))
+  end
+
+  def self.parse(line : String, domains : String::Builder) : Cookie?
+    first_end = line.index(';') || line.bytesize
+    pair = line[0, first_end]
     eq = pair.index('=')
     return nil unless eq
     name = Cookie.trim(pair[0, eq])
@@ -217,10 +248,11 @@ pub struct Cookie
     secure = false
     http_only = false
     same_site = nil.as(String?)
-    i = 1
-    while i < parts.size
-      attribute = parts[i]
-      i = i + 1
+    i = first_end + 1
+    while i < line.bytesize
+      stop = line.index(';', i) || line.bytesize
+      attribute = line[i, stop - i]
+      i = stop + 1
       key = attribute
       text = "".as_tape
       if at = attribute.index('=')
@@ -236,7 +268,13 @@ pub struct Cookie
         end
       elsif key == "domain"
         name_of = text.starts_with?(".") ? text[1, text.bytesize - 1] : text
-        domain = lower(name_of) if name_of.bytesize > 0
+        if name_of.bytesize > 0
+          mark = domains.length
+          name_of.each_byte do |byte|
+            domains << (byte >= 65_u8 && byte <= 90_u8 ? byte + 32_u8 : byte).chr
+          end
+          domain = domains.finish[mark, domains.length - mark]
+        end
       elsif key == "path"
         path = text if text.starts_with?("/")
       elsif key == "secure"
@@ -336,9 +374,12 @@ pub struct Cookie
     found
   end
 
-  def self.parse_header(value : String) : Hash(String, String)
-    found = Hash(String, String).new
-    value.split(';').each do |part|
+  def self.parse_header(value : String, found : Hash(String, String)) : Nil
+    start = 0
+    while start < value.bytesize
+      stop = value.index(';', start) || value.bytesize
+      part = value[start, stop - start]
+      start = stop + 1
       eq = part.index('=')
       next unless eq
       name = Cookie.trim(part[0, eq])
@@ -349,7 +390,7 @@ pub struct Cookie
       end
       found[name] = text unless found[name]?
     end
-    found
+    nil
   end
 
   def self.trim(text : String) : String

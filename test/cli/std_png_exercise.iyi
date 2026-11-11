@@ -56,7 +56,10 @@ def assert_bytes(expected : String, actual : String, msg : String) : Nil
 end
 
 def decoded(data : String, label : String) : PngFile
-  f = Png.decode(data)
+  checked_decode(Png.decode(data), label)
+end
+
+def checked_decode(f : PngFile | PngError, label : String) : PngFile
   raise "ASSERTION FAILED: #{label}: refused with #{f.message.inspect}" if f.is_a?(PngError)
   f
 end
@@ -87,35 +90,44 @@ end
 # An image with gradients and noise in it, so that every filter has rows
 # it wins.
 def picture(w : Int32, h : Int32, layout : Layout, depth : Int32, seed : UInt32) : Image
-  rng = Lcg.new(seed)
-  ch = channels_of(layout)
-  bytes = depth // 8
-  samples = String.from_bytes(w * h * ch * bytes) do |dst|
-    at = 0
-    y = 0
-    while y < h
-      x = 0
-      while x < w
-        c = 0
-        while c < ch
-          v = (x * 3 + y * 5 + c * 40 + (rng.byte.to_i32 & 7)) & 255
-          v = 255 - v if y % 3 == 1
-          v = rng.byte.to_i32 if y % 7 == 6
-          if bytes == 1
-            dst[at] = v.to_u8
-          else
-            dst[at] = v.to_u8
-            dst[at + 1] = rng.byte
+  RisPicture.new(w, h, layout, depth, seed).image
+end
+
+@[OnTape]
+struct RisPicture
+  getter image : Image
+
+  def initialize(w : Int32, h : Int32, layout : Layout, depth : Int32, seed : UInt32)
+    rng = Lcg.new(seed)
+    ch = channels_of(layout)
+    bytes = depth // 8
+    samples = String.from_bytes(w * h * ch * bytes) do |dst|
+      at = 0
+      y = 0
+      while y < h
+        x = 0
+        while x < w
+          c = 0
+          while c < ch
+            v = (x * 3 + y * 5 + c * 40 + (rng.byte.to_i32 & 7)) & 255
+            v = 255 - v if y % 3 == 1
+            v = rng.byte.to_i32 if y % 7 == 6
+            if bytes == 1
+              dst[at] = v.to_u8
+            else
+              dst[at] = v.to_u8
+              dst[at + 1] = rng.byte
+            end
+            at = at + bytes
+            c = c + 1
           end
-          at = at + bytes
-          c = c + 1
+          x = x + 1
         end
-        x = x + 1
+        y = y + 1
       end
-      y = y + 1
     end
+    @image = Image.new(w, h, layout, depth, samples)
   end
-  Image.new(w, h, layout, depth, samples)
 end
 
 # The chunks of a PNG file, by name and data, in order.
@@ -202,7 +214,7 @@ end
 
 def heuristic_holds(png : String, image : Image, label : String) : Array(Int32)
   idat = ""
-  chunks(png).each { |c| idat = idat + c[1] if c[0] == "IDAT" }
+  chunks(png).each { |c| idat << c[1] if c[0] == "IDAT"; nil }
   raw = Zlib.decompress(idat)
   bpp = image.channels * image.depth // 8
   n = image.width * bpp
@@ -213,10 +225,8 @@ def heuristic_holds(png : String, image : Image, label : String) : Array(Int32)
   y = 0
   while y < image.height
     sums = [0, 0, 0, 0, 0]
-    outs = [] of String
-    f = 0
-    while f < 5
-      outs << String.from_bytes(n) do |d|
+    outs = Array(String).new(5) do |f|
+      String.from_bytes(n) do |d|
         i = 0
         while i < n
           cur = src[y * n + i].to_i32
@@ -228,8 +238,11 @@ def heuristic_holds(png : String, image : Image, label : String) : Array(Int32)
           i = i + 1
         end
       end
+    end
+    f = 0
+    while f < 5
       s = 0
-      o = outs[f].to_unsafe
+      o = outs[f]
       i = 0
       while i < n
         v = o[i].to_i32
@@ -396,9 +409,9 @@ end
 # Paeth's ties, made on purpose: under a row of 10, 0, 10, 0 a row of 15s
 # puts every odd byte where the upper (0) and the upper-left (10) are
 # equally near 15 + 0 - 10, and section 9.4 takes the upper.
-ties = [] of Array(Int32)
-8.times { |i| ties << [i % 2 == 0 ? 10 : 0] }
-8.times { |_| ties << [15] }
+ties = Array(Array(Int32)).new(16) do |i|
+  [i < 8 ? (i % 2 == 0 ? 10 : 0) : 15]
+end
 tie_png = own_png(8, 2, 8, 0, false, ties, "") { |_| 4 }
 assert_bytes own_samples(ties, 8), decoded(tie_png, "filter 4 (Paeth) rows decode").image.samples, "filter 4 (Paeth) rows decode, ties between the upper and the upper-left byte taken for the upper"
 puts "  each of the five filters alone, over RGB8, RGBA16 and gray8 rows; Paeth's ties as section 9.4 breaks them"
@@ -439,99 +452,104 @@ rgba = decoded(png, "a 2-bit palette with tRNS").image.to_rgba8
 end
 puts "  tRNS on 4-bit gray and on a 2-bit interlaced palette"
 
-puts "\n== round trips"
-LAYOUTS.each do |layout|
-  [8, 16].each do |depth|
+def round_trips : Nil
+  puts "\n== round trips"
+  LAYOUTS.each do |layout|
+    [8, 16].each do |depth|
+      [false, true].each do |interlace|
+        [{1, 1}, {3, 2}, {5, 9}, {33, 17}].each do |size|
+          img = picture(size[0], size[1], layout, depth, 7_u32)
+          label = "#{size[0]}x#{size[1]} #{Image.layout_name(layout)}#{depth}#{interlace ? " interlaced" : ""}"
+          png = Png.encode(img, interlace: interlace)
+          f = decoded(png, label)
+          assert_true f.interlaced == interlace, "#{label}: read back as written, interlaced or not"
+          assert_true f.image.layout == layout && f.image.depth == depth, "#{label}: read back in its layout and depth"
+          assert_bytes img.samples, f.image.samples, "#{label}: every sample read back as written"
+        end
+      end
+    end
+  end
+  puts "  gray, gray+alpha, RGB, RGBA at 8 and 16 bits, plain and Adam7, 1x1 to 33x17"
+
+  [2, 3, 4, 5, 16, 17, 200, 256].each do |entries|
+    rng = Lcg.new(entries.to_u32)
+    pal = [] of {Int32, Int32, Int32, Int32}
+    entries.times { |i| pal << {rng.byte.to_i32, rng.byte.to_i32, rng.byte.to_i32, i % 3 == 0 ? rng.byte.to_i32 : 255} }
     [false, true].each do |interlace|
-      [{1, 1}, {3, 2}, {5, 9}, {33, 17}].each do |size|
-        img = picture(size[0], size[1], layout, depth, 7_u32)
-        label = "#{size[0]}x#{size[1]} #{Image.layout_name(layout)}#{depth}#{interlace ? " interlaced" : ""}"
-        png = Png.encode(img, interlace: interlace)
-        f = decoded(png, label)
-        assert_true f.interlaced == interlace, "#{label}: read back as written, interlaced or not"
-        assert_true f.image.layout == layout && f.image.depth == depth, "#{label}: read back in its layout and depth"
-        assert_bytes img.samples, f.image.samples, "#{label}: every sample read back as written"
+      w = 13
+      h = 11
+      idx = String.from_bytes(w * h) { |d| (w * h).times { |i| d[i] = (rng.byte.to_i32 % entries).to_u8 } }
+      png = Png.encode_indexed(w, h, idx, pal, interlace: interlace)
+      f = decoded(png, "palette of #{entries}")
+      want_depth = entries <= 2 ? 1 : entries <= 4 ? 2 : entries <= 16 ? 4 : 8
+      assert_true f.bit_depth == want_depth && f.color_type == 3, "a palette of #{entries} is written at #{want_depth} bits, not #{f.bit_depth}"
+      alpha = pal.any? { |e| e[3] != 255 }
+      assert_true f.image.layout == (alpha ? Layout::RGBA : Layout::RGB), "a palette of #{entries} reads back as RGB(A)"
+      ch = alpha ? 4 : 3
+      want = String.from_bytes(w * h * ch) do |d|
+        (w * h).times do |i|
+          e = pal[idx.byte_at(i).to_i32]
+          d[i * ch] = e[0].to_u8
+          d[i * ch + 1] = e[1].to_u8
+          d[i * ch + 2] = e[2].to_u8
+          d[i * ch + 3] = e[3].to_u8 if alpha
+        end
+      end
+      assert_bytes want, f.image.samples, "a palette of #{entries}#{interlace ? ", interlaced" : ""}: every pixel its entry"
+      raw = ""
+      chunks(png).each { |c| raw << c[1] if c[0] == "IDAT"; nil }
+      unless interlace
+        rows = Zlib.decompress(raw)
+        stride = rows.bytesize // h
+        h.times { |y| assert_true rows.byte_at(y * stride) == 0_u8, "a palette image's rows are not filtered (row #{y})" }
       end
     end
   end
+  puts "  palettes of 2 to 256 entries at 1, 2, 4 and 8 bits, tRNS where an entry is not opaque, rows unfiltered"
+
+  gray_key = Image.new(4, 1, Layout::Gray, 8, bytes_of([10, 20, 10, 30]), [10])
+  f = decoded(Png.encode(gray_key), "a gray tRNS")
+  assert_true f.transparency == bytes_of([0, 10]), "a gray tRNS is written as two bytes"
+  assert_bytes bytes_of([10, 10, 10, 0, 20, 20, 20, 255, 10, 10, 10, 0, 30, 30, 30, 255]), f.image.to_rgba8, "a gray tRNS: the key's pixels are transparent"
+  rgb_key = Image.new(2, 1, Layout::RGB, 16, bytes_of([1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 7]), [258, 772, 1286])
+  f = decoded(Png.encode(rgb_key, interlace: true), "a 16-bit RGB tRNS")
+  assert_bytes bytes_of([1, 3, 5, 0, 1, 3, 5, 255]), f.image.to_rgba8, "a 16-bit RGB tRNS is compared at 16 bits, before the reduction"
+  puts "  a transparent gray and a transparent 16-bit RGB written as tRNS and read back"
+
+  texts = [{"Title", "café"}, {"Author", "Çağrı"}, {"Comment", ""}]
+  f = decoded(Png.encode(picture(3, 3, Layout::RGB, 8, 1_u32), texts: texts), "texts")
+  assert_true f.texts.size == 3, "three texts read back"
+  assert_str "tEXt Title café", "#{f.texts[0].chunk} #{f.texts[0].keyword} #{f.texts[0].text}", "a Latin-1 text is a tEXt"
+  assert_str "iTXt Author Çağrı", "#{f.texts[1].chunk} #{f.texts[1].keyword} #{f.texts[1].text}", "a text past Latin-1 is an iTXt"
+  assert_str "tEXt Comment ", "#{f.texts[2].chunk} #{f.texts[2].keyword} #{f.texts[2].text}", "an empty text is a tEXt"
+  puts "  tEXt for Latin-1, iTXt past it"
+
+  puts "\n== filters"
+  f00 = picture(64, 24, Layout::RGB, 8, 3_u32)
+  chosen = heuristic_holds(Png.encode(f00), f00, "a 64x24 RGB picture")
+  kinds = [0, 0, 0, 0, 0]
+  chosen.each { |c| kinds[c] = kinds[c] + 1 }
+  f16 = picture(40, 30, Layout::RGBA, 16, 9_u32)
+  heuristic_holds(Png.encode(f16), f16, "a 40x30 RGBA16 picture").each { |c| kinds[c] = kinds[c] + 1 }
+  fg = picture(50, 40, Layout::Gray, 8, 11_u32)
+  heuristic_holds(Png.encode(fg), fg, "a 50x40 gray picture").each { |c| kinds[c] = kinds[c] + 1 }
+  # A ramp across the row is Sub's; the same row again is Up's (its sum is
+  # 0, and Paeth's equal 0 after it does not displace it).
+  ramp = String.from_bytes(32 * 2) { |d| 64.times { |i| d[i] = ((i % 32) * 8).to_u8 } }
+  ramp_img = Image.new(32, 2, Layout::Gray, 8, ramp)
+  assert_true heuristic_holds(Png.encode(ramp_img), ramp_img, "a ramp twice") == [1, 2], "the filter heuristic: a ramp is Sub's, the same row again Up's"
+  assert_true kinds.all? { |k| k > 0 }, "the filter heuristic chose every filter somewhere: #{kinds}"
+  puts "  every row carries the first filter of least absolute sum, as recomputed here; chosen #{kinds} times"
+
 end
-puts "  gray, gray+alpha, RGB, RGBA at 8 and 16 bits, plain and Adam7, 1x1 to 33x17"
 
-[2, 3, 4, 5, 16, 17, 200, 256].each do |entries|
-  rng = Lcg.new(entries.to_u32)
-  pal = [] of {Int32, Int32, Int32, Int32}
-  entries.times { |i| pal << {rng.byte.to_i32, rng.byte.to_i32, rng.byte.to_i32, i % 3 == 0 ? rng.byte.to_i32 : 255} }
-  [false, true].each do |interlace|
-    w = 13
-    h = 11
-    idx = String.from_bytes(w * h) { |d| (w * h).times { |i| d[i] = (rng.byte.to_i32 % entries).to_u8 } }
-    png = Png.encode_indexed(w, h, idx, pal, interlace: interlace)
-    f = decoded(png, "palette of #{entries}")
-    want_depth = entries <= 2 ? 1 : entries <= 4 ? 2 : entries <= 16 ? 4 : 8
-    assert_true f.bit_depth == want_depth && f.color_type == 3, "a palette of #{entries} is written at #{want_depth} bits, not #{f.bit_depth}"
-    alpha = pal.any? { |e| e[3] != 255 }
-    assert_true f.image.layout == (alpha ? Layout::RGBA : Layout::RGB), "a palette of #{entries} reads back as RGB(A)"
-    ch = alpha ? 4 : 3
-    want = String.from_bytes(w * h * ch) do |d|
-      (w * h).times do |i|
-        e = pal[idx.byte_at(i).to_i32]
-        d[i * ch] = e[0].to_u8
-        d[i * ch + 1] = e[1].to_u8
-        d[i * ch + 2] = e[2].to_u8
-        d[i * ch + 3] = e[3].to_u8 if alpha
-      end
-    end
-    assert_bytes want, f.image.samples, "a palette of #{entries}#{interlace ? ", interlaced" : ""}: every pixel its entry"
-    raw = ""
-    chunks(png).each { |c| raw = raw + c[1] if c[0] == "IDAT" }
-    unless interlace
-      rows = Zlib.decompress(raw)
-      stride = rows.bytesize // h
-      h.times { |y| assert_true rows.byte_at(y * stride) == 0_u8, "a palette image's rows are not filtered (row #{y})" }
-    end
-  end
-end
-puts "  palettes of 2 to 256 entries at 1, 2, 4 and 8 bits, tRNS where an entry is not opaque, rows unfiltered"
-
-gray_key = Image.new(4, 1, Layout::Gray, 8, bytes_of([10, 20, 10, 30]), [10])
-f = decoded(Png.encode(gray_key), "a gray tRNS")
-assert_true f.transparency == bytes_of([0, 10]), "a gray tRNS is written as two bytes"
-assert_bytes bytes_of([10, 10, 10, 0, 20, 20, 20, 255, 10, 10, 10, 0, 30, 30, 30, 255]), f.image.to_rgba8, "a gray tRNS: the key's pixels are transparent"
-rgb_key = Image.new(2, 1, Layout::RGB, 16, bytes_of([1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 7]), [258, 772, 1286])
-f = decoded(Png.encode(rgb_key, interlace: true), "a 16-bit RGB tRNS")
-assert_bytes bytes_of([1, 3, 5, 0, 1, 3, 5, 255]), f.image.to_rgba8, "a 16-bit RGB tRNS is compared at 16 bits, before the reduction"
-puts "  a transparent gray and a transparent 16-bit RGB written as tRNS and read back"
-
-texts = [{"Title", "café"}, {"Author", "Çağrı"}, {"Comment", ""}]
-f = decoded(Png.encode(picture(3, 3, Layout::RGB, 8, 1_u32), texts: texts), "texts")
-assert_true f.texts.size == 3, "three texts read back"
-assert_str "tEXt Title café", "#{f.texts[0].chunk} #{f.texts[0].keyword} #{f.texts[0].text}", "a Latin-1 text is a tEXt"
-assert_str "iTXt Author Çağrı", "#{f.texts[1].chunk} #{f.texts[1].keyword} #{f.texts[1].text}", "a text past Latin-1 is an iTXt"
-assert_str "tEXt Comment ", "#{f.texts[2].chunk} #{f.texts[2].keyword} #{f.texts[2].text}", "an empty text is a tEXt"
-puts "  tEXt for Latin-1, iTXt past it"
-
-puts "\n== filters"
-f00 = picture(64, 24, Layout::RGB, 8, 3_u32)
-chosen = heuristic_holds(Png.encode(f00), f00, "a 64x24 RGB picture")
-kinds = [0, 0, 0, 0, 0]
-chosen.each { |c| kinds[c] = kinds[c] + 1 }
-f16 = picture(40, 30, Layout::RGBA, 16, 9_u32)
-heuristic_holds(Png.encode(f16), f16, "a 40x30 RGBA16 picture").each { |c| kinds[c] = kinds[c] + 1 }
-fg = picture(50, 40, Layout::Gray, 8, 11_u32)
-heuristic_holds(Png.encode(fg), fg, "a 50x40 gray picture").each { |c| kinds[c] = kinds[c] + 1 }
-# A ramp across the row is Sub's; the same row again is Up's (its sum is
-# 0, and Paeth's equal 0 after it does not displace it).
-ramp = String.from_bytes(32 * 2) { |d| 64.times { |i| d[i] = ((i % 32) * 8).to_u8 } }
-ramp_img = Image.new(32, 2, Layout::Gray, 8, ramp)
-assert_true heuristic_holds(Png.encode(ramp_img), ramp_img, "a ramp twice") == [1, 2], "the filter heuristic: a ramp is Sub's, the same row again Up's"
-assert_true kinds.all? { |k| k > 0 }, "the filter heuristic chose every filter somewhere: #{kinds}"
-puts "  every row carries the first filter of least absolute sum, as recomputed here; chosen #{kinds} times"
+round_trips
 
 puts "\n== refused as a value"
 good = Png.encode(picture(8, 8, Layout::Gray, 8, 5_u32))
 cs = chunks(good)
 idat = ""
-cs.each { |c| idat = idat + c[1] if c[0] == "IDAT" }
+cs.each { |c| idat << c[1] if c[0] == "IDAT"; nil }
 head = SIG + ihdr(8, 8, 8, 0, 0)
 tail = chunk("IEND", "")
 refused("GIF89a" + good, "the 8-byte signature is not there", "not a PNG file")
@@ -597,35 +615,35 @@ if gate
   File.read(work + "/index.txt").lines.each do |line|
     next if line.empty?
     parts = line.split(' ')
-    name = parts[1]
-    png = File.read(work + "/" + name + ".png")
+    python_name = parts[1]
+    python_png = File.read(work + "/" + python_name + ".png")
     if parts[0] == "refuse"
       phrase = parts[2, parts.size - 2].join(" ")
-      refused(png, phrase, "python's #{name}")
+      refused(python_png, phrase, "python's #{python_name}")
       refused_count = refused_count + 1
       next
     end
-    f = decoded(png, "python's #{name}")
-    img = f.image
-    lines = File.read(work + "/" + name + ".info").lines
-    said = "#{img.width}x#{img.height} color_type=#{f.color_type} bit_depth=#{f.bit_depth} interlaced=#{f.interlaced} layout=#{Image.layout_name(img.layout)} depth=#{img.depth}"
-    assert_str lines[0], said, "python's #{name}: the header"
-    assert_bytes File.read(work + "/" + name + ".samples"), img.samples, "python's #{name}: the samples"
-    assert_bytes File.read(work + "/" + name + ".rgba"), img.to_rgba8, "python's #{name}: to_rgba8"
-    meta = [] of String
-    if g = f.gamma
-      meta << "gamma #{g}"
+    python_f = decoded(python_png, "python's #{python_name}")
+    python_img = python_f.image
+    lines = File.read(work + "/" + python_name + ".info").lines
+    said = "#{python_img.width}x#{python_img.height} color_type=#{python_f.color_type} bit_depth=#{python_f.bit_depth} interlaced=#{python_f.interlaced} layout=#{Image.layout_name(python_img.layout)} depth=#{python_img.depth}"
+    assert_str lines[0], said, "python's #{python_name}: the header"
+    assert_bytes File.read(work + "/" + python_name + ".samples"), python_img.samples, "python's #{python_name}: the samples"
+    assert_bytes File.read(work + "/" + python_name + ".rgba"), python_img.to_rgba8, "python's #{python_name}: to_rgba8"
+    meta = String::Builder.new(256)
+    if g = python_f.gamma
+      meta << "gamma #{g}\n"
     end
-    if s = f.srgb_intent
-      meta << "srgb #{s}"
+    if s = python_f.srgb_intent
+      meta << "srgb #{s}\n"
     end
-    if prof = f.icc_profile
-      meta << "icc #{f.icc_name} #{CRC32.checksum(prof).to_s(16).rjust(8, '0')} #{prof.bytesize}"
+    if prof = python_f.icc_profile
+      meta << "icc #{python_f.icc_name} #{CRC32.checksum(prof).to_s(16).rjust(8, '0')} #{prof.bytesize}\n"
     end
-    f.texts.each { |t| meta << "text #{t.chunk} #{t.keyword} |#{t.text}|#{t.language}|#{t.translated_keyword}" }
-    meta << "skipped #{f.skipped.join(" ")}" unless f.skipped.empty?
+    python_f.texts.each { |t| meta << "text #{t.chunk} #{t.keyword} |#{t.text}|#{t.language}|#{t.translated_keyword}\n"; nil }
+    meta << "skipped #{python_f.skipped.join(" ")}\n" unless python_f.skipped.empty?
     want_meta = lines[1, lines.size - 1].to_a.reject { |l| l.empty? }
-    assert_str want_meta.join("\n"), meta.join("\n"), "python's #{name}: the metadata"
+    assert_str want_meta.join("\n"), meta.finish.chomp, "python's #{python_name}: the metadata"
     decoded_count = decoded_count + 1
   end
   puts "  #{decoded_count} files decoded to the samples and RGBA Python answered; #{refused_count} refused by their phrase"
@@ -653,16 +671,20 @@ if gate
   end
   [2, 4, 16, 256].each do |entries|
     [false, true].each do |interlace|
-      rng = Lcg.new((entries * 7).to_u32)
-      pal = [] of {Int32, Int32, Int32, Int32}
-      entries.times { |i| pal << {rng.byte.to_i32, rng.byte.to_i32, rng.byte.to_i32, i == 1 ? 0 : 255} }
-      idx = String.from_bytes(29 * 19) { |d| (29 * 19).times { |i| d[i] = (rng.byte.to_i32 % entries).to_u8 } }
-      name = "out-P#{entries}#{interlace ? "-i" : ""}"
-      png = Png.encode_indexed(29, 19, idx, pal, interlace: interlace)
-      File.write(work + "/" + name + ".png", png)
-      img = decoded(png, name).image
-      File.write(work + "/" + name + ".samples", img.samples)
-      File.write(work + "/" + name + ".rgba", img.to_rgba8)
+      written_rng = Lcg.new((entries * 7).to_u32)
+      written_pal = [] of {Int32, Int32, Int32, Int32}
+      entries.times do |i|
+        written_pal << {written_rng.byte.to_i32, written_rng.byte.to_i32, written_rng.byte.to_i32,
+                i == 1 ? 0 : 255}
+        nil
+      end
+      written_idx = String.from_bytes(29 * 19) { |d| (29 * 19).times { |i| d[i] = (written_rng.byte.to_i32 % entries).to_u8 } }
+      written_name = "out-P#{entries}#{interlace ? "-i" : ""}"
+      written_png = Png.encode_indexed(29, 19, written_idx, written_pal, interlace: interlace)
+      File.write(work + "/" + written_name + ".png", written_png)
+      written_img = decoded(written_png, written_name).image
+      File.write(work + "/" + written_name + ".samples", written_img.samples)
+      File.write(work + "/" + written_name + ".rgba", written_img.to_rgba8)
       written = written + 1
     end
   end
