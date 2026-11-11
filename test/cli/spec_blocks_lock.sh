@@ -9,7 +9,7 @@
 # A block in src/ covers its clause; spec.lock holds the reviewed hash, so
 # editing the clause fails `ris check spec` until `ris spec ack` (a stale
 # old tag `@V` no longer counts); an orphan lock line fails; `ris check
-# --fix` writes and refreshes labels, cut at a word with `…` within 80
+# --fix` (the suite and its spec step) writes and refreshes labels, cut at a word with `…` within 80
 # columns; a stale label fails; a fresh label does not clear "to review";
 # `ris spec ack --from-tags` seeds the lock, and ris's own `ris check
 # spec` is green; a block calling a name web/spec defines, in a file
@@ -111,6 +111,11 @@ sed -i 's/^spec 1.1  # .*/spec 1.1  # A post needs nothing./' src/post.ri
 [ $? = 0 ] && fail "(e) a stale label passed"
 has e3.out "the label of spec 1.1 at src/post.ri:7 differs from SPEC.md"
 has e3.out "run \`ris check --fix\`"
+# The command the message names fixes it: the whole suite's --fix reaches
+# the spec step (its exit is the other steps' business).
+"$IYI" check --fix > e3b.out 2>&1
+grep -qx "spec 1.1  # A post needs a title of one letter or more." src/post.ri ||
+  { fail "(e) ris check --fix did not refresh the label"; cat e3b.out; }
 # A clause edit: --fix refreshes the label, but the clause stays to review.
 sed -i 's/one letter or more\./a letter or more./' SPEC.md
 changelog 3
