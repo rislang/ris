@@ -3213,6 +3213,216 @@ else
   echo "FAILED   spec-port deque: $out"; status=1
 fi
 
+out=$("$RIS" check test src/std/bzip2.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module bzip2'
+else
+  echo "FAILED   spec module bzip2: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/csv.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module csv'
+else
+  echo "FAILED   spec module csv: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/dns.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module dns'
+else
+  echo "FAILED   spec module dns: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/fileserver.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module fileserver'
+else
+  echo "FAILED   spec module fileserver: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/format.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module format'
+else
+  echo "FAILED   spec module format: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/hpack.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module hpack'
+else
+  echo "FAILED   spec module hpack: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/ini.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module ini'
+else
+  echo "FAILED   spec module ini: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/json.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module json'
+else
+  echo "FAILED   spec module json: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/mail.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module mail'
+else
+  echo "FAILED   spec module mail: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/mime.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module mime'
+else
+  echo "FAILED   spec module mime: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/netip.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module netip'
+else
+  echo "FAILED   spec module netip: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/number_format.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module number_format'
+else
+  echo "FAILED   spec module number_format: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/option_parser.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module option_parser'
+else
+  echo "FAILED   spec module option_parser: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/otp.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module otp'
+else
+  echo "FAILED   spec module otp: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/password.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module password'
+else
+  echo "FAILED   spec module password: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/png.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module png'
+else
+  echo "FAILED   spec module png: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/query.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module query'
+else
+  echo "FAILED   spec module query: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/regex.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module regex'
+else
+  echo "FAILED   spec module regex: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/router.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module router'
+else
+  echo "FAILED   spec module router: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/shlex.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module shlex'
+else
+  echo "FAILED   spec module shlex: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/smtp.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module smtp'
+else
+  echo "FAILED   spec module smtp: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/sse.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module sse'
+else
+  echo "FAILED   spec module sse: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/tar.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module tar'
+else
+  echo "FAILED   spec module tar: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/toml.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module toml'
+else
+  echo "FAILED   spec module toml: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/udp.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module udp'
+else
+  echo "FAILED   spec module udp: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/websocket.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module websocket'
+else
+  echo "FAILED   spec module websocket: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/xml.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module xml'
+else
+  echo "FAILED   spec module xml: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/xz.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module xz'
+else
+  echo "FAILED   spec module xz: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/yaml.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module yaml'
+else
+  echo "FAILED   spec module yaml: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/zip.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module zip'
+else
+  echo "FAILED   spec module zip: $out"; status=1
+fi
+
 # Run heap workloads after the other gates to avoid compiler contention.
 # Keep their fixed timeouts: a hung census must still fail.
 python3 test/ris/heap_check.py || status=1

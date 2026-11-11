@@ -1,3 +1,4 @@
+# standard: RFC 5321
 # An SMTP client (RFC 5321) over std/socket and std/tls, written in iyi:
 # it hands a mail server what std/mail builds.
 #
@@ -593,4 +594,10 @@ pub class SmtpClient
       got
     end
   end
+end
+
+spec 8.1
+  SmtpClient.stuffed(".one\n..two\rthree\r\nlast") ==
+    "..one\r\n...two\r\nthree\r\nlast\r\n.\r\n"
+  SmtpClient.stuffed("") == ".\r\n"
 end

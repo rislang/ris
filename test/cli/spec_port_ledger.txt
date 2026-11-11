@@ -8,9 +8,10 @@ test/ris/allowed.ri
   }
 test/ris/autocert.ri
   {
-    "state": "stays: todo",
+    "state": "stays: program-level",
     "old": 36,
-    "shell_old": 0
+    "shell_old": 0,
+    "reason": "Python-generated PEM fixtures and a separate lifecycle program."
   }
 test/ris/autocert_wire.ri
   {
@@ -54,9 +55,17 @@ test/ris/big_tape.ri
   }
 test/ris/bzip2.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/bzip2.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 6,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/bzip2.ri 2>&1)",
+    "case_hash": "f04ce280a87db5ab"
   }
 test/ris/cleanup_allocations.ri
   {
@@ -102,15 +111,24 @@ test/ris/const_int_width.ri
   }
 test/ris/cookie.ri
   {
-    "state": "stays: todo",
+    "state": "stays: program-level",
     "old": 18,
-    "shell_old": 0
+    "shell_old": 0,
+    "reason": "Cookie.parse retains loop-local domain (SPEC 1.1)."
   }
 test/ris/csv.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/csv.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 7,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/csv.ri 2>&1)",
+    "case_hash": "853e521cc354dae5"
   }
 test/ris/debug.ri
   {
@@ -145,9 +163,17 @@ test/ris/dir_children.ri
   }
 test/ris/dns.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/dns.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 9,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/dns.ri 2>&1)",
+    "case_hash": "b30c5aabee25eba3"
   }
 test/ris/eiy.ri
   {
@@ -177,15 +203,31 @@ test/ris/file_metadata.ri
   }
 test/ris/fileserver.ri
   {
-    "state": "stays: todo",
-    "old": 2,
-    "shell_old": 1
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/fileserver.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 5,
+    "driver": true,
+    "retained": 1,
+    "case": "out=$(\"$RIS\" run test/ris/fileserver.ri 2>&1)",
+    "case_hash": "c0e89065e6f8efed"
   }
 test/ris/format.ri
   {
-    "state": "stays: todo",
-    "old": 8,
-    "shell_old": 3
+    "state": "ported",
+    "old": 11,
+    "dest": "src/std/format.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 11,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/format.ri 2>&1)",
+    "case_hash": "d924b8306d85aafd"
   }
 test/ris/heap_exemptions.ri
   {
@@ -201,9 +243,17 @@ test/ris/heap_kinds.ri
   }
 test/ris/hpack.ri
   {
-    "state": "stays: todo",
-    "old": 12,
-    "shell_old": 1
+    "state": "ported",
+    "old": 13,
+    "dest": "src/std/hpack.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 13,
+    "driver": true,
+    "retained": 1,
+    "case": "out=$(\"$RIS\" run --release test/ris/hpack.ri 2>&1)",
+    "case_hash": "eae56ea270645550"
   }
 test/ris/hpke_owners.ri
   {
@@ -213,9 +263,17 @@ test/ris/hpke_owners.ri
   }
 test/ris/ini.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/ini.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 8,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/ini.ri 2>&1)",
+    "case_hash": "59eabf6b09d61ac3"
   }
 test/ris/iterator_stop.ri
   {
@@ -225,9 +283,17 @@ test/ris/iterator_stop.ri
   }
 test/ris/json.ri
   {
-    "state": "stays: todo",
+    "state": "ported",
     "old": 0,
-    "shell_old": 0
+    "dest": "src/std/json.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 7,
+    "driver": true,
+    "retained": 0,
+    "case": "heap_trap json runs",
+    "case_hash": "8780d9fe763d4e50"
   }
 test/ris/json_buffer.ri
   {
@@ -279,27 +345,57 @@ test/ris/log_tape.ri
   }
 test/ris/mail.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/mail.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 6,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/mail.ri 2>&1)",
+    "case_hash": "6e81f4200a814920"
   }
 test/ris/mime.ri
   {
-    "state": "stays: todo",
-    "old": 16,
-    "shell_old": 3
+    "state": "ported",
+    "old": 19,
+    "dest": "src/std/mime.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 19,
+    "driver": true,
+    "retained": 3,
+    "case": "for name in nested_containers",
+    "case_hash": "e6211b7d92c8da9a"
   }
 test/ris/netip.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/netip.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 11,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/netip.ri 2>&1)",
+    "case_hash": "b55f2bbf1f28b1d4"
   }
 test/ris/number_format.ri
   {
-    "state": "stays: todo",
+    "state": "ported",
     "old": 19,
-    "shell_old": 0
+    "dest": "src/std/number_format.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 19,
+    "driver": false,
+    "retained": 0
   }
 test/ris/once_in_program_init.ri
   {
@@ -309,9 +405,17 @@ test/ris/once_in_program_init.ri
   }
 test/ris/option_parser.ri
   {
-    "state": "stays: todo",
-    "old": 3,
-    "shell_old": 4
+    "state": "ported",
+    "old": 7,
+    "dest": "src/std/option_parser.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 10,
+    "driver": true,
+    "retained": 4,
+    "case": "run test/ris/option_parser.ri",
+    "case_hash": "d47c6c1d03c99c3a"
   }
 test/ris/option_parser_panics.ri
   {
@@ -321,9 +425,17 @@ test/ris/option_parser_panics.ri
   }
 test/ris/otp.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/otp.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 11,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/otp.ri 2>&1)",
+    "case_hash": "869df0b17a5971aa"
   }
 test/ris/params_write_tape.ri
   {
@@ -333,9 +445,17 @@ test/ris/params_write_tape.ri
   }
 test/ris/password.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/password.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 6,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/password.ri 2>&1)",
+    "case_hash": "08a965656a4ed41b"
   }
 test/ris/path.ri
   {
@@ -366,15 +486,31 @@ test/ris/pipe_wait.ri
   }
 test/ris/png.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/png.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 7,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/png.ri 2>&1)",
+    "case_hash": "807cf50d144cf136"
   }
 test/ris/query.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 1
+    "state": "ported",
+    "old": 1,
+    "dest": "src/std/query.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 3,
+    "driver": true,
+    "retained": 1,
+    "case": "out=$(\"$RIS\" run test/ris/query.ri 2>&1)",
+    "case_hash": "7de12ac9d04bc62d"
   }
 test/ris/query_scope.ri
   {
@@ -384,9 +520,17 @@ test/ris/query_scope.ri
   }
 test/ris/regex.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/regex.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 12,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/regex.ri 2>&1)",
+    "case_hash": "69c889c2807c57ca"
   }
 test/ris/round_struct_kept.ri
   {
@@ -396,9 +540,15 @@ test/ris/round_struct_kept.ri
   }
 test/ris/router.ri
   {
-    "state": "stays: todo",
+    "state": "ported",
     "old": 5,
-    "shell_old": 0
+    "dest": "src/std/router.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 5,
+    "driver": false,
+    "retained": 0
   }
 test/ris/scope_cleanup.ri
   {
@@ -408,9 +558,10 @@ test/ris/scope_cleanup.ri
   }
 test/ris/secure_dns.ri
   {
-    "state": "stays: todo",
+    "state": "stays: program-level",
     "old": 1,
-    "shell_old": 3
+    "shell_old": 3,
+    "reason": "External Python TLS/HTTPS peer and certificate fixture."
   }
 test/ris/semantic_version.ri
   {
@@ -429,9 +580,17 @@ test/ris/semantic_version.ri
   }
 test/ris/shlex.ri
   {
-    "state": "stays: todo",
-    "old": 14,
-    "shell_old": 3
+    "state": "ported",
+    "old": 17,
+    "dest": "src/std/shlex.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 17,
+    "driver": true,
+    "retained": 3,
+    "case": "for name in std_generic_tape",
+    "case_hash": "f6f4c95772d013ca"
   }
 test/ris/signal_flags.ri
   {
@@ -447,9 +606,17 @@ test/ris/slice_dup.ri
   }
 test/ris/smtp.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/smtp.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 5,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/smtp.ri 2>&1)",
+    "case_hash": "71c26e6e9d912189"
   }
 test/ris/socket_kept.ri
   {
@@ -471,9 +638,17 @@ test/ris/socket_pieces.ri
   }
 test/ris/sse.ri
   {
-    "state": "stays: todo",
-    "old": 12,
-    "shell_old": 1
+    "state": "ported",
+    "old": 13,
+    "dest": "src/std/sse.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 14,
+    "driver": true,
+    "retained": 1,
+    "case": "out=$(\"$RIS\" run test/ris/sse.ri 2>&1)",
+    "case_hash": "dcedf5457e74ca90"
   }
 test/ris/static_array_copy.ri
   {
@@ -525,9 +700,17 @@ test/ris/tape_string.ri
   }
 test/ris/tar.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/tar.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 5,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/tar.ri 2>&1)",
+    "case_hash": "ecd97819cf6957cb"
   }
 test/ris/task_reached_proc.ri
   {
@@ -561,9 +744,17 @@ test/ris/tls_error_message.ri
   }
 test/ris/toml.ri
   {
-    "state": "stays: todo",
-    "old": 20,
-    "shell_old": 3
+    "state": "ported",
+    "old": 23,
+    "dest": "src/std/toml.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 23,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/toml.ri 2>&1)",
+    "case_hash": "1c3fecb6b791f9bc"
   }
 test/ris/toml_round_flags.ri
   {
@@ -573,9 +764,17 @@ test/ris/toml_round_flags.ri
   }
 test/ris/udp.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/udp.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 8,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/udp.ri 2>&1)",
+    "case_hash": "7f29e7c41fcd1d43"
   }
 test/ris/uri_legacy.ri
   {
@@ -606,15 +805,31 @@ test/ris/uuid.ri
   }
 test/ris/websocket.ri
   {
-    "state": "stays: todo",
-    "old": 6,
-    "shell_old": 3
+    "state": "ported",
+    "old": 9,
+    "dest": "src/std/websocket.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 9,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/websocket.ri 2>&1)",
+    "case_hash": "a5f15c97e58835a0"
   }
 test/ris/xml.ri
   {
-    "state": "stays: todo",
-    "old": 11,
-    "shell_old": 3
+    "state": "ported",
+    "old": 14,
+    "dest": "src/std/xml.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 14,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/xml.ri 2>&1)",
+    "case_hash": "fbce2e2b6a4e301b"
   }
 test/ris/xpath.ri
   {
@@ -624,15 +839,31 @@ test/ris/xpath.ri
   }
 test/ris/xz.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/xz.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 4,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/xz.ri 2>&1)",
+    "case_hash": "2a078d32c66f0bdf"
   }
 test/ris/yaml.ri
   {
-    "state": "stays: todo",
-    "old": 20,
-    "shell_old": 3
+    "state": "ported",
+    "old": 23,
+    "dest": "src/std/yaml.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 23,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/yaml.ri 2>&1)",
+    "case_hash": "e642c88e1764c283"
   }
 test/ris/zero_capacity.ri
   {
@@ -642,9 +873,17 @@ test/ris/zero_capacity.ri
   }
 test/ris/zip.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "dest": "src/std/zip.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 6,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/zip.ri 2>&1)",
+    "case_hash": "4cfcf545d10041c3"
   }
 test/spec/clause_1_2_test.ri
   {

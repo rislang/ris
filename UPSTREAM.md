@@ -201,3 +201,8 @@ back.
 Spec port (doc/drafts/spec-port/): standards-header validation and lazy
 spec process/tmp imports belong upstream in iyi. Pure library proofs
 must not acquire a dependency cycle through unused filesystem helpers.
+
+Spec builds keep computed constant declarations and trait declarations.
+Macro lookup in nested types also searches enclosing namespaces, so an
+entry module can derive with its own exported macros just as an imported
+module can. These fixes belong upstream in iyi.

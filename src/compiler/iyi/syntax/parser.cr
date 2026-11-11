@@ -462,7 +462,7 @@ module Iyi
       case node
       when ModuleHeader, ImportDecl, UsingDecl, Require, Def, Macro,
            ClassDef, ModuleDef, EnumDef, LibDef, Alias, AnnotationDef,
-           Annotation, CStructOrUnionDef, FunDef, TypeDef, ImplDef, Nop, SpecBlock
+           Annotation, CStructOrUnionDef, FunDef, TypeDef, TraitDef, ImplDef, Nop, SpecBlock
         true
       when MacroLiteral
         begin
@@ -484,7 +484,7 @@ module Iyi
           node.expressions.all? { |child| ris_declaration?(child) }
         end
       when Assign
-        node.target.is_a?(Path) && ris_literal?(node.value)
+        node.target.is_a?(Path)
       else
         false
       end

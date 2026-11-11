@@ -1,3 +1,4 @@
+# standard: RFC 6238
 # One-time passwords, written in iyi: HOTP (RFC 4226), TOTP (RFC 6238),
 # and the `otpauth://` key URI an authenticator app reads from a QR code
 # (Google Authenticator's Key Uri Format, which is the de facto spec:
@@ -512,4 +513,23 @@ struct OTPText
       -1
     end
   end
+end
+
+
+spec 8.1
+  key = Array(UInt8).new(20) { |i| (48 + (i + 1) % 10).to_u8 }
+  (0..3).map { |c| HOTP.code(key, c.to_i64) }.join(",") ==
+    "755224,287082,359152,969429"
+  TOTP.code(key, 59_i64, digits: 8) == "94287082"
+  TOTP.code(key, 1111111109_i64, digits: 8) == "07081804"
+  TOTP.verify(key, "07081804", 1111111109_i64 + 30, digits: 8)
+  !TOTP.verify(key, "07081804", 1111111109_i64 + 90, digits: 8)
+  auth = OTPAuth.totp(key, "ada@example.com", "Ex Co",
+    OTPAlgorithm::SHA256, 8, 60)
+  back = OTPAuth.parse(auth.to_s)
+  back.is_a?(OTPAuth)
+  raise "URI failed" unless back.is_a?(OTPAuth)
+  back.secret == key
+  back.account == "ada@example.com"
+  OTPAuth.parse("otpauth://totp/x?digits=6").is_a?(OTPError)
 end

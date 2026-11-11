@@ -1,3 +1,4 @@
+# standard: Perl regular expression grammar
 # Regular expressions, RE2's contract, written in iyi.
 #
 # Linear time: a Thompson NFA run as a Pike VM, one pass over the text
@@ -2380,4 +2381,19 @@ struct ::String
   def matches?(pattern : Std::Regex::Regex) : Bool
     !pattern.find(self).nil?
   end
+end
+
+spec 8.1
+  Regex.compile("b+c").find("aabbbcd") == "bbbc"
+  date = Regex.compile("(\\d{4})-(\\d\\d)-(?<day>\\d\\d)")
+  match = date.match("on 2026-10-30.")
+  raise "missing match" unless match
+  match["day"] == "30"
+  match[1] == "2026"
+  Regex.compile("cat|dog|bird").scan("a dog, a cat").join(",") == "dog,cat"
+  Regex.compile("a|ab").find("ab") == "a"
+  Regex.compile("^abc$").match?("abc")
+  !Regex.compile("^abc$").match?("abcd")
+  Regex.compile("\\s+").split("a  b\tc").join("|") == "a|b|c"
+  Regex.compile("\\d+").replace("a1b22c333", "#") == "a#b#c#"
 end

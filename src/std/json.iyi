@@ -1,3 +1,4 @@
+# standard: RFC 8259
 # JSON, read and written in iyi: a byte lexer and a recursive parser into
 # `Any`, a streaming `PullParser`, a `Builder` that writes a document one
 # value at a time, and `JSON.parse` / `JSON.parse?` / `JSON.build` /
@@ -4171,4 +4172,17 @@ impl WritesJSON for String::Builder
   def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Std::Json::Writer -> Nil) : Nil
     Std::Json::JSON.write(self, indent, ascii_only) { |j| yield j }
   end
+end
+
+spec 8.1
+  text = "{\"id\":1,\"name\":\"café\",\"tags\":[true,null]}"
+  value = JSON.parse(text)
+  value["id"].as_i == 1
+  value["name"].as_s == "café"
+  JSON.parse(value.to_json) == value
+  doc = JSON.document(text)
+  doc.size(doc.root) == 3
+  JSON.parse?("[bad").nil?
+  JSON.parse("1e3").as_f == 1000.0
+  JSON.parse("0.125").as_f == 0.125
 end

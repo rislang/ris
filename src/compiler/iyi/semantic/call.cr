@@ -1399,6 +1399,16 @@ class Iyi::Call
 
     macros = yield node_scope
 
+    # A nested type can use macros declared by its enclosing module,
+    # including an entry module that has no imported file-module record.
+    enclosing = node_scope.instance_type
+    while !macros && enclosing.is_a?(NamedType)
+      parent = enclosing.namespace
+      break if parent == enclosing || parent == program
+      macros = yield parent.metaclass
+      enclosing = parent
+    end
+
     # If the scope is a module (through its instance type), lookup in Object too
     # (so macros like `property` and others, defined in Object, work at the module level)
     if !macros && node_scope.instance_type.module?

@@ -1,3 +1,4 @@
+# standard: YAML 1.2.2
 # YAML, read and written in iyi alone: a parser and an emitter for the
 # YAML 1.2 core schema over the bytes of a `String`, with no library under
 # them.
@@ -2964,4 +2965,63 @@ pub struct YAML
     RisDecoded(T).new(value).value
   end
 
+end
+
+@[OnTape]
+struct Point
+  getter name : String
+  getter x : Int32
+  getter tags : Array(String)
+  getter scale : Float64?
+  derive yaml_serializable
+end
+
+spec 8.1
+
+
+  # std/yaml on the caller's tape: documents read into TapeValue, dumped,
+  # read back and compared; derive yaml_serializable; no heap.
+
+
+  tagged = YAML.parse("a: !!int 12\nb: !!float 3\nc: !!bool true\n" \
+                      "d: !!null null\ne: !<tag:yaml.org,2002:str> 7\n")
+  tagged["a"].as_i == 12
+  tagged["b"].as_f == 3.0
+  tagged["c"].as_bool && tagged["d"].null?
+  tagged["e"].as_s == "7"
+  retained = YAML.parse("a: &a \"first\\ntext\"\nb: 'second'\nc: *a\n")
+  retained["a"].as_s == "first\ntext"
+  retained["c"] == retained["a"]
+  text = "name: café\nlist: [1, true, null, 0.125]\nquoted: \"a\\nb\"\n"
+  doc = YAML.parse(text)
+  YAML.parse("[1, 2]")[-1].as_i == 2
+  YAML.read_value(doc["name"], String?) == "café"
+  YAML.read_value(TapeValue.new(nil), Point?).nil?
+  copied = doc.copy_to(Program.tape)
+  copied == doc
+  doc["name"].as_s == "café"
+  doc["list"][0].as_i == 1
+  doc["quoted"].as_s == "a\nb"
+  w = String::Builder.new(1)
+  w << "prefix:"
+  YAML.dump(doc, w)
+  rendered = YAML.dump(doc)
+  print rendered
+  YAML.parse(rendered) == doc
+  YAML.parse(rendered).hash == doc.hash
+  w.finish.starts_with?("prefix:name:")
+  YAML.parse?("[bad").nil?
+  nested = YAML.parse("- [1, [2], 3]\n-\n  - 4\n  - [5, 6]\n")
+  nested[0][1][0].as_i == 2
+  nested[1][1][1].as_i == 6
+  YAML.parse(YAML.dump(nested)) == nested
+  print YAML.dump(nested)
+  puts nested.inspect
+  puts doc.inspect
+  docs = YAML.parse_all("a: 1\n---\n- x\n- {k: v}\n")
+  puts docs.size
+  docs.each { |d| print YAML.dump(d) }
+  p = Point.from_yaml("name: p\nx: 3\ntags: [a, b]\n")
+  puts "#{p.name} #{p.x} #{p.tags.join(",")} #{p.scale.nil?}"
+  print p.to_yaml
 end

@@ -1,3 +1,4 @@
+# standard: XZ file format 1.0.4
 # LZMA and LZMA2 decompression, and the two files they travel in: the
 # .xz container (The .xz File Format, version 1.0.4, Tukaani project,
 # 2009-08-27, which 1.2.1 restates) and the legacy .lzma file that LZMA
@@ -1726,4 +1727,8 @@ pub struct Xz
     return core.error if core.failed?
     sink.to_s
   end
+end
+
+spec 8.1
+  Xz.decompress("bad").is_a?(XzError)
 end

@@ -45,6 +45,71 @@ cat > SPEC.md <<'EOF'
 * 1.5 Later work.
 EOF
 
+# Libraries keep computed constants and can derive their own types.
+cat > constants.ri <<'EOF'
+module constants
+
+VALUES = Array(Int32).new(2) { |i| i + 20 }
+
+pub def answer : Int32
+  VALUES[0] + VALUES[1] + 1
+end
+
+spec 1.1
+  answer == 42
+end
+EOF
+"$IYI" test constants.ri > constants.out 2>&1
+[ $? = 0 ] || { fail "computed library constant"; tail -15 constants.out; }
+rm constants.ri
+
+cat > derived.ri <<'EOF'
+module derived
+
+pub trait Answer
+  abstract def answer : Int32
+end
+
+pub macro own(declaration)
+  impl ::Derived::Answer for {{ declaration[:name].id }}
+    def answer : Int32
+      42
+    end
+  end
+end
+
+pub struct Value
+  derive own
+end
+
+spec 1.1
+  Value.new.answer == 42
+end
+EOF
+"$IYI" test derived.ri > derived.out 2>&1
+[ $? = 0 ] || { fail "module's own derive"; tail -15 derived.out; }
+rm derived.ri
+
+# A loop's nested comparisons are not top-level proof checks.
+python3 - "$REPO" <<'PYPROBE'
+import importlib.util
+import pathlib
+import sys
+sys.dont_write_bytecode = True
+root = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location(
+    'counts', root / 'test/cli/spec_port_counts.py')
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+p = pathlib.Path('nested.ri')
+p.write_text('spec 1.1\n  2.times do |i|\n'
+             '    raise "bad" unless i < 2\n  end\n  42 == 42\nend\n')
+checks = list(m.blocks(p))[0][2]
+assert checks == [(4, 5)], checks
+p.unlink()
+PYPROBE
+[ $? = 0 ] || fail "only top-level Bool lines are port checks"
+
 mkdir proj
 cat > proj/m.ri <<'EOF'
 module m

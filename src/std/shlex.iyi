@@ -1,3 +1,4 @@
+# standard: POSIX shell word grammar
 # Shell-style words, read and written the way Python's `shlex` reads and
 # writes them in POSIX mode: `Shlex.split` is `shlex.split(s, comments)`,
 # `Shlex.quote` is `shlex.quote` and `Shlex.join` is `shlex.join`, rule
@@ -291,4 +292,37 @@ pub struct Shlex
       "shlex: no escaped character: the backslash at byte #{at} ends " \
       "the text")
   end
+end
+
+
+spec 8.1
+
+
+  kept = [] of String
+  text = "plain 'two words' \"café\" a\\ b ''"
+  words = Shlex.split(text)
+  !(words.is_a?(ShlexError))
+  raise "split failed" if words.is_a?(ShlexError)
+  words.size == 5
+  words[1] == "two words" && words[2] == "café"
+  words[3] == "a b" && words[4].empty?
+  w = String::Builder.new(1)
+  w << "prefix:"
+  Shlex.join(words, w)
+  w.finish.starts_with?("prefix:plain 'two words'")
+  again = Shlex.split(Shlex.join(words))
+  !(again.is_a?(ShlexError))
+  raise "split failed" if again.is_a?(ShlexError)
+  again == words
+  Shlex.quote("a'b") == "'a'\"'\"'b'"
+  Shlex.split("'bad").is_a?(ShlexError)
+  Shlex.split("bad\\").is_a?(ShlexError)
+  comments = Shlex.split("a# rest\nb", true)
+  !(comments.is_a?(ShlexError))
+  raise "split failed" if comments.is_a?(ShlexError)
+  comments == ["a", "b"]
+  kept = words.copy_to(Program.tape)
+  kept == ["plain", "two words",
+    "café", "a b", ""]
+  Shlex.split(Shlex.join(kept)) == kept
 end

@@ -51,7 +51,9 @@ def blocks(path):
             text = s.strip()
             if re.match(r'\w+\s*=(?!=)', text):
                 continue
-            if text in ('end', 'else') or text.startswith('tape '):
+            if (text in ('end', 'else') or
+                    re.match(r'(?:tape|raise|puts|print|while|until|if|unless)\b',
+                             text) or re.search(r'\bdo(?: \|.*\|)?$', text)):
                 continue
             stop = i + 1
             while stop < end and lines[stop].startswith('    '):
@@ -148,7 +150,7 @@ def main():
             for start, clause, checks in found:
                 first, stop = checks[0]
                 lines = original.copy()
-                expression = ' '.join(s.strip() for s in lines[first:stop])
+                expression = '\n'.join(lines[first:stop]).strip()
                 lines[first:stop] = ['  !(' + expression + ')']
                 copy = Path(scratch) / "std" / dest.name
                 copy.parent.mkdir(exist_ok=True)

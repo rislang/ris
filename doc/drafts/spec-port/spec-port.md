@@ -522,3 +522,91 @@ Verification of the retained phase 2 result:
   grouped loops, end with `PASS: selected ris checks`.
 - No commit was made. Own scripts, compiler cache and temporary files
   under test/cli/.work/ were removed; existing scratch was preserved.
+
+### 10.1 Retry after spec-build repairs (2026-11-11)
+
+The three regressions have small checks in spec_blocks_run.sh. On the
+phase 2 binary, the computed-table check failed with the dropped-name
+error, the local derive failed as unavailable, and the loop scanner
+returned both the loop and its following Bool instead of only the Bool.
+A second derive probe, using a trait, exposed a missing TraitDef in the
+declaration list. Both derive forms now pass.
+
+- Computed constants are declarations regardless of their initializer.
+  Test builds retain their initialization, including JSON's POW10 and
+  HPACK's HUFFMAN_CODES. Program statements are still omitted.
+- Trait declarations stay too. Macro lookup walks enclosing namespaces,
+  so nested test types can derive with macros in their own entry module.
+  The program gate also checks a computed constant beside program code.
+- Port counting inspects top-level statements, skipping control blocks,
+  raises and output effects. Multiline Bool expressions still count as
+  one check. Mutation preserves continuation newlines and their backslashes.
+  A nested comparison can no longer turn a loop into a syntax-error flip.
+
+Thirty additional modules have blocks. Text: csv, ini, toml, json, yaml,
+xml, regex, shlex, format, number_format and option_parser. Net: dns,
+netip, udp, smtp, mail, sse, websocket, router, query, mime, fileserver,
+otp and password. Compression: bzip2, xz, zip, tar, png and hpack.
+Together with the seven retained ports, that is 37 modules.
+
+The existing output, heap and integration drivers stay byte-for-byte
+unchanged and their shell cases are pinned in the ledger. They retain
+large codec corpora, socket exchanges and printed-format comparisons.
+number_format and router have no retained shell case and their programs
+are removed. JSON keeps its heap_trap driver; that shorthand is now
+explicitly recorded as its retained case. No library API was changed.
+
+Lifetime adaptations and retained program checks:
+
+- CSV's blocks use the callback parser and copy retained rows to their
+  owner. The original stream-reader/output driver remains: a module
+  proof must not retain a live view across CSVReader.@bytes refill.
+- Cookie remains program-level. Even a minimal Cookie.parse proof with
+  Domain=.EXAMPLE.COM refuses the loop-local lowercased domain escaping
+  its round (SPEC 1.1, 3.6). The compiler rule and library API stay.
+- ZIP passes with an explicit Time.unix modification time. Its proof does
+  not invoke the Time.read_local default refused under SPEC 1.9.
+- TAR reads the current entry before advancing; it retains no entry view
+  across the reader's next names-buffer clear.
+- secure_dns remains program-level: its Python TLS/HTTPS peer generates
+  the CA and port files and takes a fixture directory argument.
+- autocert remains program-level: autocert_checks.py builds its separate
+  program, generates short-lived PEM identities and runs the lifecycle
+  fixture. RisProgram cannot build/run an arbitrary fixture or start the
+  Python fixture generator; it runs only the plain module under proof.
+  debug's previously recorded process-handle limitation is unchanged.
+
+The TLS/PKI fixtures are not a reason to roll back independent module
+proofs. Their original programs and shell checks remain, with explicit
+program-level ledger verdicts. No later port phase was attempted.
+
+Verification of this retry:
+
+- The new probes were red before the compiler/scanner fixes: computed
+  constant dropped; own derive unavailable; loop checks [(1, 3), (4, 5)]
+  instead of [(4, 5)]. The trait form also failed before TraitDef stayed.
+- After: spec_blocks_run reports `PASS: spec blocks run`; the changed
+  program fixture reports `spec_blocks_program: ok`. All seven
+  spec_blocks_*.sh gates pass.
+- Baseline from the committed phase 2 record above:
+  `PASS: spec port counts (7 modules, 12 flips)`; 492 shell cases.
+- Retry: `PASS: spec port counts (37 modules, 42 flips)`;
+  `485 old - 0 removed + 37 modules = 522 new`.
+- `spec_verb: 52 steps passed`; `bin/ris check spec` reports
+  `43 clauses: 19 ok, 24 todo, 0 to review, 0 uncovered, 0 unversioned`.
+- The 30 added module runs pass. Selected check.sh module and retained
+  driver cases report `PASS: selected ris checks`, including the pilot,
+  deque and eiy driver loops. No full check.sh or full suite was run.
+- LLVM 23.1.3 build passes. No commit is made; the lead reviews and
+  commits. Own .work scratch is removed at the stopping point.
+
+Additional compiler verification:
+
+- iyi_derive_test.cr: `14 examples, 0 failures, 3 errors, 0 pending`.
+  Unchanged HEAD produces the same three errors at lines 96, 178 and
+  527: two old fixtures omit OnTape, and one still uses String.view.
+  No inherited test was changed to hide those failures.
+- Crystal formatting was checked. parser.cr passes; call.cr has existing
+  formatting differences outside the added hunk. The unchanged HEAD
+  copy also fails its formatting check. Unrelated reformatting is left
+  to a separate change. `git diff --check` passes.

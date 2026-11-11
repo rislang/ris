@@ -1,3 +1,4 @@
+# standard: RFC 5322
 # Internet mail messages (RFC 5322) with MIME (RFC 2045 to 2047, RFC
 # 2231): a message built from its parts, and a message read back into its
 # headers, its tree of parts and their decoded bodies, written in iyi.
@@ -2751,4 +2752,20 @@ pub struct Mail
       found
     end
   end
+end
+
+spec 8.1
+  msg = Mail::Message.new
+  msg.from = Mail::Address.new("jorg@example.com", "Jörg Müller")
+  msg.to << Mail::Address.new("ann@example.org")
+  msg.subject = "Grüße aus Köln"
+  msg.date = Mail.date(1792224000_i64, 120)
+  msg.text = "Hallo Ann,\n"
+  wire = msg.to_s
+  parser = Mail::RisMailParser.new(wire)
+  part = parser.parse
+  part.is_a?(MailError) == false
+  raise "mail parse failed" if part.is_a?(MailError)
+  part.subject == "Grüße aus Köln"
+  part.media_type == "text/plain"
 end

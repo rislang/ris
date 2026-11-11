@@ -1,3 +1,4 @@
+# standard: INI grammar
 # INI configuration text: `[section]` headers, `key = value` lines,
 # comments opened by `#` or `;`, and keys before the first header filed
 # under the section named `""`.
@@ -334,4 +335,13 @@ pub struct RisIni
     end
     true
   end
+end
+
+spec 8.1
+  doc = INI.parse("top=yes\n[s]\na=café\na=last\n")
+  doc["", "top"] == "yes"
+  doc["s", "a"] == "last"
+  doc["s", "missing"]?.nil?
+  INI.parse(INI.build(doc)) == doc
+  INI.parse("").empty?
 end
