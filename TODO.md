@@ -17,7 +17,6 @@ How to work (fewer tokens, faster to the goal):
 What CHANGELOG's 0.1.0 promises must work; the items stay in their
 sections below and are listed here in order:
 
-* HTTP handlers on Incoming/Outgoing (section 1).
 * Checking time per nested block (sections 1 and 2): web's examples
   must check in seconds.
 * Benches build (section 7), including `HTTP.tls_config=` callers.
@@ -28,10 +27,13 @@ sections below and are listed here in order:
 
 ## 1. Programs first
 
-* HTTP handlers: port every HTTP bench and samples/iyi/autocert.iyi
-  from `def call(req) : Response` to `call(req : Incoming, res :
-  Outgoing) : Nil` (HTTP.answer, src/std/http.iyi:2384). The old form
-  stays refused; no adapter (decided 2026-11-10).
+* std on the tape, found porting the HTTP handlers (drift report in
+  doc/drafts/server-answer-features.md): Router's `Pattern.parse` (SPEC
+  1.9, router.iyi:189), the HTTPS client (`records_handshake` returns
+  an owner, http.iyi:4847; blocks samples/iyi/autocert.iyi),
+  `Zstd.decompress` (view check, zstd.iyi:1410), `Cookie.parse_header`
+  and `HTTP.cookie_pairs` (a Hash from a def). Then give `Incoming`
+  back `form`, `multipart` and `cookies`, which `Request` had.
 
 * The user's own ris programs: each obstacle becomes an item here.
 
@@ -171,12 +173,71 @@ Unknown must be refused (SPEC 3.6).
 
 ## 7. Benches
 
-* Build each bench, group the refusals by message, fix per group (old
+* 36 check scripts nothing runs (not CI, not test/ris/check.sh, not another
+  script; gates_reachable.py lists them): wire each into CI or delete it.
+  test/cli: bounded_gate.sh, collections_exercise.sh, collector_free_floor.sh,
+  daemon_agrees.py, debug_info.py, enum_exercise.sh, float_text.sh,
+  format_exercise.sh, gates_reachable.py, generic_boundary.py, io_exercise.sh,
+  language_is_named.py, lsp_artifacts.py, lsp_positions.py,
+  lsp_token_boundaries.py, mod_context.sh, mod_diff.sh, number_exercise.sh,
+  packages_get.sh, parallel_exercise.sh, runtime_exercise.sh,
+  sandbox_story.sh, server_load.sh, socket_exercise.sh, tarball_std.sh,
+  test_verb.sh, value_exercise.sh, verbs_exercise.sh,
+  wasm_concurrency_probe.sh, windows_exercise.sh. test/speed: defer_cost.sh,
+  definition_typing_scale.py, measured_numbers.py, metric_port.sh,
+  rebuild_speed.py, tls_speed.sh.
+* test/cli/agent_loop.py fails at step 12 on main (2026-11-10) and no CI
+  job runs it (gates_reachable counts it only through a spec comment):
+  fix it and put it in .github/workflows/ris.yml. Its `check -f json`
+  and `fix --json` calls still need moving to `check types --json`
+  (diagnostics in the steps object) and `check types --fix`.
+* test/cli/test_verb.sh fails on main (2026-11-10) at "the discount says
+  when it turns itself off": the eiy macro gets the file name
+  `::String.view(::String.view("page.eiy"))` and panics `cannot read`.
+* test/cli/packages_get.sh: 9 FAIL (get/reach/doc/mod context), 31 on main
+  before ris check; test/cli/verbs_exercise.sh: a reopen of String (now a
+  struct) and `fix printed its edit` (split.iyi already clean).
+
+* Build each test/cli program, group refusals by message, fix per group (old
   step 5). Known before the new rules: 5.1 task captures (tls server
   configs, udp:274, dns:951, http.iyi:2154 serve's `handle`, sse.iyi:513
   and :543, std_compress's opaque source proc); drop std/gc imports
-  from its importers and server_load. HTTP.tls_config= is removed but
-  still called by acme, http2_exercise and std_http_exercise.sh.
+  from its importers and server_load. 2026-11-10: 70 of 139 benches
+  pass --no-codegen (40 before the group fixes); 77 after the second
+  round (box, capsule, deque, number_format, semantic_version, atomic,
+  udp). Left, by first refusal:
+  - a def's or block's result made in its scratch, SPEC 1.9 (benchmark's
+    IPS Entry class kept in an Array, std's and named_tuple's Hash
+    results, png, sse, steppable, time, mlkem, runtime; yaml's read_value
+    of a Hash, which a derived Hash field needs a destination for);
+  - block or round data stored past it (big, bzip2, xz, rsa, user,
+    indexable, dir, io, cookie, http_server, ct_timing, socket, process;
+    slice's fresh Slice keys in a Hash);
+  - iterator: to_a's `each { |e| result << e }` of an element a map or
+    each_slice made is an opaque callback;
+  - procs outliving their tape block (file, file_utils: a task takes a
+    local File or path; router);
+  - certificates and Times in constants (ocsp, x509), log's @parent:
+    even `NOW = Time.utc(2026, 6, 1)` is refused at Zone's @name, and a
+    constant RisCertificateStore at its kept certificates;
+  - std_tls: from_pem and configs returned from defs; http2_exercise;
+  - API drift: hpack (encode answers a String, decode takes
+    TapeHeaders), dns (SvcbRecord.parse takes a String), secure_dns
+    (https_records), toml (Any), xml, websocket, http_https_records,
+    acme and fuzz (Array::View), slice, wasm32, http2_tape_*;
+  - TLS owners: autocert, http_latency, http_resume, hpke; Upgraded
+    (http, http_stop); views in csv, zip, zstd, tar, compress, netip;
+  - number (invalid constant), eiy (its run step).
+  std_regex builds but overflows a task's stack at the deepest nesting.
+  A String byte compared with a Char (`host[0] == '['`) is always false
+  and compiles (std/udp had one): refuse UInt8 == Char.
+  Checker hole: `shuffled.map { |s| SemanticVersion.parse(s) }`, where
+  shuffled holds views of another Array's Strings, is refused as a block
+  result made in its scratch (semantic_version maps over indices).
+* std_http_exercise's and std_fuzz's parse checks call
+  `Server.parse_request`, gone with `Request`: read through
+  `Server.parse_head` or a socket round trip. Most of
+  std_http_exercise.sh's mutation patterns no longer match http.iyi.
 
 ## 8. Speed
 
@@ -227,7 +288,7 @@ change. Gates stay structural.
 * TlsConfig system roots: check whether SystemRoots (00130b97e) already
   keeps them. If still read per handshake, make Certificate copyable to
   Program.tape to keep them once.
-* Autocert part B: bench/std_autocert_exercise.iyi and its driver, with
+* Autocert part B: test/cli/std_autocert_exercise.iyi and its driver, with
   real TLS deadline and parallel-server cases, Pebble, restarts and
   mutation checks (part A's gates: test/ris/autocert.ri, autocert_wire.ri).
 * std_process: the `handlers` mutation proof (child keeps this program's
@@ -256,17 +317,17 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
   up to eight (doc/drafts/fileserver-outgoing.md, Memory).
 * compiler_test: 225 failures and two segfaulting groups (Code gen: if,
   Codegen: special vars), each top-level describe run apart (80fc5b354).
-* bench/concurrency_exercise.sh needs `ulimit -n 8192` and is not in
+* test/cli/concurrency_exercise.sh needs `ulimit -n 8192` and is not in
   check.sh; recheck on minitest.
-* bench/parallel_exercise.iyi:124 (a task value's Panicked arm) and
-  bench/metric/metric.iyi (Array of the tape type Planet) do not
+* test/cli/parallel_exercise.iyi:124 (a task value's Panicked arm) and
+  test/speed/metric/metric.iyi (Array of the tape type Planet) do not
   typecheck; recheck on minitest.
-* bench/std_websocket_exercise.iyi appends to an `io` builder and reads
+* test/cli/std_websocket_exercise.iyi appends to an `io` builder and reads
   it back: move it to a String local, then recheck the artifact
   comparison on minitest.
 * test/compiler/iyimod_test.cr's getter/defer case cannot resolve
   `Pointer(RisArrayPool(String))` from boot/shelf's type ids.
-* bench/socket_exercise.sh: several mutations are not caught; a
+* test/cli/socket_exercise.sh: several mutations are not caught; a
   unix-socket mutation fails with "the address is in use". Recheck on
   minitest.
 * The mutation phases of std_acme, cookie, router, sse and websocket .sh

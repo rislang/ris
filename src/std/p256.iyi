@@ -37,7 +37,7 @@
 # chain and the inlined field), ECDH 69 (89), against 14 and 28 from
 # Python's `cryptography` (OpenSSL).
 #
-# bench/ct_timing.sh, `sign` with one key, a fixed message against random
+# test/speed/ct_timing.sh, `sign` with one key, a fixed message against random
 # ones: |t| = 3.8 to 6.0 over 100,000 signatures. It put this at 16 to 24
 # before `P256BaseTable.pick`'s selectors were hidden from LLVM, which had
 # made them a branch on each nonce digit (see there). Later runs on the
@@ -54,7 +54,7 @@
 # signature is always the same length, times apart from random ones. The
 # rest is where the inputs live: the same digest copied to 1,024 other
 # addresses puts an array concatenation at 8 to 59 and `from_bytes` at 37
-# to 63 with no value differing. bench/ct_timing.sh times `sign` against
+# to 63 with no value differing. test/speed/ct_timing.sh times `sign` against
 # messages whose r and s are as long in DER as the fixed one's.
 #
 # The nonce is RFC 6979's: HMAC over the hash the signature names, from
@@ -928,7 +928,7 @@ struct P256BaseTable
   # which LLVM cannot see the value of: with the selectors as they were,
   # a --release build tested the digit against 1 to 8 with a conditional
   # jump each (`xor`, `dec`, `js`), a branch on the nonce's digits, and
-  # bench/ct_timing.sh put P-256 signing at |t| = 16 to 24 over 100,000
+  # test/speed/ct_timing.sh put P-256 signing at |t| = 16 to 24 over 100,000
   # signatures, fixed message against random.
   def self.pick(table : Array(P256Num), row : Int32, digit : UInt64) : P256Point
     f = P256Modulus.field

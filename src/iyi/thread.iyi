@@ -1,7 +1,7 @@
 # iyi: a kernel thread in the runtime, and the stop-the-world over them —
 # GC_DESIGN.md Stage 4, built on the thread floor's measured mechanism.
 #
-# `bench/thread_floor.iyi` priced every piece of this before it was
+# `test/cli/thread_floor.iyi` priced every piece of this before it was
 # written: a mark helper by raw `clone` on Linux costs the floor no name
 # (a program's own thread is glibc's, see `pthread_create` below), a
 # thread by `pthread_create` on darwin costs libSystem's exact list, a
@@ -693,7 +693,7 @@
       # dispatcher having taken 2,672 of what the overflow left; with it,
       # 14,864 to 17,760. On the Windows runners the thread's overflow was
       # now and then reported as a memory fault, and the main thread's and
-      # a fiber's, each with 16 KB, never were (`bench/panics.sh`). Set
+      # a fiber's, each with 16 KB, never were (`test/cli/panics.sh`). Set
       # before anything else runs here, on the thread's own stack, before
       # any fiber rewrites the bounds the TEB holds.
       {% if flag?(:win32) %}

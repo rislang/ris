@@ -7,7 +7,7 @@ module Iyi
   #
   # A hand-rolled walk rather than a `Regex`, and not out of taste: a
   # regex literal here links PCRE2 into the compiler, and
-  # `bench/dependency_floor.sh` forbids that library by name — it caught
+  # `test/cli/dependency_floor.sh` forbids that library by name — it caught
   # the first version of this method within the hour.
   def self.iyi_spec_references(message : String) : Array(String)?
     refs = [] of String

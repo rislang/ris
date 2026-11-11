@@ -1,3 +1,4 @@
+# standard: RFC 4291
 # IP addresses and prefixes as values, the way Go's `net/netip` holds
 # them and Python's `ipaddress` reads and classifies them: no socket, no
 # resolver, nothing of the platform. `std/socket` connects to addresses;
@@ -1176,4 +1177,29 @@ struct NetipBits
     end
     io
   end
+end
+
+def show(text : String) : Nil
+  got = IP.parse(text)
+  if got.is_a?(IP)
+    puts "#{text} -> #{got} private=#{got.private?} loopback=#{got.loopback?}"
+  else
+    puts "#{text} -> #{got.message}"
+  end
+end
+
+spec 8.1
+  IP.parse("::1").to_s == "::1"
+  IP.parse("2001:db8:0:0:0:0:2:1").to_s == "2001:db8::2:1"
+  IP.parse("1.2.3").is_a?(NetipError)
+  IP.parse("01.2.3.4").is_a?(NetipError)
+  IP.parse("1::2::3").is_a?(NetipError)
+  net = Prefix.parse("10.1.0.0/16")
+  raise "prefix failed" unless net.is_a?(Prefix)
+  inside = IP.parse("10.1.200.3")
+  raise "address failed" unless inside.is_a?(IP)
+  net.contains?(inside)
+  net.subnets(18).map(&.to_s).join(" ") ==
+    "10.1.0.0/18 10.1.64.0/18 10.1.128.0/18 10.1.192.0/18"
+  Prefix.parse("10.1.2.3/8").is_a?(NetipError)
 end

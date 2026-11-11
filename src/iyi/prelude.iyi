@@ -1064,7 +1064,7 @@ end
   # for FILE_SHARE_READ alone, so a later write to the same path failed,
   # and a write handle asked for nothing, so reading a file while it was
   # still open came back as ERROR_SHARING_VIOLATION: that is what
-  # `bench/io_exercise.iyi`'s flush check read as "cannot read".
+  # `test/cli/io_exercise.iyi`'s flush check read as "cannot read".
   def __iyi_open_read(path : UInt8*) : Int64
     wide = __iyi_wide_path(path)
     return -1_i64 if wide.address == 0_u64
@@ -1157,7 +1157,7 @@ end
     return -1_i64 if attributes == -1 || (attributes & 1) == 0
     # `attributes - 1` clears bit 0, which the line above proved is set:
     # the prelude has no `~`, and a program that imports nothing but the
-    # prelude is what `bench/io_exercise.iyi` builds.
+    # prelude is what `test/cli/io_exercise.iyi` builds.
     return -1_i64 if LibC.SetFileAttributesW(wide, attributes - 1) == 0
     return 0_i64 if LibC.DeleteFileW(wide) != 0
     LibC.SetFileAttributesW(wide, attributes)
@@ -1433,7 +1433,7 @@ end
 # bytes from memory to memory with `llvm.memcpy` or `llvm.memmove`, and LLVM
 # expands one inline only up to a size of its own choosing; past it, it calls
 # these names, which no iyi program asked of the C library before values were
-# copied that way, and which the floor gates (`bench/dependency_floor.sh` and
+# copied that way, and which the floor gates (`test/cli/dependency_floor.sh` and
 # the exercises') would read as a dependency taken on.
 #
 # `memcpy` goes 32 bytes a turn while both ends are word-aligned, then a word,
@@ -1607,7 +1607,7 @@ end
   #
   # which is `std/int`'s `Int128#%`. Linking `clang_rt.builtins-x86_64.lib`
   # for four functions would move this tree's dependency floor
-  # (`bench/dependency_floor.sh`: kernel32, advapi32, ws2_32, the CRT import
+  # (`test/cli/dependency_floor.sh`: kernel32, advapi32, ws2_32, the CRT import
   # libraries and the opt-in collector), so the four are defined here
   # instead, the same way `__multi3` above is defined for the targets that
   # ask for it.
@@ -2436,6 +2436,14 @@ def assert(condition : Bool, message : String = "", file : String = __FILE__, li
   raise(message.empty? ? "assertion failed" : "assertion failed: " + message, file, line)
 end
 
+# ris: a test of a promise not kept yet (SPEC 6.9): it ends here with exit
+# code 77, automake's SKIP, which `ris test` reports as todo, neither pass
+# nor fail. `exit` is every target's, wasm32's included.
+def todo(reason : String) : NoReturn
+  STDERR.puts "todo: " + reason
+  exit 77
+end
+
 # The assertions that name their values - `assert_eq`, `assert_error`,
 # `assert_panics`, named `test` cases and the rest - with no import, as
 # `assert` has none.
@@ -2914,7 +2922,7 @@ end
   # handler then named a memory fault, after the stack-overflow sentence
   # it had just written. Whether the guarantee's 16 KB were enough for the
   # detaches was a matter of where in the reservation the first fault
-  # landed, so `bench/panics.sh` saw it once in three runs. `TerminateProcess`
+  # landed, so `test/cli/panics.sh` saw it once in three runs. `TerminateProcess`
   # ends the process without unwinding anything on this stack, and the
   # exit code is the same 1.
   def __iyi_win_fault_exit : NoReturn
@@ -3045,9 +3053,7 @@ fun main(argc : Int32, argv : UInt8**) : Int32
   {% else %}
     LibIyiMain.__iyi_main(argc, argv)
   {% end %}
-  # Named `test` cases keep going past a failure, so the program's own code
-  # ends normally and the exit status is theirs to give (testing.iyi).
-  status = IyiTestCases.verdict
+  status = 0
   # Standard stream objects belong to program storage; flush before release.
   __iyi_flush_std
   {% if (!flag?(:gc_none) || flag?(:linux) || flag?(:darwin)) && !flag?(:gc_boehm) &&
@@ -3092,9 +3098,8 @@ end
     {% else %}
       LibIyiMain.__iyi_main(argc, argv)
     {% end %}
-    status = IyiTestCases.verdict
     __iyi_flush_std
-    status
+    0
   end
 {% end %}
 

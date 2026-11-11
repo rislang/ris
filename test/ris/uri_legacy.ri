@@ -1,3 +1,4 @@
+# spec: 1.1@fdc7907b
 module test/ris/uri_legacy
 import std/uri::{URI}
 

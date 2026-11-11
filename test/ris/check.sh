@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# ris's own checks: every program under test/ris/refused must be refused by
-# the compiler with the expected message, test/ris/allowed.ri must compile
-# and run, the fibers test must read back what each fiber wrote, a tape must
-# grow past its first mapping in whole 64 KiB grains and refuse an index out
-# of range, a RisTree must step over subtrees, and the respond sample must
-# print its known checksum. Fatal size errors must allocate nothing.
+# spec: 2.2@67a6a6f1, 1.9@3f448e8c, 3.5@4513f7df, 3.6@47d91b08, 1.1@fdc7907b
+# spec: 5.1@610b0d22, 1.5@9935f4c7, 3.2@9533bb9c, 7.1@e54681fa
+# ris's own checks: every
+# program under test/ris/refused must be refused by the compiler with the
+# expected message, test/ris/allowed.ri must compile and run, the fibers test
+# must read back what each fiber wrote, a tape must grow past its first mapping
+# in whole 64 KiB grains and refuse an index out of range, a RisTree must step
+# over subtrees, and the respond sample must print its known checksum. Fatal
+# size errors must allocate nothing.
 #
 #   bash test/ris/check.sh
 set -uo pipefail
@@ -435,7 +438,8 @@ expect select_gone 'ris has no select'
 expect channel_gone 'undefined constant Channel'
 expect mutex_gone 'ris has no std/mutex'
 expect http_tls_config_gone 'HTTPClient.new(tls: config)'
-expect http_upgrade_block 'take_over(socket, leftover, response)'
+expect answer_no_take_over 'leftover : String, res : Outgoing) : Nil'
+expect answer_old_call 'Write def call(req : Incoming, res : Outgoing) : Nil'
 expect http_parse_head_text 'Server.parse_head(bytes, 0, true, fields)'
 
 # Timed joins broadcast completion without cancelling the retained task.
@@ -1269,7 +1273,7 @@ if [ "$?" -eq 0 ] &&
 else
   echo "FAILED   http_continue: $out"; status=1
 fi
-expect http_server_listener 'Server.serve(host, port, config, Handler)'
+expect http_server_listener 'Server.answer(host, port, config, Handler)'
 expect http_server_resource_config 'open and use resources'
 out=$(RIS="$RIS" python3 test/ris/http_prefork.py 2>&1)
 if [ "$?" -eq 0 ]; then
@@ -1279,6 +1283,57 @@ else
 fi
 out=$("$RIS" run test/ris/answer.ri 2>&1)
 if [ "$out" = 'PASS: read and answered on the tape, fast path and not' ]; then echo "runs     answer"; else echo "FAILED   answer: $out"; status=1; fi
+# Server.answer's features (doc/drafts/server-answer-features.md):
+# timeouts on the fast path, streamed and sent bodies, compression.
+out=$("$RIS" run test/ris/answer_timeout.ri 2>&1)
+if [ "$out" = 'PASS: answered, idle head closed, dripped head closed' ]; then
+  echo "runs     answer_timeout"
+else
+  echo "FAILED   answer_timeout: $out"; status=1
+fi
+# The raise mid-stream is the test's own panic, on stderr before PASS.
+out=$("$RIS" run test/ris/answer_stream.ri 2>&1)
+if [ "$(tail -n1 <<<"$out")" = 'PASS: stream, length=, send, HEAD, HTTP/1.0, body_io, a raise mid-stream' ]; then
+  echo "runs     answer_stream"
+else
+  echo "FAILED   answer_stream: $out"; status=1
+fi
+out=$("$RIS" run test/ris/answer_compress.ri 2>&1)
+want='/big gzip: gzip vary=Accept-Encoding smaller=true same=true
+/big zstd, gzip: zstd vary=Accept-Encoding smaller=true same=true
+/big gzip;q=1, zstd;q=0.5: gzip vary=Accept-Encoding smaller=true same=true
+/small gzip, zstd: none vary=- smaller=false same=true
+/stream zstd, gzip: gzip vary=Accept-Encoding smaller=true same=true
+/own gzip, zstd: identity vary=- smaller=false same=true'
+if [ "$out" = "$want" ]; then
+  echo "runs     answer_compress"
+else
+  echo "FAILED   answer_compress: $out"; status=1
+fi
+# Server.answer over TLS (resumed by a ticket) and HTTP/2 in the clear.
+out=$("$RIS" run test/ris/answer_tls.ri 2>&1)
+want='HTTP/1.1 200 HTTP/1.0 resumed=false
+HTTP/1.1 200 HTTP/1.0 resumed=true
+HTTP/1.1 200 one two
+h2c statuses true: HTTP/2 resumed=false | one two'
+if [ "$out" = "$want" ]; then
+  echo "runs     answer_tls"
+else
+  echo "FAILED   answer_tls: $out"; status=1
+fi
+# An echo over take_over, a WebSocket over TLS, an ACME challenge.
+out=$("$RIS" run test/ris/answer_upgrade.ri 2>&1)
+want='HTTP/1.1 101 true true
+GET /nothing: 404 not found
+POST /.well-known/acme-challenge/tok: 405  GET, HEAD
+GET /.well-known/acme-challenge/tok: 200 tok.print
+GET /.well-known/acme-challenge/other: 404
+HTTP/1.1 101 true echo hi'
+if [ "$out" = "$want" ]; then
+  echo "runs     answer_upgrade"
+else
+  echo "FAILED   answer_upgrade: $out"; status=1
+fi
 # Outgoing's length= and block-header refusals, raised at run time.
 out=$(RIS="$RIS" bash test/ris/outgoing_refusals.sh 2>&1)
 if [ "$?" -eq 0 ] &&
@@ -1930,11 +1985,11 @@ else
   echo "FAILED   dns: $out"; status=1
 fi
 # std/secure_dns over loopback: DoT, then DoH by POST and GET, against
-# bench/std_secure_dns_server.py; the upstreams connect by address, so no
+# test/cli/std_secure_dns_server.py; the upstreams connect by address, so no
 # exchange calls back into the resolver (SPEC 3.5).
 if python3 -c 'import ssl; from cryptography import x509' 2>/dev/null; then
   srv=$(mktemp -d)
-  python3 bench/std_secure_dns_server.py "$srv" >"$srv/log" 2>&1 &
+  python3 test/cli/std_secure_dns_server.py "$srv" >"$srv/log" 2>&1 &
   srv_pid=$!
   for _ in $(seq 200); do [ -f "$srv/ready" ] && break; sleep 0.1; done
   out=$(RIS_HEAP_STATS=1 timeout 300 "$RIS" run test/ris/secure_dns.ri -- \
@@ -2441,7 +2496,7 @@ else
   echo "FAILED   refill_default_init: $out"
   status=1
 fi
-out=$("$RIS" check test/ris/integer_text_floor.ri 2>&1)
+out=$("$RIS" check types test/ris/integer_text_floor.ri 2>&1)
 if [ $? -ne 0 ]; then
   echo "FAILED   integer_text_floor: $out"
   status=1
@@ -2460,7 +2515,7 @@ done
 
 # A lexer that steps its own offset through tape text is warned, not
 # refused; the same lexer on String::Scanner is not.
-out=$("$RIS" check test/ris/warned/scanner_hint.ri 2>&1)
+out=$("$RIS" check types test/ris/warned/scanner_hint.ri 2>&1)
 if [ $? -eq 0 ] && grep -qF '`@pos` walks tape text by hand' <<<"$out"; then
   echo "warned   scanner_hint"
 else
@@ -2543,15 +2598,16 @@ for kind in field parameter literal; do
 done
 expect text_plain_builder 'only appends and is read back: write `text = ""`'
 expect text_plain_build 'this String.build only appends: write `io = ""`'
-# ris fix applies the compiler's own edits: Crystal-style text becomes ris.
-out=$(f="${TMPDIR:-/tmp}/plain_builder.ri"; cp test/ris/fix/plain_builder.ri "$f" && "$RIS" fix "$f" >/dev/null 2>&1 && diff test/ris/fix/plain_builder.expected "$f" && "$RIS" run "$f" 2>&1)
+# ris check types --fix applies the compiler's own edits: Crystal-style text
+# becomes ris.
+out=$(f="${TMPDIR:-/tmp}/plain_builder.ri"; cp test/ris/fix/plain_builder.ri "$f" && "$RIS" check types --fix "$f" >/dev/null 2>&1 && diff test/ris/fix/plain_builder.expected "$f" && "$RIS" run "$f" 2>&1)
 if [ "$out" = "hello, ris" ]; then echo "runs     fix plain_builder"; else echo "FAILED   fix plain_builder: $out"; status=1; fi
 for rule in plain_build plain_build_inline io_parameter array_refill; do
   result=$(f="${TMPDIR:-/tmp}/fix_$rule.ri";
     cp "test/ris/fix/$rule.ri" "$f" &&
-    "$RIS" fix "$f" >/dev/null 2>&1 &&
+    "$RIS" check types --fix "$f" >/dev/null 2>&1 &&
     diff "test/ris/fix/$rule.expected" "$f" &&
-    "$RIS" fix "$f" >/dev/null 2>&1 &&
+    "$RIS" check types --fix "$f" >/dev/null 2>&1 &&
     diff "test/ris/fix/$rule.expected" "$f" &&
     "$RIS" run "$f" 2>&1)
   if [ "$result" = "hello, ris" ]; then
@@ -2563,7 +2619,7 @@ done
 # fix leaves alone a refill it cannot prove: a new Array that is not empty.
 kept=$(f="${TMPDIR:-/tmp}/fix_array_refill_kept.ri";
   cp test/ris/fix/array_refill_kept.ri "$f" &&
-  { "$RIS" fix "$f" >/dev/null 2>&1; diff -q test/ris/fix/array_refill_kept.ri "$f"; })
+  { "$RIS" check types --fix "$f" >/dev/null 2>&1; diff -q test/ris/fix/array_refill_kept.ri "$f"; })
 if [ "$?" -eq 0 ]; then echo "runs     fix array_refill_kept"; else echo "FAILED   fix array_refill_kept: $kept"; status=1; fi
 out=$("$RIS" run test/ris/text_field_kinds.ri 2>&1)
 if grep -qF 'PASS: text companions only for text fields' <<<"$out"; then echo "runs     text_field_kinds"; else echo "FAILED   text_field_kinds: $out"; status=1; fi
@@ -3100,6 +3156,321 @@ for deep in "$(mktemp -d)"; do
   fi
   rm -rf "$deep"
 done
+
+# spec-port pilot base32: module proofs.
+out=$("$RIS" check test src/std/base32.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port base32"
+else
+  echo "FAILED   spec-port base32: $out"; status=1
+fi
+
+# spec-port pilot base64: module proofs.
+out=$("$RIS" check test src/std/base64.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port base64"
+else
+  echo "FAILED   spec-port base64: $out"; status=1
+fi
+
+# spec-port pilot uuid: module proofs.
+out=$("$RIS" check test src/std/uuid.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port uuid"
+else
+  echo "FAILED   spec-port uuid: $out"; status=1
+fi
+
+# spec-port pilot semantic_version: module proofs.
+out=$("$RIS" check test src/std/semantic_version.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port semantic_version"
+else
+  echo "FAILED   spec-port semantic_version: $out"; status=1
+fi
+
+# spec-port pilot path: module proofs.
+out=$("$RIS" check test src/std/path.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port path"
+else
+  echo "FAILED   spec-port path: $out"; status=1
+fi
+
+# spec-port phase 2 eiy: module proofs.
+out=$("$RIS" check test src/std/eiy.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port eiy"
+else
+  echo "FAILED   spec-port eiy: $out"; status=1
+fi
+
+# spec-port phase 2 deque: module proofs.
+out=$("$RIS" check test src/std/deque.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port deque"
+else
+  echo "FAILED   spec-port deque: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/bzip2.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module bzip2'
+else
+  echo "FAILED   spec module bzip2: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/csv.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module csv'
+else
+  echo "FAILED   spec module csv: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/dns.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module dns'
+else
+  echo "FAILED   spec module dns: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/fileserver.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module fileserver'
+else
+  echo "FAILED   spec module fileserver: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/format.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module format'
+else
+  echo "FAILED   spec module format: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/hpack.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module hpack'
+else
+  echo "FAILED   spec module hpack: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/ini.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module ini'
+else
+  echo "FAILED   spec module ini: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/json.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module json'
+else
+  echo "FAILED   spec module json: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/mail.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module mail'
+else
+  echo "FAILED   spec module mail: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/mime.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module mime'
+else
+  echo "FAILED   spec module mime: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/netip.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module netip'
+else
+  echo "FAILED   spec module netip: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/number_format.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module number_format'
+else
+  echo "FAILED   spec module number_format: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/option_parser.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module option_parser'
+else
+  echo "FAILED   spec module option_parser: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/otp.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module otp'
+else
+  echo "FAILED   spec module otp: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/password.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module password'
+else
+  echo "FAILED   spec module password: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/png.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module png'
+else
+  echo "FAILED   spec module png: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/query.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module query'
+else
+  echo "FAILED   spec module query: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/regex.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module regex'
+else
+  echo "FAILED   spec module regex: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/router.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module router'
+else
+  echo "FAILED   spec module router: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/shlex.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module shlex'
+else
+  echo "FAILED   spec module shlex: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/smtp.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module smtp'
+else
+  echo "FAILED   spec module smtp: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/sse.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module sse'
+else
+  echo "FAILED   spec module sse: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/tar.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module tar'
+else
+  echo "FAILED   spec module tar: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/toml.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module toml'
+else
+  echo "FAILED   spec module toml: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/udp.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module udp'
+else
+  echo "FAILED   spec module udp: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/websocket.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module websocket'
+else
+  echo "FAILED   spec module websocket: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/xml.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module xml'
+else
+  echo "FAILED   spec module xml: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/xz.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module xz'
+else
+  echo "FAILED   spec module xz: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/yaml.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module yaml'
+else
+  echo "FAILED   spec module yaml: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/zip.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module zip'
+else
+  echo "FAILED   spec module zip: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/big.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module big'
+else
+  echo "FAILED   spec module big: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/dir.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module dir'
+else
+  echo "FAILED   spec module dir: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/io.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module io'
+else
+  echo "FAILED   spec module io: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/text.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module text'
+else
+  echo "FAILED   spec module text: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/time.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module time'
+else
+  echo "FAILED   spec module time: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/tls.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module tls'
+else
+  echo "FAILED   spec module tls: $out"; status=1
+fi
+
+out=$("$RIS" check test src/std/uri.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module uri'
+else
+  echo "FAILED   spec module uri: $out"; status=1
+fi
 
 # Run heap workloads after the other gates to avoid compiler contention.
 # Keep their fixed timeouts: a hung census must still fail.

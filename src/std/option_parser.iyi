@@ -1,3 +1,4 @@
+# standard: POSIX utility argument syntax
 # Flag parsing, written in iyi; ris reads the flags after parse.
 #
 # `on` registers a flag and answers a `RisFlag`, a handle to it. `parse`
@@ -395,4 +396,20 @@ pub class OptionParser
   def to_s : String
     String.build { |io| help(io) }
   end
+end
+
+spec 8.1
+  found = RisOptions.new
+  tool = OptionParser.new
+  verbose = tool.on("-v", "--verbose", "say more")
+  name = tool.on("--name VALUE", "the name")
+  port = tool.on("-n PORT", "port")
+  rest = tool.parse(["-v", "--name", "ada", "-n8080", "x"], found)
+  found.has?(verbose)
+  found[name]? == "ada"
+  found[port]? == "8080"
+  rest == ["x"]
+  tool.parse(["--name=bo"], found)
+  found[name]? == "bo"
+  !found.has?(verbose)
 end

@@ -1,3 +1,4 @@
+# standard: RFC 8259
 # JSON, read and written in iyi: a byte lexer and a recursive parser into
 # `Any`, a streaming `PullParser`, a `Builder` that writes a document one
 # value at a time, and `JSON.parse` / `JSON.parse?` / `JSON.build` /
@@ -457,7 +458,7 @@ pub struct Any
     end
   end
 
-  private def array? : Bool
+  protected def array? : Bool
     @document.kind(@index) == Document::Kind::Array
   end
 
@@ -696,27 +697,43 @@ pub struct Any
   # scalar's locals sat in each level's frame, and a 256-level document
   # compared in a task ran Windows' 256 KB stack out.
   def ==(other : Any) : Bool
-    pending = Array(Tuple(Any, Any)).new
-    pending << {self, other}
+    # Indices, not values: both sides stay in their own documents, and a
+    # value built in one round is not kept past it.
+    mine = @document
+    theirs = other.document
+    pending = Array(Tuple(Int32, Int32)).new
+    rights = Array(Int32).new
+    pending << {@index, other.index}
     until pending.empty?
-      left, right = pending.pop
-      if a = left.as_a?
-        b = right.as_a?
-        return false unless b && a.size == b.size
-        a.each_with_index { |child, i| pending << {child, b[i]} }
+      at = pending.pop
+      left = Any.new(mine, at[0])
+      right = Any.new(theirs, at[1])
+      if left.array?
+        return false unless right.array? && mine.size(at[0]) == theirs.size(at[1])
+        rights.clear
+        theirs.each(at[1]) { |child| rights << child }
+        i = 0
+        mine.each(at[0]) do |child|
+          pending << {child, rights[i]}
+          i += 1
+        end
       elsif a = left.as_h?
         b = right.as_h?
         return false unless b && a.size == b.size
         a.each do |key, child|
           value = b[key]?
           return false unless value
-          pending << {child, value}
+          pending << {child.index, value.index}
         end
       else
         return false unless left.scalar_equals?(right)
       end
     end
     true
+  end
+
+  protected def index : Int32
+    @index
   end
 
   @[NoInline]
@@ -4155,4 +4172,17 @@ impl WritesJSON for String::Builder
   def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Std::Json::Writer -> Nil) : Nil
     Std::Json::JSON.write(self, indent, ascii_only) { |j| yield j }
   end
+end
+
+spec 8.1
+  text = "{\"id\":1,\"name\":\"café\",\"tags\":[true,null]}"
+  value = JSON.parse(text)
+  value["id"].as_i == 1
+  value["name"].as_s == "café"
+  JSON.parse(value.to_json) == value
+  doc = JSON.document(text)
+  doc.size(doc.root) == 3
+  JSON.parse?("[bad").nil?
+  JSON.parse("1e3").as_f == 1000.0
+  JSON.parse("0.125").as_f == 0.125
 end

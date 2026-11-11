@@ -1,3 +1,4 @@
+# standard: RFC 9110
 # Files served from a directory: what a `Server.answer` block writes
 # into its `Outgoing` with `FileServer.serve(root, req, res)` for the
 # requests it means to be files. Go's `http.FileServer`, and the same
@@ -250,4 +251,12 @@ pub struct FileServer
     return true if first >= size
     {first, last}
   end
+end
+
+
+spec 8.1
+  FileServer.byte_range("bytes=0-4", 10_i64) == {0_i64, 4_i64}
+  FileServer.byte_range("bytes=-3", 10_i64) == {7_i64, 9_i64}
+  FileServer.byte_range("bytes=20-", 10_i64) == true
+  FileServer.byte_range("unknown=0-4", 10_i64).nil?
 end

@@ -8,7 +8,7 @@ Database that `scripts/generate_unicode_data.cr` downloads and writes for the
 compatibility library, and `src/unicode/unicode.cr`, which names the UCD
 version it was written from. The repository already carries that data, and
 both libraries answering from one table is what lets
-`bench/std_unicode_exercise.sh` diff them.
+`test/cli/std_unicode_exercise.sh` diff them.
 
 Some properties are not in it, because the compatibility library has no
 use for them, and are read from the UCD files of the same release, fetched
@@ -466,7 +466,8 @@ def main() -> None:
     begin = module.index(BEGIN)
     end = module.index(END)
     generated = BEGIN + "\n" + "\n\n".join(sections) + "\n" + END
-    # The module's lines end in LF on every platform; a Windows text write would end them in CRLF.
+    # The module's lines end in LF on every platform; a Windows text write would
+    # end them in CRLF.
     MODULE.write_text(module[:begin] + generated + module[end + len(END):], encoding="utf-8", newline="\n")
     total = sum(len(section) for section in sections)
     print(f"wrote {len(sections) - 1} tables ({total} bytes) for Unicode {ucd} into {MODULE.relative_to(REPO)}")

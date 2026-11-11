@@ -1,0 +1,457 @@
+#!/usr/bin/env bash
+# The prelude's numbers at their edges: printed and read back, what does not
+# fit, the two divisions that leave the type, and the float values that are
+# their own question - NaN, the two zeros, and a conversion that cannot fit.
+#
+#     bash test/cli/number_exercise.sh
+#
+# `test/cli/number_exercise.iyi` is the program, run plain and optimised. Then
+# the two panics are driven here - a program that panics has no next line to
+# assert on - and then each check is proved capable of failing by patching a
+# *copy of the prelude* and building against it through `IYI_PATH`. A check
+# that cannot fail is not a check.
+#
+# What is being protected: `Int32::MIN` has no positive twin, so a parser
+# that accumulates the magnitude and negates it cannot read what `to_s`
+# wrote, and with checked arithmetic it panicked rather than answering the
+# `nil` a `?` promises. And `MIN // -1` is the one division whose result the
+# type does not hold: left to the processor it traps, and the program dies of
+# "a floating-point system exception" for an integer divide - the same
+# sentence the zero divisor used to give before it was checked here.
+#
+# Exits non-zero if any check fails or if any patch leaves the exercise green.
+
+set -u
+
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+# The gate runs whatever compiler the caller names; `bin/iyi` is a shell
+# wrapper, and on Windows the caller has to point at the built exe itself.
+IYI="${IYI:-$REPO/bin/iyi}"
+mkdir -p "$REPO/test/cli/.work"
+WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+# A native compiler cannot resolve this shell's own path mapping: a search
+# path built from the shell's `pwd` finds no prelude at all, and a scratch
+# directory named `/tmp/tmp.X` on it is silently ignored, so the patched
+# copy is never read and the proof that a check can fail quietly stops
+# proving it.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN* | Windows_NT)
+    REPO="$(cygpath -m "$REPO")"
+    WORK="$(cygpath -m "$WORK")"
+    ;;
+esac
+trap 'rm -rf "$WORK"' EXIT
+
+# The search path is a list, and the byte between its entries is the
+# platform's: `;` where a drive letter already owns the colon.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN* | Windows_NT) PSEP=';' ;;
+  *) PSEP=':' ;;
+esac
+
+status=0
+
+run_case() { # run_case <label> <name> [build flags...]
+  local label="$1" name="$2"
+  shift 2
+  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/number_exercise.iyi" \
+       > "$WORK/$name.build" 2>&1; then
+    echo "  $label: the exercise did not build"
+    sed -n '1,12p' "$WORK/$name.build"
+    status=1
+    return
+  fi
+  if ! "$WORK/$name" > "$WORK/$name.out" 2>&1; then
+    echo "  $label: the exercise panicked"
+    tail -3 "$WORK/$name.out"
+    status=1
+    return
+  fi
+  if ! grep -q "all number checks passed" "$WORK/$name.out"; then
+    echo "  $label: the exercise ended without passing"
+    tail -3 "$WORK/$name.out"
+    status=1
+    return
+  fi
+  echo "  $label: every check held"
+}
+
+echo "== the edges, plain"
+run_case "plain" plain
+
+echo
+echo "== and with optimisation on (--release)"
+run_case "release" release --release
+
+echo
+echo "== the rounding without the processor's instruction"
+# x86_64 rounds with `roundsd` where the processor has it, which every CI
+# machine does; the conversion that stands in for it elsewhere is run here
+# by a copy of the prelude that never asks. It has to pass every check.
+mkdir -p "$WORK/software/iyi"
+cp -R "$REPO/src/iyi/." "$WORK/software/iyi/"
+sed -e 's/^      rounds == 1$/      false/' "$REPO/src/iyi/float.iyi" > "$WORK/software/iyi/float.iyi"
+if cmp -s "$REPO/src/iyi/float.iyi" "$WORK/software/iyi/float.iyi"; then
+  echo "  software: the copy still asks the processor, so this runs nothing new"
+  status=1
+elif IYI_PATH="$WORK/software${PSEP}$REPO/src" "$IYI" build -o "$WORK/software/program" \
+       "$REPO/test/cli/number_exercise.iyi" > "$WORK/software/build" 2>&1 &&
+     "$WORK/software/program" > "$WORK/software/out" 2>&1 &&
+     grep -q "all number checks passed" "$WORK/software/out"; then
+  echo "  software: every check held"
+else
+  echo "  software: the conversion's answers are not the instruction's"
+  tail -3 "$WORK/software/out" "$WORK/software/build" 2>/dev/null
+  status=1
+fi
+
+echo
+echo "== the divisions that leave the type, which are panics"
+
+panics_with() { # panics_with <label> <name> <phrase> <expression>
+  local label="$1" name="$2" phrase="$3" expression="$4"
+  printf 'module main\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.iyi"
+  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    echo "  $label: the program did not build"
+    sed -n '1,10p' "$WORK/$name.build"
+    status=1
+    return
+  fi
+  "$WORK/$name" > "$WORK/$name.out" 2>&1
+  local code=$?
+  if [ "$code" -eq 0 ]; then
+    echo "  $label: it answered instead of panicking"
+    status=1
+    return
+  fi
+  # 136 is SIGFPE: the processor's own report, which is the failure this
+  # check exists to keep out. A panic is exit 1 with a sentence.
+  if [ "$code" -ne 1 ]; then
+    echo "  $label: died with exit $code rather than a panic"
+    tail -2 "$WORK/$name.out"
+    status=1
+    return
+  fi
+  if ! grep -q "$phrase" "$WORK/$name.out"; then
+    echo "  $label: panicked, but not with '$phrase'"
+    tail -2 "$WORK/$name.out"
+    status=1
+    return
+  fi
+  printf '  %s: exits 1 at "%s"\n' "$label" \
+    "$(grep -m1 -o "$phrase.*" "$WORK/$name.out")"
+}
+
+panics_with "min over minus one" min_div "arithmetic overflow" "-2147483648 // -1"
+panics_with "int64 min over minus one" min_div64 "arithmetic overflow" "-9223372036854775808_i64 // -1_i64"
+panics_with "division by zero" zero_div "division by zero" "7 // 0"
+panics_with "modulo by zero" zero_mod "modulo by zero" "7 % 0"
+
+# And the float that does not fit an integer, which the compiler checks
+# rather than this file: unchecked it would hand back whatever the hardware's
+# conversion left behind. A float truncates first and what is refused is a
+# truncation the type does not hold, so each boundary is the first double
+# whose truncation does not fit: 2147483648.0 rather than 2147483647.9,
+# which truncates to one that does and is answered in
+# `test/cli/number_exercise.iyi`. That was a panic too, the range checked on
+# the untruncated value, while std/int's `255.5.to_u16` answered 255.
+panics_with "a float too large for an int" big_float "arithmetic overflow" "1e20.to_i"
+panics_with "not a number as an int" nan_int "arithmetic overflow" "(0.0/0.0).to_i"
+panics_with "infinity as an int" inf_int "arithmetic overflow" "(1.0/0.0).to_i"
+panics_with "the boundary float" edge_float "arithmetic overflow" "2147483648.0.to_i"
+panics_with "the boundary float below" edge_float_low "arithmetic overflow" "(-2147483649.0).to_i32"
+panics_with "a byte's boundary" edge_byte "arithmetic overflow" "256.0.to_u8"
+panics_with "minus one as a byte" neg_byte "arithmetic overflow" "(-1.0).to_u8"
+panics_with "minus one as a uint64" neg_u64 "arithmetic overflow" "(-1.0).to_u64"
+panics_with "2^63 as an int64" edge_i64 "arithmetic overflow" "9223372036854775808.0.to_i64"
+
+# A code point `chr` reads now that it reads past ASCII, and the ones that
+# are not characters at all: a surrogate half, and past U+10FFFF.
+panics_with "a surrogate is no character" surrogate_chr "out of char range" "0xD800.chr"
+panics_with "past the last code point" past_chr "out of char range" "0x110000.chr"
+# `Char#+` steps by code point and lands on no surrogate either: it checked
+# the two ends alone, and `'\u{D7FF}' + 1` was U+D800, invalid UTF-8.
+panics_with "a step onto a surrogate" surrogate_step "out of char range" "'\\u{D7FF}' + 1"
+
+# And the same value through the unchecked form, which is the pair of every
+# panic above: the instruction without the check. It is spelled
+# `unsafe_to_i32` because `!` is not part of a name in iyi (III.1.7), and
+# until an expansion was parsed in the language of the file it expands in,
+# nothing written in iyi source could name it at all — `x.to_i!` reads as
+# `x.to_i` with its error propagated, which the compiler refuses.
+answers_with() { # answers_with <label> <name> <expected> <expression>
+  local label="$1" name="$2" expected="$3" expression="$4"
+  printf 'module main\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.iyi"
+  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    echo "  $label: the program did not build"
+    sed -n '1,10p' "$WORK/$name.build"
+    status=1
+    return
+  fi
+  if ! "$WORK/$name" > "$WORK/$name.out" 2>&1; then
+    echo "  $label: panicked where the unchecked form has nothing to check"
+    tail -2 "$WORK/$name.out"
+    status=1
+    return
+  fi
+  if [ "$(cat "$WORK/$name.out")" != "$expected" ]; then
+    echo "  $label: answered $(cat "$WORK/$name.out") rather than $expected"
+    status=1
+    return
+  fi
+  printf '  %s: answers %s\n' "$label" "$expected"
+}
+
+answers_with "an int too large for a byte, unchecked" big_byte_unchecked 44 "300.unsafe_to_u8"
+answers_with "a negative as a byte, unchecked" neg_byte_unchecked 255 "(-1).unsafe_to_u8"
+answers_with "a handle of -1, unchecked" handle_unchecked 18446744073709551615 "(-1_i64).unsafe_to_u64"
+
+echo
+echo "== proving the checks can fail, one broken method at a time"
+
+# A copy of the whole prelude with one method patched, on `IYI_PATH` ahead of
+# the real one. The patch has to change the file - a sed that matched nothing
+# would otherwise read as a pass - and the exercise then has to exit non-zero
+# at the check that names the method.
+prove_fails() { # prove_fails <label> <dir> <file> <phrase> <sed script>
+  local label="$1" dir="$2" file="$3" phrase="$4" script="$5"
+  mkdir -p "$WORK/$dir/iyi"
+  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
+  sed -e "$script" "$REPO/src/iyi/$file" > "$WORK/$dir/iyi/$file"
+  if cmp -s "$REPO/src/iyi/$file" "$WORK/$dir/iyi/$file"; then
+    echo "  $label: the patch changed nothing, so this proves nothing"
+    status=1
+    return
+  fi
+
+  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/number_exercise.iyi" \
+       > "$WORK/$dir/build" 2>&1; then
+    echo "  $label: the patched prelude did not build"
+    sed -n '1,10p' "$WORK/$dir/build"
+    status=1
+    return
+  fi
+
+  "$WORK/$dir/program" > "$WORK/$dir/out" 2>&1
+  local code=$?
+  if [ "$code" -eq 0 ]; then
+    echo "  $label: the exercise still passed, so it does not test this"
+    status=1
+    return
+  fi
+  if ! grep -q "$phrase" "$WORK/$dir/out"; then
+    echo "  $label: failed, but not at the expected check (wanted '$phrase')"
+    tail -2 "$WORK/$dir/out"
+    status=1
+    return
+  fi
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" \
+    "$(grep -m1 -o "$phrase.*" "$WORK/$dir/out" | sed 's/^assert failed: //')"
+}
+
+# 1. The parser accumulating a positive magnitude again, which is what could
+#    not read `Int32::MIN`.
+prove_fails "parser accumulates positively" pos_parse string.iyi \
+  "arithmetic overflow" \
+  's/^      value = value \* 10 - digit$/      value = value * 10 + digit/'
+
+# 2. The range guard removed, so a string that does not fit reaches the
+#    checked arithmetic and panics where a `nil` was promised. That panic is
+#    the old behaviour, and it is what this proof reads.
+prove_fails "range guard removed" no_guard string.iyi \
+  "arithmetic overflow" \
+  's/^      return nil if value < -214748364 || (value == -214748364 \&\& digit > 8)$/      # unguarded/'
+
+# 3. The magnitude that only exists as a negative handed back as a positive,
+#    so `"2147483648"` answers a number instead of nil.
+prove_fails "min accepted as a positive" min_pos string.iyi \
+  "number: max plus one is nil" \
+  's/^    return nil if value == -2147483648$/    return 0 if value == -2147483648/'
+
+# 4. Truncation turned into a floor, so `//` and `%` stop agreeing. Anchored
+#    on the Int32 overflow guard, which is the one line only `Int32#//` has.
+prove_fails "division floors instead" floor_div number.iyi \
+  "number: division truncates toward zero" \
+  's/^    raise "arithmetic overflow" if self == -2147483648 \&\& other == -1$/    return unsafe_div(other) - 1 if self < 0/'
+
+# 5. And the remainder beside it, anchored the same way on `Int32#%`.
+prove_fails "remainder takes the divisor sign" mod_sign number.iyi \
+  "number: remainder takes the dividend" \
+  's/^    return 0 if self == -2147483648 \&\& other == -1$/    return 0 - unsafe_mod(other)/'
+
+# 6. `to_s` in a base, the other direction of the round trip: the letters
+#    written from the wrong offset.
+prove_fails "base printing broken" bad_base number.iyi \
+  "number: hex" \
+  's/^        buffer\[at\] = d < 10 ? (48 + d).to_u8 : (87 + d).to_u8$/        buffer[at] = d < 10 ? (48 + d).to_u8 : (55 + d).to_u8/'
+
+# 7. The rounding a column of numbers reads, in the file it lives in: the
+#    conversion's floor truncating, with the instruction out of the way.
+prove_fails "floor rounds the wrong way" bad_floor float.iyi \
+  "number: floor goes down" \
+  's/^      rounds == 1$/      false/; s/^      LibIyiRounding.copysign(truncated > self ? truncated - 1.0 : truncated, self)$/      LibIyiRounding.copysign(truncated, self)/'
+
+# 7b. The conversion's answer without the argument's sign: `(-0.3).ceil`
+#     is `0.0` again, where the instruction answers `-0.0`.
+prove_fails "a zero without its sign" unsigned_zero float.iyi \
+  "number: floor and ceil as the other library answers them" \
+  's/^      rounds == 1$/      false/; s/^      LibIyiRounding.copysign(truncated < self ? truncated + 1.0 : truncated, self)$/      truncated < self ? truncated + 1.0 : truncated/'
+
+# 7d. abs by a comparison again, which leaves `-0.0` as it is.
+prove_fails "abs keeps a zero's sign" abs_sign float.iyi \
+  "number: abs clears the sign of a zero too" \
+  's/^    LibIyiRounding.copysign(self, 1.0)$/    self < 0.0 ? 0.0 - self : self/'
+
+# 7c. The instruction told to truncate: `roundsd`'s mode 11 rather than
+#     9, which is what floor asks. Read on a processor that has it.
+prove_fails "the instruction truncates" roundsd_mode float.iyi \
+  "number: floor goes down" \
+  's/roundsd \$\$9,/roundsd $$11,/'
+
+# 8. And the rounding that has to be symmetric about zero.
+prove_fails "round is not symmetric" bad_round float.iyi \
+  "number: round is symmetric" \
+  's/^    self < 0.0 ? nearest \* -1.0 : nearest$/    nearest/'
+
+# 8b. A tie decided away from zero, which is the other library's meaning
+#     of the same name.
+prove_fails "a tie rounds away" away_round float.iyi \
+  "number: a tie rounds to the even integer" \
+  's/^                (whole \/ 2.0).floor \* 2.0 == whole ? whole : whole + 1.0$/                whole + 1.0/'
+
+# 8c. The nearest found by a sum, which rounds before the floor sees it.
+prove_fails "round adds a half" sum_round float.iyi \
+  "number: round reads the fraction, not a sum" \
+  's/^    fraction = magnitude - whole$/    fraction = (magnitude + 0.5).floor > whole ? 0.75 : 0.25/'
+
+# 8e. The printer treating a power of two like any other double: its gap
+#     below is half its gap above, and read as equal the text of 2^64 and
+#     of 2^-1017 comes out a digit short, and reads back as a neighbour.
+prove_fails "a power of two's nearer neighbour" pow2_text float.iyi \
+  "number: shortest text at the range's ends" \
+  's/^      r.shl(e + (unequal ? 2 : 1))$/      r.shl(e + 1)/; s/^      s.shl(unequal ? 2 : 1)$/      s.shl(1)/; s/^      m_plus.shl(unequal ? e + 1 : e)$/      m_plus.shl(e)/; s/^      r.shl(unequal ? 2 : 1)$/      r.shl(1)/; s/^      s.shl(-e + (unequal ? 2 : 1))$/      s.shl(-e + 1)/; s/^      m_plus = IyiBig.new(unequal ? 2_u64 : 1_u64, limbs)$/      m_plus = IyiBig.new(1_u64, limbs)/; s/^    quick = shortest(f, e, unequal)$/    quick = shortest(f, e, false)/'
+
+# 8d. A place count under one read as zero.
+prove_fails "negative places ignored" places_round float.iyi \
+  "number: round to tens and hundreds" \
+  's/^    return round if digits == 0$/    return round if digits <= 0/'
+
+# 8f. A scaled value past 2^53 scaled back again, which moved a double
+#     that had nothing left to round.
+prove_fails "round scales back what has nothing to round" round_drift float.iyi \
+  "number: round keeps a double with nothing left to round" \
+  's/^      return self unless scaled.abs < 9007199254740992.0$/      return self if scaled * 0.0 != 0.0/'
+
+# 8g. The double kept from 2^52 instead, where the place can still be
+#     coarser than its last bit.
+prove_fails "round keeps from 2^52" round_band float.iyi \
+  "number: round still rounds under 2^53" \
+  's/^      return self unless scaled.abs < 9007199254740992.0$/      return self unless scaled.abs < 4503599627370496.0/'
+
+# 9. And the unchecked conversions made checked, which is what the prelude
+#    had before `unsafe_to_u8` was a name: the instruction is the point, so
+#    a checked one panics where the exercise asserted a value. Anchored on
+#    the eight-space annotation inside the conversion loop, which is the one
+#    `unsafe_chr` (six spaces, in the integer loop) does not share.
+prove_fails "the unchecked conversion checked" checked_unsafe primitives.iyi \
+  "arithmetic overflow" \
+  's/^        @\[::Primitive(:unchecked_convert)\]$/        @[::Primitive(:convert)]/'
+
+# 10. A 64-bit integer against a double by the instruction's rounding
+#     again: the integer made a double first, in both operand orders, and
+#     the operators and `std/int`'s `<=>` no longer agree.
+prove_fails "int64 against a double rounded first" i64_rounded primitives.iyi \
+  "number: int64 against a double is exact" \
+  's/^              (self - unsafe_mod(2048)).to_f64 - other + unsafe_mod(2048).to_f64 {{ op.id }} 0.0$/              to_f64 {{ op.id }} other/'
+
+# 11. A negative shift count answering zero again, in `>>` and in `<<`,
+#     and the Int64 pair the same way.
+prove_fails "a negative count shifts nowhere" neg_shr number.iyi \
+  "number: a negative count shifts the other way" \
+  's/^    count < 0 ? self << (0 - count) : (count >= 32 ? /    count < 0 ? 0 : (count >= 32 ? /'
+prove_fails "a negative count shifts nowhere, left" neg_shl number.iyi \
+  "number: a negative count shifts back" \
+  's/^    count < 0 ? self >> (0 - count) : (count >= 32 ? 0 : unsafe_shl(count))$/    count >= 32 || count < 0 ? 0 : unsafe_shl(count)/'
+prove_fails "an int64 negative count shifts nowhere" neg_shr64 number.iyi \
+  "number: an int64 negative count shifts the other way" \
+  's/^    count < 0 ? self << (0 - count) : (count >= 64 ? /    count < 0 ? 0_i64 : (count >= 64 ? /'
+
+# 12. `chr` held to ASCII again, so `'é'.ord.chr` panics.
+prove_fails "chr only ASCII" ascii_chr number.iyi \
+  "233 is out of char range" \
+  's/^    raise "#{self} is out of char range" if self < 0 || self > 0x10FFFF || (self >= 0xD800 \&\& self <= 0xDFFF)$/    raise "#{self} is out of char range" if self < 0 || self > 127/'
+
+echo
+echo "== and the check that keeps the processor out of it"
+
+# The overflowing division with its guard removed does not fail a check - it
+# dies of the processor's fault, which is the whole reason the guard is
+# there. So this one asks for the fault rather than for a phrase: SIGFPE
+# where there are signals, and on Windows STATUS_INTEGER_OVERFLOW
+# (0xC0000095) as the process's exit code. Git Bash reports that exit as
+# 127, the same as a command it could not find, so the code is read whole
+# through PowerShell.
+prove_traps() { # prove_traps <label> <dir> <sed script>
+  local label="$1" dir="$2" script="$3"
+  mkdir -p "$WORK/$dir/iyi"
+  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
+  sed -e "$script" "$REPO/src/iyi/number.iyi" > "$WORK/$dir/iyi/number.iyi"
+  if cmp -s "$REPO/src/iyi/number.iyi" "$WORK/$dir/iyi/number.iyi"; then
+    echo "  $label: the patch changed nothing, so this proves nothing"
+    status=1
+    return
+  fi
+  printf 'module main\n\nputs (-2147483648 %% -1).to_s\n' > "$WORK/$dir/program.iyi"
+  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
+       -o "$WORK/$dir/program" "$WORK/$dir/program.iyi" > "$WORK/$dir/build" 2>&1; then
+    echo "  $label: the patched prelude did not build"
+    sed -n '1,10p' "$WORK/$dir/build"
+    status=1
+    return
+  fi
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN* | Windows_NT)
+      local exe
+      exe="$(cygpath -w "$WORK/$dir/program.exe")"
+      local nt
+      # `Process.Start`, not `Start-Process`: the cmdlet takes hold of the
+      # process after it has started it, and this one dies at its first
+      # division - on a runner it threw "the process has exited" and gave
+      # no code at all. `Process.Start` keeps the handle it was created
+      # with, and the exit code is read from that.
+      nt="$(powershell -NoProfile -Command "\$i = New-Object System.Diagnostics.ProcessStartInfo '$exe'; \$i.UseShellExecute = \$false; \$i.RedirectStandardOutput = \$true; \$p = [System.Diagnostics.Process]::Start(\$i); [void]\$p.StandardOutput.ReadToEnd(); \$p.WaitForExit(); '{0:X8}' -f \$p.ExitCode" | tr -d '\r')"
+      if [ "$nt" != "C0000095" ]; then
+        echo "  $label: exited 0x$nt rather than of the processor's integer overflow (0xC0000095), so the guard proves nothing"
+        status=1
+        return
+      fi
+      printf '  %s: dies of STATUS_INTEGER_OVERFLOW (0x%s) without the guard\n' "$label" "$nt"
+      ;;
+    *)
+      "$WORK/$dir/program" > "$WORK/$dir/out" 2>&1
+      local code=$?
+      if [ "$code" -lt 128 ]; then
+        echo "  $label: exited $code rather than dying of a signal, so the guard proves nothing"
+        status=1
+        return
+      fi
+      printf '  %s: dies of signal %s without the guard\n' "$label" "$((code - 128))"
+      ;;
+  esac
+}
+
+prove_traps "remainder without its guard" no_mod_guard \
+  's/^    return 0 if self == -2147483648 \&\& other == -1$/    # unchecked/'
+
+echo
+if [ "$status" -eq 0 ]; then
+  echo "Numbers: every value prints and reads back, what does not fit says so,"
+  echo "the two divisions that leave the type are panics with sentences rather"
+  echo "than a fault from the processor, and the floats keep the three answers"
+  echo "a program reads without thinking - NaN is not itself, -0.0 is zero, and"
+  echo "everything rounds toward the same side it always did."
+else
+  echo "the number surface does not hold"
+fi
+exit "$status"

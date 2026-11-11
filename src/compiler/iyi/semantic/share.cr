@@ -1,6 +1,6 @@
 # iyi: iyi SPEC III.4.4's `Share` — the marker that says a value may be
 # reached from two threads. Decided structurally, per type, the way
-# `bench/share_count.cr` counted it before it was built: a type is
+# `test/cli/share_count.cr` counted it before it was built: a type is
 # shareable if none of its fields is mutable and every field's type is
 # shareable, where a field is mutable if any method other than `initialize`
 # assigns it or a setter `field=` is defined for it; or it is trusted

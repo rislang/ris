@@ -133,7 +133,6 @@ pub trait Iterator
     # Refused at the door, where the caller can see it: a negative prefix is
     # not a prefix, and `Enumerable#take` refuses it in the same words.
     # Zero still yields nothing, which is what an empty prefix is.
-    raise "negative count: #{n}" if n < 0
     TakeIterator(self, Elem).new(self, n)
   end
 
@@ -146,7 +145,6 @@ pub trait Iterator
   end
 
   def skip(n : Int32) : SkipIterator(self, Elem)
-    raise "negative count: #{n}" if n < 0
     SkipIterator(self, Elem).new(self, n)
   end
 
@@ -177,12 +175,10 @@ pub trait Iterator
     # Refused at the door, the way `Indexable` and `Enumerable` refuse it:
     # an adaptor built with a window of zero yielded nothing from one tower
     # and shifted an empty array in this one.
-    raise "slice size must be positive" if n <= 0
     SliceIterator(self, Elem).new(self, n)
   end
 
   def each_cons(n : Int32) : ConsIterator(self, Elem)
-    raise "cons size must be positive" if n <= 0
     ConsIterator(self, Elem).new(self, n)
   end
 
@@ -211,7 +207,6 @@ pub trait Iterator
     # it, and in the sentence `Enumerable#each_step` uses. `StepIterator` also
     # refused a zero step, but from a struct the caller never named and with
     # different words, so the same mistake read as two.
-    raise "step size must be positive" if n <= 0
     StepIterator(self, Elem).new(self, n)
   end
 
@@ -472,7 +467,7 @@ end
 # and then walks that snapshot, so a hash that changes under the iterator
 # does not change what it yields.
 @[OnTape]
-pub class KeyIterator(K, V)
+pub struct KeyIterator(K, V)
   @keys : Array(K)
   @index : Int32
 
@@ -495,7 +490,7 @@ end
 
 @[OnTape]
 
-pub class ValueIterator(K, V)
+pub struct ValueIterator(K, V)
   @values : Array(V)
   @index : Int32
 
@@ -518,7 +513,7 @@ end
 
 @[OnTape]
 
-pub class EntryIterator(K, V)
+pub struct EntryIterator(K, V)
   @keys : Array(K)
   @values : Array(V)
   @index : Int32
@@ -541,6 +536,7 @@ impl Iterator for EntryIterator(K, V) forall K, V
   type Elem = Tuple(K, V)
 end
 
+@[OnTape]
 pub struct MapIterator(I, T, U)
   def initialize(@iter : I, @func : T -> U)
   end
@@ -559,6 +555,7 @@ impl Iterator for MapIterator(I, T, U) forall I, T, U
   type Elem = U
 end
 
+@[OnTape]
 pub struct SelectIterator(I, T)
   def initialize(@iter : I, @func : T -> Bool)
   end
@@ -577,6 +574,7 @@ impl Iterator for SelectIterator(I, T) forall I, T
   type Elem = T
 end
 
+@[OnTape]
 pub struct RejectIterator(I, T)
   def initialize(@iter : I, @func : T -> Bool)
   end
@@ -599,6 +597,7 @@ end
 
 pub class TakeIterator(I, T)
   def initialize(@iter : I, @n : Int32)
+    raise "negative count: #{@n}" if @n < 0
     @count = 0
   end
 
@@ -649,6 +648,7 @@ end
 
 pub class SkipIterator(I, T)
   def initialize(@iter : I, @n : Int32)
+    raise "negative count: #{@n}" if @n < 0
     @skipped = 0
   end
 
@@ -696,6 +696,7 @@ impl Iterator for SkipWhileIterator(I, T) forall I, T
   type Elem = T
 end
 
+@[OnTape]
 pub struct ZipIterator(I1, T1, I2, T2)
   def initialize(@iter1 : I1, @iter2 : I2)
   end
@@ -741,8 +742,7 @@ impl Iterator for ChainIterator(I1, I2, T) forall I1, I2, T
 end
 
 @[OnTape]
-
-pub class FlatMapIterator(I, T, U)
+pub struct FlatMapIterator(I, T, U)
   def initialize(@iter : I, @func : T -> Array(U))
     @current_sub = [] of U
     @current_idx = 0
@@ -769,8 +769,10 @@ impl Iterator for FlatMapIterator(I, T, U) forall I, T, U
   type Elem = U
 end
 
+@[OnTape]
 pub struct SliceIterator(I, T)
   def initialize(@iter : I, @n : Int32)
+    raise "slice size must be positive" if @n <= 0
   end
 
   def next : Array(T) | Stop
@@ -796,8 +798,9 @@ end
 
 @[OnTape]
 
-pub class ConsIterator(I, T)
+pub struct ConsIterator(I, T)
   def initialize(@iter : I, @n : Int32)
+    raise "cons size must be positive" if @n <= 0
     @window = [] of T
     @started = false
   end
@@ -854,7 +857,7 @@ end
 
 @[OnTape]
 
-pub class CycleIterator(I, T)
+pub struct CycleIterator(I, T)
   def initialize(@iter : I)
     @cache = [] of T
     @cached = false
@@ -891,7 +894,7 @@ end
 
 @[OnTape]
 
-pub class CycleNIterator(I, T)
+pub struct CycleNIterator(I, T)
   def initialize(@iter : I, @n : Int32)
     @cache = [] of T
     @cached = false
@@ -935,6 +938,7 @@ end
 
 pub class StepIterator(I, T)
   def initialize(@iter : I, @by : Int32)
+    raise "step size must be positive" if @by <= 0
     @first = true
   end
 
@@ -960,6 +964,7 @@ impl Iterator for StepIterator(I, T) forall I, T
   type Elem = T
 end
 
+@[OnTape]
 pub struct CompactMapIterator(I, T, U)
   def initialize(@iter : I, @func : T -> U?)
   end

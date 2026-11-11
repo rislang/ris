@@ -1,3 +1,4 @@
+# standard: RFC 4180
 # CSV, RFC 4180, written in iyi.
 #
 # `CSV.parse` reads a document a row of fields at a time, each row
@@ -45,7 +46,7 @@
 # and a first field that opens with U+FEFF is quoted so it is not read
 # past as a byte order mark. `quote_all: true` quotes every field. Python's
 # `csv` module reads what it writes, and it reads what Python's writes;
-# `bench/std_csv_exercise.sh` holds both directions on a generated corpus.
+# `test/cli/std_csv_exercise.sh` holds both directions on a generated corpus.
 
 module std/csv
 
@@ -901,4 +902,18 @@ pub class CSVWriter
   private def put(b : UInt8) : Nil
     @io.write(String.build(1) { |w| w.push(b) })
   end
+end
+
+spec 8.1
+  rows = [] of Array(String)
+  CSV.parse("id,name\r\n1,\"Ada, A\"\r\n") do |row|
+    rows << row.copy_to(Program.tape)
+  end
+  rows.size == 2
+  rows[1] == ["1", "Ada, A"]
+  back = CSV.build(rows)
+  again = [] of Array(String)
+  CSV.parse(back) { |row| again << row.copy_to(Program.tape) }
+  again == rows
+  CSV.build([["\uFEFFid"]]) == "\"\uFEFFid\""
 end

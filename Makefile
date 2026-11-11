@@ -73,7 +73,7 @@ override FLAGS += -D strict_multi_assign -D preview_overload_order $(if $(releas
 #
 # Fixed in src/string/builder.cr, and measured: the same sample now builds 0
 # failures in 10 runs with a fresh cache each, every sample builds, and the
-# collector-free compiler links libLLVM and libSystem only. bench/collector_
+# collector-free compiler links libLLVM and libSystem only. test/cli/collector_
 # free_floor.sh is the gate, and it fails if the reservation is removed again.
 #
 # The compiler still builds with bdw-gc by default, and that is now a trade
@@ -321,7 +321,7 @@ all_test: $(O)/all_test$(EXE) ## Run all tests (note: this builds a huge program
 	$(O)/all_test$(EXE) $(TEST_FLAGS)
 
 .PHONY: crystal
-crystal: $(O)/$(CRYSTAL_BIN) ## Build the compiler under Crystal's name (tests and bench use this one)
+crystal: $(O)/$(CRYSTAL_BIN) ## Build the compiler under Crystal's name (test/ and its scripts use this one)
 
 .PHONY: iyi
 iyi: $(O)/iyi$(EXE) ## iyi: build `iyi` itself, runnable as ./bin/iyi [default, with crystal]
@@ -365,7 +365,7 @@ format: ## Format sources
 # source into a `lib/` beside it, and the formatter's own `-e lib` default
 # is anchored at the top level, so a vendored tree one directory down was
 # walked into and `check=1` failed on code nobody here wrote. Tracked plus
-# new-and-not-ignored is the same rule `bench/identity_floor.py` reads for
+# new-and-not-ignored is the same rule `test/cli/identity_floor.py` reads for
 # the same reason, `safe.directory` included: inside the build image the
 # checkout is owned by another user and git 2.35+ refuses `ls-files`
 # without it, which would turn this gate into a crash rather than a check.

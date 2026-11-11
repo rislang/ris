@@ -1,3 +1,4 @@
+# spec: 3.3@a4f6b9c5
 # A holder struct that clears the Array it holds, called in a loop that
 # reads the Array after: the read's storage may be gone, refused at
 # compile time (SPEC 3.3), not left to the bounds check.

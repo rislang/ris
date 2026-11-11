@@ -1,3 +1,4 @@
+# spec: 1.5@9935f4c7
 @[PointerUnsafe("test that returned input slices retain their byte address")]
 def pending_address(text : String) : UInt64
   IyiHeap.read64(pointerof(text).address)

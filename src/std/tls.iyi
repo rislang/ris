@@ -1,3 +1,4 @@
+# standard: RFC 8446
 # TLS 1.3 (RFC 8446), both ends, written in iyi from the RFCs: a client
 # whose server's certificate std/x509 checked and a server whose Ed25519,
 # P-256, P-384 or RSA key signs for it, over std/socket - each of which
@@ -351,7 +352,7 @@
 # (section 7.1); padding beyond the name's (section 6.1.3's ALPN profiles,
 # and the server's record padding). Measured on loopback (--release, this
 # program's client and server on one thread, the median of 200 handshakes
-# each, the best of five runs, bench/std_tls_exercise.iyi's `ech-speed`):
+# each, the best of five runs, test/cli/std_tls_exercise.iyi's `ech-speed`):
 # 0.619 ms without ECH, 0.646 with GREASE, 0.730 with ECH taken - ECH
 # costs 0.11 ms a handshake, the HPKE seal and open and the inner built,
 # encoded and rebuilt. `TlsServerConfig#groups` orders the key exchange
@@ -632,13 +633,13 @@ pub class TlsConfig
   def self.on_program(*args : *T) : NoReturn forall T
     {% raise "Declare config = TlsConfig.new(alpn), then use
 " +
-      "config.copy_to(Program.tape), or declare a program constant." %}
+             "config.copy_to(Program.tape), or declare a program constant." %}
   end
 
   def dup(*args : *T) : NoReturn forall T
     {% raise "A config is an owner: declare copy = TlsConfig.new,
 " +
-      "then copy.refill(config)." %}
+             "then copy.refill(config)." %}
   end
 
   # System roots live with this config. Explicit read_system refreshes
@@ -1007,7 +1008,7 @@ struct TlsSuites
   ECDHE_RSA_CHACHA20      = 0xCCA8
   # Offered in this order.
   TLS12 = StaticArray[ECDHE_ECDSA_AES_128_GCM, ECDHE_RSA_AES_128_GCM, ECDHE_ECDSA_AES_256_GCM, ECDHE_RSA_AES_256_GCM,
-           ECDHE_ECDSA_CHACHA20, ECDHE_RSA_CHACHA20]
+    ECDHE_ECDSA_CHACHA20, ECDHE_RSA_CHACHA20]
 
   def self.name(suite : Int32) : String
     case suite
@@ -1060,6 +1061,7 @@ end
 module RisTlsConnectionState
   include RisCertificateStore::Storage
   @ocsp_store : RisOcspStore
+
   def place : String
     @place
   end
@@ -1128,6 +1130,7 @@ module RisTlsConnectionState
     @alpn_protocol_text << text
     @alpn_protocol_size = text.bytesize
   end
+
   @cipher_suite_text : String::Builder = String::Builder.new(64)
   @cipher_suite_at : Int32 = 0
   @cipher_suite_size : Int32 = 0
@@ -1141,6 +1144,7 @@ module RisTlsConnectionState
     @cipher_suite_text << text
     @cipher_suite_size = text.bytesize
   end
+
   # The version negotiated: "TLSv1.3", or "TLSv1.2" where one end asked
   # for it and the other spoke nothing newer.
   getter version : String = "TLSv1.3"
@@ -1161,6 +1165,7 @@ module RisTlsConnectionState
     @named_group_text << text
     @named_group_size = text.bytesize
   end
+
   # The chain the peer's certificate was checked through, leaf first: the
   # server's, for a client; the client's, for a server that asked for one.
   getter peer_certificates : Array(Certificate) = [] of Certificate
@@ -1212,6 +1217,7 @@ module RisTlsConnectionState
     end
     TlsError.new(said, alert, timed_out, cancelled, retry)
   end
+
   @inbox_at : Int32 = 0
   @inbox_end : Int32 = 0
   # The last record read, its header and body, and its content once
@@ -1234,6 +1240,7 @@ module RisTlsConnectionState
   protected def transcript : Array::View(UInt8)
     @transcript_data[@transcript_start, @transcript_data.size - @transcript_start]
   end
+
   @schedule : TlsKeySchedule = TlsKeySchedule.new(false)
   @read_cipher : TlsRecordCipher
   @write_cipher : TlsRecordCipher
@@ -1753,7 +1760,7 @@ module RisTlsConnectionState
   # peer what it had received and not yet read: closed at once on a
   # request body it had not read, an HTTPS server lost its whole answer to
   # Python's http.client in each of 50 runs, and curl the end of it in
-  # each of 50 (bench/std_http_exercise.sh, "a close while the client
+  # each of 50 (test/cli/std_http_exercise.sh, "a close while the client
   # still sends"). Nothing is waited for once the peer's close_notify has
   # been read: nothing comes after it. A socket already closed under the
   # connection leaves only the close: no alert, and nothing read. `abort`
@@ -2367,27 +2374,27 @@ end
 
 # The common interface owns no storage; concrete connections own theirs.
 pub abstract class TlsConnection
-  HELLO_RETRY = RisTlsConnectionState::HELLO_RETRY
-  DOWNGRADE_TLS12 = RisTlsConnectionState::DOWNGRADE_TLS12
-  DOWNGRADE_TLS11 = RisTlsConnectionState::DOWNGRADE_TLS11
-  MAX_HANDSHAKE = RisTlsConnectionState::MAX_HANDSHAKE
-  MAX_CCS = RisTlsConnectionState::MAX_CCS
+  HELLO_RETRY          = RisTlsConnectionState::HELLO_RETRY
+  DOWNGRADE_TLS12      = RisTlsConnectionState::DOWNGRADE_TLS12
+  DOWNGRADE_TLS11      = RisTlsConnectionState::DOWNGRADE_TLS11
+  MAX_HANDSHAKE        = RisTlsConnectionState::MAX_HANDSHAKE
+  MAX_CCS              = RisTlsConnectionState::MAX_CCS
   HANDSHAKE_TIMEOUT_MS = RisTlsConnectionState::HANDSHAKE_TIMEOUT_MS
   GROUP_X25519MLKEM768 = RisTlsConnectionState::GROUP_X25519MLKEM768
-  GROUP_X25519 = RisTlsConnectionState::GROUP_X25519
-  GROUP_SECP256R1 = RisTlsConnectionState::GROUP_SECP256R1
-  GROUP_SECP384R1 = RisTlsConnectionState::GROUP_SECP384R1
-  GROUPS12 = RisTlsConnectionState::GROUPS12
-  GROUPS = RisTlsConnectionState::GROUPS
-  HYBRID_CLIENT_SHARE = RisTlsConnectionState::HYBRID_CLIENT_SHARE
-  HYBRID_SERVER_SHARE = RisTlsConnectionState::HYBRID_SERVER_SHARE
-  OUTBOX_SIZE = RisTlsConnectionState::OUTBOX_SIZE
-  DRAIN_BYTES = RisTlsConnectionState::DRAIN_BYTES
-  DRAIN_GAP_MS = RisTlsConnectionState::DRAIN_GAP_MS
-  DRAIN_MS = RisTlsConnectionState::DRAIN_MS
-  LINGER_BYTES = RisTlsConnectionState::LINGER_BYTES
-  LINGER_MS = RisTlsConnectionState::LINGER_MS
-  INBOX_SIZE = RisTlsConnectionState::INBOX_SIZE
+  GROUP_X25519         = RisTlsConnectionState::GROUP_X25519
+  GROUP_SECP256R1      = RisTlsConnectionState::GROUP_SECP256R1
+  GROUP_SECP384R1      = RisTlsConnectionState::GROUP_SECP384R1
+  GROUPS12             = RisTlsConnectionState::GROUPS12
+  GROUPS               = RisTlsConnectionState::GROUPS
+  HYBRID_CLIENT_SHARE  = RisTlsConnectionState::HYBRID_CLIENT_SHARE
+  HYBRID_SERVER_SHARE  = RisTlsConnectionState::HYBRID_SERVER_SHARE
+  OUTBOX_SIZE          = RisTlsConnectionState::OUTBOX_SIZE
+  DRAIN_BYTES          = RisTlsConnectionState::DRAIN_BYTES
+  DRAIN_GAP_MS         = RisTlsConnectionState::DRAIN_GAP_MS
+  DRAIN_MS             = RisTlsConnectionState::DRAIN_MS
+  LINGER_BYTES         = RisTlsConnectionState::LINGER_BYTES
+  LINGER_MS            = RisTlsConnectionState::LINGER_MS
+  INBOX_SIZE           = RisTlsConnectionState::INBOX_SIZE
 
   def self.group_name(group : Int32) : String
     RisTlsConnectionState.group_name(group)
@@ -2432,6 +2439,7 @@ pub class TlsClient < TlsConnection
   private def early_bytes : Array(UInt8)?
     @has_early ? @early_storage : nil
   end
+
   @early_sent : Bool = false
   @early_taken : Bool = false
   @early_cipher : TlsRecordCipher
@@ -2616,13 +2624,13 @@ pub class TlsClient < TlsConnection
   def self.over(*args : *T, **options : **U) : NoReturn forall T, U
     {% raise "TlsClient.over returns no owner: declare client =
 " +
-      "TlsClient.new(socket, host, config, session), then client.over(timeout_ms)." %}
+             "TlsClient.new(socket, host, config, session), then client.over(timeout_ms)." %}
   end
 
   def self.connect(*args : *T, **options : **U) : NoReturn forall T, U
     {% raise "TlsClient.connect returns no owner: declare client =
 " +
-      "TlsClient.new(host, config, session), then client.connect(port, timeout_ms)." %}
+             "TlsClient.new(host, config, session), then client.connect(port, timeout_ms)." %}
   end
 
   # --- The handshake (section 4) ---
@@ -2694,7 +2702,7 @@ pub class TlsClient < TlsConnection
       kem = pq
       hybrid_share = pq.encapsulation_key + public_key
       shares << {GROUP_X25519MLKEM768,
-        hybrid_share[0, hybrid_share.size]}
+                 hybrid_share[0, hybrid_share.size]}
     end
     shares << {GROUP_X25519, public_key[0, public_key.size]}
     # Encrypted Client Hello (RFC 9849): with `ech_configs`, *hello* is the
@@ -4031,9 +4039,9 @@ pub class TlsMadeUnder
     @roots = @config.roots
     roots = @roots || @config.kept_certificates
     roots.each do |root|
-        root.raw.each { |byte| root_values << byte }
-        root_offsets << root_values.size
-        nil
+      root.raw.each { |byte| root_values << byte }
+      root_offsets << root_values.size
+      nil
     end
     @identity = @config.identity
     @now = @config.now
@@ -4060,9 +4068,9 @@ pub class TlsMadeUnder
     @root_offsets << 0
     roots = @roots || config.kept_certificates
     roots.each do |root|
-        root.raw.each { |byte| @root_values << byte }
-        @root_offsets << @root_values.size
-        nil
+      root.raw.each { |byte| @root_values << byte }
+      @root_offsets << @root_values.size
+      nil
     end
     @identity = config.identity
     @now = config.now
@@ -4619,6 +4627,7 @@ pub class TlsIdentity
   def leaf : Certificate
     @leaf.as(Certificate)
   end
+
   # The schemes CertificateVerify can be signed under, by the key's kind:
   # ed25519 (0x0807), ecdsa_secp256r1_sha256 (0x0403),
   # ecdsa_secp384r1_sha384 (0x0503), or for an RSA key rsa_pss_rsae_sha256,
@@ -4741,13 +4750,13 @@ pub class TlsIdentity
   def self.from_pem(*args : *T, **options : **U) : NoReturn forall T, U
     {% raise "TlsIdentity.from_pem returns no owner: declare identity =
 " +
-      "TlsIdentity.new(certificates, private_key), then check identity.error." %}
+             "TlsIdentity.new(certificates, private_key), then check identity.error." %}
   end
 
   def self.from_der(*args : *T, **options : **U) : NoReturn forall T, U
     {% raise "TlsIdentity.from_der returns no owner: declare identity =
 " +
-      "TlsIdentity.new(chain, key), then check identity.error." %}
+             "TlsIdentity.new(chain, key), then check identity.error." %}
   end
 
   private macro initialize_ec(chain, der, pkcs8)
@@ -4994,11 +5003,12 @@ pub class TlsServerConfig
 
   def identity_source=(source : Proc) : Nil
     {% raise "TlsServerConfig#identity_source= takes no proc.\n" +
-      "Give it a value whose type has\n" +
-      "`impl TlsIdentitySource for T` and\n" +
-      "`def identity_for(server_name : String?, alpn : Array(String)?,\n" +
-      "  left_ms : Int32?) : TlsIdentity | TlsError | Nil`." %}
+             "Give it a value whose type has\n" +
+             "`impl TlsIdentitySource for T` and\n" +
+             "`def identity_for(server_name : String?, alpn : Array(String)?,\n" +
+             "  left_ms : Int32?) : TlsIdentity | TlsError | Nil`." %}
   end
+
   # The oldest version this server speaks: TLS 1.3 by default, and then a
   # client that does not offer it is refused (protocol_version); `TLS12`
   # answers a client that offers 1.2 and not 1.3 in 1.2, held to what the
@@ -5135,16 +5145,16 @@ pub class TlsServerConfig
   # A config is an owner (SPEC 2.1): a def does not make and return one.
   macro from_pem(certificates, private_key)
     {% raise "TlsServerConfig.from_pem is gone: a config is an owner, made\n" +
-      "at a named declaration (SPEC 2.1). Write\n" +
-      "identity = TlsIdentity.new(certificates, private_key)\n" +
-      "and then config = TlsServerConfig.new(identity)." %}
+             "at a named declaration (SPEC 2.1). Write\n" +
+             "identity = TlsIdentity.new(certificates, private_key)\n" +
+             "and then config = TlsServerConfig.new(identity)." %}
   end
 
   macro from_der(chain, key)
     {% raise "TlsServerConfig.from_der is gone: a config is an owner, made\n" +
-      "at a named declaration (SPEC 2.1). Write\n" +
-      "identity = TlsIdentity.new(chain, key)\n" +
-      "and then config = TlsServerConfig.new(identity)." %}
+             "at a named declaration (SPEC 2.1). Write\n" +
+             "identity = TlsIdentity.new(chain, key)\n" +
+             "and then config = TlsServerConfig.new(identity)." %}
   end
 
   def chain : (Array(Array(UInt8)) | Array(Array::View(UInt8)))
@@ -5376,7 +5386,6 @@ pub class TlsTicket
     RisTlsTicketRead.result(RisTlsTicketRead.new(keys, ticket,
       now_ms, period_ms))
   end
-
 end
 
 # Ticket storage is constructed where its caller retains it. Chain entries
@@ -5568,7 +5577,7 @@ class TlsOffer
     when RisTlsConnectionState::GROUP_X25519         then @x25519
     when RisTlsConnectionState::GROUP_SECP256R1      then @p256
     when RisTlsConnectionState::GROUP_SECP384R1      then @p384
-    else                                          nil
+    else                                                  nil
     end
   end
 end
@@ -5744,8 +5753,8 @@ pub class TlsServer < TlsConnection
 
   macro over(socket, config, timeout_ms = HANDSHAKE_TIMEOUT_MS, early_data = true)
     {% raise "TlsServer.over is gone: a server is an owner, made at a named\n" +
-      "declaration (SPEC 2.1). Write server = TlsServer.new(socket, config)\n" +
-      "and then problem = server.accept(timeout_ms, early_data)." %}
+             "declaration (SPEC 2.1). Write server = TlsServer.new(socket, config)\n" +
+             "and then problem = server.accept(timeout_ms, early_data)." %}
   end
 
   protected def takes_early=(takes : Bool) : Bool
@@ -7118,7 +7127,7 @@ pub struct TlsEchConfig
     i = 0
     while i < suite_bytes.size
       suites << {(suite_bytes[i].to_i32 << 8) | suite_bytes[i + 1].to_i32,
-        (suite_bytes[i + 2].to_i32 << 8) | suite_bytes[i + 3].to_i32}
+                 (suite_bytes[i + 2].to_i32 << 8) | suite_bytes[i + 3].to_i32}
       i += 4
     end
     @suites = suites[first_suite, suites.size - first_suite]
@@ -8009,4 +8018,9 @@ struct TlsBytes
     name = alert_name(code)
     name[0, name.size - " (#{code})".size]
   end
+end
+
+spec 8.1
+  TlsError.new("plain").message == "tls: plain"
+  TlsError.new("alert", TlsAlert::DECODE_ERROR).message == "tls: alert (decode_error)"
 end

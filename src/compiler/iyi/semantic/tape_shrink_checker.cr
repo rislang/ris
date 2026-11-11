@@ -1469,7 +1469,10 @@ class Iyi::TapeShrinkChecker
         if union_with_text?(owner.type?) || owner.type?.try { |t| one_text_struct?(t.remove_typedef) }
           leaving = merge(moved_text?(body) || ends_in_return?(body) ? EMPTY : last, @kept_returns)
         end
-        check_leaving(owner.object_id, leaving, env, owner.type?, owner)
+        # A def answering Nil drops its last value: nothing leaves.
+        unless owner.type?.try(&.nil_type?)
+          check_leaving(owner.object_id, leaving, env, owner.type?, owner)
+        end
         @leaving = owner.object_id
       end
       boundary = fresh
@@ -1569,7 +1572,10 @@ class Iyi::TapeShrinkChecker
     return true if storage_type?(type)
     return false unless type
     name = type_name(type.remove_typedef)
-    name == "String" || name == "String::Span" || name.starts_with?("Array::Link(") || name.includes?("View(") || name.includes?("Iterator") ||
+    # The type's own name, not its module's: std/iterator's Stop is a
+    # plain value.
+    own = name.split('(').first.split("::").last
+    name == "String" || name == "String::Span" || name.starts_with?("Array::Link(") || name.includes?("View(") || own.includes?("Iterator") ||
       name.starts_with?("Pointer(") || !!TapeChecker.tape_in(@program, type)
   end
 

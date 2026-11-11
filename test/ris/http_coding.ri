@@ -1,7 +1,7 @@
 module test/http_coding
 
 import std/socket::{IyiSocket}
-import std/http::{Server, Request, Response, HTTP}
+import std/http::{Server, Incoming, Outgoing, Response, HTTP}
 import std/compress::{Gzip, Zlib, Deflate}
 import std/zstd::{Zstd}
 
@@ -20,9 +20,9 @@ struct Coded
     RisBoard.post(Listening.new)
   end
 
-  def call(req : Request) : Response
-    Response.new(200, coded(req.path),
-      {"Content-Encoding" => coding(req.path)})
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.header("Content-Encoding", coding(req.path))
+    res.body << coded(req.path)
   end
 
   def coding(path : String) : String
@@ -49,7 +49,7 @@ port = probe.local_port
 probe.close
 group do |g|
   g.spawn do
-    Server.serve("127.0.0.1", port, 0, Coded, max_connections: {% if flag?(:darwin) %}1{% else %}8{% end %})
+    Server.answer("127.0.0.1", port, 0, Coded, max_connections: {% if flag?(:darwin) %}1{% else %}8{% end %})
     0
   end
   RisBoard.take(Listening).or_panic

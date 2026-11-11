@@ -2539,6 +2539,37 @@ module Iyi
     def_equals_and_hash @path
   end
 
+  # ris: `spec 1.2  # label` ... `end`, a proof of SPEC.md clause *clause*
+  # at the end of a module file (doc/drafts/spec-blocks, 5.1). The parser
+  # keeps a file's spec section only when asked (`Parser#ris_keep_spec`):
+  # `ris build`, `run` and `doc` never see it. *label* is the trailing
+  # comment's text (D15), *ordinal* counts earlier blocks of the same clause
+  # in the file (5.8); *source_start* and *source_end* are the block's byte
+  # range, which the formatter writes back unchanged.
+  class SpecBlock < ASTNode
+    property clause : String
+    property body : ASTNode
+    property label : String?
+    property ordinal : Int32
+    property source_start : Int32
+    property source_end : Int32
+
+    def initialize(@clause, @body, @label = nil, @ordinal = 0,
+                   @source_start = 0, @source_end = 0)
+    end
+
+    def accept_children(visitor)
+      @body.accept visitor
+    end
+
+    def clone_without_location
+      SpecBlock.new(@clause, @body.clone, @label, @ordinal, @source_start,
+        @source_end)
+    end
+
+    def_equals_and_hash @clause, @body, @label, @ordinal
+  end
+
   # iyi: `import std/json`, `import std/json::{parse, Any}`, `import
   # std/json::*` (iyi SPEC R-2b, II.3). The module is loaded by all three;
   # the second brings the names it lists into unqualified scope and the

@@ -3,7 +3,7 @@
 module test/ris/http_continue
 
 import std/socket::{IyiSocket}
-import std/http::{Server, Request, Response, HTTPError, Conn, BodyReader}
+import std/http::{Server, Incoming, Outgoing, HTTPError, Conn, BodyReader}
 import std/tuple
 
 {% if flag?(:linux) %}
@@ -56,13 +56,13 @@ struct Handler
     RisBoard.post(Listening.new)
   end
 
-  # One call: the Response is built in the server's scope (SPEC 1.5).
-  def call(req : Request) : Response
-    Response.new(200, check(req))
+  def call(req : Incoming, res : Outgoing) : Nil
+    check(req)
+    res.body << "ok"
   end
 
-  # The body read as the case asks, what was seen posted; the answer's.
-  private def check(req : Request) : String
+  # The body read as the case asks, what was seen posted.
+  private def check(req : Incoming) : Nil
     reader = req.body_io
     if @reset_peer
       RisBoard.post(Pending.new)
@@ -90,7 +90,7 @@ struct Handler
         reader.read(1).or_panic.empty?
     end
     RisBoard.post(Checked.new(passed))
-    "ok"
+    nil
   end
 end
 
@@ -102,7 +102,7 @@ def exchange(chunked : Bool, reset_peer : Bool = false,
   passed = false
   group do |g|
     g.spawn do
-      Server.serve("127.0.0.1", port, {chunked, reset_peer, cancel}, Handler,
+      Server.answer("127.0.0.1", port, {chunked, reset_peer, cancel}, Handler,
         stream_bodies: true, max_connections: 1)
       0
     end

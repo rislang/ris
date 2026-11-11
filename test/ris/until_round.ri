@@ -1,3 +1,4 @@
+# spec: 1.1@fdc7907b
 # Each `until` round frees what it made: 200000 rounds of `split` reuse
 # one mapping, as `while` rounds do (SPEC 1.1). check.sh reads the
 # RIS_TAPE_STATS line; the leaking form made a mapping a round.

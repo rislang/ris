@@ -1,3 +1,4 @@
+# standard: Crystal Big numeric API
 # Arbitrary precision numbers: BigInt, BigDecimal, BigRational and BigFloat.
 #
 # Everything here is iyi all the way down: no GMP, no libc, no `lib` (iyi SPEC
@@ -41,7 +42,7 @@
 # counters and n alone. After the rounds: the test that b is 1 branches,
 # which is the answer's nil and public, and `BigInt.new` trims the
 # answer's leading zero limbs, which shows how many it has.
-# bench/ct_timing.sh, x = (m - 1) / 2 against random x modulo 2048 bits:
+# test/speed/ct_timing.sh, x = (m - 1) / 2 against random x modulo 2048 bits:
 # |t| = 2.4 to 3.4 over 50,000 to 100,000 inversions (under 10 is no
 # leak seen), where the extended Euclid's algorithm std/rsa had reached
 # |t| = 317 to 403 on 2,000 to 5,000.
@@ -780,8 +781,8 @@ pub struct BigInt
   # An explicit stack keeps scratch on the caller's tape. Each frame
   # holds fixed views; no growing local crosses a recursive call.
   private def mul_karatsuba(a : Array(UInt64) | Array::View(UInt64),
-                           b : Array(UInt64) | Array::View(UInt64),
-                           threshold : Int32) : Array(UInt64)
+                            b : Array(UInt64) | Array::View(UInt64),
+                            threshold : Int32) : Array(UInt64)
     scratch = RisBigScratch.new(a.size + b.size)
     output = Array(UInt64).new(a.size + b.size)
     frames = Array(RisMulFrame).new(32, RisMulFrame.new(a.view, b.view))
@@ -1329,7 +1330,7 @@ pub struct BigInt
   # modulus' length, and a 2048-bit modulus with a 2048-bit exponent took
   # 19.0 ms in a --release build where Python 3.14's `pow` took 13.3 (3072
   # bits: 63.2 and 42.3, 4096: 168.7 and 100.3). Montgomery's takes 2.5 ms,
-  # 8.5 and 20.6 in the run of bench/std_big_exercise.sh that measured
+  # 8.5 and 20.6 in the run of test/cli/std_big_exercise.sh that measured
   # Python at 13.7, 45.4 and 102.1, which prints these each run.
   def pow_mod(exp : BigInt, mod : BigInt) : BigInt
     BigInt.new(1, BigInt.pow_mod_limbs(self, exp, mod))
@@ -4074,4 +4075,38 @@ struct ::String
   def to_big_r : Std::Big::BigRational
     Std::Big::BigRational.new(self)
   end
+end
+
+spec 8.1
+  a = BigInt.new("12345678901234567890")
+  b = BigInt.new("987654321")
+  (a + b).to_s == "12345678902222222211"
+  (a * b).to_s == "12193263112482853211126352690"
+  q, r = a.divmod(b)
+  q * b + r == a
+  ((a << 37) >> 37) == a
+  BigInt.new("ff", 16).to_s(16) == "ff"
+  (BigDecimal.new("1.25") *
+    BigDecimal.new("2")).to_s == "2.50"
+  BigRational.new("3/4").to_s == "3/4"
+  BigFloat.new(1.5).to_f64 == 1.5
+  x = BigInt.new("f" * 600, 16)
+  y = BigInt.new("f" * 640, 16)
+  x * y ==
+    (BigInt.one << 4960) - (BigInt.one << 2560) -
+    (BigInt.one << 2400) + BigInt.one
+  y = BigInt.new("f" * 2400, 16)
+  x * y ==
+    (BigInt.one << 12000) - (BigInt.one << 9600) -
+    (BigInt.one << 2400) + BigInt.one
+  BigInt.new(2).pow_mod(
+    BigInt.new(10), BigInt.new(17)) == BigInt.new(4)
+  BigInt.new(2).pow_mod_secret(
+    BigInt.new(10), BigInt.new(17)) == BigInt.new(4)
+  BigInt.new(3).inverse_mod_secret(
+    BigInt.new(17)) == BigInt.new(6)
+  text = ""
+  text << BigInt.new(42) << ',' << BigDecimal.new("1.50") << ','
+  text << BigRational.new("3/4") << ',' << BigFloat.new(1.5)
+  text == "42,1.50,3/4,1.5"
 end

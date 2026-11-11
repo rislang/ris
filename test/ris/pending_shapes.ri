@@ -1,3 +1,4 @@
+# spec: 1.5@9935f4c7, 1.9@3f448e8c
 def pending_used : UInt64
   IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 end

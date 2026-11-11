@@ -290,11 +290,11 @@ class Iyi::Command
         STDERR.puts "#{file}:#{remaining.line}:#{remaining.column}: #{remaining.message}"
         if elsewhere
           STDERR.puts "the cause is in #{Iyi.relative_filename(elsewhere[0])}:#{elsewhere[1]}:#{elsewhere[2]}, " \
-                      "which this run does not edit: run `#{Command.program_name} fix #{Iyi.relative_filename(elsewhere[0])}`"
+                      "which this run does not edit: run `#{Command.program_name} check types --fix #{Iyi.relative_filename(elsewhere[0])}`"
         end
         if capped
           STDERR.puts "#{applied.size} edits is this run's cap and the file still " \
-                      "reports an error: run `#{Command.program_name} fix #{file}` again"
+                      "reports an error: run `#{Command.program_name} check types --fix #{file}` again"
         end
       elsif applied.empty? && single
         puts "#{file}: already clean"

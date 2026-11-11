@@ -1,3 +1,4 @@
+# standard: bzip2 file format
 # bzip2 (Julian Seward's format, as libbzip2 1.0.8 writes and reads it),
 # both ways, written in iyi; no libbzip2 is linked. There is no RFC: the
 # format is what bzip2's own `compress.c`, `decompress.c` and
@@ -1569,4 +1570,12 @@ class Bzip2Encode
       end
     end
   end
+end
+
+spec 8.1
+  text = "line on tape\n" * 3000
+  packed = Bzip2.compress(text, 9)
+  Bzip2.decompress(packed) == text
+  Bzip2.decompress(Bzip2.compress("")) == ""
+  Bzip2.decompress("bad").is_a?(Bzip2Error)
 end

@@ -1,0 +1,222 @@
+# `Server.answer` over TLS: a TLS 1.3 handshake and an answer, a second
+# connection resumed by a ticket (`tls_resumed?`), a streamed body over
+# HTTP/1.0 to the close; HTTP/2 by prior knowledge in the clear on the
+# fast path, whole and streamed, and an upgrade over HTTP/2 answered 501.
+# (std/http's HTTPS client is refused by the owner check today, so the
+# TLS side is driven with TlsClient.)
+module test/ris/answer_tls
+
+import std/http::{Server, Incoming, Outgoing}
+import std/socket::{IyiSocket}
+import std/tls::{TlsClient, TlsSession, TlsConfig, TlsServerConfig, TlsIdentity, TlsError}
+import std/x509::{RisCertificateStore, Certificate}
+
+struct Ready
+end
+
+# A test PKI (test/cli/std_http_resume.iyi's): Ed25519, valid to 9999. The
+# leaf's key guards nothing but this test.
+LEAF_PEM = "-----BEGIN CERTIFICATE-----\n" \
+           "MIIBQzCB9qADAgECAgEDMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
+           "dDAgFw0yNTAxMDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1OVowFDESMBAGA1UEAwwJ\n" \
+           "bG9jYWxob3N0MCowBQYDK2VwAyEAOeskudtTVi76JObK6QHqJy6M7PaEu/aLlC5H\n" \
+           "B5OLks+jZjBkMBQGA1UdEQQNMAuCCWxvY2FsaG9zdDAMBgNVHRMBAf8EAjAAMB0G\n" \
+           "A1UdDgQWBBQN8ZJay/U7zf07disj78hKukvGAjAfBgNVHSMEGDAWgBSNjkTWVhBs\n" \
+           "a874Ao2cPFX4w4saajAFBgMrZXADQQAcAgj9qe58GnzceRkYfxyfNHxmqWOgDJkn\n" \
+           "b3rO1pz+8OCRioO1P+BhFa1FR/FMHSH9bOFEKfXfy3Nwr+y+GkMM\n" \
+           "-----END CERTIFICATE-----\n"
+ROOT_PEM = "-----BEGIN CERTIFICATE-----\n" \
+           "MIIBJDCB16ADAgECAgEBMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
+           "dDAgFw0yNTAxMDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1OVowGTEXMBUGA1UEAwwO\n" \
+           "aXlpIGJlbmNoIHJvb3QwKjAFBgMrZXADIQCQIEeX9suXr4DL8DiLdBUfoWaJU+Hv\n" \
+           "7JhN3IpqspsuOqNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYw\n" \
+           "HQYDVR0OBBYEFI2ORNZWEGxrzvgCjZw8VfjDixpqMAUGAytlcANBAFEfpUf437+b\n" \
+           "PwJvPGD/gB0zIegp6+3cJzF42Tx6Hj8tIJgdtXVKA58EXmitGetqb788+xoJ49My\n" \
+           "4Wc3L1uxxAI=\n" \
+           "-----END CERTIFICATE-----\n"
+KEY_PEM = "-----BEGIN PRIVATE KEY-----\n" \
+          "MC4CAQAwBQYDK2VwBCIEIOYKs3OzEJYJ/j+ZQYLoAU929MQeanF9kupAR9HpeHJ8\n" \
+          "-----END PRIVATE KEY-----\n"
+
+class TlsHandler
+  getter tls_config : TlsServerConfig
+
+  def initialize(config : Int32)
+    identity = TlsIdentity.new(LEAF_PEM + ROOT_PEM, KEY_PEM)
+    raise identity.error.as(TlsError).message if identity.error
+    server = TlsServerConfig.new(identity)
+    @tls_config = server
+    @tls_config.alpn = ["h2", "http/1.1"]
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    Answers.call(req, res)
+  end
+
+  def take_over(socket, leftover : String, res : Outgoing) : Nil
+  end
+end
+
+struct PlainHandler
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    Answers.call(req, res)
+  end
+end
+
+struct Answers
+  def self.call(req : Incoming, res : Outgoing) : Nil
+    case req.path
+    when "/stream"
+      res.stream do |w|
+        w.write("one ")
+        w.write("two")
+      end
+    when "/upgrade"
+      res.header("Upgrade", "x")
+      res.upgrade
+    else
+      res.body << req.version << " resumed=" << req.tls_resumed?
+    end
+  end
+end
+
+# The answer's body to an HTTP/1.0 GET of *path* over a new TLS
+# connection under *session*.
+def fetch(port : Int32, config : TlsConfig, session : TlsSession,
+          path : String) : String
+  tls = TlsClient.new("localhost", config, session)
+  if problem = tls.connect(port)
+    return problem.message
+  end
+  tls.write("GET #{path} HTTP/1.0\r\nHost: localhost\r\n\r\n")
+  got = ""
+  while true
+    piece = tls.read
+    break if piece.is_a?(TlsError) || piece.empty?
+    got << piece
+  end
+  tls.close
+  at = got.index("\r\n\r\n") || 0
+  "#{got[0, 12]} #{got[at + 4, got.bytesize - at - 4]}"
+end
+
+# One HTTP/2 frame: its 9-byte head and *payload*.
+def frame(kind : Int32, flags : Int32, id : Int32, payload : String) : String
+  text = ""
+  size = payload.bytesize
+  text << (size >> 16).unsafe_chr << ((size >> 8) & 255).unsafe_chr <<
+    (size & 255).unsafe_chr << kind.unsafe_chr << flags.unsafe_chr <<
+    ((id >> 24) & 127).unsafe_chr << ((id >> 16) & 255).unsafe_chr <<
+    ((id >> 8) & 255).unsafe_chr << (id & 255).unsafe_chr
+  text << payload
+  text
+end
+
+# A GET of *path*'s HPACK block: :method GET, :scheme http, :authority h
+# from the static table and literals, *path* a literal never indexed.
+def get_block(path : String) : String
+  text = ""
+  text << "\x82\x86\x41\x01h\x04" << path.bytesize.unsafe_chr << path
+  text
+end
+
+# Three requests over one cleartext connection with HTTP/2's preface
+# (prior knowledge): whether the statuses are 200, 200 and 501 (:status
+# indexed, or a literal "501" in Huffman code), and each stream's DATA.
+def h2c(port : Int32) : String
+  socket = IyiSocket.connect("127.0.0.1", port).or_panic
+  socket.read_timeout_ms = 5000
+  text = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+  text << frame(4, 0, 0, "")
+  text << frame(1, 5, 1, get_block("/"))
+  text << frame(1, 5, 3, get_block("/stream"))
+  text << frame(1, 5, 5, get_block("/upgrade"))
+  socket.write(text).or_panic
+  got = ""
+  d1 = ""
+  d3 = ""
+  h1 = ""
+  h3 = ""
+  h5 = ""
+  ended = 0
+  at = 0
+  while ended < 3
+    while got.bytesize - at < 9 ||
+          got.bytesize - at < 9 + ((got.byte_at(at).to_i32 << 16) |
+            (got.byte_at(at + 1).to_i32 << 8) | got.byte_at(at + 2).to_i32)
+      piece = socket.read(65536).or_panic
+      raise "closed early: #{got.inspect}" if piece.empty?
+      got << piece
+    end
+    size = (got.byte_at(at).to_i32 << 16) | (got.byte_at(at + 1).to_i32 << 8) |
+           got.byte_at(at + 2).to_i32
+    kind = got.byte_at(at + 3).to_i32
+    flags = got.byte_at(at + 4).to_i32
+    id = got.byte_at(at + 8).to_i32
+    payload = got[at + 9, size]
+    if id > 0 && id < 6
+      if kind == 1
+        h1 << payload if id == 1
+        h3 << payload if id == 3
+        h5 << payload if id == 5
+      elsif kind == 0
+        d1 << payload if id == 1
+        d3 << payload if id == 3
+      end
+      ended += 1 if (kind == 0 || kind == 1) && (flags & 1) == 1
+    end
+    at += 9 + size
+  end
+  socket.close
+  ok = h1.byte_at(0) == 0x88_u8 && h3.byte_at(0) == 0x88_u8 &&
+       h5.starts_with?("\x48\x82\x6c\x01")
+  "h2c statuses #{ok}: #{d1} | #{d3}"
+end
+
+def free_port : Int32
+  probe = IyiSocket.listen(0)
+  port = probe.local_port
+  probe.close
+  port
+end
+
+tls_port = free_port
+plain_port = free_port
+group do |g|
+  g.spawn do
+    # One worker: each has its own ticket keys, so a second connection
+    # resumes only on the worker that sealed its ticket.
+    Server.answer("127.0.0.1", tls_port, 0, TlsHandler, max_connections: 1)
+    0
+  end
+  g.spawn do
+    Server.answer("127.0.0.1", plain_port, 0, PlainHandler,
+      max_connections: 2)
+    0
+  end
+  3.times { RisBoard.take(Ready).or_panic }
+  store = RisCertificateStore.new
+  if problem = store.read_pem(ROOT_PEM)
+    raise problem.message
+  end
+  config = TlsConfig.new
+  config.roots = store.kept_certificates
+  config.alpn = ["http/1.1"]
+  session = TlsSession.new
+  puts fetch(tls_port, config, session, "/")
+  puts fetch(tls_port, config, session, "/")
+  puts fetch(tls_port, config, session, "/stream")
+  puts h2c(plain_port)
+  g.cancel_children
+end

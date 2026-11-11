@@ -1,3 +1,4 @@
+# spec: 1.5@9935f4c7
 # A def's error result, a struct whose one tape field is its sentence,
 # moves the sentence down as a String result moves (SPEC 1.5): the
 # def's other scratch is freed, the sentence stays.

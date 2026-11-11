@@ -10,7 +10,7 @@
 # safe form that replaces the pointer, and the mark only for calling C.
 # std (`/std/`) and the runtime (`src/iyi/`, `.cr`) are exempt, as they are
 # from the tape's rules (`TapeRules`), and so are std's exercises in ris's
-# own `bench/`: speed is std's to give, through the tape, not a pointer's.
+# own `test/cli/`: speed is std's to give, through the tape, not a pointer's.
 # Checked on the parsed source, so a def nothing calls is held to it too.
 #
 # A def that needs a pointer and calls no C says so, with its reason:
@@ -77,15 +77,16 @@ module Iyi::FfiBoundaryChecker
     end
   end
 
-  # ris's own `bench/`, beside `src/`: std's exercises and probes, which
-  # test std's insides as std's own code would, not a program's. A bench
-  # script writes its probes under `bench/.work/` for this, not in /tmp.
+  # ris's own `test/cli/` and `test/speed/`, beside `src/`: std's exercises
+  # and probes, which test std's insides as std's own code would, not a
+  # program's. Their scripts write probes under `.work/` there, not in /tmp.
   def self.std_exercise?(program : Program, filename : String) : Bool
     file = File.expand_path(filename).gsub('\\', '/')
     program.iyi_path.entries.any? do |entry|
       next false unless File.directory?(File.join(entry, "std"))
       root = File.dirname(File.expand_path(entry)).gsub('\\', '/')
-      file.starts_with?("#{root}/bench/")
+      file.starts_with?("#{root}/test/cli/") ||
+        file.starts_with?("#{root}/test/speed/")
     end
   end
 

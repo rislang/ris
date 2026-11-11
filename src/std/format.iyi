@@ -1,3 +1,4 @@
+# standard: POSIX printf
 # Format strings for iyi.
 #
 # Provides `sprintf`, `printf`, and `String.format` / `String#%` with
@@ -1101,4 +1102,29 @@ struct ::String
   def %(*args : *T) : String forall T
     Std::Format.sprintf(self, *args)
   end
+end
+
+
+spec 8.1
+
+
+  fmt = "%s|%+08d|%#x|%.2f|%.3e|%.4g|%%"
+  args = {"café", -42, 255, 0.125, 1.25, 0.000125}
+  w = String::Builder.new(1)
+  w << "prefix:"
+  sprintf(fmt, w, args)
+  rendered = sprintf(fmt, args)
+  expected = "café|-0000042|0xff|0.12|1.250e+00|0.000125|%"
+  rendered == expected
+  w.finish == "prefix:" + expected
+  sprintf("%5.1s", "éx") == "    é"
+  sprintf("%d", -9223372036854775808_i64) ==
+    "-9223372036854775808"
+  sprintf("%.0f", 1e23) ==
+    "99999999999999991611392"
+  sprintf("%u", 18446744073709551615_u64) ==
+    "18446744073709551615"
+  sprintf("%s|%+08d|%#x|%.2f|%.3e|%.4g|%%",
+    "café", -42, 255, 0.125, 1.25, 0.000125) == rendered
+  sprintf("%s, %s", ["A", "B"]) == "A, B"
 end

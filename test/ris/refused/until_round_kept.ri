@@ -1,3 +1,4 @@
+# spec: 1.1@fdc7907b
 # An `until` round frees its scratch as a `while` round does (SPEC 1.1,
 # 3.6): an Array made in it and kept past it is refused.
 module test/ris/refused/until_round_kept

@@ -1,3 +1,4 @@
+# standard: RFC 5321
 # An SMTP client (RFC 5321) over std/socket and std/tls, written in iyi:
 # it hands a mail server what std/mail builds.
 #
@@ -62,7 +63,7 @@
 #
 # Not here: PIPELINING, CHUNKING, DSN, and a password that std/tls has not
 # kept from the wire because the caller set `cleartext_auth`.
-# bench/std_smtp_exercise.sh holds it to a server written in Python for
+# test/cli/std_smtp_exercise.sh holds it to a server written in Python for
 # the purpose, over plain TCP, STARTTLS and TLS.
 
 module std/smtp
@@ -593,4 +594,10 @@ pub class SmtpClient
       got
     end
   end
+end
+
+spec 8.1
+  SmtpClient.stuffed(".one\n..two\rthree\r\nlast") ==
+    "..one\r\n...two\r\nthree\r\nlast\r\n.\r\n"
+  SmtpClient.stuffed("") == ".\r\n"
 end

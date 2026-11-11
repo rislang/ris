@@ -1,13 +1,13 @@
 # Exercises `std/mlkem`.
 #
 # Run via:
-#     ./bin/iyi run bench/std_mlkem_exercise.iyi [-- VECTORS.json]
+#     ./bin/iyi run test/cli/std_mlkem_exercise.iyi [-- VECTORS.json]
 #
 # With no argument: a few of NIST's ACVP cases for ML-KEM-768, embedded
 # below, then round trips from fixed seeds, the implicit rejection's key
 # for tampered ciphertexts, and the refusals of FIPS 203 section 7 - no
 # file, network or Python. With VECTORS.json, NIST's ACVP vectors in the
-# shape bench/std_mlkem_exercise.sh writes them (bench/std_mlkem_fixture
+# shape test/cli/std_mlkem_exercise.sh writes them (test/cli/std_mlkem_fixture
 # has the vendored subset), every case of each kind is checked first. The
 # other modes the gate drives:
 #   oracle   reads lines from standard input, answers a line each:

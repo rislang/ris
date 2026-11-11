@@ -1,3 +1,4 @@
+# standard: RFC 4648 sections 6 and 7
 # Base32, RFC 4648 section 6, and Base32hex, section 7, written in iyi.
 #
 #     import std/base32::{Base32, Base32Hex, Base32Error}
@@ -67,15 +68,12 @@ end
 BASE32_ALPHABET    = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 BASE32HEX_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV"
 
-# A data character's value, by byte, in either case; -1 for everything
-# else.
-BASE32_VALUES = Base32Codec.values_of(
-  BASE32_ALPHABET).copy_to(Program.tape)
-BASE32HEX_VALUES = Base32Codec.values_of(
-  BASE32HEX_ALPHABET).copy_to(Program.tape)
-
 # RFC 4648 section 6, the alphabet authenticator secrets are written in.
 pub struct Base32
+  # A data character's value by byte; -1 for bytes outside the alphabet.
+  BASE32_VALUES = Base32Codec.values_of(
+    BASE32_ALPHABET).copy_to(Program.tape)
+
   def self.encode(data : String,
                   padding : Bool = true) : String
     Base32Codec.encode(data, BASE32_ALPHABET, padding)
@@ -100,6 +98,9 @@ end
 # RFC 4648 section 7, the extended-hex alphabet: what DNSSEC's NSEC3
 # records (RFC 5155) write their hashed names in.
 pub struct Base32Hex
+  BASE32HEX_VALUES = Base32Codec.values_of(
+    BASE32HEX_ALPHABET).copy_to(Program.tape)
+
   def self.encode(data : String,
                   padding : Bool = true) : String
     Base32Codec.encode(data, BASE32HEX_ALPHABET, padding)
@@ -276,4 +277,31 @@ struct Base32Codec
     end
     values
   end
+end
+
+spec 8.1  # A std module follows the standard its header names (an RFC, a file…
+  text = "foobar"
+  encoded = Base32.encode(text)
+  encoded == "MZXW6YTBOI======"
+  decoded = Base32.decode(encoded)
+  !(decoded.is_a?(Base32Error))
+  decoded == text
+  Base32.decode("MB").is_a?(Base32Error)
+  Base32.decode("A").is_a?(Base32Error)
+  Base32Hex.encode(text) == "CPNMUOJ1E8======"
+  w = String::Builder.new(1)
+  w << "prefix:"
+  Base32.encode("f", w, false)
+  Base32Hex.decode("CO======", w)
+  w.finish == "prefix:MYf"
+  Base32.encode("foo", false) == "MZXW6"
+  Base32Hex.decode("CO======") == "f"
+end
+
+spec 1.5  # A def builds its tape result in its caller's destination (Goose §7,…
+  kept = ""
+  tape do
+    kept = Base32.encode("foobar").copy_to(Program.tape)
+  end
+  Base32.decode(kept) == "foobar"
 end

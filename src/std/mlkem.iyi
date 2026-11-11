@@ -61,7 +61,7 @@
 # real one or the implicit rejection's, as FIPS 203 requires.
 #
 # Measured on one x86_64 Linux machine, --release, the best of five runs
-# of 200 (bench/std_mlkem_exercise.sh): a key pair took 41 microseconds
+# of 200 (test/cli/std_mlkem_exercise.sh): a key pair took 41 microseconds
 # against OpenSSL 3.5.5's 25 (its own `speed`), an encapsulation 48
 # against 16, a decapsulation 36 against 24. Decapsulation is the cheaper
 # of the two here because a key keeps its matrix A and vector t, so its
@@ -69,7 +69,7 @@
 # from the key it is given. Decapsulating a good ciphertext and a tampered
 # one, 2,000 of each interleaved, took a median of 34,590 and 34,591 ns.
 #
-# Held by bench/std_mlkem_exercise.sh to NIST's ACVP vectors for
+# Held by test/cli/std_mlkem_exercise.sh to NIST's ACVP vectors for
 # ML-KEM-768 (key generation, encapsulation, decapsulation with implicit
 # rejection, and both key checks), to OpenSSL 3.5's ML-KEM-768 and to
 # Python's `cryptography`, each side encapsulating to the other's keys and
@@ -81,7 +81,7 @@
 # Refused with a sentence, as the caller's own misuse: a seed that is not
 # 64 bytes and an m that is not 32.
 
-# bench/ct_timing.sh, `decapsulate`: one key's valid ciphertext against
+# test/speed/ct_timing.sh, `decapsulate`: one key's valid ciphertext against
 # ciphertexts with one bit flipped, which take the implicit rejection,
 # |t| = 2.1 to 2.4 over 50,000; one key and its ciphertext against 64
 # other keys and theirs, |t| = 5.2 to 6.3 over 50,000 (under 10 is no

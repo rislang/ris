@@ -1,3 +1,4 @@
+# standard: XML 1.0
 # XML for ris: a well-formedness parser, a document tree on the caller's
 # tape, and a serializer.
 #
@@ -2973,4 +2974,68 @@ pub struct TapeNode
   def xpath_values(path : String) : Array(String)
     RisXPath.parse_checked(path).values(self)
   end
+end
+
+
+spec 8.1
+
+
+  # std/xml on the caller's tape: a document read into one node array, its
+  # names, attributes, namespaces and text, written back and read again,
+  # built from nothing, copied to the program tape; no heap.
+
+  text = "<root xmlns:p=\"urn:x\" a=\"&amp;\"><p:child>café &lt;" \
+    "<![CDATA[raw]]></p:child><!--ok--><item n=\"1\"/><item n=\"2\">" \
+    "<item n=\"3\"/></item></root>"
+  doc = parse(text)
+  doc.root.name == "root"
+  doc.root["a"] == "&"
+  doc.root.text == "café <raw"
+  w = String::Builder.new(1)
+  w << "prefix:"
+  doc.to_xml(w)
+  rendered = doc.to_xml
+  puts rendered
+  again = parse(rendered)
+  again.to_xml == rendered
+  w.finish.starts_with?("prefix:<?xml")
+  parse?("<bad>").nil?
+  escape("<&\r") == "&lt;&amp;&#13;"
+  child = doc.root.first_element_child
+  !(child.nil?)
+  raise "missing node" unless child
+  puts "#{child.name} #{child.local_name} #{child.namespace_uri}"
+  puts doc.root.find_all("item").map { |n| n["n"] }.join(",")
+  found = doc.root.find("item")
+  !(found.nil?)
+  raise "missing node" unless found
+  up = found.parent
+  puts up ? up.name : "-"
+  puts doc.root.children.size
+  copied = doc.copy_to(Program.tape)
+  puts copied.to_xml == rendered
+
+  held_tree = XmlTree.new
+  held_root = held_tree.document.add_element("held")
+  3.times do |i|
+    held_root.set_attribute("value", "temporary #{i}")
+    held_root.add_text("#{i}")
+    nil
+  end
+  held_root["value"] == "temporary 2"
+  held_root.text == "012"
+
+  tree = XmlTree.new
+  built = tree.document
+  top = built.add_element("list")
+  top.set_attribute("kind", "a<b")
+  entry = top.add_element("entry")
+  entry.add_text("x & y")
+  top.set_attribute("size", "1")
+  entry.set_attribute("id", "e1")
+  top.set_attribute("kind", "c\"d")
+  top.append(built.new_comment("end"))
+  puts built.to_xml
+  puts unescape?("a &lt; &#x41;") || "-"
+  puts unescape?("bad &x;").nil?
 end

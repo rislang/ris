@@ -1,3 +1,4 @@
+# standard: Semantic Versioning 2.0.0
 # Semantic versions, as Semantic Versioning 2.0.0 spells them:
 # `MAJOR.MINOR.PATCH`, an optional `-prerelease` of dot-separated
 # identifiers, an optional `+build` tail.
@@ -214,4 +215,39 @@ impl Comparable for SemanticVersion
   def <=>(other : self) : Int32
     self <=> other
   end
+end
+
+spec 8.1  # A std module follows the standard its header names (an RFC, a file…
+  version = SemanticVersion.parse("1.2.3-beta.11+build.7\r\n")
+  version.major == 1 && version.prerelease == "beta.11"
+  version.build == "build.7"
+  SemanticVersion.parse?("01.2.3").nil?
+  SemanticVersion.parse?("1.2.3-01").nil?
+  SemanticVersion.parse?("1.2.3-a..b").nil?
+  earlier = SemanticVersion.parse("1.2.3-beta.2")
+  (earlier <=> version) < 0
+  w = String::Builder.new(1)
+  w << "prefix:"
+  version.write(w)
+  w.finish == "prefix:1.2.3-beta.11+build.7"
+  version.to_tape == version.to_tape
+  huge = "999999999999999999.0.0"
+  SemanticVersion.valid?(huge)
+  SemanticVersion.parse?(huge).nil?
+  SemanticVersion.valid?("1.2.3")
+  SemanticVersion.parse?("1.2").nil?
+end
+
+spec 1.5  # A def builds its tape result in its caller's destination (Goose §7,…
+  kept = ""
+  tape do
+    kept = SemanticVersion.parse("1.2.3-beta.11+build.7").to_tape.copy_to(Program.tape)
+  end
+  SemanticVersion.parse(kept).to_tape == kept
+  owned = nil.as(SemanticVersion?)
+  tape do
+    owned = SemanticVersion.parse("1.2.3-beta.11+build.7").copy_to(Program.tape)
+  end
+  !owned.nil?
+  owned.to_s == kept
 end

@@ -1,3 +1,4 @@
+# standard: TOML 1.0.0
 # TOML 1.0.0 (https://toml.io/en/v1.0.0), read and written in iyi alone:
 # a reader that answers a document as an `TapeAny` or a `TOMLError` saying
 # what is wrong and where, a writer whose text reads back to the value it
@@ -969,7 +970,7 @@ struct TapeReader
   # whatever called them. Measured in a plain build, with the limit
   # lifted: inline tables nested 110 deep read in a task and 120 ran out
   # of stack; arrays, 160 and 200. At 64 the deepest inline table uses a
-  # little over half of what overflowed. `bench/std_toml_exercise.iyi`
+  # little over half of what overflowed. `test/cli/std_toml_exercise.iyi`
   # reads, compares, hashes, dumps and inspects values DEPTH_LIMIT deep,
   # each kind of nesting, in a task.
   DEPTH_LIMIT = 64
@@ -2914,4 +2915,87 @@ module TapeNumbers
     bits = bits | 9223372036854775808_u64 if negative
     IyiFloatText.from_bits(bits)
   end
+end
+
+@[OnTape]
+struct Server
+  getter host : String
+  getter port : Int32
+  getter tags : Array(String)
+  getter ratio : Float64?
+  derive toml_serializable
+end
+
+spec 8.1
+
+
+  # std/toml on the caller's tape: documents read into TapeAny, written
+  # back, read again and compared; derive toml_serializable; no heap.
+
+
+  parsed = TOML.parse("title = 'café'\n[db]\nports = [80, 443]\n")
+  !(parsed.is_a?(TOMLError))
+  raise "parse failed" if parsed.is_a?(TOMLError)
+  parsed["title"].as_s == "café"
+  parsed["db"]["ports"][1].as_i == 443_i64
+  parsed["db"]["ports"][-1].as_i == 443
+  TOML.read_value(parsed["title"], String?) == "café"
+  copied = parsed.copy_to(Program.tape)
+  copied == parsed
+  writer = String::Builder.new(1)
+  writer << "prefix:"
+  TOML.dump(parsed, writer)
+  encoded = TOML.dump(parsed)
+  puts encoded.inspect
+  expected = "prefix:"
+  expected << encoded
+  writer.finish == expected
+  again = TOML.parse(encoded)
+  !(again.is_a?(TOMLError))
+  raise "parse failed" if again.is_a?(TOMLError)
+  again == parsed
+  values = TOML.parse("x = 1.25\ny = 1979-05-27T07:32:00Z")
+  !(values.is_a?(TOMLError))
+  raise "parse failed" if values.is_a?(TOMLError)
+  values["x"].as_f == 1.25
+  puts values["y"].as_datetime.unix_seconds
+  dates = TOML.parse(TOML.dump(values))
+  !(dates.is_a?(TOMLError))
+  raise "parse failed" if dates.is_a?(TOMLError)
+  dates == values
+  bad = TOML.parse("x=1\nx=2")
+  bad.is_a?(TOMLError)
+  raise "expected error" unless bad.is_a?(TOMLError)
+  puts bad.message
+  corpus = Array(String){
+    "x = \"line\\nquote\\\"\"",
+    "x = \"\"\"\nmultiline\ntext\"\"\"",
+    "x = {a = 1, b = ['a', true]}\ny.z = 2",
+    "[[a]]\nx = 1\n[[a]]\nx = 2\n[a.b]\ny = 3",
+    "x = -9223372036854775808\ny = 0x7FFFFFFFFFFFFFFF",
+    "a = nan\nb = -inf\nc = +inf\nd = -0.0",
+    "a = 1979-05-27\nb = 07:32:00.123\nc = 1979-05-27T07:32:00",
+    "x = 0.10000000000000000000000000000000000001",
+    "root.a = {nested.b = [1, [2], 3], after = 4}\nroot.tail = 5",
+  }
+  corpus.each do |text|
+    value = TOML.parse(text)
+    raise "proof failed" if value.is_a?(TOMLError)
+    dumped = TOML.dump(value)
+    puts dumped.inspect
+    roundtrip = TOML.parse(dumped)
+    raise "proof failed" if roundtrip.is_a?(TOMLError)
+    raise "proof failed" unless roundtrip == value
+    raise "proof failed" unless roundtrip.hash == value.hash
+  end
+  parsed["title"].size == 4
+  parsed.dig("db", "ports", 1).as_i == 443_i64
+  puts parsed["db"].inspect
+  server = Server.from_toml("host = \"h\"\nport = 8080\ntags = [\"a\", \"b\"]\n")
+  puts "#{server.host} #{server.port} #{server.tags.join(",")} #{server.ratio.nil?}"
+  print server.to_toml
+  server.host == "h"
+  server.port == 8080
+  server.tags == ["a", "b"]
+  server.ratio.nil?
 end
