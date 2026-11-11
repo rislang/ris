@@ -1,12 +1,13 @@
+# standard: WHATWG HTML server-sent events
 # Server-sent events (the WHATWG HTML Living Standard, §9.2): a stream of
 # text events over one long HTTP response, `text/event-stream`, for both
 # ends of std/http.
 #
-# **The server.** Inside `Server.serve`'s block, `SSE.stream { |events|
-# ... }` answers the request: a 200 with `Content-Type:
-# text/event-stream` and `Cache-Control: no-cache` (a caller's own
-# `Cache-Control` replaces it; its own `Content-Type` is refused), whose
-# body the block writes as it goes through `Response.stream`.
+# **The server.** Inside a `Server.answer` handler, `SSE.stream(res) {
+# |events| ... }` answers the request: a 200 with `Content-Type:
+# text/event-stream` and `Cache-Control: no-cache` (a handler's own
+# `Cache-Control` written first replaces it; its own `Content-Type` is
+# refused), whose body the block writes as it goes (`Outgoing#stream`).
 # `events.send(data, event: nil, id: nil, retry: nil)` writes one event -
 # its `event:`, `id:` and `retry:` lines, then its data a `data:` line per
 # line, then the blank line that dispatches it - as one chunk, sent at
@@ -69,7 +70,7 @@
 # 2147483647 ms, about 24 days, past what `sleep` takes); a blank line
 # sets the last event ID and dispatches the event when its data is not
 # empty, and what a stream ends with before its blank line is discarded.
-# `bench/std_sse_exercise.sh` holds it to the standard's own examples and
+# `test/cli/std_sse_exercise.sh` holds it to the standard's own examples and
 # to a Python transcription of the algorithm over a generated corpus fed
 # in pieces of one to seven bytes, and runs the client against a Python
 # server that drops the connection mid-stream, and the server under
@@ -82,7 +83,7 @@
 
 module std/sse
 
-import std/http::{HTTP, Response, BodyWriter, HTTPError}
+import std/http::{HTTP, Response, BodyWriter, HTTPError, Outgoing}
 import std/socket::{SocketError}
 import std/mime::{MIME}
 
@@ -533,12 +534,19 @@ pub struct SSE
   # no event, while each brings none.
   RECONNECTS = 5
 
-  # The answer to a request for an event stream: a 200, `text/event-stream`,
-  # `Cache-Control: no-cache` unless *headers* names its own, whose body
-  # *block* writes through an `EventWriter` as it goes. The stream ends
-  # when the block returns. A `Content-Type` in *headers* is refused.
-  def self.stream(headers : Hash(String, String) = {} of String => String, &block : EventWriter -> Nil) : Response
-    Response.stream(200, headers, "text/event-stream", "no-cache") { |writer| block.call(EventWriter.new(writer)) }
+  # The answer to a request for an event stream, written into *res*: a
+  # 200, `text/event-stream`, `Cache-Control: no-cache` unless the handler
+  # wrote its own first, whose body *block* writes through an
+  # `EventWriter` as it goes (`Outgoing#stream`). The stream ends when the
+  # block returns. A `Content-Type` the handler wrote is refused.
+  def self.stream(res : Outgoing, & : EventWriter -> Nil) : Nil
+    if res.header("Content-Type")
+      raise "SSE: Content-Type is the stream's own, text/event-stream"
+    end
+    res.status = 200
+    res.header("Content-Type", "text/event-stream")
+    res.header("Cache-Control", "no-cache") unless res.header("Cache-Control")
+    res.stream { |writer| yield EventWriter.new(writer) }
   end
 
   # The event stream at *url*, each event handed to *block*, which answers
@@ -636,4 +644,42 @@ pub struct SSE
     return false unless parsed
     parsed.essence == "text/event-stream"
   end
+end
+
+spec 8.1
+  expected = "event: update\nid: 7\nretry: 0\ndata: a\ndata: b\ndata:\n\n"
+  SSE.encode("a\r\nb\r", "update", "7", 0) == expected
+  SSE.comment("a\r\nb\r") == ": a\n: b\n:\n"
+  parser = EventParser.new
+  count = 0
+  data = ""
+  id = ""
+  kind = ""
+  parser.feed("\uFEFFid: 7\r") { |_| raise "early event" }
+  parser.feed("\ndata: café\r\ndata: next\r\n\r") do |event|
+    count += 1
+    data = event.data.copy_to(Program.tape)
+    id = event.id.copy_to(Program.tape)
+    kind = event.event.copy_to(Program.tape)
+  end
+  count == 1
+  parser.dispatched == 1_i64
+  data == "café\nnext"
+  id == "7"
+  kind == "message"
+  parser.feed("\nretry: 999999999999\n\n") { |_| raise "empty event" }
+  parser.retry == 2147483647
+  parser.finish
+  second = EventParser.new
+  seen = 0
+  second.feed("id: 7\r") { |_| raise "early event" }
+  second.feed("\ndata: café\ndata: next\n\n") do |event|
+    raise "wrong event" unless event.data == data && event.id == "7"
+    seen += 1
+  end
+  seen == 1
+  SSE.encode("hi") == "data: hi\n\n"
+  SSE.comment("hi") == ": hi\n"
+  second.dispatched == 1_i64
+  second.retry.nil?
 end

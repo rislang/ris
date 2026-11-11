@@ -1,0 +1,130 @@
+# `Outgoing#stream` and `#send` over loopback, read on the wire: a stream
+# chunked, one with `length=` right, short and long (the connection is
+# cut after the latter two), `send` of a file, a HEAD that runs no block,
+# HTTP/1.0 to the close, `stream_bodies` read from `body_io`, and a raise
+# mid-stream, which cuts the body with no second head.
+module test/ris/answer_stream
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Incoming, Outgoing, BodyWriter}
+import std/file::{File}
+
+struct Ready
+end
+
+class Handler
+  def initialize(@file : String)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.header("Content-Type", "text/plain")
+    case req.path
+    when "/chunked"
+      res.stream do |w|
+        w.write("ab")
+        w.write("cd")
+      end
+    when "/len"
+      res.length = 4_i64
+      res.stream { |w| w.write("abcd") }
+    when "/short"
+      res.length = 10_i64
+      res.stream { |w| w.write("abc") }
+    when "/long"
+      res.length = 2_i64
+      res.stream { |w| w.write("abcd") }
+    when "/file"
+      file = File.open(@file)
+      res.send(file)
+      file.close
+    when "/upload"
+      got = req.body_io.read_all(1000000_i64)
+      res.body << "body=" << req.body.bytesize << " io="
+      res.body << got.as(String) if got.is_a?(String)
+    when "/raise"
+      res.stream do |w|
+        w.write("partial")
+        raise "test: a raise mid-stream"
+      end
+    else
+      res.body << "plain"
+    end
+  end
+end
+
+# Every byte until the peer closes.
+def read_to_close(socket : IyiSocket, writer : String::Builder) : Nil
+  while true
+    got = socket.read(writer, 65536)
+    break unless got.is_a?(Int32) && got > 0
+  end
+end
+
+def exchange(port : Int32, text : String, received : String::Builder) : Nil
+  client = IyiSocket.connect("127.0.0.1", port).or_panic
+  client.write(text).or_panic
+  read_to_close(client, received)
+  client.close
+end
+
+def free_port : Int32
+  probe = IyiSocket.listen(0)
+  port = probe.local_port
+  probe.close
+  port
+end
+
+path = Program.arguments.size > 0 ? Program.arguments[0] : "/tmp/answer_stream.txt"
+File.write(path, "file body\n")
+want = [
+  "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n2\r\nab\r\n2\r\ncd\r\n0\r\n\r\n",
+  "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 4\r\nConnection: keep-alive\r\n\r\nabcd" +
+  "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 10\r\nConnection: keep-alive\r\n\r\nabc",
+  "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\n",
+  "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\na\r\nfile body\n\r\n0\r\n\r\n",
+  "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n",
+  "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nabcd",
+  "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 15\r\nConnection: close\r\n\r\nbody=0 io=hello",
+  "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n7\r\npartial\r\n",
+]
+names = ["chunked", "length", "long", "send", "head", "http/1.0", "body_io", "raise"]
+port = free_port
+streamed = free_port
+failed = false
+group do |g|
+  g.spawn do
+    Server.answer("127.0.0.1", port, path, Handler, max_connections: 1)
+    0
+  end
+  g.spawn do
+    Server.answer("127.0.0.1", streamed, path, Handler, stream_bodies: true,
+      max_connections: 1)
+    0
+  end
+  2.times { RisBoard.take(Ready).or_panic }
+  asks = [] of {Int32, String}
+  asks << {port, "GET /chunked HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"}
+  asks << {port, "GET /len HTTP/1.1\r\nHost: h\r\n\r\nGET /short HTTP/1.1\r\nHost: h\r\n\r\nGET /never HTTP/1.1\r\nHost: h\r\n\r\n"}
+  asks << {port, "GET /long HTTP/1.1\r\nHost: h\r\n\r\nGET /never HTTP/1.1\r\nHost: h\r\n\r\n"}
+  asks << {port, "GET /file HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"}
+  asks << {port, "HEAD /chunked HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"}
+  asks << {port, "GET /chunked HTTP/1.0\r\nHost: h\r\n\r\n"}
+  asks << {streamed, "POST /upload HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello"}
+  asks << {port, "GET /raise HTTP/1.1\r\nHost: h\r\n\r\n"}
+  asks.each_with_index do |ask, i|
+    received = String::Builder.new(4096)
+    exchange(ask[0], ask[1], received)
+    got = received.finish
+    unless got == want[i]
+      puts "FAILED #{names[i]}:\n#{got.inspect}\nwanted\n#{want[i].inspect}"
+      failed = true
+    end
+  end
+  g.cancel_children
+end
+
+puts "PASS: stream, length=, send, HEAD, HTTP/1.0, body_io, a raise mid-stream" unless failed

@@ -1,0 +1,46 @@
+# Run --release with current and baseline std modules, alternating runs.
+# Both paths do the same work and retain the same heap results.
+module bench/http2_tape
+
+import std/hpack::{Encoder, Decoder, HeaderField, Huffman, HpackError, TapeHeaders}
+import std/time::{Time}
+
+N = 20000
+fields = [HeaderField.new(":method", "GET"),
+          HeaderField.new(":scheme", "https"),
+          HeaderField.new(":path", "/resource?q=one"),
+          HeaderField.new(":authority", "www.example.com"),
+          HeaderField.new("authorization", "Bearer abcdef0123456789", true),
+          HeaderField.new("x-request", "a fairly long request field", true)]
+encoder = Encoder.new
+wire = encoder.encode(fields)
+huffman = Huffman.encode("a fairly long request field")
+# Warm the static tables and tape spare before recording allocation.
+Huffman.decode(huffman)
+encoder.encode(fields)
+["encode", "huffman", "decode"].each do |part|
+  decoder = Decoder.new
+  before = RisRegion.tape_bytes(1_u64)
+  started = Time.monotonic_nanoseconds
+  sum = 0_i64
+  N.times do
+    case part
+    when "encode"
+      sum = sum + encoder.encode(fields).size
+    when "huffman"
+      got = Huffman.decode(huffman)
+      raise got.message if got.is_a?(HpackError)
+      sum = sum + got.bytesize
+    else
+      # Use a fresh table: the wire block establishes its entries.
+      fresh = Decoder.new
+      parsed = TapeHeaders.new(fresh.capacity(wire))
+      failed = fresh.decode(wire, parsed)
+      raise failed.message if failed
+      sum = sum + parsed.size
+    end
+  end
+  elapsed = Time.monotonic_nanoseconds - started
+  allocated = RisRegion.tape_bytes(1_u64) - before
+  puts "#{part} ns=#{elapsed} bytes=#{allocated} sum=#{sum}"
+end

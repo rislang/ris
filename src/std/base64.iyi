@@ -1,3 +1,4 @@
+# standard: RFC 4648
 # Base64, RFC 4648, written in iyi.
 #
 # `encode` is the alphabet with `+` `/` and `=` padding, no line
@@ -11,20 +12,20 @@
 
 module std/base64
 
-# A data character's value, by byte; -1 for everything else, which the
-# byte-at-a-time path sorts into whitespace, padding and refusals.
-DECODE_VALUES = Base64.decode_values.copy_to(Program.tape)
-
-# Two characters per twelve bits, the first in the low byte: the encoder
-# writes eight characters for every six bytes it reads, as one word.
-PAIRS_STD = Base64.pairs_of(
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-).copy_to(Program.tape)
-PAIRS_URL = Base64.pairs_of(
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-).copy_to(Program.tape)
-
 pub struct Base64
+  # A data character's value, by byte; -1 for everything else, which the
+  # byte-at-a-time path sorts into whitespace, padding and refusals.
+  DECODE_VALUES = Base64.decode_values.copy_to(Program.tape)
+
+  # Two characters per twelve bits, the first in the low byte: the encoder
+  # writes eight characters for every six bytes it reads, as one word.
+  PAIRS_STD = Base64.pairs_of(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  ).copy_to(Program.tape)
+  PAIRS_URL = Base64.pairs_of(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+  ).copy_to(Program.tape)
+
 
   def self.encode(data : String) : String
     encode_with(data, plus_slash, PAIRS_STD, true)
@@ -199,4 +200,28 @@ pub struct Base64
       -1
     end
   end
+end
+
+spec 8.1  # A std module follows the standard its header names (an RFC, a file…
+  raw = "\u0000hello café\u00ff"
+  encoded = Base64.encode(raw)
+  Base64.decode(encoded) == raw
+  Base64.decode(" Q Q = = \n") == "A"
+  w = String::Builder.new(1)
+  w << "prefix:"
+  Base64.encode("foo", w)
+  Base64.decode("YmFy", w)
+  Base64.urlsafe_encode("?", w)
+  w.finish == "prefix:Zm9vbarPw=="
+  Base64.encode("").empty?
+  Base64.encode("foobar") == "Zm9vYmFy"
+  Base64.urlsafe_encode("foobar") == "Zm9vYmFy"
+end
+
+spec 1.5  # A def builds its tape result in its caller's destination (Goose §7,…
+  kept = ""
+  tape do
+    kept = Base64.encode("\u0000hello café\u00ff").copy_to(Program.tape)
+  end
+  Base64.decode(kept) == "\u0000hello café\u00ff"
 end

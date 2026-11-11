@@ -126,55 +126,61 @@ struct ::Symbol
   # carried a raw escape byte and NUL read `\0` where the other says
   # `\u0000`.
   def self.escape_quoted_body(string : String) : String
-    out = ""
+    index = 0
+    while index < string.bytesize
+      break if escape_at(string, index)
+      index = index + 1
+    end
+    return string if index == string.bytesize
+    String.build(string.bytesize + 8) do |io|
+      escape_quoted_body(string, io)
+    end
+  end
+
+  # The same, written into *io*.
+  def self.escape_quoted_body(string : String, io : String::Builder) : Nil
     start = 0
     index = 0
     while index < string.bytesize
-      byte = string.byte_at(index)
-      repl = ""
-      found = true
-      if byte == 34_u8
-        repl = "\\\""
-      elsif byte == 92_u8
-        repl = "\\\\"
-      elsif byte == 35_u8 && index + 1 < string.bytesize && string.byte_at(index + 1) == 123_u8
-        repl = "\\#"
-      elsif byte == 7_u8
-        repl = "\\a"
-      elsif byte == 8_u8
-        repl = "\\b"
-      elsif byte == 27_u8
-        repl = "\\e"
-      elsif byte == 12_u8
-        repl = "\\f"
-      elsif byte == 10_u8
-        repl = "\\n"
-      elsif byte == 13_u8
-        repl = "\\r"
-      elsif byte == 9_u8
-        repl = "\\t"
-      elsif byte == 11_u8
-        repl = "\\v"
-      elsif byte < 32_u8 || byte == 127_u8
-        hex = "0123456789ABCDEF"
-        code = byte.to_i32
-        repl = "\\u00" + hex[code // 16, 1] + hex[code % 16, 1]
-      else
-        found = false
-      end
-      if found
-        if index > start
-          out = out + string[start, index - start]
-        end
-        out = out + repl
+      if repl = escape_at(string, index)
+        io << string[start, index - start] if index > start
+        io << repl
         start = index + 1
       end
       index = index + 1
     end
-    return string if start == 0
-    if start < string.bytesize
-      out = out + string[start, string.bytesize - start]
+    io << string[start, string.bytesize - start] if start < string.bytesize
+  end
+
+  # What the byte at *index* is written as, or nil when it stands as is.
+  private def self.escape_at(string : String, index : Int32) : String?
+    byte = string.byte_at(index)
+    if byte == 34_u8
+      "\\\""
+    elsif byte == 92_u8
+      "\\\\"
+    elsif byte == 35_u8 && index + 1 < string.bytesize && string.byte_at(index + 1) == 123_u8
+      "\\#"
+    elsif byte == 7_u8
+      "\\a"
+    elsif byte == 8_u8
+      "\\b"
+    elsif byte == 27_u8
+      "\\e"
+    elsif byte == 12_u8
+      "\\f"
+    elsif byte == 10_u8
+      "\\n"
+    elsif byte == 13_u8
+      "\\r"
+    elsif byte == 9_u8
+      "\\t"
+    elsif byte == 11_u8
+      "\\v"
+    elsif byte < 32_u8 || byte == 127_u8
+      hex = "0123456789ABCDEF"
+      code = byte.to_i32
+      "\\u00" + hex[code // 16, 1] + hex[code % 16, 1]
     end
-    out
   end
 end

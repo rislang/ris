@@ -1,3 +1,4 @@
+# spec: 3.7@64779b1c
 # SPEC 3.7: t may be a back edge's scratch, so storing it is refused.
 class P
   def initialize

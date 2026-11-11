@@ -567,7 +567,7 @@ class Iyi::Command
         # that variable along with the rest: the child then found a daemon
         # too, connected to this very server, and was served by a fork that
         # found it again. Nothing in that recursion ever finishes a build, so
-        # it ended as the machine running out of memory — `cli_spec`'s
+        # it ended as the machine running out of memory — `cli_test`'s
         # implicit-socket example aborted after forty seconds, and CI's job
         # spent its whole thirty minutes there.
         if client_env

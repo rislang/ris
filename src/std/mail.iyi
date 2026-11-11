@@ -1,3 +1,4 @@
+# standard: RFC 5322
 # Internet mail messages (RFC 5322) with MIME (RFC 2045 to 2047, RFC
 # 2231): a message built from its parts, and a message read back into its
 # headers, its tree of parts and their decoded bodies, written in iyi.
@@ -97,7 +98,7 @@
 #
 # Quoted-printable is written as Python's `email.quoprimime.body_encode`
 # writes it, line for line, and read as RFC 2045 says; base64 in lines of
-# 76. `bench/std_mail_exercise.sh` has Python's `email` read what this
+# 76. `test/cli/std_mail_exercise.sh` has Python's `email` read what this
 # builds and this read what Python's `EmailMessage` builds, under
 # `policy.default` and `policy.SMTP`, holds the encodings to `quopri`,
 # `base64` and `email.quoprimime`, and dates to `email.utils`.
@@ -2751,4 +2752,20 @@ pub struct Mail
       found
     end
   end
+end
+
+spec 8.1
+  msg = Mail::Message.new
+  msg.from = Mail::Address.new("jorg@example.com", "Jörg Müller")
+  msg.to << Mail::Address.new("ann@example.org")
+  msg.subject = "Grüße aus Köln"
+  msg.date = Mail.date(1792224000_i64, 120)
+  msg.text = "Hallo Ann,\n"
+  wire = msg.to_s
+  parser = Mail::RisMailParser.new(wire)
+  part = parser.parse
+  part.is_a?(MailError) == false
+  raise "mail parse failed" if part.is_a?(MailError)
+  part.subject == "Grüße aus Köln"
+  part.media_type == "text/plain"
 end

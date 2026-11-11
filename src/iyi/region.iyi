@@ -548,7 +548,7 @@ class RisRegion
 
   {% if flag?(:linux) %}
     # Raw syscalls, as the prelude's `__iyi_mmap`: a Linux program names
-    # no libc symbol for its tape (bench/floor_base.sh). Each answers
+    # no libc symbol for its tape (test/cli/floor_base.sh). Each answers
     # what libc's would: an address or all ones, 0 or -1.
     def self.sys_mmap(length : UInt64, flags : Int64) : UInt64
       result = uninitialized Int64

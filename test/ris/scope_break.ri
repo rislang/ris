@@ -1,3 +1,4 @@
+# spec: 1.1@fdc7907b
 # A `break` out of a block or loop frees its scratch on the way out, as
 # its normal end does (SPEC 1.1: every exit releases).
 def cur : UInt64

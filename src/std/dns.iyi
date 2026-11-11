@@ -1,3 +1,4 @@
+# standard: RFC 1035
 # DNS: the wire format, the resolver's configuration file and the hosts
 # file, read by iyi itself.
 #
@@ -375,7 +376,7 @@ end
 # The values are views of the record's data, on the caller's tape.
 #
 # `to_s` is the record's data in presentation format as dig 9.20 prints it,
-# for reading the record while debugging: bench/std_dns_exercise.sh holds
+# for reading the record while debugging: test/cli/std_dns_exercise.sh holds
 # the two to the same text, record by record.
 @[OnTape]
 pub struct SvcbRecord
@@ -1442,4 +1443,16 @@ struct DnsText
     end
     words
   end
+end
+
+spec 8.1
+  wire = DnsTapeMessage.query(42_u16, "example.com", 1)
+  DnsTapeMessage.id_of(wire) == 42
+  parsed = DnsTapeMessage.parse(wire)
+  parsed.is_a?(DnsError) == false
+  raise "query failed" if parsed.is_a?(DnsError)
+  parsed.opcode == 0
+  !parsed.response?
+  DnsName.same?("EXAMPLE.com.", "example.com")
+  !DnsName.valid?("a..b")
 end

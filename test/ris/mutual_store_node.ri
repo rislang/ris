@@ -1,3 +1,4 @@
+# spec: 3.5@4513f7df
 # jq's shape: a class owner of nodes holding String and SlicePool::Run
 # fields, stored through mutual recursion (SPEC 3.5, 3.7).
 @[OnTape]

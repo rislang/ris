@@ -23,16 +23,19 @@ section; a removed one leaves its number unused.
   @[OnTape]
   structs and class instances; all obey the root rules. Dispatch and union
   payloads never box.
+  <!-- todo: Needs tape-type, root and unboxed-dispatch proofs -->
 * 1.3 Classes stay: new allocates the instance on the active tape, checked
   before initialize; a reference is a root like a view. Instances are fixed size
   and never move; finalize is refused (resources have explicit cleanup); class
   instances are not Share. Long-lived ones are built on their owner's tape
   (Program.tape) or copied there with copy_to.
+  <!-- todo: Needs class allocation and reference-lifetime proofs -->
 * 1.4 Array, RisTree and builders are handles to shared state: assignment and
   arguments alias data, length and capacity, so growth through b shows through
   a; String and views alias their bytes. copy_to and checked boundary copies
   (4.1, 5.1-5.3, 5.6) copy; Goose's implicit value copies (§4.1) do not
   apply. String is read-only.
+  <!-- todo: Needs shared-handle aliasing proofs -->
 * 1.5 A def builds its tape result in its caller's destination (Goose §7,
   C.3): a body that is one call hands the destination on; a local grown in
   place is returned where it is; a fresh flat value (String, Array of
@@ -41,6 +44,7 @@ section; a removed one leaves its number unused.
   borrow caller input; nested tape blocks share the tape.
 * 1.6 Text literals are static String views; interpolation builds a
   String on the active tape. Text parameters borrow, never copy.
+  <!-- todo: Needs static literal and borrowed-text proofs -->
 * 1.7 Build retained data on its destination (writers, in-place append), else
   copy_to(owner) deep-copies String bytes, Array/RisTree/@[OnTape] fields and
   class instances, splitting all sharing and extending no borrows. It keeps
@@ -49,8 +53,10 @@ section; a removed one leaves its number unused.
   collections, unions or subclasses): build those on the destination with Array
   nodes and indices. Publish only complete results; discard partial destination
   storage on failure; deep chains never overflow the stack.
+  <!-- todo: Needs deep-copy destination and failure proofs -->
 * 1.8 Program data initializes in iyi III.5's module order, once, never
   suspending or seeing incomplete values; stores obey owner provenance.
+  <!-- todo: Needs module initialization order and provenance proofs -->
 * 1.9 No result is staged and copied back implicitly. A result that would
   have to leave a def's scratch by copy (it links into that scratch) is
   refused, naming the forms that replace it: end the def with the call
@@ -77,9 +83,11 @@ section; a removed one leaves its number unused.
   construction, via helpers or aliases (Goose §4.2-4.3).
 * 2.3 No owner byte image, raw copy/equality, FFI layout or transfer;
   copy_to(owner) deep-copies an owner into fresh space (1.7).
+  <!-- todo: Needs owner image/layout refusal and deep-copy proofs -->
 ## 3. Roots (Goose §9.1-9.2)
 * 3.1 Track (owner, field path) through aliases, branches, holders, calls and
   results; joins keep every alternative; inexact roots bound lifetime only.
+  <!-- todo: Needs transitive root and branch-join proofs -->
 * 3.2 Every source root outlives every possible destination; inexact stores
   check each read-back candidate, caller storage behind parameters included.
   Branch-local and temporary storage cannot escape; loops see earlier rounds.
@@ -120,11 +128,14 @@ section; a removed one leaves its number unused.
   released after the defers; panic data and copyable task results survive
   on retained result storage and are copied to each reader's tape (5.6).
   A panic in cleanup is fatal.
+  <!-- todo: Needs cleanup ordering and retained-result proofs -->
 * 4.2 Exhaustion and bad sizes are checked before mutation, with overflow-safe
   arithmetic; they end as iyi's panic print (allocation-free), no fallback.
   Limits for tape bytes, regions, tasks and native stack are published.
+  <!-- todo: Needs exhaustion, overflow and published-limit proofs -->
 * 4.3 Fatal errors skip user cleanup. Signals are std/signal's: the handler sets
   a flag and wakes a pipe; work runs in a task.
+  <!-- todo: Needs fatal-exit cleanup and signal-handler proofs -->
 ## 5. Concurrency and boundaries (iyi III.4; Goose §11.2)
 * 5.1 Tasks start in an iyi group and never outlive it (III.4.1); work that
   outlives its caller runs in a longer group, such as main's. ris adds:
@@ -180,6 +191,7 @@ section; a removed one leaves its number unused.
   has an owner and cleanup. Never unwind across foreign frames; foreign
   threads attach first.
   Safety exceptions are marks with reasons, never a global switch.
+  <!-- todo: Needs public API and foreign-boundary lifetime proofs -->
 * 5.6 ris uses grouped iyi fibers (5.1), not detached Goose threads; a waiting
   take parks its fiber. At one consume commit, cancellation wins, then data,
   then timeout, including poll and already-cancelled entry. Cancelled consumes
@@ -220,23 +232,57 @@ section; a removed one leaves its number unused.
   gives a SO_REUSEPORT port's connections to one listener; more is refused.
   Pipe and socket race IO
   stay in one task using OS facilities on the poller; board IO copies data.
+  <!-- todo: Needs grouped-fiber and board transport proofs -->
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
   views see typed replacements; generations only guard checked handles.
+  <!-- todo: Needs typed pool replacement and generation proofs -->
 * 6.2 Free keeps memory; reset obeys shrink rules. Run relocation is explicit:
   holders keep offsets and re-read; old views stay unchanged. Runs holding
   self-relative links are never relocated (Goose §5.4).
+  <!-- todo: Needs pool reset and explicit-relocation proofs -->
 * 6.3 Validate bounds, overflow and aligned membership before mutation; foreign
   storage is refused statically or at runtime. No uninitialized slots;
   self-relative links stay in one region.
+  <!-- todo: Needs pool bounds, overflow and membership proofs -->
 * 6.4 External byte images (.load(bytes)) check lengths, alignment, union tags,
   spans and links (each to an element start in the image) before any value is
   published; invalid input yields none, never part. This is safety, not
   integrity: a checksum is the caller's (Goose §9.4).
+  <!-- todo: Needs external byte-image validation proofs -->
 * 6.5 Pool free never closes a resource: resources have explicit cleanup.
+  <!-- todo: Needs proof that pool free never closes resources -->
 * 6.6 RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste,
   copies, and results moved down to a caller's boundary.
   check.sh tests exit, panic, cancel, exhaustion.
+  <!-- todo: Needs RIS_TAPE_STATS accounting and exit-path proofs -->
+* 6.7 `ris spec` links the spec's clauses to the proofs that keep them.
+  The spec is SPEC.md or spec/*.md (both is an error) at the root: the
+  nearest directory holding ris.mod or iyi.mod, else the current one. A
+  clause is `* N.M text` under `## N. Title`, continued by indented
+  lines; its version is the first 8 hex digits of SHA-256 of its text
+  with each whitespace run one space. A proof is a `spec N.M` block in
+  a module under the root (the walk `ris test` uses), or an old file
+  under test/ naming the clause in its leading `#` comment block
+  (`# spec: 1.3@a4f20c19`, or a `# ... SPEC 1.3` comment). After review
+  `ris spec ack N.M` writes N.M and its version to ROOT/.spec.lock; with
+  a lock line a tag's `@VERSION` is ignored. `ris spec ack --from-tags`
+  locks each clause whose versioned tags all match it.
+* 6.8 `ris check spec` fails on a spec, tag or .spec.lock that does not
+  parse, a tag or block naming no clause, a clause with proofs whose
+  version .spec.lock lacks, a lock line for no clause, a version no
+  CHANGELOG.md entry records (`## DATE` or, under a release, `### DATE`;
+  a left-over SPEC_CHANGELOG.md or spec.lock fails), a clause with no
+  proof, and a block label that differs from its clause:
+  `spec 1.5  # text` (the text cut at a word with `…` within 80
+  columns). `ris check --fix` writes the labels; a label is no review.
+  Each failure names the next command.
+* 6.9 `todo "reason"` ends a test with exit code 77: `ris test` reports it
+  as todo, neither pass nor fail, and exits 0 when the rest pass. A
+  clause named only by todo tests passes `ris check spec`; `ris spec
+  todo` lists them. `ris init` writes SPEC.md with one clause,
+  CHANGELOG.md recording it, .spec.lock reviewing it and a spec
+  block proving it at the end of the root module; no test/.
 
 ## 7. Types, memory and Ruby syntax (doc/TAPE_TYPES.md; Goose §1.2, §3.7)
 
@@ -250,6 +296,7 @@ section; a removed one leaves its number unused.
   tape. Array is grow-only in its own reservation, never moving. Hash is
   open addressing in place, in insertion order. RisTree is a tree in one array
   with index links.
+  <!-- todo: Needs tape data-type and stable-growth proofs -->
 * 7.3 Ruby's and Crystal's syntax stays as written; the compiler places
   memory. A String local or field that gets `<<` reserves growing storage
   at its first append, copying its current text once; later appends grow
@@ -260,14 +307,24 @@ section; a removed one leaves its number unused.
   Bang methods rebind. A String::Builder that a program only appends to
   and reads back is refused, naming `text = ""`; one passed to a call or
   used for bytes stays.
+  <!-- todo: Needs implicit storage and String-append proofs -->
 * 7.4 Nested containers (`Array(Array(T))`, `Hash(K, Array(V))`) hold
   their inner arrays as runs of a SlicePool they own; `outer[i]` answers a
   handle to its run, so a change through it shows in the container. No
   view into a run outlives its next growth.
+  <!-- todo: Needs nested-container lifetime and growth proofs -->
 * 7.5 A long-lived container (a constant, a class variable, a field of a
   program-owned object) owns a SlicePool for what it holds. A store copies
   the value into a run of that pool; delete, clear and overwrite give the
   run back. Only this store copies implicitly.
+  <!-- todo: Needs long-lived container retention proofs -->
 * 7.6 Any other store of a tape value into something that outlives it is
   a compile error naming the forms that work: `copy_to(owner)` or a
   long-lived container (1.x, 3.x).
+  <!-- todo: Needs escaping tape-store refusal proofs -->
+
+## 8. Library
+
+* 8.1 A std module follows the standard its header names (an RFC, a file
+  format, a published grammar); its spec blocks check that standard's
+  rules and examples.

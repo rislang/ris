@@ -1,7 +1,7 @@
 # String, Array, Hash and RisTree: the final design
 
 ris has no heap and no GC. Its data types are Goose's (cited as Goose and a
-section of doc/reference/goose/docs/goose_spec.md, or stdlib.md), spelled
+section of doc/reference/goose/docs/goose_test.md, or stdlib.md), spelled
 with Ruby's and Crystal's names. There is no second, heap-backed type of
 any of them, no fallback allocator and no transition layer.
 

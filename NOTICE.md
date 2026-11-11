@@ -70,10 +70,10 @@ iyi's own standard library includes code derived from, and its benches a
 port of:
 
 - [Arm optimized-routines][] (`Math.exp`, `exp2`, `log`, `log2` and `pow` in `src/std/math.iyi`, and
-  `bench/libm_oracle/`) - [MIT][]
+  `test/cli/libm_oracle/`) - [MIT][]
 - fdlibm, as glibc carries it (`Math.log10`, `expm1`, `log1p`, `sinh`, `cosh`,
   `tanh` and the Bessel functions, and their
-  copies in `bench/libm_oracle/`) -
+  copies in `test/cli/libm_oracle/`) -
   Sun Microsystems' notice: "Permission to use, copy, modify, and
   distribute this software is freely granted, provided that this notice is
   preserved."
@@ -81,19 +81,19 @@ port of:
 - [CORE-MATH][], as glibc 2.43 carries it and as published (`Math.erf`,
   `erfc`, `asinh`, `acosh`, `atanh`, `lgamma`, `tgamma`, `atan`, `asin`,
   `acos`, `sin`, `cos`, `tan`, `cbrt`, `hypot` and `atan2` in
-  `src/std/math.iyi`, and `bench/libm_oracle/core_math/`) - [MIT][]
-- [crystal-metric][] (`bench/metric/`) - [MIT][]
+  `src/std/math.iyi`, and `test/cli/libm_oracle/core_math/`) - [MIT][]
+- [crystal-metric][] (`test/speed/metric/`) - [MIT][]
 
 Its benches vendor test vectors:
 
-- [NIST's ACVP-Server][] (`bench/std_mlkem_fixture/`, ML-KEM-768 vectors,
+- [NIST's ACVP-Server][] (`test/cli/std_mlkem_fixture/`, ML-KEM-768 vectors,
   a subset) - NIST's notice for NIST-developed software, kept whole with
-  the source and what was changed in `bench/std_mlkem_fixture/NOTICE`
-- [the CFRG's HPKE draft repository][] (`bench/std_hpke_fixture/`, RFC
+  the source and what was changed in `test/cli/std_mlkem_fixture/NOTICE`
+- [the CFRG's HPKE draft repository][] (`test/cli/std_hpke_fixture/`, RFC
   9180's test vectors, a subset) - Contributions to the IETF Standards
   Process under BCP 78 and the IETF Trust Legal Provisions, code
   components under the Simplified BSD License; the source, its terms and
-  what was changed are in `bench/std_hpke_fixture/NOTICE`
+  what was changed are in `test/cli/std_hpke_fixture/NOTICE`
 
 <!-- licenses -->
 [Apache-2.0]: https://www.openssl.org/source/apache-license-2.0.txt

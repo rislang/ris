@@ -2023,7 +2023,7 @@ module Iyi::IyiMod
       needed = [declaration.superclass].concat(declaration.includes).concat(declaration.annotations)
       needed.each do |written|
         # Split by hand rather than with a literal: a regex in the compiler's
-        # own source is a link against PCRE2, and `bench/dependency_floor.sh`
+        # own source is a link against PCRE2, and `test/cli/dependency_floor.sh`
         # forbids one by name — iyi does not get to need a library it tells
         # programs they can do without.
         iyi_names_in(written).each do |name|
@@ -2652,7 +2652,7 @@ module Iyi::IyiMod
   # can name: exported functions, macros, constants and types, the members,
   # associated types and nested types of those types, their methods, their
   # docs, the impls — no bodies, no fields, no carried private types. The
-  # measurement that forced the split is `bench/context_pack.py`: on the
+  # measurement that forced the split is `test/cli/context_pack.py`: on the
   # kemal sample the compile-against text was within 4% of the sources it
   # replaces, because the bodies *are* most of a macro-heavy module.
   #

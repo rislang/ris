@@ -1,0 +1,15 @@
+module test/ris/refused/answer_no_take_over
+# A handler that upgrades without take_over: refused, naming take_over.
+import std/http::{Server, Incoming, Outgoing}
+
+struct Handler
+  def initialize(config : Int32)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.header("Upgrade", "x")
+    res.upgrade
+  end
+end
+
+Server.answer("127.0.0.1", 18098, 0, Handler)

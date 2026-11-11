@@ -1,7 +1,7 @@
 module test/sse_open
 
 import std/socket::{IyiSocket}
-import std/http::{Server, Request, Response}
+import std/http::{Server, Incoming, Outgoing}
 import std/sse::{SSE}
 
 # SSE.open against SSE.stream on a ris Server over loopback: the first
@@ -19,18 +19,16 @@ struct Events
     RisBoard.post(Listening.new)
   end
 
-  # One call (SPEC 1.5): the answer is built on the server's tape, and
-  # what the stream needs of the request goes in as a number.
-  def call(req : Request) : Response
-    Events.answer(Events.step(req.header("Last-Event-ID")))
+  def call(req : Incoming, res : Outgoing) : Nil
+    Events.answer(res, Events.step(req.header("Last-Event-ID")))
   end
 
   def self.step(last : String?) : Int32
     last.nil? ? 0 : last == "1" ? 1 : 2
   end
 
-  def self.answer(step : Int32) : Response
-    SSE.stream do |events|
+  def self.answer(res : Outgoing, step : Int32) : Nil
+    SSE.stream(res) do |events|
       if step == 0
         events.send("first", id: "1", retry: 10)
       elsif step == 1
@@ -48,7 +46,7 @@ port = probe.local_port
 probe.close
 group do |g|
   g.spawn do
-    Server.serve("127.0.0.1", port, 0, Events, max_connections: 2)
+    Server.answer("127.0.0.1", port, 0, Events, max_connections: 2)
     0
   end
   RisBoard.take(Listening).or_panic

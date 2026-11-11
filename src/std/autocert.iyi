@@ -3,7 +3,7 @@
 # nothing else - Go's golang.org/x/crypto/acme/autocert, over std/acme,
 # std/tls and std/http.
 #
-# HTTP integration uses Server.serve(host, port, config, Handler), where
+# HTTP integration uses Server.answer(host, port, config, Handler), where
 # Handler.new(config) constructs AutocertView on its own serving task.
 # Handler#tls_config exposes only that task's server configuration.
 # Copy directory URL, cache path, allowed domains and account settings
@@ -101,7 +101,7 @@
 # test/ris/autocert.ri gates completion broadcast, independent deadlines,
 # failure expiry, renewal reload, stop and manager isolation with a local
 # issuer. autocert_wire.ri gates Copyable config and bounded orders with
-# zero heap. Part B updates bench/std_autocert_exercise.sh and its driver
+# zero heap. Part B updates test/cli/std_autocert_exercise.sh and its driver
 # for Python SSL and Pebble: chain trust, host policy before ordering,
 # ten first handshakes making one order, restarts without an order,
 # short-lived renewal seen as a new serial before expiry, rejected
@@ -160,7 +160,7 @@ import std/ecdsa::{EcdsaError}
 import std/file::{File}
 import std/dir::{Dir}
 import std/tls::{TlsClient, TlsConfig, TlsServerConfig, TlsIdentity, TlsIdentitySource, TlsError, TlsAlert}
-import std/http::{HTTPClient, Request, Response}
+import std/http::{HTTPClient, Incoming, Outgoing}
 import std/random::{Random}
 import std/base64::{Base64}
 import std/time::{Time, Span}
@@ -390,30 +390,6 @@ struct RisAutocertFlight
   getter delay : Int64
 
   def initialize(@config : AutocertConfig, @name : String, @delay : Int64)
-  end
-end
-
-@[OnTape]
-struct RisAutocertAnswer
-  getter value : Response? = nil
-
-  def initialize(view : V, request : Request) forall V
-    path = request.path
-    return unless path.starts_with?(AcmeHttp01::PATH)
-    unless request.method == "GET" || request.method == "HEAD"
-      @value = Response.new(405, "", {"Allow" => "GET, HEAD"})
-      return
-    end
-    token = path[AcmeHttp01::PATH.bytesize,
-      path.bytesize - AcmeHttp01::PATH.bytesize]
-    text = view.cache.get("challenge-http-#{token}")
-    @value = text.is_a?(String) ?
-      Response.new(200, text, {"Content-Type" => "application/octet-stream"}) :
-      Response.new(404, "")
-  end
-
-  def self.result(parsed : RisAutocertAnswer) : Response?
-    parsed.value
   end
 end
 
@@ -663,8 +639,26 @@ module RisAutocertViewState
     index < fields.size ? (fields[index].to_i? || 0) : 0
   end
 
-  def answer(request : Request) : Response?
-    RisAutocertAnswer.result(RisAutocertAnswer.new(self, request))
+  # Whether *req* was an http-01 challenge, then answered into *res* from
+  # the cache (`AcmeHttp01#answer`'s answers). False for any other path.
+  def answer(req : Incoming, res : Outgoing) : Bool
+    path = req.path
+    return false unless path.starts_with?(AcmeHttp01::PATH)
+    unless req.method == "GET" || req.method == "HEAD"
+      res.status = 405
+      res.header("Allow", "GET, HEAD")
+      return true
+    end
+    token = path[AcmeHttp01::PATH.bytesize,
+      path.bytesize - AcmeHttp01::PATH.bytesize]
+    text = @cache.get("challenge-http-#{token}")
+    if text.is_a?(String)
+      res.header("Content-Type", "application/octet-stream")
+      res.body << text
+    else
+      res.status = 404
+    end
+    true
   end
 
   def add_challenge(name : String, token : String, authorization : String) : AutocertError?
@@ -974,7 +968,8 @@ pub struct Autocert
     outcome = group do |own|
       flight = own.spawn do
         settings, flight_name, delay = image.read(Tuple(AutocertConfig, String, Int64))
-        F.new(settings).issue(flight_name)
+        issuer = F.new(settings)
+        issuer.issue(flight_name)
       end
       got = flight.value
       if got.is_a?(Panicked)

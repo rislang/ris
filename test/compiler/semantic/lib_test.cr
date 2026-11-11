@@ -1,0 +1,997 @@
+require "../../test_helper"
+
+describe "Semantic: lib" do
+  it "types a varargs external" do
+    assert_type("lib LibFoo; fun bar(x : Int32, ...) : Int32; end; LibFoo.bar(1, 1.5, 'a')") { int32 }
+  end
+
+  it "raises on undefined fun" do
+    assert_error <<-CODE, "undefined fun 'foo' for LibC"
+      lib LibC
+      end
+
+      LibC.foo
+      CODE
+  end
+
+  it "raises wrong number of arguments" do
+    assert_error <<-CODE, "wrong number of arguments for 'LibC#foo' (given 1, expected 0)"
+      lib LibC
+        fun foo : Int32
+      end
+
+      LibC.foo 1
+      CODE
+  end
+
+  it "raises wrong argument type" do
+    assert_error <<-CODE, "argument 'x' of 'LibC#foo' must be Int32, not Char"
+      lib LibC
+        fun foo(x : Int32) : Int32
+      end
+
+      LibC.foo 'a'
+      CODE
+  end
+
+  it "reports error when changing var type and something breaks" do
+    assert_error <<-CODE, "undefined method '+' for Char"
+      class LibFoo
+        def initialize
+          @value = 1
+        end
+
+        def value
+          @value
+        end
+
+        def value=(@value : Char)
+        end
+      end
+
+      f = LibFoo.new
+      f.value + 1
+      f.value = 'a'
+      CODE
+  end
+
+  it "reports error when changing instance var type and something breaks" do
+    assert_error <<-CODE, "argument 'c' of 'Lib#bar' must be Char"
+      lib Lib
+        fun bar(c : Char)
+      end
+
+      class Foo
+        def value=(@value : Int32 | Char)
+        end
+
+        def value
+          @value
+        end
+      end
+
+      def foo(x)
+        x.value = 'a'
+        Lib.bar x.value
+      end
+
+      f = Foo.new
+      foo(f)
+
+      f.value = 1
+      CODE
+  end
+
+  it "reports error on fun argument type not primitive like" do
+    assert_error "lib LibFoo; fun foo(x : Reference); end",
+      "only primitive types"
+  end
+
+  it "reports error on fun argument type not primitive like, Nil (#2994)" do
+    assert_error "lib LibFoo; fun foo(x : Nil); end",
+      "only primitive types"
+  end
+
+  it "reports error on fun return type not primitive like" do
+    assert_error "lib LibFoo; fun foo : Reference; end",
+      "only primitive types"
+  end
+
+  it "reports error on struct field type not primitive like" do
+    assert_error "lib LibFoo; struct Foo; x : Reference; end; end",
+      "only primitive types"
+  end
+
+  it "reports error on typedef type not primitive like" do
+    assert_error "lib LibFoo; type Foo = Reference; end",
+      "only primitive types"
+  end
+
+  it "reports error out can only be used with lib funs" do
+    assert_error "foo(out x)",
+      "out can only be used with lib funs"
+  end
+
+  it "reports error out can only be used with lib funs in named argument" do
+    assert_error "foo(x: out x)",
+      "out can only be used with lib funs"
+  end
+
+  it "reports error if using out with an already declared variable" do
+    assert_error <<-CODE, "variable 'x' is already defined, `out` must be used to define a variable, use another name", inject_primitives: true
+      lib Lib
+        fun foo(x : Int32*)
+      end
+
+      x = Pointer(Int32).malloc(1_u64)
+      Lib.foo out x
+      CODE
+  end
+
+  it "allows invoking out with underscore " do
+    assert_type(<<-CODE) { float64 }
+      lib Lib
+        fun foo(x : Int32*) : Float64
+      end
+
+      Lib.foo out _
+      CODE
+  end
+
+  it "reports redefinition of fun with different signature" do
+    assert_error <<-CODE, "fun redefinition with different signature"
+      lib LibC
+        fun foo : Int32
+        fun foo : Int64
+      end
+      CODE
+  end
+
+  it "types lib var get" do
+    assert_type(<<-CODE) { int32 }
+      lib LibC
+        $errno : Int32
+      end
+
+      LibC.errno
+      CODE
+  end
+
+  it "types lib var set" do
+    assert_type(<<-CODE) { int32 }
+      lib LibC
+        $errno : Int32
+      end
+
+      LibC.errno = 1
+      CODE
+  end
+
+  it "types lib var get with forward declaration" do
+    assert_type(<<-CODE) { int32 }
+      lib LibC
+        $errno : A
+
+        alias A = Int32
+      end
+
+      LibC.errno
+      CODE
+  end
+
+  it "defined fun with aliased type" do
+    assert_type(<<-CODE) { int32 }
+      lib LibC
+        alias SizeT = Int32
+        fun foo(x : SizeT) : SizeT
+      end
+
+      LibC.foo(1)
+      CODE
+  end
+
+  it "overrides definition of fun" do
+    result = assert_type(<<-CODE) { float64 }
+      lib LibC
+        fun foo(x : Int32) : Float64
+      end
+
+      lib LibC
+        fun foo = bar(x : Int32) : Float64
+      end
+
+      LibC.foo(1)
+      CODE
+    mod = result.program
+    lib_type = mod.types["LibC"].as(LibType)
+    foo = lib_type.lookup_first_def("foo", false).as(External)
+    foo.real_name.should eq("bar")
+  end
+
+  it "error if passing type to LibC with to_unsafe but type doesn't match" do
+    assert_error <<-CODE, "argument 'x' of 'LibC#foo' must be Int32, not Foo (nor Char returned by 'Foo#to_unsafe')"
+      lib LibC
+        fun foo(x : Int32) : Int32
+      end
+
+      class Foo
+        def to_unsafe
+          'a'
+        end
+      end
+
+      LibC.foo Foo.new
+      CODE
+  end
+
+  it "error if passing non primitive type as varargs" do
+    assert_error <<-CODE, "argument #2 of 'LibC#foo' is not a primitive type and no Foo#to_unsafe method found"
+      lib LibC
+        fun foo(x : Int32, ...)
+      end
+
+      class Foo
+      end
+
+      LibC.foo 1, Foo.new
+      CODE
+  end
+
+  it "error if passing non primitive type as varargs invoking to_unsafe" do
+    assert_error <<-CODE, "converted Foo invoking to_unsafe, but Bar is not a primitive type"
+      lib LibC
+        fun foo(x : Int32, ...)
+      end
+
+      class Bar
+      end
+
+      class Foo
+        def to_unsafe
+          Bar.new
+        end
+      end
+
+      LibC.foo 1, Foo.new
+      CODE
+  end
+
+  it "allows passing splat to LibC fun" do
+    assert_type(<<-CODE) { float64 }
+      lib LibC
+        fun foo(x : Int32, y : Float64, ...) : Float64
+      end
+
+      t = {1, 2.5, 3, 4}
+      LibC.foo *t
+      CODE
+  end
+
+  it "allows passing double splat to LibC fun" do
+    assert_type(<<-CODE, inject_primitives: true) { float64 }
+      lib LibC
+        fun foo(x : Int32, y : Float64) : Float64
+      end
+
+      t = {y: 2.5, x: 3}
+      LibC.foo **t
+      CODE
+  end
+
+  it "errors if missing link arguments" do
+    assert_error <<-CODE, "missing link arguments: must at least specify a library name"
+      @[Link]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "errors if first argument is not a string" do
+    assert_error <<-CODE, "'lib' link argument must be a String"
+      @[Link(1)]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "errors if second argument is not a string" do
+    assert_error <<-CODE, "'ldflags' link argument must be a String"
+      @[Link("foo", 1)]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "errors if third argument is not a bool" do
+    assert_error <<-CODE, "'static' link argument must be a Bool"
+      @[Link("foo", "bar", 1)]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "errors if fourth argument is not a string" do
+    assert_error <<-CODE, "'framework' link argument must be a String"
+      @[Link("foo", "bar", true, 1)]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "errors if too many link arguments" do
+    assert_error <<-CODE, "wrong number of link arguments (given 5, expected 1..4)"
+      @[Link("foo", "bar", true, "Cocoa", 1)]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "errors if unknown named arg" do
+    assert_error <<-CODE, "unknown link argument: 'boo' (valid arguments are 'lib', 'ldflags', 'static', 'pkg_config', 'framework', 'wasm_import_module', and 'dll')"
+      @[Link(boo: "bar")]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "allows dll argument" do
+    assert_no_errors <<-CODE
+      @[Link(dll: "foo.dll")]
+      lib LibFoo
+      end
+      CODE
+
+    assert_no_errors <<-CODE
+      @[Link(dll: "BAR.DLL")]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "errors if dll argument contains directory separators" do
+    assert_error <<-CODE, "'dll' link argument must not include directory separators"
+      @[Link(dll: "foo/bar.dll")]
+      lib LibFoo
+      end
+      CODE
+
+    assert_error <<-CODE, "'dll' link argument must not include directory separators"
+      @[Link(dll: %q(foo\\bar.dll))]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "errors if dll argument does not end with '.dll'" do
+    assert_error <<-CODE, "'dll' link argument must use a '.dll' file extension"
+      @[Link(dll: "foo")]
+      lib LibFoo
+      end
+      CODE
+
+    assert_error <<-CODE, "'dll' link argument must use a '.dll' file extension"
+      @[Link(dll: "foo.dylib")]
+      lib LibFoo
+      end
+      CODE
+
+    assert_error <<-CODE, "'dll' link argument must use a '.dll' file extension"
+      @[Link(dll: "")]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "errors if lib already specified with positional argument" do
+    assert_error <<-CODE, "'lib' link argument already specified"
+      @[Link("foo", lib: "bar")]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "errors if lib named arg is not a String" do
+    assert_error <<-CODE, "'lib' link argument must be a String"
+      @[Link(lib: 1)]
+      lib LibFoo
+      end
+      CODE
+  end
+
+  it "clears annotations after lib" do
+    assert_type(<<-CODE) { int32 }
+      @[Link("foo")]
+      lib LibFoo
+        fun foo
+      end
+      1
+      CODE
+  end
+
+  it "warns if @[Link(static: true)] is specified" do
+    assert_warning <<-CODE,
+      @[Link("foo", static: true)]
+      lib Foo
+      end
+      CODE
+      "warning in line 1\nWarning: specifying static linking for individual libraries is deprecated"
+  end
+
+  it "warns if Link annotations use positional arguments" do
+    assert_warning <<-CODE,
+      @[Link("foo", "bar")]
+      lib Foo
+      end
+      CODE
+      "warning in line 1\nWarning: using non-named arguments for Link annotations is deprecated"
+  end
+
+  it "allows invoking lib call without obj inside lib" do
+    assert_type(<<-CODE) { int32 }
+      lib LibFoo
+        fun foo : Int32
+
+        A = foo
+      end
+
+      LibFoo::A
+      CODE
+  end
+
+  it "errors if lib fun call is part of dispatch" do
+    assert_error <<-CODE, "lib fun call is not supported in dispatch"
+      lib LibFoo
+        fun foo : Int32
+      end
+
+      class Bar
+        def self.foo
+        end
+      end
+
+      (LibFoo || Bar).foo
+      CODE
+  end
+
+  it "disallows passing nil or pointer to arg expecting pointer" do
+    assert_error <<-CODE, "argument 'x' of 'Foo#foo' must be Pointer(Int32), not (Pointer(Int32) | Nil)", inject_primitives: true
+      lib Foo
+        fun foo(x : Int32*) : Int64
+      end
+
+      a = 1 == 1 ? nil : Pointer(Int32).malloc(1_u64)
+      Foo.foo(a)
+      CODE
+  end
+
+  it "correctly attached link flags if there's a macro if" do
+    result = semantic(<<-CODE)
+      @[Link("SDL")]
+      @[Link("SDLMain")]
+      {% if flag?(:some_flag) %}
+        @[Link(framework: "Cocoa")]
+      {% end %}
+      lib LibSDL
+        fun init = SDL_Init(flags : UInt32) : Int32
+      end
+
+      LibSDL.init(0_u32)
+      CODE
+    sdl = result.program.types["LibSDL"].as(LibType)
+    attrs = sdl.link_annotations.should_not(be_nil)
+    attrs.size.should eq(2)
+    attrs[0].lib.should eq("SDL")
+    attrs[1].lib.should eq("SDLMain")
+  end
+
+  it "supports forward references (#399)" do
+    assert_type(<<-CODE) { pointer_of(types["LibFoo"].types["Bar"]) }
+      lib LibFoo
+        fun foo() : Bar*
+
+        struct Bar
+          x : Int32
+        end
+      end
+
+      LibFoo.foo
+      CODE
+  end
+
+  it "supports forward references with struct inside struct (#399)" do
+    assert_type(<<-CODE) { pointer_of(types["LibFoo"].types["Foo"]) }
+      lib LibFoo
+        struct Bar
+          x : Foo*
+        end
+
+        struct Foo
+          x : Int32
+        end
+      end
+
+      LibFoo::Bar.new.x
+      CODE
+  end
+
+  it "errors if defines def on lib" do
+    assert_error <<-CODE, "can't define method in lib LibC"
+      lib LibC
+      end
+
+      def LibC.foo
+      end
+      CODE
+  end
+
+  it "reopens lib and adds more link annotations" do
+    result = semantic(<<-CODE)
+      @[Link("SDL")]
+      lib LibSDL
+        fun init = SDL_Init(flags : UInt32) : Int32
+      end
+
+      @[Link("SDLMain")]
+      lib LibSDL
+      end
+
+      LibSDL.init(0_u32)
+      CODE
+    sdl = result.program.types["LibSDL"].as(LibType)
+    attrs = sdl.link_annotations.should_not(be_nil)
+    attrs.size.should eq(2)
+    attrs[0].lib.should eq("SDL")
+    attrs[1].lib.should eq("SDLMain")
+  end
+
+  it "reopens lib and adds same link annotations" do
+    result = semantic(<<-CODE)
+      @[Link("SDL")]
+      lib LibSDL
+        fun init = SDL_Init(flags : UInt32) : Int32
+      end
+
+      @[Link("SDL")]
+      lib LibSDL
+      end
+
+      LibSDL.init(0_u32)
+      CODE
+    sdl = result.program.types["LibSDL"].as(LibType)
+    attrs = sdl.link_annotations.should_not(be_nil)
+    attrs.size.should eq(1)
+    attrs[0].lib.should eq("SDL")
+  end
+
+  it "gathers link annotations from macro expression" do
+    result = semantic(<<-CODE)
+      {% begin %}
+        @[Link("SDL")]
+      {% end %}
+      lib LibSDL
+        fun init = SDL_Init : Int32
+      end
+
+      LibSDL.init
+      CODE
+    sdl = result.program.types["LibSDL"].as(LibType)
+    attrs = sdl.link_annotations.should_not(be_nil)
+    attrs.size.should eq(1)
+    attrs[0].lib.should eq("SDL")
+  end
+
+  it "errors if using void as parameter (related to #508)" do
+    assert_error <<-CODE, "can't use Void as parameter type"
+      lib LibFoo
+        fun foo(x : Void)
+      end
+      CODE
+  end
+
+  it "errors if using void via typedef as parameter (related to #508)" do
+    assert_error <<-CODE, "can't use Void as parameter type"
+      lib LibFoo
+        type Foo = Void
+        fun foo(x : Foo)
+      end
+      CODE
+  end
+
+  it "can use tuple as fun return" do
+    assert_type(<<-CODE) { tuple_of([int32, int32] of TypeVar) }
+      lib LibC
+        fun foo : {Int32, Int32}
+      end
+
+      LibC.foo
+      CODE
+  end
+
+  it "doesn't try to invoke unsafe for c struct/union (#1362)" do
+    assert_error <<-CODE, "argument 'x' of 'LibFoo#foo' must be Pointer(LibFoo::Bar), not LibFoo::Bar"
+      lib LibFoo
+        struct Bar
+        end
+
+        fun foo(x : Bar*)
+      end
+
+      bar = LibFoo::Bar.new
+      LibFoo.foo(bar)
+      CODE
+  end
+
+  it "passes int as another integer type in variable" do
+    assert_type(<<-CODE, inject_primitives: true) { float64 }
+      lib LibFoo
+        fun foo(x : Int32) : Float64
+      end
+
+      a = 1_u8
+      LibFoo.foo a
+      CODE
+  end
+
+  it "passes float as another integer type in variable" do
+    assert_type(<<-CODE, inject_primitives: true) { int32 }
+      lib LibFoo
+        fun foo(x : Float32) : Int32
+      end
+
+      a = 1_f64
+      LibFoo.foo a
+      CODE
+  end
+
+  it "passes int as another integer type with literal" do
+    assert_type(<<-CODE) { float64 }
+      lib LibFoo
+        fun foo(x : Int32) : Float64
+      end
+
+      LibFoo.foo 1_u8
+      CODE
+  end
+
+  it "errors if invoking to_i32! and got error in that call" do
+    assert_error <<-CODE, "converting from Foo to Int32 by invoking 'to_i32!'"
+      lib LibFoo
+        fun foo(x : Int32) : Float64
+      end
+
+      class Foo
+        def to_i32!
+          1 + 'a'
+        end
+      end
+
+      LibFoo.foo Foo.new
+      CODE
+  end
+
+  it "errors if invoking to_i32! and got wrong type" do
+    assert_error <<-CODE, "invoked 'to_i32!' to convert from Foo to Int32, but got Char"
+      lib LibFoo
+        fun foo(x : Int32) : Float64
+      end
+
+      class Foo
+        def to_i32!
+          'a'
+        end
+      end
+
+      LibFoo.foo Foo.new
+      CODE
+  end
+
+  it "defines lib funs before funs with body" do
+    assert_type(<<-CODE) { int32 }
+      fun foo : Int32
+        LibX.x
+      end
+
+      lib LibX
+        fun x : Int32
+      end
+
+      foo
+      CODE
+  end
+
+  it "errors if using out with varargs" do
+    assert_error <<-CODE, "can't use out at varargs position: declare the variable with `z = uninitialized ...` and pass it with `pointerof(z)`"
+      lib LibX
+        fun x(...)
+      end
+
+      LibX.x(out z)
+      CODE
+  end
+
+  it "errors if using out with void pointer (#2424)" do
+    assert_error <<-CODE, "can't use out with Void* (parameter 'x' of LibFoo.foo is Void*)"
+      lib LibFoo
+        fun foo(x : Void*)
+      end
+
+      LibFoo.foo(out x)
+      CODE
+  end
+
+  it "errors if using out with void pointer through type" do
+    assert_error <<-CODE, "can't use out with Void* (parameter 'x' of LibFoo.foo is Void*)"
+      lib LibFoo
+        type Foo = Void
+        fun foo(x : Foo*)
+      end
+
+      LibFoo.foo(out x)
+      CODE
+  end
+
+  it "errors if using out with non-pointer" do
+    assert_error <<-CODE, "parameter 'x' of LibFoo.foo cannot be passed as 'out' because it is not a pointer"
+      lib LibFoo
+        fun foo(x : Int32)
+      end
+
+      LibFoo.foo(out x)
+      CODE
+  end
+
+  it "freezes type of out variable (#16645)" do
+    assert_error <<-CODE, "must be Int32, not (Char | Int32)"
+    lib LibFoo
+      fun foo(x : Int32*)
+    end
+
+    LibFoo.foo(out x)
+    x = 'a'
+    CODE
+  end
+
+  it "errors if redefining fun with different signature (#2468)" do
+    assert_error <<-CODE, "fun redefinition with different signature"
+      fun foo
+      end
+
+      fun foo(x : Int32)
+      end
+      CODE
+  end
+
+  it "errors if using named args with variadic function" do
+    assert_error <<-CODE, "can't use named args with variadic function"
+      lib LibC
+        fun foo(x : Int32, y : UInt8, ...) : Int32
+      end
+
+      LibC.foo y: 1_u8, x: 1
+      CODE
+  end
+
+  it "errors if using unknown named param" do
+    assert_error <<-CODE, "no parameter named 'z'"
+      lib LibC
+        fun foo(x : Int32, y : UInt8) : Int32
+      end
+
+      LibC.foo y: 1_u8, x: 1, z: 2
+      CODE
+  end
+
+  it "errors if parameter already specified" do
+    assert_error <<-CODE, "argument for parameter 'x' already specified"
+      lib LibC
+        fun foo(x : Int32, y : UInt8) : Int32
+      end
+
+      LibC.foo 1, x: 2
+      CODE
+  end
+
+  it "errors if missing argument" do
+    assert_error <<-CODE, "missing argument: y"
+      lib LibC
+        fun foo(x : Int32, y : UInt8) : Int32
+      end
+
+      LibC.foo x: 2
+      CODE
+  end
+
+  it "errors if missing arguments" do
+    assert_error <<-CODE, "missing arguments: x, z"
+      lib LibC
+        fun foo(x : Int32, y : UInt8, z: Int32) : Int32
+      end
+
+      LibC.foo y: 1_u8
+      CODE
+  end
+
+  it "can use named args" do
+    assert_type(<<-CODE) { int32 }
+      lib LibC
+        fun foo(x : Int32, y : UInt8) : Int32
+      end
+
+      LibC.foo y: 1_u8, x: 1
+      CODE
+  end
+
+  it "can use out with named args" do
+    assert_type(<<-CODE) { int32 }
+      lib LibC
+        fun foo(x : Int32*)
+      end
+
+      LibC.foo(x: out x)
+      x
+      CODE
+  end
+
+  it "types fun returning nothing as nil" do
+    assert_type(<<-CODE) { nil_type }
+      lib LibFoo
+        fun foo
+      end
+
+      LibFoo.foo
+      CODE
+  end
+
+  it "types fun returning void as nil" do
+    assert_type(<<-CODE) { nil_type }
+      lib LibFoo
+        fun foo : Void
+      end
+
+      LibFoo.foo
+      CODE
+  end
+
+  it "types fun returning nil as nil" do
+    assert_type(<<-CODE) { nil_type }
+      lib LibFoo
+        fun foo : Nil
+      end
+
+      LibFoo.foo
+      CODE
+  end
+
+  it "can use macros inside lib" do
+    assert_type(<<-CODE) { int32 }
+      lib LibFoo
+        {% begin %}
+          fun foo : Int32
+        {% end %}
+      end
+
+      LibFoo.foo
+      CODE
+  end
+
+  it "can use macros inside struct" do
+    assert_type(<<-CODE) { int32 }
+      lib LibFoo
+        struct Foo
+          {% begin %}
+            x : Int32
+          {% end %}
+        end
+      end
+
+      LibFoo::Foo.new.x
+      CODE
+  end
+
+  it "errors if defining incompatible funs with the same name in the same lib (#3045)" do
+    assert_error <<-CODE, "fun redefinition with different signature"
+      lib LibFoo
+        fun foo1 = foo
+        fun foo2 = foo(x : Int32)
+      end
+      CODE
+  end
+
+  it "errors if defining incompatible funs with the same name in different libs (#3045)" do
+    assert_error <<-CODE, "fun redefinition with different signature"
+      lib LibFoo1
+        fun foo1 = foo
+      end
+
+      lib LibFoo2
+        fun foo2 = foo(x : Int32)
+      end
+      CODE
+  end
+
+  it "specifies a call convention" do
+    result = semantic(<<-CODE)
+      lib LibFoo
+        @[CallConvention("X86_StdCall")]
+        fun foo : Int32
+      end
+      CODE
+    foo = result.program.types["LibFoo"].lookup_first_def("foo", nil).as(External)
+    foo.call_convention.should eq(LLVM::CallConvention::X86_StdCall)
+  end
+
+  it "specifies a call convention to a lib" do
+    result = semantic(<<-CODE)
+      @[CallConvention("X86_StdCall")]
+      lib LibFoo
+        fun foo : Int32
+      end
+      CODE
+    foo = result.program.types["LibFoo"].lookup_first_def("foo", nil).as(External)
+    foo.call_convention.should eq(LLVM::CallConvention::X86_StdCall)
+  end
+
+  it "errors if wrong number of arguments for CallConvention" do
+    assert_error <<-CODE, "wrong number of arguments for annotation CallConvention (given 2, expected 1)"
+      lib LibFoo
+        @[CallConvention("X86_StdCall", "bar")]
+        fun foo : Int32
+      end
+      CODE
+  end
+
+  it "errors if CallConvention argument is not a string" do
+    assert_error <<-CODE, "argument to CallConvention must be a string"
+      lib LibFoo
+        @[CallConvention(1)]
+        fun foo : Int32
+      end
+      CODE
+  end
+
+  it "errors if CallConvention argument is not a valid string" do
+    assert_error <<-CODE, "invalid call convention. Valid values are #{LLVM::CallConvention.values.join ", "}"
+      lib LibFoo
+        @[CallConvention("foo")]
+        fun foo : Int32
+      end
+      CODE
+  end
+
+  it "errors if assigning void lib call to var (#4414)" do
+    assert_error <<-CODE, "assigning Void return value of lib fun call has no effect"
+      lib LibFoo
+        fun foo
+      end
+
+      x = LibFoo.foo
+      CODE
+  end
+
+  it "errors if passing void lib call to call argument (#4414)" do
+    assert_error <<-CODE, "passing Void return value of lib fun call has no effect"
+      lib LibFoo
+        fun foo
+      end
+
+      def bar(x)
+      end
+
+      bar(LibFoo.foo)
+      CODE
+  end
+
+  it "can list lib functions at the top level (#12395)" do
+    assert_type(<<-CODE) { bool }
+      lib LibFoo
+        fun foo
+      end
+
+      {% if LibFoo.methods.size == 1 %}
+        true
+      {% else %}
+        1
+      {% end %}
+      CODE
+  end
+end

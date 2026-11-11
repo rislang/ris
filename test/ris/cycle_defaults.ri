@@ -1,3 +1,4 @@
+# spec: 3.7@64779b1c
 # SPEC 3.7, Goose §7.1: a default has the roots written at the call.
 struct Cell
   def initialize(@n : Int32 = 0)

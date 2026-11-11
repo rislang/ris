@@ -268,6 +268,11 @@ module Iyi
       node
     end
 
+    def transform(node : SpecBlock)
+      node.body = node.body.transform(self)
+      node
+    end
+
     # The value is a type, not an expression, so there is nothing here to
     # rewrite either.
     def transform(node : AssocTypeDecl)

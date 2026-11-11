@@ -21,7 +21,7 @@
 /man/
 
 # Spec artifacts
-/spec/manual/dwarf/
+/test/manual/dwarf/
 
 # CI
 /coverage/
@@ -36,7 +36,7 @@
 # pre-commit
 .pre-commit-config.yaml
 
-# Python bytecode from bench helpers
+# Python bytecode from test/cli and test/speed helpers
 __pycache__/
 *.pyc
 
@@ -51,13 +51,14 @@ __pycache__/
 # The compiler's local cache when IYI_CACHE_DIR is unset.
 /.iyi/
 
-# ris: scripts/spec-par.sh
-/spec-out/
-/spec-build.log
+# ris: scripts/test-par.sh
+/test-out/
+/test-build.log
 
-# ris: the bench scripts' work directories, so the probes they write are
-# std's exercises under bench/ (FfiBoundaryChecker).
-/bench/.work/
+# ris: the test scripts' work directories, so the probes they write are
+# std's exercises under test/cli/ (FfiBoundaryChecker).
+/test/cli/.work/
+/test/speed/.work/
 
 # ris: EGM drift reports are worksheets, not committed.
 /*_DRIFT_REPORT.md

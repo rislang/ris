@@ -150,18 +150,22 @@ pub struct Der
     # A stack of its own rather than the call stack, so a value nested a
     # million deep is a refusal at depth 65 and not an overflow, and in
     # the order written: each value's children pushed last first.
-    stack = [{value, 0}]
+    # Offsets, not values: a child read in one round is not kept past it.
+    data = value.data
+    stack = [{value.offset, value.end_offset, 0}]
     until stack.empty?
       item = stack.pop
-      current = item[0]
-      depth = item[1]
+      read = item[0] == value.offset ? value : DerValue.read(data, item[0], item[1])
+      return read if read.is_a?(Asn1Error)
+      current = read
+      depth = item[2]
       return Asn1Error.new("a value nested deeper than #{MAX_DEPTH}", current.offset) if depth > MAX_DEPTH
       yield current, depth
       if current.constructed?
         inner = current.children!
         i = inner.size - 1
         while i >= 0
-          stack << {inner[i], depth + 1}
+          stack << {inner[i].offset, current.end_offset, depth + 1}
           i = i - 1
         end
       end
@@ -576,7 +580,7 @@ pub struct DerValue
   # The code is read in Int64: in Int32 a first byte of 0x80 or more
   # shifted into the sign bit, U+FFFFFFFF came out as -1, under the bound
   # below, and `chr` panicked on it (`1c04ffffffff`, found by
-  # bench/std_fuzz_exercise.sh).
+  # test/cli/std_fuzz_exercise.sh).
   private def wide(width : Int32) : String | Asn1Error
     built = ""
     i = content_offset

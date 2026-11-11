@@ -1,3 +1,4 @@
+# spec: 1.1@fdc7907b
 # A reader refills one row per call (SPEC 1.1, 3.3): it clears its row
 # and the builder the row views, then fills them again. The caller reads
 # each row before the next call; nothing is made per row outside them.

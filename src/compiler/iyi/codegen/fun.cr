@@ -91,7 +91,7 @@ class Iyi::CodeGenVisitor
   # line. The list an artifact carries was empty for every module whose
   # `lib` is its own: `std/socket`'s `LibWs2_32` on Windows, where every
   # program built from that artifact failed to link on sixteen Winsock
-  # symbols (`bench/samples_roundtrip.sh`, the first time it ran there), and
+  # symbols (`test/cli/samples_roundtrip.sh`, the first time it ran there), and
   # a `lib` nested in a class on Linux, where `libm` being linked anyway
   # was all that hid it.
   private def iyi_record_unit_lib(target_def) : Nil

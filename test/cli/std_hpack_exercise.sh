@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+# Exercises `std/hpack`: RFC 7541 Header Compression for HTTP/2.
+#
+#     bash test/cli/std_hpack_exercise.sh
+#
+# Proves the exercise holds plain and --release, that RFC 7541 test vectors
+# match byte-for-byte, that static and dynamic table lookups, insertions,
+# evictions, and size updates behave per spec, that realistic request and
+# response header sets round-trip cleanly, that broken codecs are caught by
+# mutation, and that malformed or truncated inputs are refused.
+set -u
+
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# wrapper a Windows build cannot run.
+IYI="${IYI:-$REPO/bin/iyi}"
+mkdir -p "$REPO/test/cli/.work"
+WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+
+# A native compiler cannot resolve this shell's own path mapping: a search
+# path built from the shell's `pwd` finds no prelude at all, and a scratch
+# directory named `/tmp/tmp.X` is silently ignored on that path, so the
+# patched copy is never read and the proof that a check can fail quietly
+# stops proving it.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN* | Windows_NT)
+    REPO="$(cygpath -m "$REPO")"
+    WORK="$(cygpath -m "$WORK")"
+    ;;
+esac
+
+# The search path is a list, and the byte between its entries is the
+# platform's: `;` where a drive letter already owns the colon.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN* | Windows_NT) PSEP=';' ;;
+  *) PSEP=':' ;;
+esac
+
+# The negative proofs are patched by python, and a machine can answer
+# `python3` with a store stub that prints a refusal instead of running, so
+# the interpreter is resolved once and proven to run before it is trusted.
+PY=""
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys' >/dev/null 2>&1; then
+    PY="$candidate"
+    break
+  fi
+done
+
+status=0
+export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+
+build_and_run() {
+  local label="$1" name="$2"
+  shift 2
+  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_hpack_exercise.iyi" \
+       >"$WORK/$name.build.log" 2>&1; then
+    echo "$label: build failed"
+    tail -12 "$WORK/$name.build.log"
+    status=1
+    return 1
+  fi
+  "$WORK/$name" >"$WORK/$name.out" 2>&1
+  local exit_code=$?
+  sed 's/^/  /' "$WORK/$name.out"
+  if [ "$exit_code" -ne 0 ]; then
+    echo "$label: exited $exit_code"
+    status=1
+    return 1
+  fi
+  return 0
+}
+
+echo "== the std/hpack exercise, plain build"
+build_and_run "plain" hpack-plain
+if ! grep -q "ALL CHECKS PASSED" "$WORK/hpack-plain.out" 2>/dev/null; then
+  echo "plain: missing pass sentinel"
+  status=1
+fi
+
+echo
+echo "== every hpack section reported"
+for phrase in "== RFC 7541 integer codec" \
+              "== RFC 7541 Huffman codec" \
+              "== RFC 7541 request and response vectors" \
+              "== static table hits" \
+              "== dynamic table eviction at capacity" \
+              "== table size update" \
+              "== realistic round trip" \
+              "== decoder refusals on malformed and truncated wire" \
+              "== overflow, two size updates, mid-block size, C.5" \
+              "== SETTINGS changes, caller bounds, counts past Int32"; do
+  if ! grep -q "$phrase" "$WORK/hpack-plain.out" 2>/dev/null; then
+    echo "  missing section: $phrase"
+    status=1
+  fi
+done
+[ "$status" -eq 0 ] && echo "  all sections reported"
+
+echo
+echo "== the same program with optimisation on (--release)"
+build_and_run "release" hpack-release --release >/dev/null
+if ! grep -q "ALL CHECKS PASSED" "$WORK/hpack-release.out" 2>/dev/null; then
+  echo "release: missing pass sentinel"
+  status=1
+fi
+
+echo
+echo "== proving the checks can fail when the module is broken"
+if [ -z "$PY" ]; then
+  echo "  skipped: no working python3, so the broken copy could not be made"
+else
+  mkdir -p "$WORK/patched/std"
+  "$PY" - <<PY
+from pathlib import Path
+src = Path("$REPO/src/std/hpack.iyi").read_text()
+old = 'if val < prefix_max'
+if old not in src:
+    raise SystemExit("patch site missing")
+Path("$WORK/patched/std/hpack.iyi").write_text(src.replace(old, 'if false', 1))
+PY
+  if [ $? -ne 0 ]; then
+    echo "  the patch did not apply"
+    status=1
+  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_hpack_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+    echo "  the exercise PASSED on a broken module"
+    status=1
+  else
+    echo "  a broken hpack is caught"
+  fi
+fi
+
+if [ -z "$PY" ]; then
+  echo "  skipped: no working python3, so the broken copy could not be made"
+else
+  mkdir -p "$WORK/patched2/std"
+  "$PY" - <<PY
+from pathlib import Path
+src = Path("$REPO/src/std/hpack.iyi").read_text()
+old = 'if @pending_min_table_size < @pending_table_size'
+if old not in src:
+    raise SystemExit("two-update patch site missing")
+Path("$WORK/patched2/std/hpack.iyi").write_text(src.replace(old, 'if false', 1))
+PY
+  if [ $? -ne 0 ]; then
+    echo "  the two-update patch did not apply"
+    status=1
+  elif IYI_PATH="$WORK/patched2${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_hpack_exercise.iyi" >"$WORK/mut2.out" 2>&1; then
+    echo "  the exercise PASSED without RFC 4.2 two size updates"
+    status=1
+  else
+    echo "  a missing two-size-update is caught"
+  fi
+fi
+
+# Each fix below undone in a copy must be caught where its check says: an
+# assertion by its message, an overflow by the panic before its own line.
+fix_proof() { # fix_proof <label> <name> <phrase> <line it must not reach> <old> <new> [<old> <new>]...
+  local label="$1" name="$2" phrase="$3" unreached="$4"
+  shift 4
+  if [ -z "$PY" ]; then
+    echo "  skipped: no working python3, so $label is unmeasured"
+    return
+  fi
+  mkdir -p "$WORK/$name/std"
+  if ! "$PY" - "$@" <<PY
+import sys
+from pathlib import Path
+src = Path("$REPO/src/std/hpack.iyi").read_text()
+pairs = sys.argv[1:]
+for k in range(0, len(pairs), 2):
+    if pairs[k] not in src:
+        raise SystemExit("patch site missing: " + pairs[k])
+    src = src.replace(pairs[k], pairs[k + 1])
+Path("$WORK/$name/std/hpack.iyi").write_text(src)
+PY
+  then
+    echo "  the patch for $label did not apply"
+    status=1
+  elif IYI_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_hpack_exercise.iyi" >"$WORK/$name.out" 2>&1; then
+    echo "  the exercise PASSED with $label"
+    status=1
+  elif grep -qF -- "$phrase" "$WORK/$name.out" && { [ -z "$unreached" ] || ! grep -qF -- "$unreached" "$WORK/$name.out"; }; then
+    echo "  $label is caught"
+  else
+    echo "  $label failed, but not at '$phrase':"
+    tail -2 "$WORK/$name.out" | sed 's/^/    /'
+    status=1
+  fi
+}
+fix_proof "a decoder SETTINGS the table never hears" fix_dec_settings \
+  "decoder takes a raised SETTINGS" "" \
+  '    @dynamic_table.settings_max_size = limit
+  end
+
+  def decode(' \
+  '  end
+
+  def decode('
+fix_proof "an encoder SETTINGS the table never hears" fix_enc_settings \
+  "encoder takes a raised SETTINGS" "" \
+  '    @dynamic_table.settings_max_size = limit
+    if lowered' \
+  '    if lowered'
+fix_proof "a lowered SETTINGS left unsignalled" fix_enc_lowered \
+  "lowered SETTINGS is signalled" "" \
+  '    if lowered
+' \
+  '    if false
+'
+fix_proof "a lowered SETTINGS signalled only above the table" fix_enc_below \
+  "lowered SETTINGS is signalled below it too" "" \
+  '    if lowered
+      set_max_table_size(@dynamic_table.max_size > limit ? limit : @dynamic_table.max_size)' \
+  '    if @dynamic_table.max_size > limit
+      set_max_table_size(limit)'
+fix_proof "a negative integer offset read from the end" fix_int_offset \
+  "negative integer offset refused" "" \
+  '    if offset < 0
+      return HpackError.new("Integer decode' \
+  '    if false
+      return HpackError.new("Integer decode'
+fix_proof "a Huffman bound that adds offset and length" fix_huff_bound \
+  "arithmetic overflow" "a Huffman length past Int32 is refused" \
+  'offset > bytes.bytesize ||
+       length > bytes.bytesize - offset' \
+  'offset + length > bytes.bytesize'
+fix_proof "a header list counted in Int32" fix_list_i32 \
+  "arithmetic overflow" "a header list past Int32 octets is counted" \
+  'total_uncompressed_size = 0_i64' 'total_uncompressed_size = 0_i32' \
+  'bytesize.to_i64' 'bytesize' \
+  '@max_header_list_size.to_i64' '@max_header_list_size'
+fix_proof "a Huffman size counted in Int32" fix_size_i32 \
+  "arithmetic overflow" "a Huffman size past Int32 bits is counted" \
+  'total_bits = 0_i64' 'total_bits = 0_i32' \
+  'HUFFMAN_LENS[byte_val].to_i64' 'HUFFMAN_LENS[byte_val]' \
+  '((total_bits + 7_i64) // 8_i64).to_i32' '(total_bits + 7) // 8'
+fix_proof "a header list counted without 32 octets a field" fix_list_overhead \
+  "a header list counts 32 octets a field" "" \
+  'bytesize.to_i64 + 32' 'bytesize.to_i64'
+
+echo
+echo "== what integer encoding and the codec constructors refuse"
+refuses() { # refuses <label> <name> <phrase> <expression>
+  local label="$1" name="$2" phrase="$3" expr="$4"
+  printf 'module main\n\nimport std/hpack::{Integer, Encoder, Decoder, DynamicTable}\n\n%s\n' "$expr" > "$WORK/$name.iyi"
+  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    echo "  $label: the program did not build"
+    sed -n '1,10p' "$WORK/$name.build"
+    status=1
+    return
+  fi
+  "$WORK/$name" > "$WORK/$name.out" 2>&1
+  local code=$?
+  if [ "$code" -eq 0 ]; then
+    echo "  $label: it answered instead of refusing: $(cat "$WORK/$name.out")"
+    status=1
+    return
+  fi
+  if ! grep -qF -- "$phrase" "$WORK/$name.out"; then
+    echo "  $label: refused, but not with '$phrase'"
+    sed -n '1,3p' "$WORK/$name.out"
+    status=1
+    return
+  fi
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+}
+refuses "prefix_bits zero" prefix_zero "prefix_bits must be between 1 and 8" 'Integer.encode(10_u64, 0)'
+refuses "prefix_bits nine" prefix_nine "prefix_bits must be between 1 and 8" 'Integer.encode(10_u64, 9)'
+# Made above the protocol's limit, an encoder's table outgrew the peer's:
+# the constructor took the size that `set_max_table_size` refused.
+refuses "an encoder made above the protocol limit" enc_over "Dynamic table size 8192 exceeds protocol limit 4096" \
+  'Encoder.new(max_table_size: 8192)'
+refuses "a decoder made above the protocol limit" dec_over "Dynamic table size 8192 exceeds protocol limit 4096" \
+  'Decoder.new(max_table_size: 8192)'
+refuses "a table made with a negative size" table_neg "Negative dynamic table size: -1" \
+  'DynamicTable.new(-1, 4096)'
+
+echo
+if [ "$status" -eq 0 ]; then
+  echo "the std/hpack exercise holds"
+else
+  echo "the std/hpack exercise did not hold"
+fi
+exit $status

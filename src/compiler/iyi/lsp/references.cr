@@ -117,7 +117,7 @@ module Iyi::Lsp
       # the same question: a module path is posix by grammar (R-1) and a
       # target's file is spelled the platform's way, so on Windows no file
       # ever ended with `/greet.iyi` and a rename left every `import` line
-      # behind — step 13 of `bench/lsp_session.py`, the first time it ran
+      # behind — step 13 of `test/cli/lsp_session.py`, the first time it ran
       # there.
       suffix = "/#{node.path.join('/')}.iyi"
       return true unless @target_files.any? { |file| ::Path[file].to_posix.to_s.ends_with?(suffix) }
@@ -275,7 +275,7 @@ module Iyi::Lsp
     # alone — so on Windows the importer's compile names the def's file
     # `...\gate\calc/lexer.iyi` while the cursor's names it
     # `...\gate\calc\lexer.iyi`, and a reference from a file nobody opened
-    # never matched the def it calls (step 32 of `bench/lsp_session.py`,
+    # never matched the def it calls (step 32 of `test/cli/lsp_session.py`,
     # the first time it ran there). Compared case-blind on Windows too,
     # which is what its filesystem does.
     # iyi: the def's name is part of the key: a `new` made from an

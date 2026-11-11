@@ -1,3 +1,4 @@
+# spec: 3.3@a4f6b9c5
 module test/ris/refused/row_refill_held
 # A row kept past the next call, which clears it (SPEC 3.3).
 class RowReader

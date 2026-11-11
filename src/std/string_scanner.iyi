@@ -34,7 +34,7 @@
 # any group when the last scan matched nothing. `[]?` answers nil for
 # those instead. What the scanner reads is never refused: a pattern that
 # does not match is nil, and whether input is malformed is the tokenizer's
-# to say with an error value of its own, as bench/std_string_scanner_exercise
+# to say with an error value of its own, as test/cli/std_string_scanner_exercise
 # does.
 #
 # Left out: `peek_behind`, `rewind`, `current_char`, `previous_byte` and

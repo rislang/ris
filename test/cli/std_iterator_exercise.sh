@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+# Lazy sequences, exercised and driven. Runs the iterator exercise plain and
+# optimised, checks every section reported, and proves the checks can fail
+# by patching copies of the iterator library via IYI_PATH.
+#
+#     bash test/cli/std_iterator_exercise.sh
+#
+# A check that cannot fail is not a check. This script proves failure across
+# each capability: infinite sequence consumption, pipeline laziness, map,
+# select, skip, zip, chain, flat_map, a source shared with its adaptor, a
+# zip that pulls past its first source, a counting adaptor copied into the
+# adaptor built on it, a take that leaves an empty pull uncounted, and a
+# nil element read as the end.
+#
+# Exits non-zero if any check fails.
+
+set -u
+
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# wrapper a Windows build cannot run.
+IYI="${IYI:-$REPO/bin/iyi}"
+mkdir -p "$REPO/test/cli/.work"
+WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+
+# A native compiler cannot resolve this shell's own path mapping: a search
+# path built from the shell's `pwd` finds no prelude at all, and a scratch
+# directory named `/tmp/tmp.X` is silently ignored on that path, so the
+# patched copy is never read and the proof that a check can fail quietly
+# stops proving it.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN* | Windows_NT)
+    REPO="$(cygpath -m "$REPO")"
+    WORK="$(cygpath -m "$WORK")"
+    ;;
+esac
+
+# The search path is a list, and the byte between its entries is the
+# platform's: `;` where a drive letter already owns the colon.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN* | Windows_NT) PSEP=';' ;;
+  *) PSEP=':' ;;
+esac
+
+status=0
+
+# Ensure foundation traits are present in IYI_PATH even if std/foundation
+# has not yet been merged into current master branch.
+EXTRA_PATH=""
+if [ ! -f "$REPO/src/std/traits.iyi" ]; then
+  mkdir -p "$WORK/foundation/std"
+  git show origin/std/foundation:src/std/traits.iyi > "$WORK/foundation/std/traits.iyi" 2>/dev/null || true
+  git show origin/std/foundation:src/std/enumerable.iyi > "$WORK/foundation/std/enumerable.iyi" 2>/dev/null || true
+  EXTRA_PATH="$WORK/foundation${PSEP}"
+fi
+
+BASE_IYI_PATH="${EXTRA_PATH}${REPO}/src"
+
+run_case() {
+  local label="$1" name="$2"
+  shift 2
+  if ! IYI_PATH="$BASE_IYI_PATH" "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_iterator_exercise.iyi" \
+       >"$WORK/$name.build.log" 2>&1; then
+    echo "$label: build failed"
+    sed -n '1,12p' "$WORK/$name.build.log"
+    status=1
+    return 1
+  fi
+  "$WORK/$name" >"$WORK/$name.out" 2>&1
+  local exit_code=$?
+  sed 's/^/  /' "$WORK/$name.out"
+  if [ "$exit_code" -ne 0 ]; then
+    echo "$label: exited $exit_code"
+    status=1
+    return 1
+  fi
+  return 0
+}
+
+echo "== the iterator exercise, plain build"
+run_case "plain" iterator-plain
+if ! grep -q "all iterator checks passed" "$WORK/iterator-plain.out" 2>/dev/null; then
+  echo "  MISSING: plain build did not reach the end"
+  status=1
+fi
+
+echo
+echo "== every iterator section reported"
+for phrase in \
+  "iterator: infinite take" \
+  "iterator: pipeline laziness" \
+  "iterator: short-circuit any?" \
+  "iterator: short-circuit find" \
+  "iterator: map" \
+  "iterator: compact_map" \
+  "iterator: flat_map" \
+  "iterator: select" \
+  "iterator: reject" \
+  "iterator: take and first(n)" \
+  "iterator: take_while" \
+  "iterator: skip" \
+  "iterator: skip_while" \
+  "iterator: each_slice" \
+  "iterator: each_cons" \
+  "iterator: step" \
+  "iterator: zip" \
+  "iterator: chain" \
+  "iterator: with_index" \
+  "iterator: cycle" \
+  "iterator: terminals folding" \
+  "iterator: terminals counting" \
+  "iterator: terminals predicates" \
+  "iterator: terminals searching" \
+  "iterator: terminals traits" \
+  "iterator: each" \
+  "iterator: sources"; do
+  grep -q "$phrase" "$WORK/iterator-plain.out" 2>/dev/null || {
+    echo "  MISSING: nothing reported for $phrase"
+    status=1
+  }
+done
+[ "$status" -eq 0 ] && echo "  all 27 iterator sections reported"
+
+echo
+echo "== the same program with optimisation on (--release)"
+run_case "release" iterator-release --release
+if ! grep -q "all iterator checks passed" "$WORK/iterator-release.out" 2>/dev/null; then
+  echo "  MISSING: release build did not reach the end"
+  status=1
+fi
+
+echo
+echo "== zip and chain take an iterator, and say so at the call"
+# `zip` and `chain` are bounded `forall O : Iterator`, as `Enumerable#zip`
+# is (iyi SPEC II.6 finding 6). Unbounded, a zip with an array was refused
+# from inside std/iterator.iyi, "undefined constant O::Elem" and "Did you
+# mean 'IO'?", and a chain with one, or with another element type, from
+# `ChainIterator#next`. The refusal names the caller's line, `O` and the
+# method now, and a chain of two element types yields either, as the other
+# library's does.
+refused_at_call() { # refused_at_call <label> <name> <method> <expression>
+  local label="$1" name="$2" method="$3" expression="$4"
+  printf 'module main\n\nimport std/iterator::{Iterator, ArrayIterator}\n\nputs (%s).to_a\n' \
+    "$expression" > "$WORK/$name.iyi"
+  if IYI_PATH="$BASE_IYI_PATH" "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" \
+       > "$WORK/$name.build" 2>&1; then
+    echo "  $label: it built"
+    status=1
+    return
+  fi
+  if ! grep -qF -- "required by \`O\` in \`$method\`" "$WORK/$name.build" ||
+     ! grep -qF -- "$name.iyi:5" "$WORK/$name.build"; then
+    echo "  $label: refused, but not at the call"
+    sed -n '1,8p' "$WORK/$name.build"
+    status=1
+    return
+  fi
+  echo "  $label: refused at the call, naming \`O\` in \`$method\`"
+}
+refused_at_call "a zip with an array" zip_array zip 'Iterator.of([1, 2]).zip([10, 20])'
+refused_at_call "a chain with an array" chain_array chain 'Iterator.of([1, 2]).chain([10, 20])'
+printf 'module main\n\nimport std/iterator::{Iterator, ArrayIterator}\n\nputs Iterator.of([1, 2]).chain(Iterator.of(["a"])).to_a\n' \
+  > "$WORK/chain_mixed.iyi"
+if IYI_PATH="$BASE_IYI_PATH" "$IYI" build -o "$WORK/chain_mixed" "$WORK/chain_mixed.iyi" \
+     > "$WORK/chain_mixed.build" 2>&1 &&
+   [ "$("$WORK/chain_mixed" | tr -d '\r')" = '[1, 2, "a"]' ]; then
+  echo '  a chain of Int32 and String yields both: [1, 2, "a"]'
+else
+  echo "  a chain of two element types did not yield both"
+  sed -n '1,8p' "$WORK/chain_mixed.build"
+  status=1
+fi
+
+echo
+echo "== proving the checks can fail when an iterator mechanism is broken"
+
+prove_fails() {
+  local label="$1" dir="$2" phrase="$3" sed_script="$4"
+  mkdir -p "$WORK/$dir/std"
+  if [ -d "$WORK/foundation/std" ]; then
+    cp -R "$WORK/foundation/std/." "$WORK/$dir/std/"
+  fi
+  sed -e "$sed_script" "$REPO/src/std/iterator.iyi" > "$WORK/$dir/std/iterator.iyi"
+  if ! IYI_PATH="$WORK/$dir${PSEP}$BASE_IYI_PATH" "$IYI" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/std_iterator_exercise.iyi" \
+       >"$WORK/$dir/build.log" 2>&1; then
+    echo "  $label: the patched iterator library did not build"
+    sed -n '1,12p' "$WORK/$dir/build.log"
+    status=1
+    return
+  fi
+  "$WORK/$dir/program" >"$WORK/$dir/out" 2>&1
+  local exit_code=$?
+  if [ "$exit_code" -eq 0 ]; then
+    echo "  $label: the exercise still passed, so it does not test this"
+    status=1
+    return
+  fi
+  if ! grep -q "$phrase" "$WORK/$dir/out"; then
+    echo "  $label: failed, but not at expected check (expected '$phrase')"
+    sed -n '$p' "$WORK/$dir/out"
+    status=1
+    return
+  fi
+  printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" \
+    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+}
+
+# 1. Take pulls wrong element count (take(n) takes n + 1)
+prove_fails "take limit broken" broken_take "assertion failed for infinite take" \
+  's/@count < @n/@count < (@n + 1)/'
+
+# 2. Pipeline mapping broken (map iterator answers the end prematurely)
+prove_fails "map transform broken" broken_map "assertion failed for pipeline result" \
+  's/def next : U | Stop/def next : U | Stop; return Stop.new/g'
+
+# 3. Select filtering broken (fails to loop over elements)
+prove_fails "select predicate broken" broken_select "assertion failed for pipeline result" \
+  's/until (item = @iter\.next)\.is_a?(Stop)/item = @iter.next; unless item.is_a?(Stop)/'
+# 4. Skip broken (fails to advance past requested count)
+prove_fails "skip count broken" broken_skip "assertion failed for skip" \
+  's/while @skipped < @n/while @skipped < 0/'
+
+# 5. Zip broken (prematurely halts pairing: every pull answers as though a
+#    source had run out)
+prove_fails "zip pairing broken" broken_zip "assertion failed for zip" \
+  's/{item1, item2}/Stop.new/'
+
+# 6. Chain broken (skips first iterator directly to second)
+prove_fails "chain sequence broken" broken_chain "assertion failed for chain" \
+  's/if !@first_done/if false/'
+
+# 7. FlatMap broken (fails to yield sub-arrays)
+prove_fails "flat_map flattening broken" broken_flat_map "assertion failed for flat_map" \
+  's/@current_sub = @func\.call(item)/@current_sub = [] of U/'
+
+# 8. Range iterator broken (yields the exclusive end)
+prove_fails "range end broken" broken_range "assertion failed for range exclusive" \
+  's/elsif !@range\.exclusive? \&\& val == @range\.end/elsif val == @range.end/'
+
+# 9. Array source copied into its adaptor (a struct again)
+prove_fails "array source copied" copied_source "assertion failed for adaptor shares its array source" \
+  's/^pub class ArrayIterator(T)/pub struct ArrayIterator(T)/'
+
+# 10. Zip pulls its second source after the first ran out
+prove_fails "zip over-pulls" zip_overpull "assertion failed for zip pulls the longer source once per pair" \
+  's/^    return Stop.new if item1\.is_a?(Stop)$/    item2 = @iter2.next if item1.is_a?(Stop)\n    return Stop.new if item1.is_a?(Stop)/'
+
+# 11-15. A counting adaptor copied into the adaptor built on it (a struct
+#        again, as every stateful adaptor was)
+prove_fails "skip copied" copied_skip "assertion failed for skip keeps its count" \
+  's/^pub class SkipIterator(I, T)/pub struct SkipIterator(I, T)/'
+prove_fails "take copied" copied_take "assertion failed for take keeps its count" \
+  's/^pub class TakeIterator(I, T)/pub struct TakeIterator(I, T)/'
+prove_fails "with_index copied" copied_with_index "assertion failed for with_index keeps its count" \
+  's/^pub class WithIndexIterator(I, T)/pub struct WithIndexIterator(I, T)/'
+prove_fails "step copied" copied_step "assertion failed for step keeps its stride" \
+  's/^pub class StepIterator(I, T)/pub struct StepIterator(I, T)/'
+prove_fails "each_cons copied" copied_cons "assertion failed for each_cons keeps its window" \
+  's/^pub class ConsIterator(I, T)/pub struct ConsIterator(I, T)/'
+
+# 16. Take counts only the pulls that answered
+prove_fails "take leaves an empty pull uncounted" take_uncounted "assertion failed for a take counts an empty pull" \
+  '/^pub class TakeIterator/,/^pub class TakeWhileIterator/s/^      @iter\.next$/      took = @iter.next; @count = @count - 1 if took.is_a?(Stop); took/'
+
+# 17. A nil element read as the end, as it was when the end was nil
+prove_fails "a nil element read as the end" nil_as_end "assertion failed for a nil element is an element" \
+  's/^    until (item = self\.next)\.is_a?(Stop)$/    until (item = self.next).is_a?(Stop) || item.nil?/'
+echo
+if [ "$status" -eq 0 ]; then
+  echo "Iterator: all 27 sections pass plain and release, and each check is"
+  echo "proven to fail when its mechanism is broken."
+else
+  echo "Iterator: something above failed."
+fi
+exit "$status"

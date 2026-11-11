@@ -89,12 +89,23 @@ and offset; `ris check` warns of an `@pos += 1` that indexes tape text.
 Needs Crystal and LLVM 23. In the clone: `make ris`, then
 `./bin/ris run samples/ris/hello.ri`. To install, follow README.md.
 
-* `ris init example.com/me/app` writes `ris.mod` and `app.ri`;
-  `ris get github.com/x/y` adds a requirement.
-* After every edit: `ris check -f json FILE` (errors, with suggested
-  edits), `ris fix FILE`, `ris fmt`, `ris test` (runs every `*_test.ri`;
-  exit 0 passes). A test is a program: `import app::*`, then
-  `exit 1 unless parse_age("7") == 7`.
+* `ris init example.com/me/app` writes `ris.mod`, `app.ri` and an
+  `AGENTS.md`; `ris get github.com/x/y` adds a requirement.
+* After every edit: `ris check types FILE` (errors; `--json` gives
+  them as data with suggested edits), `ris check types --fix FILE`
+  (applies those edits), `ris test --affected FILE` (runs the
+  `*_test.ri` a change reaches; exit 0 passes). A test is a program:
+  `import app::*`, then `exit 1 unless parse_age("7") == 7`.
+* Before you say done: `ris check`. It runs the parts format, deps
+  (ris.mod and ris.sum), types, unused and test: format and deps first,
+  then the rest at once. The first failure shows its output and a
+  `next:` line naming the command that fixes it; exit 0 only when all
+  pass. `ris check --fix` fixes formatting and dependencies first.
+  `ris check PART` runs one part; `--json` gives the verdict as data;
+  `--affected FILE` narrows types and test; `-j N` runs tests at once
+  (default `RIS_JOBS`, else the CPU count). Each part line shows its
+  wall time and a last line the total (`ok in 22.7s`).
 * `ris doc MODULE` prints a module's exported surface: read that, not its
-  body. `ris mcp` serves check, fix, context and test as MCP tools.
+  body. `ris mcp` serves check, fix, context, test and ok as MCP
+  tools.
 * `ris help` and `ris COMMAND --help` say the rest.

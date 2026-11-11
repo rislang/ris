@@ -1,0 +1,232 @@
+# ris: the core of a spec block (doc/drafts/spec-blocks, 5.7, D16, D17).
+# Test-only: `ris build --spec` imports it into a module's test build and
+# nothing else does, so a `ris build` binary has none of these types.
+#
+# Every block gets `tmp`, a RisTmp, removed at the block's end with every
+# process the block started. In a program file the module's name runs the
+# plain binary `ris test` built first (`RIS_SPEC_PROGRAM`): a call is a
+# RisRun, `name.start` a RisProcess. Linux and darwin: a background
+# process writes its output to two files beside `tmp` through `/bin/sh`.
+# No port and no protocol here: those belong to a package's spec module.
+
+module std/ris_spec
+
+import std/process::{Process, ChildProcess, ProcessStatus, Redirect}
+import std/dir::{Dir}
+import std/file::{File}
+import std/file_utils::{FileUtils}
+import std/socket::{IyiSocket}
+import std/regex::{Regex}
+import std/tuple
+
+# A TCP port on 127.0.0.1 that was free when asked.
+pub def free_port : Int32
+  probe = IyiSocket.listen("127.0.0.1", 0)
+  port = probe.local_port
+  probe.close
+  port
+end
+
+# A block's temporary directory and the processes it started (D16).
+pub class RisTmp
+  @@count = 0
+
+  getter path : String
+  @processes = [] of RisProcess
+
+  def initialize
+    @@count = @@count + 1
+    @path = Dir.tempdir + "/ris-spec-" + Process.pid.to_s + "-" + @@count.to_s
+    Dir.mkdir_p(@path)
+  end
+
+  # Writes *text* to *name* under the directory, parents made.
+  def file(name : String, text : String) : Nil
+    full = @path + "/" + name
+    slash = full.rindex('/')
+    Dir.mkdir_p(full[0, slash]) if slash
+    File.write(full, text)
+  end
+
+  def read(name : String) : String
+    File.read(@path + "/" + name)
+  end
+
+  # The names in a directory under it, sorted.
+  def children(name : String = ".") : Array(String)
+    Dir.children(name == "." ? @path : @path + "/" + name).sort
+  end
+
+  def started(process : RisProcess) : RisProcess
+    @processes << process
+    process
+  end
+
+  # The block's end: every process stopped, the directory removed.
+  def close : Nil
+    @processes.each(&.remove)
+    FileUtils.rm_rf(@path) if Dir.exists?(@path)
+  end
+end
+
+# One run of a program to its end (D17), on the block's tape.
+@[OnTape]
+pub struct RisRun
+  getter stdout : String
+  getter stderr : String
+  getter status : Int32
+
+  def initialize(@stdout : String, @stderr : String, @status : Int32)
+  end
+
+  def ==(text : String) : Bool
+    @stdout == text
+  end
+
+  def =~(pattern : Regex) : Int32?
+    @stdout =~ pattern
+  end
+
+  def inspect : String
+    "RisRun(status: " + @status.to_s + ", stdout: " + @stdout.inspect +
+      ", stderr: " + @stderr.inspect + ")"
+  end
+end
+
+# The program file's plain binary: what a package helper starts (5.7).
+pub class RisProgram
+  getter name : String
+  getter path : String
+
+  def initialize(@name : String, @tmp : RisTmp)
+    binary = Program.env("RIS_SPEC_PROGRAM")
+    unless binary
+      raise "#{@name}: RIS_SPEC_PROGRAM is not set; run the block with `ris test`"
+    end
+    @path = binary
+  end
+
+  # The test program's own environment, less its `RIS_SPEC_*` variables,
+  # with HOME and TMPDIR the block's `tmp` and *env* added.
+  def self.environment(dir : String, env : Hash(String, String),
+                       values : Hash(String, String?)) : Nil
+    values["RIS_SPEC_JSON"] = nil
+    values["RIS_SPEC_PROGRAM"] = nil
+    values["HOME"] = dir
+    values["TMPDIR"] = dir
+    env.each { |key, value| values[key] = value }
+  end
+
+  # The generated `demo(*args)` passes its splat here.
+  def run(args : ::Tuple, stdin : String, env : Hash(String, String)) : RisRun
+    list = [] of String
+    args.each { |arg| list << arg }
+    run(list, stdin, env)
+  end
+
+  # Runs it to its end in `tmp`.
+  def run(args : Array(String), stdin : String, env : Hash(String, String)) : RisRun
+    values = {} of String => String?
+    RisProgram.environment(@tmp.path, env, values)
+    done = Process.run(@path, args, input: stdin, chdir: @tmp.path,
+      env: values).or_panic
+    RisRun.new(done.stdout, done.stderr, done.exit_code)
+  end
+
+  # Starts it in the background in `tmp`. A block's `demo.start` is
+  # lowered to `tmp.started(...)`, so the block's end stops it; a helper
+  # hands its process to `tmp.started` in the block the same way (the
+  # process must be made in the block's scope to outlive the helper).
+  def start(args : Array(String) = [] of String,
+            env : Hash(String, String) = {} of String => String) : RisProcess
+    RisProcess.new(@name, @path, args, @tmp.path, env)
+  end
+end
+
+# A program running in the background (D17).
+pub class RisProcess
+  @@count = 0
+  @child : ChildProcess
+  @logs : String
+  @status : Int32? = nil
+
+  def initialize(@name : String, binary : String, args : Array(String),
+                 dir : String, changes : Hash(String, String))
+    env = {} of String => String?
+    RisProgram.environment(dir, changes, env)
+    @@count = @@count + 1
+    @logs = dir + "." + @@count.to_s
+    script = "out=$1; err=$2; shift 2; exec \"$@\" >\"$out\" 2>\"$err\""
+    @child = Process.spawn("/bin/sh",
+      ["-c", script, "sh", @logs + ".out", @logs + ".err", binary] + args,
+      input: Redirect::Pipe, chdir: dir, env: env).or_panic
+  end
+
+  def stdout : String
+    File.exists?(@logs + ".out") ? File.read(@logs + ".out") : ""
+  end
+
+  def stderr : String
+    File.exists?(@logs + ".err") ? File.read(@logs + ".err") : ""
+  end
+
+  # True once stdout matches; false after *timeout* seconds or when the
+  # process ended first.
+  def wait_for(pattern : Regex, timeout : Int32 = 10) : Bool
+    waited = 0
+    while waited < timeout * 1000
+      return true unless (stdout =~ pattern).nil?
+      return !(stdout =~ pattern).nil? if @child.ended?
+      sleep(20)
+      waited += 20
+    end
+    false
+  end
+
+  def write(text : String) : Nil
+    @child.stdin.write(text)
+    nil
+  end
+
+  # nil while it runs.
+  def status : Int32?
+    if done = @status
+      return done
+    end
+    if ended = @child.status
+      return ended.exit_code
+    end
+    nil
+  end
+
+  # SIGTERM, 2 s, SIGKILL; the status.
+  def stop : Int32
+    if done = @status
+      return done
+    end
+    @child.terminate
+    waited = 0
+    while !@child.ended? && waited < 2000
+      sleep(20)
+      waited += 20
+    end
+    @child.kill unless @child.ended?
+    code = -1
+    ended = @child.wait
+    code = ended.exit_code if ended.is_a?(ProcessStatus)
+    @status = code
+    code
+  end
+
+  # Stopped, its output files removed: the block's end.
+  def remove : Nil
+    stop
+    File.delete(@logs + ".out") if File.exists?(@logs + ".out")
+    File.delete(@logs + ".err") if File.exists?(@logs + ".err")
+  end
+
+  def inspect : String
+    "RisProcess(" + @name + ", status: " + status.inspect + ", stdout: " +
+      stdout.inspect + ", stderr: " + stderr.inspect + ")"
+  end
+end

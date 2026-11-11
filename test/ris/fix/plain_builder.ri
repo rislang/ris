@@ -1,4 +1,4 @@
-# Crystal-style text building; `ris fix` turns it into ris.
+# Crystal-style text building; `ris check types --fix` turns it into ris.
 tape do
   text = String::Builder.new(64)
   text << "hello, " << "ris"

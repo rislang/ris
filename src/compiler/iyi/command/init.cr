@@ -86,7 +86,10 @@ class Iyi::Command
              "already the prelude's #{prelude_type.type_desc.lchop("generic ")}. Name the project so its last segment " \
              "is a name the prelude does not take", :USAGE_ERROR
     end
-    files = iyi_init_files(module_path, name)
+    # The spec block proves init's own clause 1.1, so it comes only with
+    # the SPEC.md init writes.
+    own_spec = File.exists?(File.join(directory, "SPEC.md"))
+    files = iyi_init_files(module_path, name, !own_spec)
     taken = files.keys.select { |name| File.exists?(File.join(directory, name)) }
     unless taken.empty?
       abort! "#{Iyi.relative_filename(directory)} already has #{taken.map { |name| "`#{name}`" }.join(", ")}; " \
@@ -97,6 +100,28 @@ class Iyi::Command
     files.each do |name, text|
       File.write(File.join(directory, name), "#{text}\n")
       puts "wrote #{Iyi.relative_filename(File.join(directory, name))}"
+    end
+
+    # The agent's note: what "done" means here. An AGENTS.md already in
+    # the directory is the project's own and is kept as it is.
+    agents = File.join(directory, "AGENTS.md")
+    unless File.exists?(agents)
+      File.write(agents, iyi_init_agents)
+      puts "wrote #{Iyi.relative_filename(agents)}"
+    end
+
+    # ris: the promises (SPEC 6.9): one clause, the entry recording its
+    # version and .spec.lock reviewing it; NAME.ri's spec block proves it,
+    # so `ris check` is green. A SPEC.md already here is the project's
+    # own: then none of the three is written.
+    unless File.exists?(File.join(directory, "SPEC.md"))
+      iyi_init_spec(name).each do |file, text|
+        path = File.join(directory, file)
+        next if File.exists?(path)
+        Dir.mkdir_p(File.dirname(path))
+        File.write(path, text)
+        puts "wrote #{Iyi.relative_filename(path)}"
+      end
     end
 
     # Two lines, not one joined with `&&`: Windows PowerShell 5.1 refuses
@@ -130,18 +155,78 @@ class Iyi::Command
   end
 
   # The two files, in the order they are written.
-  private def iyi_init_files(module_path : String, name : String) : Hash(String, String)
+  private def iyi_init_files(module_path : String, name : String, spec : Bool) : Hash(String, String)
     {
       "ris.mod" => <<-MOD,
         # `#{Command.program_name} get example.com/someone/lib` adds a dependency here.
         module #{module_path}
         MOD
-      "#{name}.ri" => <<-IYI,
+      "#{name}.ri" => spec ? <<-SPEC : <<-IYI,
+        module #{name}
+
+        puts "hello from #{name}"
+
+        spec 1.1  # Running #{name}.ri prints `hello from #{name}`.
+          #{name} == "hello from #{name}\\n"
+        end
+        SPEC
         module #{name}
 
         puts "hello from #{name}"
         IYI
     }
+  end
+
+  private def iyi_init_spec(name : String) : Array({String, String})
+    program = Command.program_name
+    clause = "Running #{name}.ri prints `hello from #{name}`."
+    version = "1.1@#{spec_version(clause)}"
+    [
+      {"SPEC.md", <<-MD},
+        # #{name} specification
+
+        What #{name} promises, as numbered clauses. A `spec N.M` block at
+        the end of the module that keeps a clause proves it. A new clause
+        goes last in its chapter; a removed one leaves its number unused.
+        `#{program} spec` shows each clause and its proofs.
+
+        ## 1. Start
+        * 1.1 #{clause}
+
+        MD
+      {"CHANGELOG.md", <<-MD},
+        # Changelog
+
+        The spec is the software: every change to SPEC.md gets an entry
+        here, newest first: a heading `## DATE · N.M@VERSION` (`###` under
+        a release's `## 0.2.0`) naming each clause version it records, then
+        the reason. `#{program} check spec` asks for one per version.
+
+        ## #{Time.local.to_s("%Y-%m-%d")} · #{version}
+
+        * 1.1: the project's first promise, written by `#{program} init`.
+
+        MD
+      {".spec.lock", "1.1 #{spec_version(clause)}\n"},
+    ]
+  end
+
+  private def iyi_init_agents : String
+    name = Command.program_name
+    <<-MD
+      # Agents
+
+      The work is done when `#{name} check` passes. Use `#{name} check --fix`
+      to fix formatting and dependencies first; `#{name} check types` and
+      `#{name} test --affected FILE` for quick loops.
+
+      SPEC.md holds what the program promises. A clause is proven by a
+      `spec N.M` block at the end of the module that keeps it; after
+      reviewing the proof run `#{name} spec ack N.M`, which writes
+      .spec.lock. A promise not kept yet is a block holding `todo "reason"`;
+      `#{name} spec todo` lists the open ones.
+
+      MD
   end
 
   private def iyi_init_usage
@@ -152,7 +237,10 @@ class Iyi::Command
     module, where NAME is MODULE's last segment (`-` written `_`) - `ris
     init kemal` writes ris.mod and kemal.ri. DIR is where, and the current
     directory when it is left out. Nothing that is already there is
-    overwritten.
+    overwritten; an AGENTS.md saying `ris check` decides
+    when the work is done is written unless one is there, and so are
+    SPEC.md (one clause), CHANGELOG.md and .spec.lock, unless a
+    SPEC.md is there; NAME.ri ends with a spec block proving the clause.
 
     MODULE is the path other projects would import this one by — a URL's
     path half, `example.com/me/hello` — or a bare name like `hello` for a

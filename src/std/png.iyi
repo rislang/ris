@@ -1,3 +1,4 @@
+# standard: PNG specification ISO/IEC 15948
 # PNG images (ISO/IEC 15948:2004, and the W3C's Portable Network Graphics
 # Specification, Third Edition, 2025, which is the same format with APNG
 # and cICP written down), read and written in iyi over the zlib of
@@ -1348,4 +1349,16 @@ pub struct Png
     io << data
     PngBytes.put32(io, CRC32.update(CRC32.update(0_u32, name, 4), data, data.bytesize))
   end
+end
+
+spec 8.1
+  samples = "\xff\x00\x00\x00\xff\x00"
+  image = Image.new(2, 1, Layout::RGB, 8, samples)
+  encoded = Png.encode(image)
+  back = Png.decode(encoded)
+  back.is_a?(PngError) == false
+  raise "decode failed" if back.is_a?(PngError)
+  back.image.width == 2
+  back.image.samples == samples
+  Png.decode("GIF89a").is_a?(PngError)
 end

@@ -1,3 +1,4 @@
+# spec: 1.9@3f448e8c
 # RisBoard.take decodes its message in the taking def's scratch: a def
 # that answers it after other work would copy it out (SPEC 1.9).
 @[OnTape]

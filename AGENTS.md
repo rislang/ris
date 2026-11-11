@@ -33,9 +33,20 @@ ris is iyi plus Goose's tape memory. These rules are for every agent.
   each Now step (TODO.md), time the ports with ris-bench's goose-evals.sh:
   one line per port in the commit body. A timing never fails a gate;
   nothing is timed per change.
+* Pass/fail checks live in test/cli/ (scripts with the programs and
+  fixtures they use); measurements live in test/speed/. A timing there
+  never fails a check unless SPEC promises the number.
 * The rules: [SPEC.md](SPEC.md), ris's specification. Other languages
   are in [ris-bench](https://github.com/rislang/ris-bench), which keeps a
   copy of `samples/ris/respond.ri`: change both in one go.
+* A SPEC clause is proven by a `spec N.M` block at the end of the
+  module that keeps it; after reviewing the proofs run `ris spec ack
+  N.M`, which writes .spec.lock. A clause not kept yet has a block holding
+  `todo "reason"`, or a SPEC.md todo marker when no module keeps it.
+  `ris check spec` fails on unreviewed clauses, stale labels (`ris check
+  --fix` writes them) and clauses with no proof.
+  Old `# spec: N.M@VERSION` tags under test/ still count.
+* A rule lives in one clause; other clauses refer to it by number.
 
 ## A library works on the caller's tape
 
@@ -86,11 +97,13 @@ temporaries and response on one tape.
 * Keep inherited documents in doc/archive/iyi/ and doc/archive/crystal/;
   iyi's draft spec is doc/archive/iyi/SPEC.md, cited as "iyi SPEC".
   SPEC.md is ris's specification; ris's own docs include CONTRIBUTING.md.
-* Change SPEC.md only with a dated entry and its reason in
-  [SPEC_CHANGELOG.md](SPEC_CHANGELOG.md), in the same commit.
+* Except for todo marker lines, change SPEC.md only with a dated entry
+  and its reason in [CHANGELOG.md](CHANGELOG.md), in the same commit.
 * EGM is required: every SPEC change or design proposal gets an EGM
   review of its draft before SPEC.md or code changes, and a drift report
-  after ([CONTRIBUTING.md](CONTRIBUTING.md), Design checks).
+  after ([CONTRIBUTING.md](CONTRIBUTING.md), Design checks). Keep only
+  consolidated_review_report.md next to the draft; the stage reports
+  are not committed. The CHANGELOG entry names the draft folder.
 * Cite doc/reference/iyi/ for unchanged iyi rules, doc/reference/goose/
   for Goose designs, doc/reference/koja/ for messages between tasks.
   Record only ris differences; check snapshot versions.

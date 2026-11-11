@@ -2,7 +2,7 @@
 #
 #     group do |g|
 #       g.spawn do
-#         Server.serve("0.0.0.0", 3000, config, Handler)
+#         Server.answer("0.0.0.0", 3000, config, Handler)
 #         0
 #       end
 #       Signal.wait(Signal::INT, Signal::TERM)

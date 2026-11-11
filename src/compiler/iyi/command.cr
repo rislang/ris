@@ -54,17 +54,15 @@ class Iyi::Command
         doc                      print a module's exported surface, docs included
         build                    build an executable
         clear_cache              clear the compiler cache
-        check                    type-check only: no codegen, no binary; errors are the exit code
-        fix                      apply the compiler's did-you-mean edits until the file is clean
+        check                    format, deps, spec, types, unused, test: exit 0 means the work is done
         env                      print Crystal environment information
         eval                     eval code from args or standard input
         mod                      inspect a .iyimod module artifact
         lsp                      serve the language over stdio (editors, agents)
         mcp                      serve the compiler's verbs as MCP tools over stdio (agents)
         run (default)            build and run program
-        spec                     build and run specs (in spec directory)
+        spec                     the spec's clauses and the tests naming them
         test                     run every *_test.iyi: exit 0 passes, anything else fails
-        vet                      report unreachable code; findings are the exit code
         unsafe                   list @[Ffi], @[PointerUnsafe] and @[TapeUnsafe] marks
         tool                     run a tool
         help, --help, -h         show this help
@@ -87,12 +85,10 @@ class Iyi::Command
           dependencies             show file dependency tree
           expand                   show macro expansion for given location
           flags                    print all macro `flag?` values
-          format                   format project, directories and/or files
           hierarchy                show type hierarchy
           implementations          show implementations for given call in location
           macro_code_coverage      generate a macro code coverage report
           types                    show type of main variables
-          unreachable              show methods that are never called
           --help, -h               show this help
       USAGE
   end
@@ -155,9 +151,11 @@ class Iyi::Command
       else
         run_command(single_file: false)
       end
-    when "spec/".starts_with?(command)
+    when command == "spec"
+      # Exact: the clauses and their tests (SPEC 6.7). Crystal's `spec`
+      # verb, and its `s`/`sp` prefixes, are gone.
       options.shift
-      spec
+      spec_command
     when command == "doc"
       # Exact: `d` would be ambiguous with `daemon` and `deps`.
       options.shift
@@ -166,15 +164,11 @@ class Iyi::Command
       # Exact, like `doc`: `t` stays `tool`'s.
       options.shift
       test
-    when command == "vet"
-      # Exact, like `test`: `v` stays `version`'s.
-      options.shift
-      vet
     when command == "check"
       # Exact: `c` must not reach a verb by accident while `clear_cache`
       # holds its full name.
       options.shift
-      check
+      check_command
     when command == "heap"
       options.shift
       heap
@@ -182,11 +176,6 @@ class Iyi::Command
       # Exact, like `check`.
       options.shift
       unsafe
-    when command == "fix"
-      # Exact: a verb that writes to files is not something to reach by
-      # prefix.
-      options.shift
-      fix
     when command == "lsp"
       # Exact: a server is not something to reach by accident from `l`.
       options.shift
@@ -351,9 +340,6 @@ class Iyi::Command
     when "context".starts_with?(tool)
       options.shift
       context
-    when "format".starts_with?(tool)
-      options.shift
-      format
     when "flags" == tool
       options.shift
       flags
@@ -372,9 +358,6 @@ class Iyi::Command
     when "types".starts_with?(tool)
       options.shift
       types
-    when "unreachable".starts_with?(tool)
-      options.shift
-      unreachable
     when "macro_code_coverage".starts_with?(tool)
       options.shift
       macro_code_coverage
@@ -394,26 +377,6 @@ class Iyi::Command
     else
       Init.run(options)
     end
-  end
-
-  # iyi: `iyi vet` — iyi SPEC III.8 #3's row, closed the way the table
-  # said: "a verb, not new analysis". The analysis is `tool
-  # unreachable`; the verb is go vet's contract — findings are the exit
-  # code, so CI can hold the line with no flag to remember.
-  private def vet
-    if options.first?.in?("--help", "-h")
-      puts <<-USAGE
-        Usage: #{Command.program_name} vet [switches] [program file]
-
-        Report methods nothing can reach, and exit 1 when there are any.
-        The analysis is `#{Command.program_name} tool unreachable`; this verb adds
-        go vet's contract: findings are the exit code. All of that tool's
-        switches (`-f json`, `--tallies`, ...) pass through.
-        USAGE
-      exit
-    end
-    options.unshift "--check"
-    unreachable "vet"
   end
 
   private def build
@@ -921,6 +884,11 @@ class Iyi::Command
       unless no_codegen
         opts.on("--release", "Release mode (-O3 --single-module)") do
           compiler.release!
+        end
+        if command == "build"
+          opts.on("--spec", "ris: build the file's spec blocks as a\ntest program (`ris test` uses it)") do
+            ris_spec_setup(compiler)
+          end
         end
         opts.on("-O LEVEL", "Optimization: 0 (default), 1, 2, 3, s, z") do |level|
           if mode = Compiler::OptimizationMode.from_level?(level)

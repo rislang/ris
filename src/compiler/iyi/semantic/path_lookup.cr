@@ -276,7 +276,7 @@ module Iyi
         message += ". It is written in macro `#{file.macro.name}`, defined at " \
                    "#{Iyi.relative_filename(defined.filename.to_s)}:#{defined.line_number}, which is where the edit goes"
       else
-        message += "; `iyi fix` makes the edit"
+        message += "; `ris check types --fix` makes the edit"
       end
       report = TypeException.for_node(path, message, suggestion: "#{lead}#{prefix}::#{first}", size: lead.size + first.size)
       report.warning = true

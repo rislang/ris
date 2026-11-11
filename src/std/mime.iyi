@@ -1,3 +1,4 @@
+# standard: RFC 2045
 # Media types for naming and serving files: the type a file name's
 # extension stands for, the extensions a type is written with, whether a
 # type is worth compressing on the wire, the type with its charset, and
@@ -12,7 +13,7 @@
 # `application/xml` (RFC 7303 prefers it to `text/xml`), `.ico` is IANA's
 # `image/vnd.microsoft.icon` rather than the older `image/x-icon`, which
 # browsers accept as well. Every entry is checked against Python's table
-# by bench/std_mime_exercise.sh, which lists the few deliberate
+# by test/cli/std_mime_exercise.sh, which lists the few deliberate
 # differences and why.
 #
 # Left out: registering types at run time, which would make the answer
@@ -480,4 +481,38 @@ pub struct RisMediaType
   end
 
 
+end
+
+
+spec 8.1
+
+
+  kept = ""
+  parsed = MIME.parse?(" Text/HTML; X=one; x=\"two\\ words\"")
+  parsed.nil? == false
+  raise "parse failed" unless parsed
+  parsed.essence == "text/html"
+  parsed.params["x"] == "two words"
+  MIME.parse?("a/b; x=\"bad").nil?
+  MIME.from_extension("dir/INDEX.HTML") == "text/html"
+  MIME.extensions("TEXT/HTML") ==
+                [".htm", ".html"]
+  MIME.compressible?("application/wasm")
+  !(MIME.compressible?("image/png"))
+  MIME.compressible?("application/a+json")
+  w = String::Builder.new(1)
+  w << "prefix:"
+  MIME.with_charset("text/html", w)
+  w.finish == "prefix:text/html; charset=utf-8"
+  kept = MIME.with_charset("text/html; charset=ascii").copy_to(Program.tape)
+  kept == "text/html; charset=ascii"
+  MIME.with_charset("text/plain") ==
+                 "text/plain; charset=utf-8"
+  second = MIME.parse?("a/b; x=y")
+  !!(second && second.essence == "a/b" &&
+    second.params["x"] == "y")
+  MIME.from_extension("x.JSON") == "application/json"
+  MIME.extensions("text/html") ==
+    [".htm", ".html"]
+  MIME.compressible?("text/plain")
 end

@@ -13,14 +13,14 @@ class Iyi::CodeGenVisitor
   # the same instructions by the linker, but leaves `__tls_get_addr`
   # undefined in the dynamic symbol table — a name on the link line the
   # dependency floor (iyi SPEC III.9) counts, for a call that is never
-  # made. bench/thread_floor.sh is where the difference is measured.
+  # made. test/cli/thread_floor.sh is where the difference is measured.
   #
   # Windows is the exception, and it is not a tuning choice. COFF has no
   # local-exec: a thread-local's address comes from `_tls_index` and the TLS
   # array the loader hangs off the TEB, registered by `__tls_used`. Forced
   # local-exec, LLVM put the datum in `.tls$` and read it as an ordinary
   # global - the same address in every thread, and an address the C runtime
-  # owns. `bench/tls_probe.iyi` printed `value wrong` for exactly that, and
+  # owns. `test/cli/tls_probe.iyi` printed `value wrong` for exactly that, and
   # once anything shifted the layout the process died at exit with
   # `0xC0000005`, in the runtime's own TLS teardown, after the program had
   # finished. The general model is the one Windows has.

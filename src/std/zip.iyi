@@ -1,3 +1,4 @@
+# standard: PKWARE APPNOTE 6.3.10
 # ZIP archives (PKWARE's APPNOTE.TXT 6.3.10), read and written in iyi,
 # with the DEFLATE of `std/compress`, the bzip2 of `std/bzip2`, the
 # Zstandard of `std/zstd`, the LZMA and xz of `std/xz`, and the CRC-32 of
@@ -1062,6 +1063,7 @@ pub class ZipWriter
   @at : Int64
   @central : Array(String)
   @central_text = String::Builder.new(4096)
+  @names_text = String::Builder.new(1024)
   @names : Hash(String, Bool)
   @zip64 : Bool
   @finished : Bool
@@ -1223,7 +1225,7 @@ pub class ZipWriter
     raise "ZipWriter: #{name.inspect} is absolute; a name in an archive is relative" if name.starts_with?("/")
     raise "ZipWriter: #{name.inspect} holds a \\; a name in an archive separates with /" if name.includes?("\\")
     raise "ZipWriter: #{name.inspect} is already in the archive" if @names.has_key?(name)
-    @names[name] = true
+    @names[ZipReader.keep(name, @names_text)] = true
   end
 
   private def emit(bytes : String) : Nil
@@ -1319,3 +1321,20 @@ pub class ZipWriter
     end
   end
 end
+
+
+spec 8.1
+  sink = Memory.new
+  writer = ZipWriter.new(sink)
+  stamp = Time.unix(1700000000_i64)
+  writer.add("a.txt", "alpha", modified: stamp)
+  writer.finish("made here")
+  archive = ZipReader.new(sink.to_s)
+  loaded = archive.load
+  loaded.is_a?(ZipError) == false
+  raise "ZIP load failed" if loaded.is_a?(ZipError)
+  loaded.entries.size == 1
+  loaded.read(loaded.entries[0]) == "alpha"
+end
+
+import std/io::{Memory}

@@ -4,7 +4,7 @@
 module test/ris/http_conn_growth
 
 import std/socket::{IyiSocket}
-import std/http::{Server, Request, Response}
+import std/http::{Server, Incoming, Outgoing}
 
 struct Listening
 end
@@ -17,20 +17,13 @@ struct Big
     RisBoard.post(Listening.new)
   end
 
-  # One call: the Response is built in the server's scope (SPEC 1.5).
-  def call(req : Request) : Response
-    Response.new(200, Big.text_for(req))
-  end
-
-  # A local grown in place, returned where it is.
-  def self.text_for(req : Request) : String
+  # The answer is written into the server's body builder.
+  def call(req : Incoming, res : Outgoing) : Nil
     head = req.header("X-Big")
     size = head ? head.bytesize : 0
     body = req.body
-    answer = ""
-    answer << size << " " << body.bytesize << " "
-    answer << "y" * (body.bytesize // 2)
-    answer
+    res.body << size << " " << body.bytesize << " "
+    res.body << "y" * (body.bytesize // 2)
   end
 end
 
@@ -65,7 +58,10 @@ port = probe.local_port
 probe.close
 group do |g|
   g.spawn do
-    Server.serve("127.0.0.1", port, 0, Big, max_connections: {% if flag?(:darwin) %}1{% else %}4{% end %})
+    # compress: true keeps the connection on the full path (serve_h1),
+    # whose buffer this test grows; an untyped answer is not coded.
+    Server.answer("127.0.0.1", port, 0, Big, compress: true,
+      max_connections: {% if flag?(:darwin) %}1{% else %}4{% end %})
     0
   end
   RisBoard.take(Listening).or_panic

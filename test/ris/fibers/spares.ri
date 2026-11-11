@@ -1,3 +1,4 @@
+# spec: 1.1@fdc7907b
 # Scopes open at once keep their mappings warm: eight fibers each write
 # 512 KiB on their tape and park inside the scope, twice. The second round
 # reuses the first round's mappings, so it faults in next to none of the

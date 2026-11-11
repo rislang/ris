@@ -1,0 +1,20 @@
+module test/iterator_stop
+
+# std/iterator's Stop is a plain value: a def answers it like an Int32.
+import std/iterator::{Stop}
+
+struct Countdown
+  def initialize(@n : Int32)
+  end
+
+  def next : Int32 | Stop
+    return Stop.new if @n == 0
+    @n -= 1
+    @n
+  end
+end
+
+c = Countdown.new(2)
+exit 1 unless c.next == 1
+exit 2 unless c.next == 0
+exit 3 unless c.next.is_a?(Stop)

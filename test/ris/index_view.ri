@@ -1,3 +1,4 @@
+# spec: 1.9@3f448e8c
 # Goose's index types and checkfree functions: a CSR graph's edges are
 # checked once when they come in, and the breadth-first search reads and
 # writes `dist[adj[k]]` with no check left, which @[CheckFree]

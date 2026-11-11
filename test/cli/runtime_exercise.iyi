@@ -1,0 +1,424 @@
+# spec: 5.2@25c4e885, 5.3@35cd0356
+# Exercises iyi SPEC III.4 concurrency runtime on Windows x86_64, Linux, and Darwin.
+#
+# Properties asserted:
+# 1. Genuine task interleaving across board messages in a group (ping-pong order).
+# 2. Overlapping waits (anti-sequential clock).
+# 3. Cancellation reaching a task blocked in sleep.
+# 4. Error unwrap `!` draining a cancelled task through later waits.
+# 5. Poller: a read parks the fiber, and another fiber wakes it by writing.
+# 6. Cancellation reaching a task blocked in IO (CancelIoEx on Windows).
+# 8. Task joining and value propagation via task.value.
+# 9. Deferred join on early return out of group block.
+# 15. Typed group returning tuple on success and error on failure.
+# 16. Dynamic group keeping general form.
+# 17. A task and a proc capturing a `case` branch's `it` at the branch's type.
+
+# ris: calls C (`lib LibC`), and a script builds copies outside test/cli/.
+@[Ffi]
+def read_teb_tls_slot : UInt64
+  slot = uninitialized UInt64
+  {% if flag?(:win32) && flag?(:x86_64) %}
+    asm("movq %gs:0x58, $0" : "=r"(slot) ::: "volatile")
+  {% else %}
+    slot = 0_u64
+  {% end %}
+  slot
+end
+
+def log_msg(msg : String) : Nil
+  print msg
+  STDOUT.flush
+end
+
+# Task observations are copied onto the board, in publication order.
+@[OnTape]
+record BenchText, text : String
+record BenchNumber, n : Int64
+
+def note(text : String) : Nil
+  RisBoard.post(BenchText.new(String.build { |w| w.append(text) }))
+end
+
+def hear : String
+  event = RisBoard.take(BenchText)
+  raise "missing task observation" unless event.is_a?(BenchText)
+  event.text
+end
+
+def number(n : Int64) : Nil
+  RisBoard.post(BenchNumber.new(n))
+end
+
+def read_number : Int64
+  event = RisBoard.take(BenchNumber)
+  raise "missing task number" unless event.is_a?(BenchNumber)
+  event.n
+end
+
+def fail(message : String) : Nil
+  log_msg("FAIL: " + message + "\n")
+  __iyi_exit(1)
+end
+
+def elapsed_ms(since : Int64) : Int64
+  (__iyi_monotonic_ns - since) // 1000000_i64
+end
+
+{% if flag?(:darwin) %}
+  lib LibC
+    fun pipe(fds : Int32*) : Int32
+  end
+
+  def make_pipe : Pointer(Int64)
+    raw_fds = Pointer(UInt8).new(RisRegion.tape_bytes(8_u64)).as(Pointer(Int32))
+    fail("pipe failed") if LibC.pipe(raw_fds) < 0
+    fds = Pointer(UInt8).new(RisRegion.tape_bytes(16_u64)).as(Pointer(Int64))
+    fds[0] = raw_fds[0].to_i64
+    fds[1] = raw_fds[1].to_i64
+    fds
+  end
+{% elsif flag?(:win32) %}
+  # The prelude's `LibC` carries only the wide `CreateFileW` now: a path a
+  # program hands iyi is UTF-8, and Windows' narrow entry points cannot
+  # take it. A pipe name is this exercise's own ASCII literal, so it
+  # declares the narrow call it wants instead of widening one.
+  lib LibC
+    fun CreateFileA(name : UInt8*, access : Int32, share : Int32, security : Void*,
+                    disposition : Int32, flags : Int32, template : Void*) : Void*
+  end
+
+  def make_pipe : Pointer(Int64)
+    pipe_name = "\\\\.\\pipe\\iyi_runtime_pipe_#{__iyi_monotonic_ns}".to_unsafe
+    h_read = LibC.CreateNamedPipeA(pipe_name, 0x40000001_i32, 0_i32, 1_i32, 4096_i32, 4096_i32, 0_i32, Pointer(Void).new(0_u64))
+    fail("CreateNamedPipeA failed") if h_read.address &+ 1_u64 == 0_u64
+    h_write = LibC.CreateFileA(pipe_name, 1073741824_i32, 0_i32, Pointer(Void).new(0_u64), 3_i32, 128_i32, Pointer(Void).new(0_u64))
+    fail("CreateFileA for pipe failed") if h_write.address &+ 1_u64 == 0_u64
+    fds = Pointer(UInt8).new(RisRegion.tape_bytes(16_u64)).as(Pointer(Int64))
+    fds[0] = h_read.address.to_i64
+    fds[1] = h_write.address.to_i64
+    fds
+  end
+{% else %}
+  {% if flag?(:x86_64) %}
+    EX_SYS_PIPE2 = 293_i64
+  {% else %}
+    EX_SYS_PIPE2 = 59_i64
+  {% end %}
+
+  def make_pipe : Pointer(Int64)
+    raw_fds = Pointer(UInt8).new(RisRegion.tape_bytes(8_u64)).as(Pointer(Int32))
+    result = __iyi_conc_syscall3(EX_SYS_PIPE2, raw_fds.address.to_i64, 0_i64, 0_i64)
+    fail("pipe2 failed") if result < 0
+    fds = Pointer(UInt8).new(RisRegion.tape_bytes(16_u64)).as(Pointer(Int64))
+    fds[0] = raw_fds[0].to_i64
+    fds[1] = raw_fds[1].to_i64
+    fds
+  end
+{% end %}
+
+pub struct TaskFailed
+  def initialize
+  end
+end
+
+impl Error for TaskFailed
+  def message : String
+    "the failing task's error"
+  end
+end
+
+# Messages between the tasks below, on the board (SPEC 5.2).
+record RPing, n : Int32
+record RPong, n : Int32
+record RDrain, n : Int32
+
+# 1. Genuine task interleaving
+slot0 = read_teb_tls_slot
+log_msg("main teb_tls_slot: ")
+log_msg(slot0 == 0_u64 ? "null\n" : "non-null\n")
+
+log_msg("step 1: interleaving\n")
+order = ""
+
+group do |g|
+  g.spawn do
+    slot_fiber = read_teb_tls_slot
+    log_msg("fiber teb_tls_slot: ")
+    log_msg(slot_fiber == 0_u64 ? "null\n" : "non-null\n")
+
+    round = 0
+    while round < 3
+      RisBoard.take(RPing)
+      note("a")
+      RisBoard.post(RPong.new(1))
+      round = round + 1
+    end
+    0
+  end
+  g.spawn do
+    round = 0
+    while round < 3
+      note("b")
+      RisBoard.post(RPing.new(1))
+      RisBoard.take(RPong)
+      round = round + 1
+    end
+    0
+  end
+end
+
+6.times { order = order + hear }
+fail("interleaving: expected bababa, got #{order}") unless order == "bababa"
+log_msg("interleaved: " + order + "\n")
+
+# 2. Overlapping waits: anti-sequential clock
+log_msg("step 2: overlapping sleeps\n")
+started = __iyi_monotonic_ns
+group do |g|
+  g.spawn do
+    sleep(150)
+  end
+  g.spawn do
+    sleep(150)
+  end
+end
+overlap = elapsed_ms(started)
+fail("overlap: 2 x 150 ms took #{overlap} ms, which is sequential") if overlap >= 260
+log_msg("two 150 ms sleeps in #{overlap} ms\n")
+
+# 3. Failing task cancels sibling blocked in sleep
+log_msg("step 3: sleep cancellation\n")
+started = __iyi_monotonic_ns
+victim_saw = ""
+group do |g|
+  victim = g.spawn do
+    slept = sleep(10000)
+    note(slept.is_a?(Cancelled) ? "cancelled" : "slept")
+    slept
+  end
+  g.spawn do
+    sleep(20)
+    TaskFailed.new
+  end
+end
+cancelled_after = elapsed_ms(started)
+victim_saw = hear
+fail("cancellation never reached the sleeping task") unless victim_saw == "cancelled"
+fail("cancellation took #{cancelled_after} ms against a 10 s sleep") if cancelled_after >= 5000
+log_msg("a failing task cancelled a sibling blocked in sleep, in #{cancelled_after} ms\n")
+
+# 4. Error unwrap `!` drains a cancelled task
+log_msg("step 4: drain through !\n")
+
+def two_naps : Nil | Cancelled
+  sleep(10000)!
+  sleep(10000)!
+  nil
+end
+
+started = __iyi_monotonic_ns
+drained = ""
+group do |g|
+  g.spawn do
+    outcome = two_naps
+    note(outcome.is_a?(Cancelled) ? "propagated" : "finished")
+    outcome
+  end
+  g.spawn do
+    sleep(20)
+    TaskFailed.new
+  end
+end
+drained = hear
+fail("`!` did not propagate Cancelled out of the task body") unless drained == "propagated"
+fail("draining a cancelled task took #{elapsed_ms(started)} ms") if elapsed_ms(started) >= 5000
+log_msg("a cancelled task drained through `!`\n")
+
+# 5. Poller: a read parks the fiber, and another fiber wakes it by writing
+log_msg("step 5: poller read/write\n")
+fds = make_pipe
+read_fd = fds[0]
+write_fd = fds[1]
+io_order = ""
+
+group do |g|
+  g.spawn do
+    note("parked,")
+    buffer = Pointer(UInt8).new(RisRegion.tape_bytes(1_u64))
+    got = iyi_read(read_fd, buffer.as(Void*), 1_u64)
+    case got
+    in Int64
+      note("read:#{buffer.value.to_i64}")
+    in Cancelled
+      note("cancelled")
+    end
+    0
+  end
+  g.spawn do
+    sleep(40)
+    note("wrote,")
+    byte = Pointer(UInt8).new(RisRegion.tape_bytes(1_u64))
+    byte.value = 7_u8
+    __iyi_write(write_fd, byte.as(Void*), 1_u64)
+    0
+  end
+end
+
+3.times { io_order = io_order + hear }
+fail("poller: expected parked,wrote,read:7 got #{io_order}") unless io_order == "parked,wrote,read:7"
+log_msg("a read parked in the poller and a sleeping writer woke it\n")
+
+# 6. Cancellation reaching a task blocked in IO (CancelIoEx on Windows)
+log_msg("step 6: IO cancellation\n")
+io_pipe = make_pipe
+io_read_fd = io_pipe[0]
+io_victim_saw = ""
+started = __iyi_monotonic_ns
+
+group do |g|
+  g.spawn do
+    buf = Pointer(UInt8).new(RisRegion.tape_bytes(1_u64))
+    outcome = iyi_read(io_read_fd, buf.as(Void*), 1_u64)
+    note(outcome.is_a?(Cancelled) ? "cancelled" : "read")
+    outcome
+  end
+  g.spawn do
+    sleep(20)
+    TaskFailed.new
+  end
+end
+
+io_cancelled_after = elapsed_ms(started)
+io_victim_saw = hear
+fail("cancellation never reached the IO-blocked task: #{io_victim_saw}") unless io_victim_saw == "cancelled"
+fail("cancellation of IO took #{io_cancelled_after} ms") if io_cancelled_after >= 5000
+log_msg("a failing task cancelled a sibling blocked in IO, in #{io_cancelled_after} ms\n")
+
+# 8. task.value joins and answers what block returned
+log_msg("step 8: task.value\n")
+doubled = 0
+group do |g|
+  t = g.spawn do
+    sleep(10)
+    21
+  end
+  value = t.value
+  doubled = value.is_a?(Int32) ? value * 2 : -1
+end
+fail("task.value answered #{doubled // 2}") unless doubled == 42
+log_msg("task.value joined and answered\n")
+
+# 9. Deferred join on early return out of group block
+log_msg("step 9: deferred join\n")
+
+def leaves_early : Nil
+  group do |g|
+    g.spawn do
+      sleep(30)
+      number(1_i64)
+      0
+    end
+    return
+  end
+end
+
+leaves_early
+flag = read_number
+fail("a `return` out of the group block left its task running") unless flag == 1
+log_msg("an early return still joined the group\n")
+
+# 15. Typed group
+log_msg("step 15: typed group\n")
+
+def fetch_pair(fail_second : Bool) : Tuple(Int32, Int32) | TaskFailed | Cancelled | Panicked
+  group do |g|
+    x = g.spawn do
+      slept = sleep(10)
+      slept.is_a?(Cancelled) ? slept : 21
+    end
+    y = g.spawn do
+      slept = sleep(fail_second ? 20 : 10)
+      slept.is_a?(Cancelled) ? slept : (fail_second ? TaskFailed.new : 2)
+    end
+  end!
+end
+
+pair = fetch_pair(false)
+case pair
+in Tuple(Int32, Int32) then fail("typed group: got #{it[0]}, #{it[1]}") unless it[0] == 21 && it[1] == 2
+in TaskFailed          then fail("typed group: failed on the success path")
+in Cancelled           then fail("typed group: cancelled on the success path")
+in Panicked            then fail("typed group: panicked on the success path")
+end
+log_msg("a typed group answered its tuple\n")
+
+broken = fetch_pair(true)
+fail("typed group: the failure did not leave as the error") unless broken.is_a?(TaskFailed)
+log_msg("a typed group's first failure left as the error\n")
+
+# 16. Dynamic group keeps general form
+log_msg("step 16: dynamic group\n")
+def spawn_send(g : IyiGroup, n : Int32) : Nil
+  g.spawn do
+    RisBoard.post(RDrain.new(n))
+    0
+  end
+end
+
+shape = group do |g|
+  index = 0
+  while index < 3
+    spawn_send(g, index)
+    index = index + 1
+  end
+end
+fail("a loop-spawning group grew a type") unless shape.is_a?(Nil)
+round = 0
+while round < 3
+  RisBoard.take(RDrain)
+  round = round + 1
+end
+log_msg("dynamic group kept the general form\n")
+
+# 17. A task and a proc capturing a `case` branch's `it`. `it` was one
+# variable for the whole scope, and a captured variable is not narrowed, so
+# `in Int32 then g.spawn { total += it }` was refused over `(Int32 |
+# String)`, a proc's `->{ it + 1 }` over `String#+`, and so was every later
+# `case` in the scope that read `it` without capturing it.
+log_msg("step 17: a captured it\n")
+
+def int_or_text(n : Int32) : Int32 | String
+  n.odd? ? "s#{n}" : n
+end
+
+def captured_total(n : Int32) : Int32
+  total = 0
+  group do |g|
+    case int_or_text(n)
+    in Int32  then t = g.spawn { it }; total = t.value.or_panic
+    in String then t = g.spawn { it.size }; total = t.value.or_panic
+    end
+  end
+  case int_or_text(n + 1)
+  in Int32  then total + it
+  in String then total + it.size
+  end
+end
+
+fail("captured it: a task answered #{captured_total(10)} for 10 and s11") unless captured_total(10) == 13
+fail("captured it: a task answered #{captured_total(11)} for s11 and 12") unless captured_total(11) == 15
+# A proc keeps no tape text (SPEC 5.3): the String arm captures
+# its size.
+bump = case int_or_text(6)
+       in Int32  then -> { it + 1 }
+       in String then size = it.size; -> { size }
+       end
+after = case int_or_text(7)
+        in Int32  then it + 1
+        in String then it.size
+        end
+fail("captured it: a proc answered #{bump.call}, the case after it #{after}") unless bump.call == 7 && after == 2
+log_msg("a task and a proc captured a branch's it at its type\n")
+
+log_msg("runtime exercise: every property held\n")

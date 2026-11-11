@@ -1,0 +1,15 @@
+module test/ris/refused/answer_old_call
+# The old server form, call(req) answering a Response: refused, naming
+# call(req : Incoming, res : Outgoing).
+import std/http::{Server, Response}
+
+struct Handler
+  def initialize(config : Int32)
+  end
+
+  def call(req) : Response
+    Response.new(200, "ok")
+  end
+end
+
+Server.answer("127.0.0.1", 18097, 0, Handler)

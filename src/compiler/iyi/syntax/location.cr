@@ -106,7 +106,7 @@ class Iyi::Location
   # the strings, every location in an importer's compile was unordered
   # against the cursor, so the language server's references, call
   # hierarchy and implementations never reached a file nobody had opened
-  # (step 32 of `bench/lsp_session.py`, the first time it ran there).
+  # (step 32 of `test/cli/lsp_session.py`, the first time it ran there).
   # Byte by byte, so asking allocates nothing: it is asked for every node
   # a cursor visitor walks.
   def self.same_file?(a : String, b : String) : Bool

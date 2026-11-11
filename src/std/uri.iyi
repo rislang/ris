@@ -1,3 +1,4 @@
+# standard: RFC 3986
 # URI references as RFC 3986 spells them: scheme, userinfo, host, port,
 # path, query and fragment, read by `URI.parse` (`URI.parse?` answers nil
 # where `parse` panics with the reason), written back by `to_s`, resolved
@@ -365,12 +366,12 @@ pub struct ParsedURI
   protected def default_port(text : String) : Int32?
     cut = text.index('\0') || text.bytesize
     case text[0, cut]
-    when "http", "ws" then 80
+    when "http", "ws"   then 80
     when "https", "wss" then 443
-    when "ftp" then 21
-    when "ssh" then 22
-    when "telnet" then 23
-    else nil
+    when "ftp"          then 21
+    when "ssh"          then 22
+    when "telnet"       then 23
+    else                     nil
     end
   end
 
@@ -578,7 +579,7 @@ pub class URI
     parsed.query = @query ? @query.as(String).as_tape : nil
     parsed.fragment = @fragment ? @fragment.as(String).as_tape : nil
     parsed.written_userinfo(@user ? @user.as(String).as_tape : nil,
-                           @password ? @password.as(String).as_tape : nil)
+      @password ? @password.as(String).as_tape : nil)
     parsed
   end
 
@@ -765,7 +766,7 @@ pub class URI
   end
 
   private def self.percent_encode(str : String, writer : String::Builder,
-                                 level : Int32, space_to_plus : Bool) : Nil
+                                  level : Int32, space_to_plus : Bool) : Nil
     str.each_byte do |b|
       if b == 32_u8 && space_to_plus
         writer.push(43_u8)
@@ -887,10 +888,6 @@ pub class URI
     decode(str, plus_to_space)
   end
 
-
-
-
-
   # =========================================================================
   # RFC 3986 Section 3 & 4: URI Parsing
   # =========================================================================
@@ -912,8 +909,6 @@ pub class URI
     return result if result.is_a?(ParsedURI)
     raise result
   end
-
-
 
   private def self.scheme_byte?(c : UInt8, first : Bool) : Bool
     return true if (c >= 97_u8 && c <= 122_u8) || (c >= 65_u8 && c <= 90_u8)
@@ -1320,5 +1315,101 @@ pub class URI
   def normalize : URI
     as_tape.normalize.to_uri
   end
+end
 
+spec 8.1
+  text : String = "HTTP://u%3A:p%40@EX%aFAMPLE:80/a/./b/../c?q#f"
+  # URI.parse answers a ParsedURI; to_uri makes the URI class under test.
+  uri = URI.parse(text).to_uri
+  uri.user == "u:" && uri.password == "p@"
+  uri.authority == "u%3A:p%40@EX%aFAMPLE:80"
+  uri.normalize.to_s == "http://u%3A:p%40@ex%AFample/a/c?q#f"
+  # A URI is not normalized in place: its new texts would be made in the
+  # call (SPEC 1.1). The normalized URI is a new one.
+  normalized = uri.normalize
+  normalized.to_s == "http://u%3A:p%40@ex%AFample/a/c?q#f"
+  !(URI.parse?("http://h:65536"))
+  URI.decode("%C3%A9+") == "é+"
+  !(URI.decode?("%GG"))
+  URI.encode_path("a/b ?") == "a/b%20%3F"
+  URI.parse("http://a/b/c/d;p?q").resolve("../g").to_s == "http://a/b/g"
+end
+
+spec 8.1
+  URI.parse("https://host/kept").path == "/kept"
+  w = String::Builder.new(512)
+  input = "HTTP://u%3A:p%40@EX%aFAMPLE:80/a/./b/../c?q#f".as_tape
+  parsed = URI.parse(input)
+  parsed.path == "/a/./b/../c"
+  parsed.to_s(w)
+  w.finish == input
+  w.clear
+  parsed.normalize.to_s(w)
+  w.finish == "http://u%3A:p%40@ex%AFample/a/c?q#f"
+  w.clear
+  URI.parse("a/..".as_tape).normalize.to_s(w)
+  w.finish == "./"
+  URI.parse("".as_tape).path.empty?
+  bad = "a b|a\n|:x|ht!tp:x|//[x|//[x]bad|//a@b@c|//h:x|//h:65536|//u%GG@h|//u:p%@h".as_tape.split('|')
+  bad.all? { |text| URI.parse?(text.as_tape).nil? }
+  cases = "../x|../x|a/..|./|a/../..|../|a/..//x|.//x|/a/../b|/b|/a/.|/a/|/a/..|/|/../x|/x|a/./b|a/b|//H:443/x|//h:443/x|https://H:443|https://h".as_tape.split('|')
+  normalizations_ok = true
+  i = 0
+  while i < cases.size
+    w.clear
+    URI.parse(cases[i]).normalize.to_s(w)
+    normalizations_ok = false unless w.finish == cases[i + 1]
+    i += 2
+  end
+  normalizations_ok == true
+  URI.remove_dot_segments("a/b/../../c/".as_tape) == "/c/"
+  w.clear
+  w << "prefix:"
+  URI.encode("a %+/é".as_tape, w)
+  w.finish == "prefix:a%20%25+/%C3%A9"
+  w.clear
+  URI.encode_path("a/b ?".as_tape, w)
+  w.finish == "a/b%20%3F"
+  w.clear
+  URI.encode_path_segment("a/b".as_tape, w)
+  w.finish == "a%2Fb"
+  w.clear
+  URI.encode_userinfo("a:@;".as_tape, w)
+  w.finish == "a%3A%40;"
+  w.clear
+  w << "kept"
+  !(URI.decode?("x%GG".as_tape, w))
+  w.finish == "kept"
+  !(URI.decode?("%0".as_tape))
+  URI.decode("%C3%A9%00+".as_tape, true) == "é\0 "
+  base = URI.parse("http://a/b/c/d;p?q")
+  refs = ["g", "./g", "g/", "/g", "//g", "?y", "g?y", "#s",
+          "g#s", "g?y#s", ";x", "", ".", "..", "../g", "../../g"]
+  expected = ["http://a/b/c/g", "http://a/b/c/g", "http://a/b/c/g/",
+              "http://a/g", "http://g", "http://a/b/c/d;p?y",
+              "http://a/b/c/g?y", "http://a/b/c/d;p?q#s",
+              "http://a/b/c/g#s", "http://a/b/c/g?y#s", "http://a/b/c/;x",
+              "http://a/b/c/d;p?q", "http://a/b/c/", "http://a/b/",
+              "http://a/b/g", "http://a/g"]
+  resolutions_ok = true
+  refs.each_with_index do |ref, i|
+    w.clear
+    base.resolve(ref).to_s(w)
+    resolutions_ok = false unless w.finish == expected[i]
+  end
+  resolutions_ok == true
+  URI.parse("http://[::1]:80/").hostname == "::1"
+  URI.parse("../g").hostname.nil?
+end
+
+spec 8.1
+  w = String::Builder.new(256)
+  w << "prefix:"
+  Params.parse("?q=caf%C3%A9+au+lait&x=%FF&x=%zz&empty=&bare".as_tape).to_s(w)
+  w.finish == "prefix:q=caf%C3%A9+au+lait&x=%FF&x=%25zz&empty=&bare="
+  w.clear
+  Params.parse("".as_tape).to_s(w)
+  w.finish.empty?
+  Params.parse("=&a=%&b=%0&c=%GG&plus=%2B".as_tape).to_s(w)
+  w.finish == "=&a=%25&b=%250&c=%25GG&plus=%2B"
 end

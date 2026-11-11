@@ -451,6 +451,18 @@ module Iyi
       false
     end
 
+    def visit(node : SpecBlock)
+      @str << "spec " << node.clause
+      if label = node.label
+        @str << "  # " << label
+      end
+      newline
+      accept_with_indent(node.body)
+      append_indent
+      @str << "end"
+      false
+    end
+
     def visit(node : ImportDecl)
       @str << "pub " if node.exported
       @str << "import " << node.path.join('/')

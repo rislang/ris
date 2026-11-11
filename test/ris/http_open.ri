@@ -1,7 +1,7 @@
 module test/http_open
 
 import std/socket::{IyiSocket, SocketError}
-import std/http::{Server, Request, Response, HTTP, HTTPError, RisHttpClientExchange}
+import std/http::{Server, Incoming, Outgoing, Response, HTTP, HTTPError, RisHttpClientExchange}
 
 # HTTP.open over loopback: its exchange lives in open's own scope, and an
 # error it answers is a copy the caller can read. HTTP.open_into reads
@@ -19,8 +19,8 @@ struct Answer
     RisBoard.post(Listening.new)
   end
 
-  def call(req : Request) : Response
-    Response.new(200, "answer " + req.path)
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.body << "answer " << req.path
   end
 end
 
@@ -39,7 +39,7 @@ gone = closed.local_port
 closed.close
 group do |g|
   g.spawn do
-    Server.serve("127.0.0.1", port, 0, Answer, max_connections: 2)
+    Server.answer("127.0.0.1", port, 0, Answer, max_connections: 2)
     0
   end
   RisBoard.take(Listening).or_panic

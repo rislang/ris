@@ -489,7 +489,7 @@ class Random::Secure < Random
     end
 
     # The device the fallback reads. A constant, and the only place the
-    # path is written, so `bench/std_random_exercise.sh` can build a copy
+    # path is written, so `test/cli/std_random_exercise.sh` can build a copy
     # that differs from this module in this one line and point the
     # fallback at a regular file; the program itself has no way to name
     # another source, by argument or by environment, since a way to name

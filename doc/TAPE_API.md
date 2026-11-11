@@ -277,7 +277,7 @@ allocation-free fatal error, before mutation and without fallback.
 Stats count copying side transfers separately from growth moves; both
 counts are zero. Construction reservations count as mappings.
 The reservation follows
-[Goose §1.2–1.3 and §10.4](reference/goose/docs/goose_spec.md).
+[Goose §1.2–1.3 and §10.4](reference/goose/docs/goose_test.md).
 Each worker caches at most 64 released initial-size tape mappings and
 64 reserved side mappings, retaining at most 1 MiB warm in each.
 Each group permits at most 2^31 - 1 live tasks (`IyiGroup::MAX_LIVE`).

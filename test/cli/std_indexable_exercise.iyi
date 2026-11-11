@@ -1,0 +1,453 @@
+# Exercise for `src/std/indexable.iyi`.
+#
+# Verifies the full surface of the Indexable trait across two types:
+#   1. The prelude's `Array(T)` equipped with `impl Indexable`,
+#      `impl IndexableMutable` and the `class ::Array(T)` mutators.
+#   2. `MinimalSeq(T)`, a custom type implementing ONLY `size`, `unsafe_fetch`
+#      and `unsafe_put`, receiving all Indexable and IndexableMutable defaults
+#      and satisfying Enumerable without writing `def each`.
+#
+# Every method in `src/std/indexable.iyi` is exercised here.
+
+module bench/std_indexable_exercise
+
+import std/indexable::{Indexable, IndexableMutable}
+import std/enumerable::{Enumerable}
+import std/random::{Random}
+
+# Minimal custom sequence implementing ONLY the two requirements.
+# Does NOT implement `def each`. Indexable supplies `def each`, which then
+# satisfies Enumerable's requirement check with an empty impl body.
+@[OnTape]
+pub struct MinimalSeq(T)
+  @data : Array(T)
+
+  def initialize(@data : Array(T))
+  end
+end
+
+impl Indexable for MinimalSeq(T) forall T
+  type Elem = T
+
+  def size : Int32
+    @data.size
+  end
+
+  def unsafe_fetch(index : Int32) : T
+    @data.unsafe_fetch(index)
+  end
+end
+
+impl IndexableMutable for MinimalSeq(T) forall T
+  type Elem = T
+
+  def unsafe_put(index : Int32, value : T) : T
+    @data.unsafe_put(index, value)
+  end
+end
+
+impl Enumerable for MinimalSeq(T) forall T
+  type Elem = T
+end
+
+# A sequence that is `Indexable` and nothing else, so that what it is asked
+# is answered by this trait: `MinimalSeq` is `Enumerable` too, and where the
+# two traits both write a method - `join` - it gets the later impl's.
+@[OnTape]
+pub struct IndexOnly
+  def initialize(@data : Array(Int32))
+  end
+end
+
+impl Indexable for IndexOnly
+  type Elem = Int32
+
+  def size : Int32
+    @data.size
+  end
+
+  def unsafe_fetch(index : Int32) : Int32
+    @data.unsafe_fetch(index)
+  end
+end
+
+def assert_true(cond : Bool, msg : String) : Nil
+  raise "assertion failed: #{msg}" unless cond
+end
+
+def assert_equal(expected : String, actual : String, msg : String) : Nil
+  raise "expected '#{expected}', got '#{actual}' in #{msg}" unless expected == actual
+end
+
+# 1. Array(T) surface
+puts "== array surface"
+arr = [10, 20, 30, 40, 50]
+
+assert_true(arr.size == 5, "array size")
+assert_true(!arr.empty?, "array empty?")
+
+# Indexing and negative index resolution
+assert_true(arr[0] == 10, "arr[0]")
+assert_true(arr[2] == 30, "arr[2]")
+assert_true(arr[4] == 50, "arr[4]")
+assert_true(arr[-1] == 50, "arr[-1]")
+assert_true(arr[-2] == 40, "arr[-2]")
+assert_true(arr[-5] == 10, "arr[-5]")
+
+# Nilable indexing
+assert_true(arr[0]? == 10, "arr[0]?")
+assert_true(arr[-1]? == 50, "arr[-1]?")
+assert_true(arr[5]?.nil?, "arr[5]? out of range")
+assert_true(arr[-6]?.nil?, "arr[-6]? out of range")
+
+# Boundaries
+assert_true(arr.first == 10, "arr.first")
+assert_true(arr.first? == 10, "arr.first?")
+assert_true(arr.last == 50, "arr.last")
+assert_true(arr.last? == 50, "arr.last?")
+
+# Fetch
+assert_true(arr.fetch(1, 999) == 20, "fetch in bounds")
+assert_true(arr.fetch(10, 999) == 999, "fetch out of bounds default")
+assert_true(arr.fetch(-1, 999) == 50, "fetch negative in bounds")
+assert_true(arr.fetch(10) { |i| i * 100 } == 1000, "fetch block out of bounds")
+assert_true(arr.fetch(-10) { |i| i * 10 } == -100, "fetch block negative out of bounds")
+
+# Search: index and rindex
+assert_true(arr.index(30) == 2, "index by value")
+assert_true(arr.index(999).nil?, "index not found")
+assert_true(arr.index { |x| x > 25 } == 2, "index by predicate")
+assert_true(arr.index { |x| x > 999 }.nil?, "index predicate not found")
+
+assert_true(arr.rindex(40) == 3, "rindex by value")
+assert_true(arr.rindex(999).nil?, "rindex not found")
+assert_true(arr.rindex { |x| x < 45 } == 3, "rindex by predicate")
+assert_true(arr.rindex { |x| x < 0 }.nil?, "rindex predicate not found")
+
+# Index and reverse iteration
+idx_sum = 0
+arr.each_index { |i| idx_sum = idx_sum + i }
+assert_true(idx_sum == 10, "each_index sum")
+
+rev_result = [] of Int32
+arr.reverse_each { |x| rev_result << x }
+assert_equal("50,40,30,20,10", rev_result.join(","), "reverse_each")
+
+# Values_at
+va_splat = arr.values_at(0, -1, 2)
+assert_equal("10,50,30", va_splat.join(","), "values_at splat")
+
+va_array = arr.values_at([3, 1])
+assert_equal("40,20", va_array.join(","), "values_at array")
+
+# Slicing and windowing
+slices = arr.each_slice(2)
+assert_true(slices.size == 3, "each_slice size")
+assert_equal("10,20", slices[0].join(","), "slice 0")
+assert_equal("30,40", slices[1].join(","), "slice 1")
+assert_equal("50", slices[2].join(","), "slice 2")
+
+slice_accum = ""
+arr.each_slice(2) { |s| slice_accum << (slice_accum.empty? ? "" : ",") << s.join("+") }
+assert_equal("10+20,30+40,50", slice_accum, "each_slice block")
+
+windows = arr.each_cons(3)
+assert_true(windows.size == 3, "each_cons size")
+assert_equal("10,20,30", windows[0].join(","), "cons 0")
+assert_equal("20,30,40", windows[1].join(","), "cons 1")
+assert_equal("30,40,50", windows[2].join(","), "cons 2")
+
+cons_accum = ""
+arr.each_cons(3) { |w| cons_accum << (cons_accum.empty? ? "" : ",") << w.join("+") }
+assert_equal("10+20+30,20+30+40,30+40+50", cons_accum, "each_cons block")
+
+# Sampling
+s_default = arr.sample
+assert_true(arr.includes?(s_default), "sample default in range")
+
+s_block = arr.sample { |sz| 1 }
+assert_true(s_block == 20, "sample with custom block")
+
+# `sample(Int32)` is a count, the only meaning it has: it was a seed on
+# `Indexable` and a count on an array with std/random imported, so
+# `xs.sample(3)` answered one element or three by the imports, and a
+# `Deque`'s answered 20 either way. A collection other than an array
+# chooses what an array chooses with the same generator.
+ten = MinimalSeq(Int32).new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+ten_picked = ten.sample(3, Random.new(5))
+assert_equal("7,8,4", ten_picked.join(","), "a collection samples three as an array does")
+assert_true(ten.sample(Random.new(3)) == ten.to_a.sample(Random.new(3)), "a collection samples one as an array does")
+assert_true(ten.sample(3).uniq.size == 3, "sample(3) is three distinct elements")
+puts "  sample(n) is a count, and chooses what an array chooses"
+
+# Binary search
+bs_elem = arr.bsearch { |x| x >= 35 }
+assert_true(bs_elem == 40, "bsearch found")
+assert_true(arr.bsearch { |x| x > 100 }.nil?, "bsearch not found")
+
+bs_idx = arr.bsearch_index { |x| x >= 35 }
+assert_true(bs_idx == 3, "bsearch_index found")
+assert_true(arr.bsearch_index { |x| x > 100 }.nil?, "bsearch_index not found")
+
+# Dig single and multi-level
+assert_true(arr.dig(2) == 30, "dig flat")
+assert_true(arr.dig?(2) == 30, "dig? flat")
+assert_true(arr.dig?(10).nil?, "dig? out of bounds")
+
+# Equals
+arr_copy = [10, 20, 30, 40, 50]
+arr_diff = [10, 20, 99, 40, 50]
+assert_true(arr.equals?(arr_copy), "equals? same elements")
+assert_true(!arr.equals?(arr_diff), "equals? different elements")
+assert_true(!arr.equals?([10, 20]), "equals? different size")
+
+assert_true(arr.equals?(arr_copy) { |a, b| a == b }, "equals? with block true")
+assert_true(!arr.equals?(arr_diff) { |a, b| a == b }, "equals? with block false")
+
+# Join, to_a, hash
+assert_equal("10-20-30-40-50", arr.join("-"), "join with dash")
+assert_equal("1020304050", arr.join, "join with default empty separator")
+
+arr_to_a = arr.to_a
+assert_true(arr_to_a.size == 5, "to_a size")
+assert_equal("10,20,30,40,50", arr_to_a.join(","), "to_a elements")
+
+h1 = arr.hash
+h2 = arr_copy.hash
+assert_true(h1 != 0, "hash non-zero")
+assert_true(h1 == h2, "hash identical for identical contents")
+
+puts "array surface: all passed"
+
+# 2. MinimalSeq(T) surface: only size and unsafe_fetch implemented
+puts "== minimal sequence surface"
+seq = MinimalSeq(Int32).new([1, 2, 3, 4, 5])
+
+# Indexable methods on MinimalSeq
+assert_true(seq.size == 5, "seq size")
+assert_true(!seq.empty?, "seq empty?")
+assert_true(seq[0] == 1, "seq[0]")
+assert_true(seq[-1] == 5, "seq[-1]")
+assert_true(seq[2]? == 3, "seq[2]?")
+assert_true(seq.first == 1, "seq.first")
+assert_true(seq.first? == 1, "seq.first?")
+assert_true(seq.last == 5, "seq.last")
+assert_true(seq.last? == 5, "seq.last?")
+assert_true(seq.fetch(10, 99) == 99, "seq fetch default")
+assert_true(seq.fetch(1, 99) == 2, "seq fetch in bounds")
+assert_true(seq.fetch(10) { |i| i * 2 } == 20, "seq fetch block")
+assert_true(seq.index(3) == 2, "seq index value")
+assert_true(seq.index { |x| x == 4 } == 3, "seq index predicate")
+assert_true(seq.rindex(2) == 1, "seq rindex value")
+assert_true(seq.rindex { |x| x <= 3 } == 2, "seq rindex predicate")
+assert_equal("1,3,5", seq.values_at(0, 2, 4).join(","), "seq values_at splat")
+assert_equal("2,4", seq.values_at([1, 3]).join(","), "seq values_at array")
+assert_equal("1-2-3-4-5", seq.join("-"), "seq join")
+# `Indexable#join` itself, which `MinimalSeq` does not reach, into one
+# builder: adding each element to the text so far copied that text once per
+# element, and 20,000 elements took 1.8 s where the same array's `join`
+# took 1 ms. A bound, not a benchmark: twenty times the array's time and
+# 200 ms over.
+assert_equal("1-2-3", IndexOnly.new([1, 2, 3]).join("-"), "indexable join")
+assert_equal("", IndexOnly.new([] of Int32).join("-"), "indexable join of nothing")
+long_data = Array(Int32).new(20000) { |i| i % 10 }
+join_started = __iyi_monotonic_ns
+long_joined = IndexOnly.new(long_data).join(",")
+seq_join_ns = __iyi_monotonic_ns - join_started
+join_started = __iyi_monotonic_ns
+array_joined = long_data.join(",")
+array_join_ns = __iyi_monotonic_ns - join_started
+assert_true(long_joined == array_joined, "indexable join of 20,000 elements matches the array's")
+assert_true(seq_join_ns <= array_join_ns * 20 + 200_000_000_i64, "indexable join in linear time: 20,000 elements took #{seq_join_ns // 1000000} ms where the array's took #{array_join_ns // 1000000} ms")
+assert_equal("1,2,3,4,5", seq.to_a.join(","), "seq to_a")
+assert_true(seq.bsearch { |x| x >= 3 } == 3, "seq bsearch")
+assert_true(seq.bsearch_index { |x| x >= 3 } == 2, "seq bsearch_index")
+assert_true(seq.sample(10).sorted.join(",") == "1,2,3,4,5", "seq sample of more than it holds is all of it")
+assert_true(seq.equals?(seq), "seq equals? self")
+
+# 12+ Enumerable methods on MinimalSeq:
+# all satisfied via Indexable's def each, without MinimalSeq writing def each
+assert_true(seq.any? { |x| x == 3 }, "seq any?")
+assert_true(seq.all? { |x| x > 0 }, "seq all?")
+assert_true(seq.none? { |x| x < 0 }, "seq none?")
+assert_true(seq.one? { |x| x == 5 }, "seq one?")
+assert_true(seq.count { |x| x % 2 == 1 } == 3, "seq count")
+assert_true(seq.find { |x| x == 4 } == 4, "seq find found")
+assert_true(seq.find { |x| x == 99 }.nil?, "seq find not found")
+assert_true(seq.find { |x| x == 4 } == 4, "seq find")
+assert_equal("2,4,6,8,10", seq.map { |x| x * 2 }.join(","), "seq map")
+assert_equal("1,3,5", seq.select { |x| x % 2 == 1 }.join(","), "seq select")
+assert_equal("2,4", seq.reject { |x| x % 2 == 1 }.join(","), "seq reject")
+assert_true(seq.reduce(0) { |acc, x| acc + x } == 15, "seq reduce")
+assert_true(seq.includes?(4), "seq includes? true")
+assert_true(!seq.includes?(99), "seq includes? false")
+
+puts "minimal sequence surface: all passed"
+
+# 3. Empty collection handling
+puts "== empty collection handling"
+empty_seq = MinimalSeq(Int32).new([] of Int32)
+assert_true(empty_seq.empty?, "empty_seq is empty")
+assert_true(empty_seq.size == 0, "empty_seq size 0")
+assert_true(empty_seq[0]?.nil?, "empty_seq[0]? is nil")
+assert_true(empty_seq[-1]?.nil?, "empty_seq[-1]? is nil")
+assert_true(empty_seq.first?.nil?, "empty_seq.first? is nil")
+assert_true(empty_seq.last?.nil?, "empty_seq.last? is nil")
+assert_true(empty_seq.fetch(0, 99) == 99, "empty_seq fetch default")
+assert_equal("", empty_seq.join(","), "empty_seq join empty")
+assert_true(empty_seq.to_a.empty?, "empty_seq to_a empty")
+assert_true(empty_seq.each_slice(2).empty?, "empty_seq each_slice empty")
+assert_true(empty_seq.each_cons(2).empty?, "empty_seq each_cons empty")
+assert_true(empty_seq.bsearch { |x| x > 0 }.nil?, "empty_seq bsearch nil")
+assert_true(empty_seq.index(1).nil?, "empty_seq index nil")
+assert_true(empty_seq.rindex(1).nil?, "empty_seq rindex nil")
+
+puts "empty collection handling: all passed"
+
+# 4. IndexableMutable defaults and the Array mutators
+puts "== mutable surface"
+mut = MinimalSeq(Int32).new([1, 2, 3, 4, 5])
+assert_true(mut.update(0) { |x| x + 100 } == 101, "update answers the new value")
+assert_true(mut[0] == 101, "update wrote")
+assert_true(mut.update(-1) { |x| x * 2 } == 10, "update negative index")
+mut.swap(0, -1)
+assert_equal("10,2,3,4,101", mut.join(","), "swap")
+mut.swap(2, 2)
+assert_equal("10,2,3,4,101", mut.join(","), "swap same index")
+mut.reverse_in_place
+assert_equal("101,4,3,2,10", mut.join(","), "reverse_in_place")
+mut.rotate_in_place(2)
+assert_equal("3,2,10,101,4", mut.join(","), "rotate_in_place(2)")
+mut.rotate_in_place(-1)
+assert_equal("4,3,2,10,101", mut.join(","), "rotate_in_place(-1)")
+mut.rotate_in_place(5)
+assert_equal("4,3,2,10,101", mut.join(","), "rotate_in_place(size) is identity")
+mut.rotate_in_place
+assert_equal("3,2,10,101,4", mut.join(","), "rotate_in_place default 1")
+mut.fill(7, 1, 3)
+assert_equal("3,7,7,7,4", mut.join(","), "fill(value, offset, count)")
+mut.fill(9, -2, 2)
+assert_equal("3,7,7,9,9", mut.join(","), "fill negative offset")
+mut.fill(0, 5, 0)
+assert_equal("3,7,7,9,9", mut.join(","), "fill at size with count 0")
+mut.fill { |i| i * i }
+assert_equal("0,1,4,9,16", mut.join(","), "fill block")
+mut.fill(1)
+assert_equal("1,1,1,1,1", mut.join(","), "fill value")
+single = MinimalSeq(Int32).new([42])
+single.rotate_in_place(3)
+single.reverse_in_place
+assert_equal("42", single.join(","), "one element stays")
+
+marr = [1, 2, 3, 4, 5]
+marr.insert(1, 10)
+assert_equal("1,10,2,3,4,5", marr.join(","), "insert")
+marr.insert(-1, 99)
+assert_equal("1,10,2,3,4,5,99", marr.join(","), "insert -1 appends")
+marr.insert(7, 100)
+assert_equal("1,10,2,3,4,5,99,100", marr.join(","), "insert at size appends")
+marr.insert(0, 0)
+assert_equal("0,1,10,2,3,4,5,99,100", marr.join(","), "insert at 0")
+assert_true(marr.delete_at(2) == 10, "delete_at answers the element")
+assert_equal("0,1,2,3,4,5,99,100", marr.join(","), "delete_at shifted")
+assert_true(marr.delete_at(-1) == 100, "delete_at -1")
+assert_true(marr.delete_at(0) == 0, "delete_at 0")
+assert_equal("1,2,3,4,5,99", marr.join(","), "delete_at ends")
+marr.delete_if { |x| x % 2 == 0 }
+assert_equal("1,3,5,99", marr.join(","), "delete_if")
+marr.keep_if { |x| x < 50 }
+assert_equal("1,3,5", marr.join(","), "keep_if")
+marr.swap(0, 2)
+assert_equal("5,3,1", marr.join(","), "Array swap via IndexableMutable")
+marr.fill(8, 1, 1)
+assert_equal("5,8,1", marr.join(","), "Array fill via IndexableMutable")
+rot = marr.rotated(1)
+assert_equal("8,1,5", rot.join(","), "rotated is a copy")
+assert_equal("5,8,1", marr.join(","), "rotated left the original")
+assert_equal("1,5,8", marr.rotated(-1).join(","), "rotated(-1)")
+marr.rotate_in_place(1)
+assert_equal("8,1,5", marr.join(","), "Array rotate_in_place")
+marr.clear
+assert_true(marr.empty? && marr.size == 0, "clear")
+marr << 4
+assert_equal("4", marr.join(","), "usable after clear")
+nils = [1, nil, 2, nil] of Int32?
+nils.compact_in_place
+assert_true(nils.size == 2 && nils[0] == 1 && nils[1] == 2, "compact_in_place")
+pairs = [1, 2].cartesian(["a", "b"])
+assert_equal("[{1, \"a\"}, {1, \"b\"}, {2, \"a\"}, {2, \"b\"}]", pairs.to_s, "cartesian")
+assert_true([1, 2].cartesian([] of String).empty?, "cartesian with empty")
+assert_true([1, 2, 3].product == 6, "product stays the multiplicative fold")
+
+puts "mutable surface: all passed"
+
+# 5. Probe triggers when invoked with an argument for failure proof testing
+if Program.args.size > 0
+  mode = Program.args[0]
+  case mode
+  when "probe_positive_out_of_range"
+    puts "triggering positive out of range raise:"
+    arr[10]
+  when "probe_negative_out_of_range"
+    puts "triggering negative out of range raise:"
+    arr[-10]
+  when "probe_empty_first"
+    puts "triggering empty first raise:"
+    empty_seq.first
+  when "probe_empty_last"
+    puts "triggering empty last raise:"
+    empty_seq.last
+  when "probe_empty_sample"
+    puts "triggering empty sample raise:"
+    empty_seq.sample
+  when "probe_trait_out_of_range"
+    puts "triggering trait out of range raise:"
+    seq[7]
+  when "probe_update_out_of_range"
+    puts "triggering update out of range raise:"
+    mut.update(5) { |x| x }
+  when "probe_swap_out_of_range"
+    puts "triggering swap out of range raise:"
+    mut.swap(0, -6)
+  when "probe_fill_negative_count"
+    puts "triggering fill negative count raise:"
+    mut.fill(0, 0, -1)
+  when "probe_fill_past_end"
+    puts "triggering fill past end raise:"
+    mut.fill(0, 3, 3)
+  when "probe_fill_huge_count"
+    puts "triggering fill past end with a huge count raise:"
+    mut.fill(0, 1, 2147483647)
+  when "probe_fill_past_end_from_negative"
+    puts "triggering fill past end from a negative offset raise:"
+    mut.fill(0, -2, 5)
+  when "probe_insert_out_of_range"
+    puts "triggering insert out of range raise:"
+    marr.insert(2, 0)
+  when "probe_delete_at_out_of_range"
+    puts "triggering delete_at out of range raise:"
+    marr.delete_at(-2)
+  else
+    raise "unknown probe mode: #{mode}"
+  end
+end
+
+# `Indexable#hash` mixed with the checked `*` and `+`, so a collection long
+# enough for `31 * h` to leave `Int32` panicked with "arithmetic overflow" -
+# six two-digit numbers were enough, while the five-element cases here passed.
+# A hash is a number modulo the word, so the arithmetic wraps.
+raise "hash: six elements" unless [10, 20, 30, 40, 50, 60].hash != 0
+raise "hash: twenty elements" unless [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].hash != 0
+raise "hash: equal collections agree" unless [1, 2, 3].hash == [1, 2, 3].hash
+raise "hash: order counts" unless [1, 2, 3].hash != [3, 2, 1].hash
+puts "  hash: a long collection mixes without leaving the type"
+
+pairs = ""
+[1, 2].each_cartesian(["a", "b"]) { |n, s| pairs << (pairs.empty? ? "" : ",") << n << s }
+assert_equal "1a,1b,2a,2b", pairs, "each_cartesian: every pair, this array's order first"
+zipped = ""
+[1, 2].zip(["x", "y", "z"]) { |n, s| zipped << (zipped.empty? ? "" : ",") << n << s }
+assert_equal "1x,2y", zipped, "zip with a block: as many pairs as this array holds"
+puts "  each_cartesian and zip with a block hand pairs over without an array of them"
+
+puts "all indexable checks passed"

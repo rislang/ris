@@ -1,3 +1,4 @@
+# standard: RFC 3339
 # `Time`, `Time::Span` and `Time::Location`: the wall clock, the monotonic
 # clock, time zones, civil-calendar arithmetic, strftime-style formatting
 # and parsing (`Time::Format`), and the named formats: RFC 3339, ISO 8601,
@@ -3816,7 +3817,7 @@ pub struct Time
         if idx - year_start < 4
           return refusal(
             "invalid year in RFC 3339 string: fewer than four digits in " \
-              "#{str}",
+            "#{str}",
             str, year_start)
         end
         year_val = 0_i64 - year_val if negative_year
@@ -3945,7 +3946,7 @@ pub struct Time
           if oh > 23 || om > 59
             return refusal(
               "invalid timezone offset in RFC 3339 string: " \
-                "#{Time.pad2(oh)}:#{Time.pad2(om)} in #{str}",
+              "#{Time.pad2(oh)}:#{Time.pad2(om)} in #{str}",
               str, tz_start)
           end
           offset_sec = sign * (oh.to_i64 * 3600_i64 + om.to_i64 * 60_i64)
@@ -3967,7 +3968,7 @@ pub struct Time
         if idx != len
           return refusal(
             "trailing text after the timezone in RFC 3339 string: " \
-              "#{str}",
+            "#{str}",
             str, idx)
         end
 
@@ -3985,7 +3986,7 @@ pub struct Time
         if d < 1 || d > Time.days_in_month(y, m)
           return refusal(
             "invalid day in RFC 3339 string: #{d} for year #{y} month #{m} " \
-              "in #{str}",
+            "in #{str}",
             str, p + 4)
         end
         if h > 23
@@ -4014,7 +4015,7 @@ pub struct Time
         if utc_sec < Time::MIN_SECONDS || utc_sec > Time::MAX_SECONDS
           return refusal(
             "year out of range: #{utc_sec} seconds from the epoch is past " \
-              "the years an Int32 holds",
+            "the years an Int32 holds",
             str, len)
         end
         Time.new(utc_sec, nanos)
@@ -4044,4 +4045,34 @@ impl Comparable for Time
   def <=>(other : self) : Int32
     self <=> other
   end
+end
+
+spec 8.1
+  value = Time.parse_rfc3339("2024-01-01T00:30:00+05:30").in(Location.fixed(19800))
+  writer = String::Builder.new
+  value.to_rfc3339(0, writer)
+  writer.finish == "2024-01-01T00:30:00+05:30"
+  writer.clear
+  value.to_rfc3339(3, writer)
+  Time.parse_rfc3339(writer.finish) == value
+end
+
+spec 8.1
+  value = Time.parse_rfc3339("2023-12-31T23:30:00-04:00").in(Location.fixed(-14400))
+  writer = String::Builder.new
+  value.to_rfc3339(0, writer)
+  writer.finish == "2023-12-31T23:30:00-04:00"
+  writer.clear
+  value.to_rfc3339(3, writer)
+  Time.parse_rfc3339(writer.finish) == value
+end
+
+spec 8.1
+  value = Time.parse_rfc3339("2024-02-29T12:30:45Z").in(Location.fixed(0))
+  writer = String::Builder.new
+  value.to_rfc3339(0, writer)
+  writer.finish == "2024-02-29T12:30:45Z"
+  writer.clear
+  value.to_rfc3339(3, writer)
+  Time.parse_rfc3339(writer.finish) == value
 end

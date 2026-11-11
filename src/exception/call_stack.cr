@@ -29,7 +29,7 @@ struct Exception::CallStack
   # the load raises (and rescues) as soon as the running binary has been
   # renamed, which is what rebuilding it does, so the language server's
   # proxy died the first time it raised anything after a rebuild
-  # (`bench/lsp_memory.py`, "a session outlives the binary it was started
+  # (`test/cli/lsp_memory.py`, "a session outlives the binary it was started
   # from"). From inside, the load answers with what it has so far.
   @@loading : Fiber? = nil
 

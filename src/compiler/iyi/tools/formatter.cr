@@ -120,6 +120,7 @@ module Iyi
       parser = Parser.new(source)
       parser.filename = filename
       parser.iyi_source_only = true
+      parser.ris_keep_spec = true
       nodes = parser.parse
 
       formatter = new(source, flags: flags)
@@ -3748,6 +3749,20 @@ module Iyi
       false
     end
 
+    # ris: a spec block (doc/drafts/spec-blocks, 5.1) is written back as
+    # the source has it: its clause line and label are not code to format.
+    def visit(node : SpecBlock)
+      source = @lexer.string
+      write source.byte_slice(node.source_start, node.source_end - node.source_start)
+      @lexer.current_pos = node.source_end
+      if to = node.end_location
+        @lexer.line_number = to.line_number
+        @lexer.column_number = to.column_number + 1
+      end
+      next_token
+      false
+    end
+
     # iyi: `import app/greeter`, `import app/greeter::{polite, title}`,
     # `import app/greeter::*`, and `pub import app/greeter` — the facade
     # form, which re-exports what it imports (R-2).
@@ -4693,7 +4708,7 @@ module Iyi
       # an exported alias in it. Every declaration `pub` takes needs its own
       # line like this one, and three of them - `import`, `enum`,
       # `annotation` - were missing it when
-      # `spec/compiler/formatter/iyi_formatter_spec.cr` was made to hold the
+      # `test/compiler/formatter/iyi_formatter_test.cr` was made to hold the
       # parser's list: that spec is what catches the next one.
       write_keyword :pub, " " if node.responds_to?(:exported?) && node.exported?
       write_keyword keyword, " "

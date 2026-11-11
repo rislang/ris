@@ -1,7 +1,7 @@
 # Messages between tasks: RisBoard
 
 The rules are SPEC 5.1-5.3 and 5.6. RisBoard copies the typed-queue
-transport in doc/reference/goose/docs/goose_spec.md §11.2, not Goose's
+transport in doc/reference/goose/docs/goose_test.md §11.2, not Goose's
 thread, global-copy or abort model. Main and all tasks use one board.
 
 ## Operations and identity
@@ -167,21 +167,20 @@ SO_REUSEPORT targets need an explicit refusal, not shared-listener fallback.
 macOS has the option but gives a port's connections to one listener: it
 serves one connection at a time, its default N is 1 and a larger N is refused.
 
-The server entry points take an address and a factory type:
+The server entry point takes an address and a factory type:
 
 ```text
 Server.answer(host, port, config, Handler, max_connections: n)
-Server.serve(host, port, config, Handler, max_connections: n)
 ```
 
 `Handler.new(config)` runs on each serving task with an independent
 checked packed copy of `config`. `answer` calls `Handler#call(Incoming,
-Outgoing)`; `serve` calls `Handler#call(Request)` and uses its Response.
+Outgoing)`, which writes its answer into the `Outgoing`.
 A factory type replaces a captured callback: construct mutable routers,
 TLS configuration and managers there, using copied values or file paths.
 An open socket, a proc, a class or a resource-containing config is refused.
-An optional `Handler#tls_config` supplies that task's TLS configuration to
-`serve`; it replaces the old `tls:` argument. An optional
+An optional `Handler#tls_config` supplies that task's TLS configuration;
+it replaces the old `tls:` argument. An optional
 `Handler#listening(port)` runs after that worker's listener has opened.
 It may post a nominal readiness message to the caller.
 
@@ -249,7 +248,7 @@ prepares the account key before starting concurrent flights. Servers
 compare cached PEM with their task-local version and rebuild identities
 when renewal publishes a change, even within one filesystem timestamp.
 Stopping joins and cancels flights; valid cached certificates keep serving.
-Part B of the autocert port covers the bench exercise and its driver.
+Part B of the autocert port covers the test/cli exercise and its driver.
 
 Many readers of one completion use a retained IyiTask result and value,
 subject to task-handle Share checks. Results are copied to each reader's

@@ -1,74 +1,11 @@
-# iyi: `iyi check` — the front end's verdict and nothing else.
-#
-# The cheapest question an agent can ask the compiler is "is this
-# program well-typed?". `check` is `build --no-codegen` with its name
-# said plainly — no object files, no linker, no artifact; the verdict is
-# the exit code, and under `-f json` every error arrives as data,
-# `suggested_edit` included.
-#
-# The blind spot this verb once patched is now the language's own rule:
-# definition-site typing (semantic/definition_typing.cr) types every
-# fully declared def at its definition, in every compile — so `check`
-# is one pass again, and a build, the LSP and this verb cannot disagree
-# about what "clean" means. The verb that grew the probe kept none of
-# it; the compiler did.
+# ris: the types part of `ris check` (check_suite.cr): the front end's
+# verdict and nothing else. `--affected` checks every module a change
+# reaches; each target is compiled alone, no codegen. Definition-site
+# typing (semantic/definition_typing.cr) types every fully declared def,
+# so a build, the LSP and this part agree on what "clean" means.
 require "../mod/installer"
 
 class Iyi::Command
-  private def check
-    if options.first?.in?("--help", "-h")
-      puts <<-USAGE
-        Usage: #{Command.program_name} check [switches] [program file]
-               #{Command.program_name} check --affected CHANGED [--affected CHANGED]...
-
-        Type-check the program and produce nothing: no codegen, no
-        binary. Exit 0 means well-typed; errors print like a build's,
-        and `-f json` makes each one data — file, line, column, size,
-        message, the SPEC sections it cites, and, when the compiler
-        knows the fix, a `suggested_edit` with the exact replacement.
-        An error inside a macro's expansion is placed at the call, with
-        no edit, and its `expansion` names the macro and the place in
-        the text the macro wrote.
-
-        Every def with a fully written signature is typed even if
-        nothing calls it — definition-site typing is the language's
-        rule, and R-2's declared types stand in for the missing caller.
-
-        `--affected CHANGED` (repeatable) checks the ripple instead of
-        one file: every .iyi under the current directory whose imports
-        reach a changed file is compiled alone, and every failure is
-        named.
-
-        Under `-f json` standard error holds one JSON array whatever
-        ends the run: a warning is a frame marked `"severity":
-        "warning"`, after the error's frames when there is one, and a
-        refusal with no place in a file - no such file, bytes that are
-        not text - is a frame whose `line` is null.
-        USAGE
-      exit
-    end
-
-    # `--affected CHANGED...`: the ripple check. `test --affected` answers
-    # "which tests re-run"; this answers the sibling question "does
-    # everyone who imports the change still compile" — every .iyi file
-    # whose parsed import closure reaches a changed file is compiled
-    # alone, and every failure is named. A deleted changed file fails its
-    # consumers here naturally, which is the loud answer this verb owes
-    # (test selection, which cannot afford to guess, turns its discount
-    # off instead).
-    if options.includes?("--affected")
-      return check_affected
-    end
-
-    compile_no_codegen "check"
-
-    # Nothing to print on success: the verdict is the exit code, the
-    # same contract `test` and `vet` keep. Errors never reach this line —
-    # they raise out to the one rescue that serves every verb.
-    report_warnings
-    exit 1 if warnings_fail_on_exit?
-  end
-
   # Everyone the change can reach, each compiled alone. The universe is
   # every .iyi file under the current directory; membership is the same
   # parsed closure `test --affected` trusts. Failures are collected, not
@@ -108,48 +45,12 @@ class Iyi::Command
     end
     abort! "check --affected: name at least one changed file", :USAGE_ERROR if changed.empty?
 
-    # A changed file that is not there is either deleted or mistyped, and
-    # the two look the same from here. Both get the same consumers - the
-    # closure keeps an import's path after its file is gone - and the
-    # verdict says which file it was, because "0 consumer(s) checked, all
-    # compile" on a typo is a clean verdict about nothing.
-    missing = typed.reject { |path| File.file?(path) }
-
-    # The manifest is not a module, so no closure holds it — and a change
-    # to it moves the code under every module at once: `import
-    # example.test/user/liba` resolves through the requirement it names.
-    # `--affected iyi.mod` answered "0 consumer(s) checked, all compile",
-    # which is a clean verdict about nothing.
-    manifest_changed = typed.select do |path|
-      Iyi::Mod::Installer::MANIFESTS.includes?(File.basename(path)) || Iyi::Mod::Sum::FILES.includes?(File.basename(path))
-    end
-
-    # A changed file no import can name: the prelude, which every module
-    # compiles, and a file that is not a module, which one reaches through
-    # a macro (`Eiy.embed`, `read_file`). No closure holds either, and a
-    # syntax error in `page.eiy` was answered "0 consumer(s) checked, all
-    # compile" while `iyi check page_test.iyi` failed in page.eiy.
-    unimported = typed.select do |path|
-      File.file?(path) && !manifest_changed.includes?(path) && outside_every_closure?(path)
-    end
-
-    consumers = [] of String
-    # The extension in any case, so that `UP.IYI` is refused by name rather
-    # than left out of the ripple in silence (`Lexer.iyi_miscased?`).
-    Dir.glob("**/*.[iI][yY][iI]") do |candidate|
-      abort! Lexer.iyi_miscased_sentence(candidate), :USAGE_ERROR if Lexer.iyi_miscased?(candidate)
-      closure = test_import_closure(candidate)
-      consumers << candidate if closure.nil? || !manifest_changed.empty? || !unimported.empty? ||
-                                closure.any? { |path| changed.includes?(Iyi.file_key(path)) }
-    end
-    consumers.sort!
-
-    failures = [] of {String, CodeError}
-    consumers.each do |consumer|
-      if error = check_one_alone(consumer)
-        failures << {consumer, error}
-      end
-    end
+    result = check_affected_result(changed, typed)
+    consumers = result[:consumers]
+    failures = result[:failures]
+    missing = result[:missing]
+    manifest_changed = result[:manifest_changed]
+    unimported = result[:unimported]
 
     if as_json
       JSON.build(STDOUT) do |json|
@@ -216,6 +117,61 @@ class Iyi::Command
     end
 
     exit failures.empty? ? 0 : 1
+  end
+
+  # The changed files' consumers, each compiled alone, and what failed.
+  private def check_affected_result(changed : Array(String), typed : Array(String))
+    # A changed file that is not there is either deleted or mistyped, and
+    # the two look the same from here. Both get the same consumers - the
+    # closure keeps an import's path after its file is gone - and the
+    # verdict says which file it was, because "0 consumer(s) checked, all
+    # compile" on a typo is a clean verdict about nothing.
+    missing = typed.reject { |path| File.file?(path) }
+
+    # The manifest is not a module, so no closure holds it — and a change
+    # to it moves the code under every module at once: `import
+    # example.test/user/liba` resolves through the requirement it names.
+    # `--affected iyi.mod` answered "0 consumer(s) checked, all compile",
+    # which is a clean verdict about nothing.
+    manifest_changed = typed.select do |path|
+      Iyi::Mod::Installer::MANIFESTS.includes?(File.basename(path)) || Iyi::Mod::Sum::FILES.includes?(File.basename(path))
+    end
+
+    # A changed file no import can name: the prelude, which every module
+    # compiles, and a file that is not a module, which one reaches through
+    # a macro (`Eiy.embed`, `read_file`). No closure holds either, and a
+    # syntax error in `page.eiy` was answered "0 consumer(s) checked, all
+    # compile" while `iyi check page_test.iyi` failed in page.eiy.
+    unimported = typed.select do |path|
+      File.file?(path) && !manifest_changed.includes?(path) && outside_every_closure?(path)
+    end
+
+    consumers = [] of String
+    # The extension in any case, so that `UP.IYI` is refused by name rather
+    # than left out of the ripple in silence (`Lexer.iyi_miscased?`).
+    Dir.glob("**/*.[iI][yY][iI]") do |candidate|
+      abort! Lexer.iyi_miscased_sentence(candidate), :USAGE_ERROR if Lexer.iyi_miscased?(candidate)
+      closure = test_import_closure(candidate)
+      consumers << candidate if closure.nil? || !manifest_changed.empty? || !unimported.empty? ||
+                                closure.any? { |path| changed.includes?(Iyi.file_key(path)) }
+    end
+    consumers.sort!
+
+    failures = [] of {String, CodeError}
+    consumers.each do |consumer|
+      if error = check_one_alone(consumer)
+        failures << {consumer, error}
+      end
+    end
+
+    {consumers: consumers, failures: failures, missing: missing,
+     manifest_changed: manifest_changed, unimported: unimported}
+  end
+
+  # `ris check types --json --affected`: the failures, for diagnostics.
+  private def check_affected_failures(affected : Array(String)) : Array({String, CodeError})
+    changed = affected.map { |value| Iyi.file_key(File.expand_path(value)) }
+    check_affected_result(changed, affected)[:failures]
   end
 
   # One consumer, compiled alone. Definition-site typing rides in the

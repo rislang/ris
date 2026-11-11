@@ -7,7 +7,7 @@
 # now that was a bench; an agent running code it just generated wants it
 # as a verb.
 #
-# The pipeline is exactly the one CI runs (bench/sandbox_story.sh):
+# The pipeline is exactly the one CI runs (test/cli/sandbox_story.sh):
 # cross-compile to wasm32-wasi — which *prints* the link command rather
 # than running it, because the target toolchain is not ours — then run
 # that command with wasi-sdk's clang standing as `cc`, then execute
