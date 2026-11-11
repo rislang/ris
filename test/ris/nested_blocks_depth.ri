@@ -1,0 +1,72 @@
+# 16 nested blocks check in linear time (SPEC 1.1 rounds).
+module test/ris/nested_blocks_depth
+
+def step(x : Int32, &block : Int32 -> Nil) : Nil
+  yield x + 1
+end
+acc = [] of Int32
+step(0) do |v1|
+  w1 = v1 * 2
+  acc << w1
+  step(v1) do |v2|
+    w2 = v2 * 2
+    acc << w2
+    step(v2) do |v3|
+      w3 = v3 * 2
+      acc << w3
+      step(v3) do |v4|
+        w4 = v4 * 2
+        acc << w4
+        step(v4) do |v5|
+          w5 = v5 * 2
+          acc << w5
+          step(v5) do |v6|
+            w6 = v6 * 2
+            acc << w6
+            step(v6) do |v7|
+              w7 = v7 * 2
+              acc << w7
+              step(v7) do |v8|
+                w8 = v8 * 2
+                acc << w8
+                step(v8) do |v9|
+                  w9 = v9 * 2
+                  acc << w9
+                  step(v9) do |v10|
+                    w10 = v10 * 2
+                    acc << w10
+                    step(v10) do |v11|
+                      w11 = v11 * 2
+                      acc << w11
+                      step(v11) do |v12|
+                        w12 = v12 * 2
+                        acc << w12
+                        step(v12) do |v13|
+                          w13 = v13 * 2
+                          acc << w13
+                          step(v13) do |v14|
+                            w14 = v14 * 2
+                            acc << w14
+                            step(v14) do |v15|
+                              w15 = v15 * 2
+                              acc << w15
+                              step(v15) do |v16|
+                                w16 = v16 * 2
+                                acc << w16
+                              end
+                            end
+                          end
+                        end
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+puts acc.sum
