@@ -281,9 +281,10 @@ def answer(&work : -> String) : String
 end
 
 # A server's end of a fresh pair, for a refused call in `answer`'s task.
-def server_end : WebSocket
+def with_server_end(& : WebSocket -> String) : String
   _, b = pair
-  WebSocket.new(b, "", false)
+  socket = WebSocket.new(b, "", false)
+  yield socket
 end
 
 def bytes(list : Array(Int32)) : String
@@ -711,12 +712,23 @@ end
 
 # Two ends of one connection with *deflate* agreed, over a raw pair: the
 # raw peer and the module's end, a server or a client.
-def deflate_pair(deflate : PerMessageDeflate, client : Bool = false) : {Raw, WebSocket, IyiSocket, IyiSocket}
-  a, b = pair
-  if client
-    {Raw.new(b), WebSocket.new(a, "", true, nil, WebSocket::MAX_MESSAGE, deflate), a, b}
-  else
-    {Raw.new(a), WebSocket.new(b, "", false, nil, WebSocket::MAX_MESSAGE, deflate), a, b}
+class RisDeflatePair
+  getter raw : Raw
+  getter ws : WebSocket
+  getter a : IyiSocket
+  getter b : IyiSocket
+
+  def initialize(deflate : PerMessageDeflate, client : Bool = false)
+    a, b = pair
+    @a = a
+    @b = b
+    raw_socket = client ? b : a
+    module_socket = client ? a : b
+    raw = Raw.new(raw_socket)
+    ws = WebSocket.new(module_socket, "", client, nil,
+      WebSocket::MAX_MESSAGE, deflate)
+    @raw = raw
+    @ws = ws
   end
 end
 
@@ -963,7 +975,7 @@ def section_server_reads : Nil
   lead_a, b = pair
   first = frame(1, "from the handshake's read")
   second = frame(2, pattern(40000))
-  ws = WebSocket.new(b, first + second[0, 20000], false)
+  lead_ws = WebSocket.new(b, first + second[0, 20000], false)
   group do |g|
     g.spawn do
       task_raw_7 = Raw.new(lead_a)
@@ -971,9 +983,9 @@ def section_server_reads : Nil
       lead_a.close
       0
     end
-    assert_str "text \"from the handshake's read\"", said(ws.receive), "a frame in the leftover"
-    assert_str "binary 40000 bytes", said(ws.receive), "a frame begun in the leftover"
-    assert_str "text \"after\"", said(ws.receive), "then the socket"
+    assert_str "text \"from the handshake's read\"", said(lead_ws.receive), "a frame in the leftover"
+    assert_str "binary 40000 bytes", said(lead_ws.receive), "a frame begun in the leftover"
+    assert_str "text \"after\"", said(lead_ws.receive), "then the socket"
     0
   end
   puts "  the bytes after the handshake are read first, a frame split between them and the socket"
@@ -1184,7 +1196,11 @@ def section_handshakes : Nil
   puts "\n== permessage-deflate: RFC 7692's examples"
   agreed = PerMessageDeflate.new
   hello = bytes([0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00])
-  raw, ws, a, b = deflate_pair(agreed)
+  deflate_connection_1 = RisDeflatePair.new(agreed)
+  raw = deflate_connection_1.raw
+  ws = deflate_connection_1.ws
+  a = deflate_connection_1.a
+  b = deflate_connection_1.b
   raw.write(frame(1, hello, rsv: 0x40))
   assert_str "text \"Hello\"", said(ws.receive), "§7.2.3.1's Hello in one frame"
   assert_str "41 03 f2 48 cd", hex(frame(1, bytes([0xf2, 0x48, 0xcd]), fin: false, mask: nil, rsv: 0x40)), "the test writes §7.2.3.1's first fragment"
@@ -1233,7 +1249,11 @@ def section_handshakes : Nil
   b.close
   # Under server_no_context_takeover each message starts from nothing, so
   # the second Hello is the first's bytes (§7.2.3.2).
-  raw, ws, a, b = deflate_pair(PerMessageDeflate.new(server_no_context_takeover: true))
+  deflate_connection_2 = RisDeflatePair.new(PerMessageDeflate.new(server_no_context_takeover: true))
+  raw = deflate_connection_2.raw
+  ws = deflate_connection_2.ws
+  a = deflate_connection_2.a
+  b = deflate_connection_2.b
   ws.send("Hello").or_panic
   ws.send("Hello").or_panic
   f = raw.next_frame
@@ -1244,7 +1264,11 @@ def section_handshakes : Nil
   # The level is this end's: at 0 the Hello is §7.2.3.3's stored block,
   # byte for byte; at 1, the default, and at 6 and 9 the same text
   # inflates back, 9 no larger than 1.
-  raw, ws, a, b = deflate_pair(PerMessageDeflate.new(level: 0))
+  deflate_connection_3 = RisDeflatePair.new(PerMessageDeflate.new(level: 0))
+  raw = deflate_connection_3.raw
+  ws = deflate_connection_3.ws
+  a = deflate_connection_3.a
+  b = deflate_connection_3.b
   ws.send("Hello").or_panic
   f = raw.next_frame
   assert_str "c1 0b 00 05 00 fa ff 48 65 6c 6c 6f 00", hex(bytes([f.b0, f.b1]) + f.payload), "at level 0 the Hello is §7.2.3.3's stored block"
@@ -1253,7 +1277,11 @@ def section_handshakes : Nil
   lines = (0...3000).map { |i| "line #{i}: the quick brown fox jumps over the lazy dog #{i % 7}\n" }.join
   by_level = [] of Int32
   [1, 6, 9].each do |level|
-    raw, ws, a, b = deflate_pair(PerMessageDeflate.new(level: level))
+    deflate_connection_4 = RisDeflatePair.new(PerMessageDeflate.new(level: level))
+    raw = deflate_connection_4.raw
+    ws = deflate_connection_4.ws
+    a = deflate_connection_4.a
+    b = deflate_connection_4.b
     ws.send(lines).or_panic
     f = raw.next_frame
     assert_true Inflater.flushed.inflate(tailed(f.payload)) == lines, "#{lines.bytesize} bytes of text at level #{level} inflate"
@@ -1265,7 +1293,11 @@ def section_handshakes : Nil
   assert_true PerMessageDeflate.new.level == 1, "the level is 1 by default"
   # A client's: masked, RSV1 on the frame; client_no_context_takeover the
   # same way.
-  raw, ws, a, b = deflate_pair(PerMessageDeflate.new(client_no_context_takeover: true), client: true)
+  deflate_connection_5 = RisDeflatePair.new(PerMessageDeflate.new(client_no_context_takeover: true), client: true)
+  raw = deflate_connection_5.raw
+  ws = deflate_connection_5.ws
+  a = deflate_connection_5.a
+  b = deflate_connection_5.b
   ws.send("Hello").or_panic
   ws.send("Hello").or_panic
   f = raw.next_frame
@@ -1280,7 +1312,11 @@ def section_handshakes : Nil
   twice = noise(300, 5) + noise(300, 5)
   sizes = [] of Int32
   [15, 8].each do |bits|
-    raw, ws, a, b = deflate_pair(PerMessageDeflate.new(server_max_window_bits: bits))
+    deflate_connection_6 = RisDeflatePair.new(PerMessageDeflate.new(server_max_window_bits: bits))
+    raw = deflate_connection_6.raw
+    ws = deflate_connection_6.ws
+    a = deflate_connection_6.a
+    b = deflate_connection_6.b
     ws.send_binary(twice).or_panic
     f = raw.next_frame
     assert_true Inflater.flushed.inflate(tailed(f.payload)) == twice, "600 bytes at a window of 2^#{bits} inflate"
@@ -1411,10 +1447,10 @@ def section_program_refused : Nil
   puts "\n== what a program is refused"
   # Each refused call is a task's own: it builds its WebSocket there
   # (SPEC 5.1), and the panic ends the task.
-  assert_str "refused: WebSocket: send's text is not UTF-8; send_binary sends bytes", answer { server_end.send(bytes([0xff])); "sent" }, "text that is not UTF-8"
-  assert_str "refused: WebSocket: a ping carries at most 125 bytes, not 126", answer { server_end.ping(pattern(126)); "sent" }, "a long ping"
-  assert_str "refused: WebSocket: close code 1005 is not one an endpoint sends: 1000-1003, 1007-1014 or 3000-4999", answer { server_end.close(1005); "sent" }, "close 1005"
-  assert_str "refused: WebSocket: a close reason is at most 123 bytes, not 124", answer { server_end.close(1000, String.from_bytes(124) { |p| 124.times { |i| p[i] = 120_u8 } }); "sent" }, "a long reason"
+  assert_str "refused: WebSocket: send's text is not UTF-8; send_binary sends bytes", answer { with_server_end { |socket| socket.send(bytes([0xff])); "sent" } }, "text that is not UTF-8"
+  assert_str "refused: WebSocket: a ping carries at most 125 bytes, not 126", answer { with_server_end { |socket| socket.ping(pattern(126)); "sent" } }, "a long ping"
+  assert_str "refused: WebSocket: close code 1005 is not one an endpoint sends: 1000-1003, 1007-1014 or 3000-4999", answer { with_server_end { |socket| socket.close(1005); "sent" } }, "close 1005"
+  assert_str "refused: WebSocket: a close reason is at most 123 bytes, not 124", answer { with_server_end { |socket| socket.close(1000, String.from_bytes(124) { |p| 124.times { |i| p[i] = 120_u8 } }); "sent" } }, "a long reason"
   assert_str "refused: WebSocket: sec-websocket-key is the handshake's own header", answer { socket = WebSocket.new; socket.connect("ws://127.0.0.1:1/", {"sec-websocket-key" => "x"}); "sent" }, "a caller's key, in any case"
   assert_str "refused: WebSocket: protocol \"a b\" is not a token", answer { socket = WebSocket.new; socket.connect("ws://127.0.0.1:1/", protocols: ["a b"]); "sent" }, "a protocol that is not a token"
   assert_str "refused: WebSocket: a max_window_bits is 8 to 15, not 16", answer { PerMessageDeflate.new(server_max_window_bits: 16); "made" }, "a window of 2^16"

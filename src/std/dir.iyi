@@ -697,26 +697,26 @@ pub class Dir
     delete(path)
   end
 
-  def self.glob(patterns : String | Array(String)) : Array(String)
+  def self.glob(patterns : String | Array(String), texts : String::Builder) : Array(String)
     res = [] of String
     glob(patterns) do |entry|
-      res << entry
+      res << glob_hold(texts, entry)
     end
     res
   end
 
   def self.glob(patterns : String | Array(String), & : String -> Nil) : Nil
     if patterns.is_a?(String)
-      glob_single(patterns) { |entry| yield entry }
+      glob_single(patterns) { |entry| yield entry; nil }
     else
       patterns.each do |p|
-        glob_single(p) { |entry| yield entry }
+        glob_single(p) { |entry| yield entry; nil }
       end
     end
   end
 
-  def self.[](patterns : String | Array(String)) : Array(String)
-    glob(patterns)
+  def self.[](patterns : String | Array(String), texts : String::Builder) : Array(String)
+    glob(patterns, texts)
   end
 
   # The other library's glob, a segment at a time: braces are expanded
@@ -747,7 +747,8 @@ pub class Dir
   # seconds where `File.match?` takes none.
   private def self.glob_single(pattern : String, & : String -> Nil) : Nil
     expanded = [] of String
-    glob_expand(pattern, expanded)
+    texts = String::Builder.new(pattern.bytesize)
+    glob_expand(pattern, expanded, texts)
     expanded.each do |one|
       bytes = one
       n = one.bytesize
@@ -794,19 +795,19 @@ pub class Dir
         next
       end
       seen = {} of String => Bool
-      glob_step(root, segs, seps, 0, tail, seen) { |entry| yield entry }
+      glob_step(root, segs, seps, 0, tail, seen, texts) { |entry| yield entry }
     end
   end
 
   # The first brace group at the top level, each branch put in its place
   # and expanded again; a pattern with none is itself. A `\` escapes the
   # byte after it on posix; on Windows it is a separator.
-  private def self.glob_expand(pattern : String, expanded : Array(String)) : Nil
+  private def self.glob_expand(pattern : String, expanded : Array(String), texts : String::Builder) : Nil
     # A stack, not recursion: a branch's own braces wait their turn, last
     # pushed first, so the patterns come out in the order they are written.
     pending = [pattern]
     while current = pending.pop?
-      glob_expand_one(current, expanded, pending)
+      glob_expand_one(current, expanded, pending, texts)
     end
   end
 
@@ -814,7 +815,7 @@ pub class Dir
   # put back on *pending* a branch at a time, or *pattern* itself, with
   # none, onto *expanded*.
   private def self.glob_expand_one(pattern : String, expanded : Array(String),
-                                   pending : Array(String)) : Nil
+                                   pending : Array(String), texts : String::Builder) : Nil
     bytes = pattern
     n = pattern.bytesize
     depth = 0
@@ -839,13 +840,19 @@ pub class Dir
           branches << glob_bytes(bytes, from + 1, at - from - 1)
           front = glob_bytes(bytes, 0, open)
           back = glob_bytes(bytes, at + 1, n - at - 1)
-          branches.reverse_each { |branch| pending << front + branch + back }
+          branches.reverse_each { |branch| pending << glob_hold(texts, front + branch + back) }
           return
         end
       end
       at = at + 1
     end
-    expanded << pattern
+    expanded << glob_hold(texts, pattern)
+  end
+
+  private def self.glob_hold(texts : String::Builder, value : String) : String
+    at = texts.bytesize
+    texts << value
+    texts.finish[at, value.bytesize]
   end
 
   private def self.glob_bytes(bytes : String, from : Int32, count : Int32) : String
@@ -880,10 +887,10 @@ pub class Dir
 
   # *tail* is the separator a pattern ends in, which asks for directories
   # and is written after each.
-  private def self.glob_yield(path : String, tail : String?, seen : Hash(String, Bool), & : String -> Nil) : Nil
+  private def self.glob_yield(path : String, tail : String?, seen : Hash(String, Bool), texts : String::Builder, & : String -> Nil) : Nil
     if tail
       return unless Dir.exists?(path)
-      path = path + tail unless glob_rooted?(path)
+      path = glob_hold(texts, path + tail) unless glob_rooted?(path)
     end
     return if seen.has_key?(path)
     seen[path] = true
@@ -894,30 +901,31 @@ pub class Dir
   private def self.glob_step(path : String?, segs : Array(String),
                              seps : Array(String), index : Int32,
                              tail : String?, seen : Hash(String, Bool),
-                             & : String -> Nil) : Nil
+                             texts : String::Builder, & : String -> Nil) : Nil
     pending = Array(Tuple(String?, Int32)).new
     pending << {path, index}
+    children = Array(Tuple(String?, Int32)).new
     until pending.empty?
       current, at = pending.pop
       if at == segs.size
-        glob_yield(current || ".", tail, seen) { |name| yield name }
+        glob_yield(current || ".", tail, seen, texts) { |name| yield name }
         next
       end
       seg = segs[at]
       sep = seps[at]
       entry = at == segs.size - 1 && !tail
-      children = Array(Tuple(String?, Int32)).new
+      children.clear
       if seg == "**" && !entry
         children << {current, at + 1}
         glob_children(current, false) do |name|
-          full = glob_join(current, name, sep)
+          full = glob_hold(texts, glob_join(current, name, sep))
           children << {full, at} if glob_dir?(full)
         end
       elsif glob_literal?(seg)
-        full = glob_join(current, seg, sep)
+        full = glob_hold(texts, glob_join(current, seg, sep))
         if entry
           if File.exists?(full) || File.symlink?(full)
-            glob_yield(full, nil, seen) { |name| yield name }
+            glob_yield(full, nil, seen, texts) { |name| yield name }
           end
         else
           children << {full, at + 1}
@@ -925,9 +933,9 @@ pub class Dir
       else
         glob_children(current, seg.starts_with?('.')) do |name|
           next unless File.match?(name, seg)
-          full = glob_join(current, name, sep)
+          full = glob_hold(texts, glob_join(current, name, sep))
           if entry
-            glob_yield(full, nil, seen) { |found| yield found }
+            glob_yield(full, nil, seen, texts) { |found| yield found }
           elsif glob_dir?(full)
             children << {full, at + 1}
           end

@@ -399,6 +399,7 @@ end
     getter socket : IyiSocket
 
     def initialize(@socket : IyiSocket, buffer_size : Int32 = 4096)
+      @socket.attach_stream
       super(-1_i64, buffer_size, false)
     end
 
@@ -441,7 +442,7 @@ pub struct IyiSocket
     # Per-wait bounds; nil waits without a deadline.
     property read_timeout_ms : Int32? = nil
     property write_timeout_ms : Int32? = nil
-    property io : Std::Socket::SocketIO? = nil
+    property streamed : Bool = false
 
     def initialize(@fd : Int32, @family : Int32)
     end
@@ -534,20 +535,10 @@ pub struct IyiSocket
     @state.value.fd
   end
 
-  {% if @top_level.has_constant?("IyiIO") %}
-
-    # This socket as a stream (`SocketIO`), the same one every time, so
-    # what one read took ahead the next reads. It was a stream over the
-    # descriptor that read a socket with nothing yet to read as failed.
-    def to_io : Std::Socket::SocketIO
-      if made = @state.value.io
-        return made
-      end
-      made = Std::Socket::SocketIO.new(self)
-      @state.value.io = made
-      made
-    end
-  {% end %}
+  # A caller-owned stream may hold unread bytes for this descriptor.
+  def attach_stream : Nil
+    @state.value.streamed = true
+  end
 
   # --- Connection and Listening ---
 
@@ -1766,10 +1757,10 @@ pub struct IyiSocket
   # connection that dials again keeps one socket. Only scalars move;
   # *source* reads as closed after.
   def take_descriptor(source : IyiSocket) : Nil
-    unless @state.value.fd < 0 && @state.value.io.nil? && @state.value.path.nil?
+    unless @state.value.fd < 0 && !@state.value.streamed && @state.value.path.nil?
       raise "an open or buffered socket cannot refill; close it first"
     end
-    unless source.@state.value.fd >= 0 && source.@state.value.io.nil? && source.@state.value.path.nil?
+    unless source.@state.value.fd >= 0 && !source.@state.value.streamed && source.@state.value.path.nil?
       raise "the source needs a fresh, unread IP descriptor"
     end
     @state.value.family = source.@state.value.family

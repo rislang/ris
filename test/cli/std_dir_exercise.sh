@@ -176,7 +176,7 @@ case "$(uname -s)" in
     ;;
   *) ln -s "$WORK/looped/d" "$WORK/looped/d/loop" ;;
 esac
-printf 'module main\n\nimport std/dir::{Dir}\n\nputs Dir.glob(Program.args[0] + "/**/*.txt").size\n' > "$WORK/looped.iyi"
+printf 'module main\n\nimport std/dir::{Dir}\n\ntexts = String::Builder.new(4096)\nputs Dir.glob(Program.args[0] + "/**/*.txt", texts).size\n' > "$WORK/looped.iyi"
 if [ ! -d "$WORK/looped/d/loop" ]; then
   echo "  no link was made, so a walk past one is unmeasured"
 else

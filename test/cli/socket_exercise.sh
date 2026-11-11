@@ -360,11 +360,6 @@ prove_fails "a read timeout not kept" untimed "timeout: the read answered" \
 prove_fails "local port returns 0" badport "local_port failed:" \
   '{ sub(/\(high << 8\) \| low/, "0"); print }'
 
-# A socket's stream made anew at each `to_io`: the second line, already in
-# the first stream's read-ahead, is never read, and the read times out.
-prove_fails "a socket's stream made anew each time" fresh_io "stream: two lines in one write" \
-  '{ sub(/^      @state\.value\.io = made$/, ""); print }'
-
 # A read the socket refuses taken for a clean end: `read_failed?` says no.
 prove_fails "a refused socket read taken for the end" quiet_end "stream: a timed-out read" \
   '{ sub(/return -1_i64 if got.is_a\?\(SocketError\)/, "return 0_i64 if got.is_a?(SocketError)"); print }'

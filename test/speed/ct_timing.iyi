@@ -68,7 +68,26 @@ class Draw
   end
 end
 
-def euclid(a : BigInt, m : BigInt) : BigInt?
+class BigBacking
+  @limbs : Array(UInt64)
+
+  def initialize(capacity : Int32)
+    @limbs = Array(UInt64).new(capacity)
+  end
+
+  def keep(value : BigInt) : BigInt
+    BigInt.new(value.sign, keep_limbs(value.limbs))
+  end
+
+  private def keep_limbs(value : Array::View(UInt64)) : Array::View(UInt64)
+    at = @limbs.size
+    @limbs.concat(value)
+    @limbs[at, value.size]
+  end
+end
+
+def euclid(a : BigInt, m : BigInt, result : BigBacking) : BigInt?
+  work = BigBacking.new(4096)
   t0 = BigInt.new(0)
   t1 = BigInt.new(1)
   r0 = m
@@ -77,12 +96,12 @@ def euclid(a : BigInt, m : BigInt) : BigInt?
   while going
     q, rest = r0.divmod(r1)
     r0 = r1
-    r1 = rest
-    t0, t1 = t1, t0 - q * t1
+    r1 = work.keep(rest)
+    t0, t1 = t1, work.keep(t0 - q * t1)
     going = !r1.zero?
   end
   return nil unless r0 == BigInt.new(1)
-  t0.negative? ? t0 + m : t0
+  result.keep(t0.negative? ? t0 + m : t0)
 end
 
 # Welch's t between the times of class 0 and class 1 at or under *limit*.
@@ -113,13 +132,23 @@ end
 # One run of *target*: *samples* measurements, the largest |t| over the
 # percentile crops, and a value made of every answer so none is unused.
 def measure(target : String, samples : Int32, pem : String?) : {Float64, Int32}
+  if target == "rsa"
+    text = File.read(pem || raise("rsa needs a PEM"))
+    key = RsaPrivateKey.from_pem(text).or_panic
+    measure_key(target, samples, key)
+  else
+    measure_key(target, samples, nil)
+  end
+end
+
+def measure_key(target : String, samples : Int32,
+                rsa_key : RsaPrivateKey?) : {Float64, Int32}
   draw = Draw.new(0x9E3779B97F4A7C15_u64)
 
   modulus = (BigInt.one << 2047) + BigInt.from_bytes(draw.bytes(255))
   modulus = modulus + BigInt.one if modulus.even?
   # (m - 1) / 2: as long as a random x, and its Euclid ends in two steps.
   fixed_x = (modulus - BigInt.one) >> 1
-  rsa_key = target == "rsa" ? RsaPrivateKey.from_pem(File.read(pem || raise("rsa needs a PEM"))).or_panic : nil
   p256_key = P256PrivateKey.from_bytes(draw.bytes(32)).or_panic
   peer = X25519.public_key(draw.bytes(32))
   fixed_secret = draw.bytes(32)
@@ -127,21 +156,28 @@ def measure(target : String, samples : Int32, pem : String?) : {Float64, Int32}
   # For p256-length: random messages whose r and s are as long in DER as the
   # fixed one's, a DER INTEGER being as long as its value's top bytes make it:
   # the signature's encoding, which is public, then takes one course.
-  same_length = [] of Array(UInt8)
+  same_length = Array(Array(UInt8)).new(256) { Array(UInt8).new(64, 0_u8) }
   if target == "p256-length"
     fixed_signature = p256_key.sign(EcdsaHash::SHA256, fixed_message)
     # SEQUENCE { INTEGER r, INTEGER s }: r's length at 3, s's after r.
     want = {fixed_signature[3], fixed_signature[5 + fixed_signature[3].to_i32]}
-    while same_length.size < 256
+    accepted = 0
+    while accepted < 256
       candidate = draw.bytes(64)
       signature = p256_key.sign(EcdsaHash::SHA256, candidate)
-      same_length << candidate if {signature[3], signature[5 + signature[3].to_i32]} == want
+      if {signature[3], signature[5 + signature[3].to_i32]} == want
+        64.times { |i| same_length[accepted][i] = candidate[i] }
+        accepted += 1
+      end
     end
   end
 
   # The random inputs are drawn before the clock starts, 1,024 of each, so
   # that neither class allocates more than the other between measurements.
-  xs = Array(BigInt).new(1024) { |_| BigInt.from_bytes(draw.bytes(256)) % modulus }
+  xs_limbs = BigBacking.new(65536)
+  xs = Array(BigInt).new(1024) do |_|
+    xs_limbs.keep(BigInt.from_bytes(draw.bytes(256)) % modulus)
+  end
   messages = Array(Array(UInt8)).new(1024) { |_| draw.bytes(64) }
   secrets = Array(Array(UInt8)).new(1024) { |_| draw.bytes(32) }
   p384_key = P384PrivateKey.from_bytes(draw.bytes(48)).or_panic
@@ -182,12 +218,13 @@ def measure(target : String, samples : Int32, pem : String?) : {Float64, Int32}
     x = c == 0 ? fixed_x : xs[pick]
     message = c == 0 ? fixed_message : (target == "p256-length" ? same_length[pick & 255] : (target == "p256-two" ? messages[0] : messages[pick]))
     secret = c == 0 ? fixed_secret : secrets[pick]
+    euclid_result = BigBacking.new(64)
     started = Time.monotonic_nanoseconds
     case target
     when "inverse"
       sink = sink ^ (x.inverse_mod_secret(modulus) || BigInt.zero).limbs.size
     when "euclid"
-      sink = sink ^ (euclid(x, modulus) || BigInt.zero).limbs.size
+      sink = sink ^ (euclid(x, modulus, euclid_result) || BigInt.zero).limbs.size
     when "rsa"
       key = rsa_key
       raise "rsa needs a PEM" unless key
@@ -267,7 +304,7 @@ if args.empty?
   t = welch(times, classes, 200_i64)
   raise "welch: two shifted sequences of 500 give #{t}, where Python's statistics make -8.989272971434428" unless near(t, -8.989272971434428)
   puts "  Welch's t as Python's statistics computes it on six fixed samples"
-  pem = __DIR__ + "/../test/std/data/openssl/openssl.key"
+  pem = __DIR__ + "/../std/data/openssl/openssl.key"
   TARGETS.each do |target|
     t, sink = measure(target, 40, pem)
     raise "#{target}: |t| is #{t}" unless t >= 0.0 && t < 1.0e300

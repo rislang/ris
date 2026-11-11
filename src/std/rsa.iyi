@@ -392,7 +392,7 @@ pub struct RsaPrivateKey
     return RsaError.new("a private key whose dp is not d mod (p - 1)") unless bd % p1 == bdp
     return RsaError.new("a private key whose dq is not d mod (q - 1)") unless bd % q1 == bdq
     return RsaError.new("a private key whose qi is not the inverse of q mod p") unless bqi < bp && (bqi * bq) % bp == one
-    RsaPrivateKey.new(public, bp, bq, bdp, bdq, bqi, SHA256.hash_bytes(RsaBytes.of("std/rsa signing") + d))
+    RsaPrivateKey.new(public, bp, bq, bdp, bdq, bqi, SHA256.hash_bytes(RsaBytes.of("std/rsa signing") + d)).copy_to(RisCurrentTape.new)
   end
 
   def initialize(@public_key : RsaPublicKey, @p : BigInt, @q : BigInt, @dp : BigInt, @dq : BigInt, @qi : BigInt, @prf : Array(UInt8))
@@ -413,11 +413,14 @@ pub struct RsaPrivateKey
     if text.includes?("-----BEGIN ENCRYPTED PRIVATE KEY-----") || text.includes?(ENCRYPTED_PKCS1)
       return RsaError.new("an encrypted private key, which this cannot open")
     end
-    pkcs1 = RsaPem.blocks(text, "RSA PRIVATE KEY")!
-    pkcs8 = RsaPem.blocks(text, "PRIVATE KEY")!
+    bytes = Array(UInt8).new(text.bytesize, 0_u8)
+    pkcs1 = [] of Array::View(UInt8)
+    pkcs8 = [] of Array::View(UInt8)
+    RsaPem.blocks(text, "RSA PRIVATE KEY", pkcs1, bytes)!
+    RsaPem.blocks(text, "PRIVATE KEY", pkcs8, bytes)!
     count = pkcs1.size + pkcs8.size
     return RsaError.new("#{count} blocks of RSA PRIVATE KEY or PRIVATE KEY, not one") unless count == 1
-    pkcs1.size == 1 ? from_pkcs1(pkcs1[0]) : from_pkcs8(pkcs8[0])
+    (pkcs1.size == 1 ? from_pkcs1(pkcs1[0]) : from_pkcs8(pkcs8[0])).copy_to(RisCurrentTape.new)
   end
 
   # An RSAPrivateKey (appendix A.1.2) of two primes: version 0 and the
@@ -619,25 +622,34 @@ end
 
 # PEM blocks (RFC 7468) of one label, as DER.
 struct RsaPem
-  def self.blocks(text : String, label : String) : Array(Array(UInt8)) | RsaError
+  def self.blocks(text : String, label : String,
+                  found : Array(Array::View(UInt8)),
+                  bytes : Array(UInt8)) : RsaError | Nil
     opening = "-----BEGIN #{label}-----"
     closing = "-----END #{label}-----"
-    found = [] of Array(UInt8)
-    body = nil
+    body = String::Builder.new(text.bytesize)
+    reading = false
+    used = 0
     text.lines.each do |raw_line|
       line = raw_line.strip
-      current = body
-      if current.nil?
-        body = String::Builder.new if line == opening
+      if !reading
+        if line == opening
+          body.clear
+          reading = true
+        end
       elsif line == closing
-        found << decode(current.to_s, label)!
-        body = nil
+        decoded = decode(body.finish, label)!
+        at = used
+        decoded.size.times { |i| bytes[at + i] = decoded[i] }
+        used += decoded.size
+        found << bytes[at, decoded.size]
+        reading = false
       else
-        current << line
+        body << line
       end
     end
-    return RsaError.new("a #{label} block with no END line") unless body.nil?
-    found
+    return RsaError.new("a #{label} block with no END line") if reading
+    nil
   end
 
   private def self.decode(text : String, label : String) : Array(UInt8) | RsaError

@@ -1,0 +1,7 @@
+import std/rsa::{RsaPrivateKey, RsaHash}
+import std/file::{File}
+
+pem = File.read("test/std/data/openssl/openssl.key")
+key = RsaPrivateKey.from_pem(pem).or_panic
+signature = key.sign_pss(RsaHash::SHA256, [1_u8, 2_u8])
+exit 1 unless signature.size == 256
