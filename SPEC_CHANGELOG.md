@@ -4,6 +4,14 @@ Every change to SPEC.md gets an entry here in the same commit: date,
 what changed and why. Newest first. An agent never edits the spec without
 one. Entries before 2026-10-31 name the file by its old name, TAPE_SPEC.md.
 
+## 2026-11-11 · 8.1@5897720c
+
+* New: std modules follow the standard named by their header; spec 8.1
+  requires a leading `# standard: ...` comment.
+* Why: format and RFC tests need a clause before moving beside std code.
+  Reviewed design: doc/drafts/spec-port/ (3.1); the review settled the
+  header syntax, clause number and landing with pilot proofs and ack.
+
 ## 2026-11-11 · 6.9@9d41266e
 
 * Was: `ris init` wrote test/NAME_test.ri, a `# spec: 1.1@HASH` tag

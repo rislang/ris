@@ -113,6 +113,9 @@ jobs:
         run: bash test/cli/spec_blocks_old_test.sh
         env:
           IYI: ./bin/ris
+      - name: spec port preserves counts and fails when flipped
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_port_counts.sh
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:

@@ -1,3 +1,4 @@
+# standard: POSIX pathname syntax; Python pathlib PureWindowsPath semantics
 # File system paths, read lexically: nothing here touches the file
 # system. A `Path` is a name and a kind, POSIX (`/` separates) or
 # Windows (`\` and `/` both separate); `Path.new` takes the kind the
@@ -799,4 +800,40 @@ pub struct Path
   def to_native : Path
     to_kind(Kind.native)
   end
+end
+
+spec 8.1  # A std module follows the standard its header names (an RFC, a file…
+  sample_path = Path.posix("/a//b/../c.txt")
+  sample_path.basename == "c.txt"
+  sample_path.extension == ".txt" && sample_path.stem == "c"
+  normal = sample_path.normalize
+  normal.name == "/a/c.txt"
+  normal.parent.name == "/a"
+  relative = normal.relative_to?("/a")
+  (relative && relative.name == "c.txt") == true
+  Path.windows("C:/a/../b").normalize.name == "C:\\b"
+  Path.windows("C:").join("foo").name == "C:foo"
+  writer = String::Builder.new(1)
+  writer << "prefix:"
+  normal.write(writer)
+  writer.finish == "prefix:/a/c.txt"
+  Path.posix("").normalize.name == "."
+  unc = Path.windows("\\\\srv\\share")
+  unc.absolute?
+  unc.join("a").name == "\\\\srv\\share\\a"
+  Path.posix("/a.txt/").basename(
+    ".txt") == "a"
+  expanded = Path.windows("C:é").expand("C:\\a")
+  expanded.name == "C:\\a\\é"
+  normal.parents[0].name == "/"
+end
+
+spec 1.5  # A def builds its tape result in its caller's destination (Goose §7,…
+  kept = ""
+  tape do
+    kept = Path.posix("/a//b/../c.txt").normalize.name.copy_to(Program.tape)
+  end
+  Path.posix("/a//b/../c.txt").normalize.name == kept
+  sample_path = Path.posix("/a//b/../c.txt")
+  sample_path.name == sample_path.copy_to(Program.tape).name
 end

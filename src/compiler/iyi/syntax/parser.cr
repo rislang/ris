@@ -462,8 +462,27 @@ module Iyi
       case node
       when ModuleHeader, ImportDecl, UsingDecl, Require, Def, Macro,
            ClassDef, ModuleDef, EnumDef, LibDef, Alias, AnnotationDef,
-           Annotation, CStructOrUnionDef, FunDef, TypeDef, Nop, SpecBlock
+           Annotation, CStructOrUnionDef, FunDef, TypeDef, ImplDef, Nop, SpecBlock
         true
+      when MacroLiteral
+        begin
+          ris_declaration?(Parser.new(node.value).parse)
+        rescue SyntaxException
+          false
+        end
+      when MacroIf
+        ris_declaration?(node.then) && ris_declaration?(node.else)
+      when Expressions
+        if node.expressions.all?(&.is_a?(MacroLiteral))
+          text = node.expressions.map(&.as(MacroLiteral).value).join
+          begin
+            ris_declaration?(Parser.new(text).parse)
+          rescue SyntaxException
+            false
+          end
+        else
+          node.expressions.all? { |child| ris_declaration?(child) }
+        end
       when Assign
         node.target.is_a?(Path) && ris_literal?(node.value)
       else
@@ -671,6 +690,28 @@ module Iyi
       end
     end
 
+    # Pure library proofs must not acquire ris_spec's filesystem imports:
+    # path -> ris_spec -> dir -> path is otherwise a synthetic cycle.
+    private class RisSpecCoreFinder < Visitor
+      getter needed = false
+
+      def visit(node : Call)
+        @needed = true if node.obj.nil? && node.name.in?("tmp", "free_port")
+        true
+      end
+
+      def visit(node : Path)
+        @needed = true if node.names.any? do |name|
+                            name.in?("RisTmp", "RisRun", "RisProcess", "RisProgram")
+                          end
+        true
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
     private def ris_lower_spec(list : Array(ASTNode), first : Int32) : ASTNode
       file = (name = @filename).is_a?(String) ? Iyi.relative_filename(name) : "?"
       program = Parser.ris_program_file?(list) ? ris_program_name(list) : nil
@@ -688,15 +729,20 @@ module Iyi
                 "local", found[1]
         end
       end
-      # The core of every block, test-only: after the header (5.7).
-      core = Parser.new("import std/ris_spec::{RisTmp, RisRun, RisProcess, RisProgram, free_port}\n")
-      core.filename = @filename
-      at = list[first]
-      imported = core.parse
-      imported = imported.is_a?(Expressions) ? imported.expressions : [imported] of ASTNode
-      imported.each(&.location=(at.location))
-      header = kept.index(&.is_a?(ModuleHeader))
-      kept.insert_all(header ? header + 1 : 0, imported)
+      core_finder = RisSpecCoreFinder.new
+      list[first..].each(&.accept(core_finder))
+      needs_core = !program.nil? || core_finder.needed
+      if needs_core
+        # The core of every block, test-only: after the header (5.7).
+        core = Parser.new("import std/ris_spec::{RisTmp, RisRun, RisProcess, RisProgram, free_port}\n")
+        core.filename = @filename
+        at = list[first]
+        imported = core.parse
+        imported = imported.is_a?(Expressions) ? imported.expressions : [imported] of ASTNode
+        imported.each(&.location=(at.location))
+        header = kept.index(&.is_a?(ModuleHeader))
+        kept.insert_all(header ? header + 1 : 0, imported)
+      end
       if program
         runner_text = "private def #{program}(tmp : RisTmp, *args, stdin : String = \"\", " \
                       "env : Hash(String, String) = {} of String => String) : RisRun\n" \
@@ -718,11 +764,12 @@ module Iyi
         ris_check_clause(block)
         index = main.size
         # `tmp`, removed with the block's processes when it ends (5.7).
-        body = [
-          Assign.new(Var.new("tmp").at(block),
-            Call.new(Path.new(["RisTmp"]).at(block), "new").at(block)).at(block),
-          Defer.new(Call.new(Var.new("tmp").at(block), "close").at(block)).at(block),
-        ] of ASTNode
+        body = [] of ASTNode
+        if needs_core
+          body << Assign.new(Var.new("tmp").at(block),
+            Call.new(Path.new(["RisTmp"]).at(block), "new").at(block)).at(block)
+          body << Defer.new(Call.new(Var.new("tmp").at(block), "close").at(block)).at(block)
+        end
         typed = [] of ASTNode
         typed_lines = [] of Int32
         asserts = 0
@@ -851,10 +898,10 @@ module Iyi
         node = node.exp
       end
       case node
-      when Def      then "`#{prefix}def #{node.name}`"
-      when ClassDef then "`#{prefix}#{node.struct? ? "struct" : "class"} #{node.name}`"
+      when Def       then "`#{prefix}def #{node.name}`"
+      when ClassDef  then "`#{prefix}#{node.struct? ? "struct" : "class"} #{node.name}`"
       when ModuleDef then "`#{prefix}module #{node.name}`"
-      when EnumDef  then "`#{prefix}enum #{node.name}`"
+      when EnumDef   then "`#{prefix}enum #{node.name}`"
       else
         text = node.to_s.lines.first? || ""
         text = "#{text[0, 40]}…" if text.size > 40

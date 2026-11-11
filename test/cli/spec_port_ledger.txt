@@ -1,0 +1,843 @@
+# Port ledger: source then indented JSON; old counts are frozen.
+# baseline cases: 485
+test/ris/allowed.ri
+  {
+    "state": "stays: todo",
+    "old": 20,
+    "shell_old": 1
+  }
+test/ris/autocert.ri
+  {
+    "state": "stays: todo",
+    "old": 36,
+    "shell_old": 0
+  }
+test/ris/autocert_wire.ri
+  {
+    "state": "stays: todo",
+    "old": 16,
+    "shell_old": 3
+  }
+test/ris/base32.ri
+  {
+    "state": "ported",
+    "old": 13,
+    "dest": "src/std/base32.iyi",
+    "clauses": [
+      "8.1",
+      "1.5"
+    ],
+    "new": 13,
+    "driver": true,
+    "retained": 3,
+    "case": "for name in std_generic_tape",
+    "case_hash": "f6f4c95772d013ca"
+  }
+test/ris/base64.ri
+  {
+    "state": "ported",
+    "old": 7,
+    "dest": "src/std/base64.iyi",
+    "clauses": [
+      "8.1",
+      "1.5"
+    ],
+    "new": 7,
+    "driver": false,
+    "retained": 0
+  }
+test/ris/big_tape.ri
+  {
+    "state": "stays: todo",
+    "old": 14,
+    "shell_old": 3
+  }
+test/ris/bzip2.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/cleanup_allocations.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/cleanup_cancel.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/cleanup_current.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/cleanup_exit.ri
+  {
+    "state": "stays: todo",
+    "old": 1,
+    "shell_old": 1
+  }
+test/ris/cleanup_order.ri
+  {
+    "state": "stays: todo",
+    "old": 1,
+    "shell_old": 1
+  }
+test/ris/cleanup_self.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/const_int_width.ri
+  {
+    "state": "stays: todo",
+    "old": 7,
+    "shell_old": 3
+  }
+test/ris/cookie.ri
+  {
+    "state": "stays: todo",
+    "old": 18,
+    "shell_old": 0
+  }
+test/ris/csv.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/debug.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 6
+  }
+test/ris/deque.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/dir_children.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 2
+  }
+test/ris/dns.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/eiy.ri
+  {
+    "state": "stays: todo",
+    "old": 7,
+    "shell_old": 3
+  }
+test/ris/escape.ri
+  {
+    "state": "stays: todo",
+    "old": 3,
+    "shell_old": 0
+  }
+test/ris/file_metadata.ri
+  {
+    "state": "stays: todo",
+    "old": 13,
+    "shell_old": 0
+  }
+test/ris/fileserver.ri
+  {
+    "state": "stays: todo",
+    "old": 2,
+    "shell_old": 1
+  }
+test/ris/format.ri
+  {
+    "state": "stays: todo",
+    "old": 8,
+    "shell_old": 3
+  }
+test/ris/heap_exemptions.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 0
+  }
+test/ris/heap_kinds.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/hpack.ri
+  {
+    "state": "stays: todo",
+    "old": 12,
+    "shell_old": 1
+  }
+test/ris/hpke_owners.ri
+  {
+    "state": "stays: todo",
+    "old": 1,
+    "shell_old": 3
+  }
+test/ris/ini.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/iterator_stop.ri
+  {
+    "state": "stays: todo",
+    "old": 3,
+    "shell_old": 0
+  }
+test/ris/json.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 0
+  }
+test/ris/json_buffer.ri
+  {
+    "state": "stays: todo",
+    "old": 13,
+    "shell_old": 0
+  }
+test/ris/lifetime_flow.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/little_endian.ri
+  {
+    "state": "stays: todo",
+    "old": 32,
+    "shell_old": 1
+  }
+test/ris/local.ri
+  {
+    "state": "stays: todo",
+    "old": 1,
+    "shell_old": 2
+  }
+test/ris/local_cleanup.ri
+  {
+    "state": "stays: todo",
+    "old": 1,
+    "shell_old": 1
+  }
+test/ris/log_async.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/log_for_constant.ri
+  {
+    "state": "stays: todo",
+    "old": 6,
+    "shell_old": 1
+  }
+test/ris/log_tape.ri
+  {
+    "state": "stays: todo",
+    "old": 5,
+    "shell_old": 1
+  }
+test/ris/mail.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/mime.ri
+  {
+    "state": "stays: todo",
+    "old": 16,
+    "shell_old": 3
+  }
+test/ris/netip.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/number_format.ri
+  {
+    "state": "stays: todo",
+    "old": 19,
+    "shell_old": 0
+  }
+test/ris/once_in_program_init.ri
+  {
+    "state": "stays: todo",
+    "old": 1,
+    "shell_old": 1
+  }
+test/ris/option_parser.ri
+  {
+    "state": "stays: todo",
+    "old": 3,
+    "shell_old": 4
+  }
+test/ris/option_parser_panics.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 4
+  }
+test/ris/otp.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/params_write_tape.ri
+  {
+    "state": "stays: todo",
+    "old": 3,
+    "shell_old": 3
+  }
+test/ris/password.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/path.ri
+  {
+    "state": "ported",
+    "old": 19,
+    "dest": "src/std/path.iyi",
+    "clauses": [
+      "8.1",
+      "1.5"
+    ],
+    "new": 19,
+    "driver": true,
+    "retained": 3,
+    "case": "big_tape mime path",
+    "case_hash": "e6211b7d92c8da9a"
+  }
+test/ris/pipe_reuse.ri
+  {
+    "state": "stays: todo",
+    "old": 7,
+    "shell_old": 4
+  }
+test/ris/pipe_wait.ri
+  {
+    "state": "stays: todo",
+    "old": 4,
+    "shell_old": 1
+  }
+test/ris/png.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/query.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/query_scope.ri
+  {
+    "state": "stays: todo",
+    "old": 1,
+    "shell_old": 5
+  }
+test/ris/regex.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/round_struct_kept.ri
+  {
+    "state": "stays: todo",
+    "old": 3,
+    "shell_old": 1
+  }
+test/ris/router.ri
+  {
+    "state": "stays: todo",
+    "old": 5,
+    "shell_old": 0
+  }
+test/ris/scope_cleanup.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/secure_dns.ri
+  {
+    "state": "stays: todo",
+    "old": 1,
+    "shell_old": 3
+  }
+test/ris/semantic_version.ri
+  {
+    "state": "ported",
+    "old": 18,
+    "dest": "src/std/semantic_version.iyi",
+    "clauses": [
+      "8.1",
+      "1.5"
+    ],
+    "new": 18,
+    "driver": true,
+    "retained": 3,
+    "case": "for name in std_generic_tape",
+    "case_hash": "f6f4c95772d013ca"
+  }
+test/ris/shlex.ri
+  {
+    "state": "stays: todo",
+    "old": 14,
+    "shell_old": 3
+  }
+test/ris/signal_flags.ri
+  {
+    "state": "stays: todo",
+    "old": 1,
+    "shell_old": 1
+  }
+test/ris/slice_dup.ri
+  {
+    "state": "stays: todo",
+    "old": 3,
+    "shell_old": 3
+  }
+test/ris/smtp.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/socket_kept.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 0
+  }
+test/ris/socket_pair.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/socket_pieces.ri
+  {
+    "state": "stays: todo",
+    "old": 1,
+    "shell_old": 1
+  }
+test/ris/sse.ri
+  {
+    "state": "stays: todo",
+    "old": 12,
+    "shell_old": 1
+  }
+test/ris/static_array_copy.ri
+  {
+    "state": "stays: todo",
+    "old": 2,
+    "shell_old": 3
+  }
+test/ris/std_io_tape.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/std_text_tape.ri
+  {
+    "state": "stays: todo",
+    "old": 8,
+    "shell_old": 3
+  }
+test/ris/string_parameters.ri
+  {
+    "state": "stays: todo",
+    "old": 3,
+    "shell_old": 0
+  }
+test/ris/string_pool.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/svcb_store.ri
+  {
+    "state": "stays: todo",
+    "old": 3,
+    "shell_old": 0
+  }
+test/ris/system.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 5
+  }
+test/ris/tape_string.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/tar.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/task_reached_proc.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/text_format_tape.ri
+  {
+    "state": "stays: todo",
+    "old": 7,
+    "shell_old": 3
+  }
+test/ris/thread_program_initializers.ri
+  {
+    "state": "stays: todo",
+    "old": 2,
+    "shell_old": 1
+  }
+test/ris/time_tape_offset.ri
+  {
+    "state": "stays: todo",
+    "old": 2,
+    "shell_old": 1
+  }
+test/ris/tls_error_message.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/toml.ri
+  {
+    "state": "stays: todo",
+    "old": 20,
+    "shell_old": 3
+  }
+test/ris/toml_round_flags.ri
+  {
+    "state": "stays: todo",
+    "old": 1,
+    "shell_old": 1
+  }
+test/ris/udp.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/uri_legacy.ri
+  {
+    "state": "stays: todo",
+    "old": 7,
+    "shell_old": 3
+  }
+test/ris/uri_tape.ri
+  {
+    "state": "stays: todo",
+    "old": 17,
+    "shell_old": 3
+  }
+test/ris/uuid.ri
+  {
+    "state": "ported",
+    "old": 14,
+    "dest": "src/std/uuid.iyi",
+    "clauses": [
+      "8.1",
+      "1.5"
+    ],
+    "new": 14,
+    "driver": true,
+    "retained": 3,
+    "case": "for name in std_generic_tape",
+    "case_hash": "f6f4c95772d013ca"
+  }
+test/ris/websocket.ri
+  {
+    "state": "stays: todo",
+    "old": 6,
+    "shell_old": 3
+  }
+test/ris/xml.ri
+  {
+    "state": "stays: todo",
+    "old": 11,
+    "shell_old": 3
+  }
+test/ris/xpath.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/xz.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/ris/yaml.ri
+  {
+    "state": "stays: todo",
+    "old": 20,
+    "shell_old": 3
+  }
+test/ris/zero_capacity.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 1
+  }
+test/ris/zip.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "shell_old": 3
+  }
+test/spec/clause_1_2_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "1.2",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_1_3_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "1.3",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_1_4_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "1.4",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_1_6_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "1.6",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_1_7_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "1.7",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_1_8_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "1.8",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_2_3_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "2.3",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_3_1_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "3.1",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_4_1_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "4.1",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_4_2_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "4.2",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_4_3_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "4.3",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_5_4_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "5.4",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_5_6_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "5.6",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_6_1_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "6.1",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_6_2_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "6.2",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_6_3_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "6.3",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_6_4_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "6.4",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_6_5_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "6.5",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_6_6_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "6.6",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_7_2_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "7.2",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_7_3_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "7.3",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_7_4_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "7.4",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_7_5_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "7.5",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }
+test/spec/clause_7_6_test.ri
+  {
+    "state": "stays: todo",
+    "old": 0,
+    "target": "marker",
+    "clause": "7.6",
+    "shell_old": 0,
+    "why": "compiler rule or built-in runtime; no standalone module"
+  }

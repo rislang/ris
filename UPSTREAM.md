@@ -197,3 +197,7 @@ back.
 * `fix` splices the compiler's character span across source lines, so a
   suggested edit can replace an entire block while preserving later code.
   The text migration refusals stay in ris.
+
+Spec port (doc/drafts/spec-port/): standards-header validation and lazy
+spec process/tmp imports belong upstream in iyi. Pure library proofs
+must not acquire a dependency cycle through unused filesystem helpers.

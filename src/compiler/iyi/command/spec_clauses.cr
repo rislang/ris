@@ -774,6 +774,14 @@ class Iyi::Command
                      "name a clause `#{name} spec` lists"}
         next
       end
+      if block.number == "8.1"
+        lines = File.read_lines(File.join(root, block.path))
+        header = spec_leading_block(lines)
+        unless header.any? { |i| lines[i].starts_with?("# standard: ") && !lines[i][12..].blank? }
+          failures << {"#{site}: name the standard",
+                       "add `# standard: ...` to the module header"}
+        end
+      end
       if block.label && !spec_label_ok?(block, clause)
         failures << {"the label of spec #{block.number} at #{site} differs from SPEC.md",
                      "run `#{name} check --fix`"}

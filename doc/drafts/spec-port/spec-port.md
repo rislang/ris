@@ -1,7 +1,7 @@
 # Draft: port test/ to spec blocks
 
-Status: draft, decisions D1-D5 in. Needs an EGM review before any
-code or SPEC.md change (AGENTS.md, CONTRIBUTING.md Design checks).
+Status: reviewed 2026-11-11; decisions D1-D7 accepted.
+Implementation stops after phase 1 in this worktree.
 
 Context: spec blocks (doc/drafts/spec-blocks/spec-blocks.md, steps
 1-8) are merged. A module file may end with `spec N.M ... end` blocks;
@@ -37,6 +37,11 @@ parallel (check_parallel.py gets one case per module with blocks).
 
 D5. Tape tests named after a module (string_pool.ri, system.ri and
 the like) stay program-level checks; they are not moved.
+
+D6. The test/ris -> test/cli/ris move is dropped. test/ris stays.
+
+D7. The 111 test/cli std_*.iyi asserts move only when their module
+changes for another reason; they are outside this port.
 
 ## 1. Problem
 
@@ -216,7 +221,7 @@ anywhere else (after a blank line, unindented, two on one clause) is
 an error of `ris check spec` naming the line, so a misplaced marker is
 never folded into clause text silently.
 
-Code sites in src/compiler/iyi/command/spec_clauses.cr (phase 5):
+Code sites in src/compiler/iyi/command/spec_clauses.cr (phase 4):
 
 - Clause parsing (the continuation loop, lines ~157-208): a marker
   line is taken out before the text is hashed and kept as the
@@ -237,7 +242,7 @@ comment) do not count. A marker beside a todo block for the same
 clause also fails ("the block holds the todo; remove the marker"), so
 a todo lives in one place. `--fix` does not edit SPEC.md.
 
-Rules that change with it, in the same phase 5 commit: spec-blocks
+Rules that change with it, in the same phase 4 change: spec-blocks
 D2 and 5.14 ("todo lives only inside a spec block") and AGENTS.md's
 spec paragraph gain "or as a SPEC.md marker for a clause no module
 keeps"; AGENTS.md's "change SPEC.md only with a SPEC_CHANGELOG entry"
@@ -253,12 +258,13 @@ A port gate for the port only; it is removed when phase 5 ends.
 
 - Ledger: test/cli/spec_port_ledger.txt lists only files that move or
   are judged (the 41 module tests, the 41 one-import programs, the 24
-  stubs, D5's two). One line each:
-  `SRC -> DEST spec N.M (K old, K new)` or `SRC -> stays: reason`.
-  Phase 0 writes it with every verdict `stays: todo`; each port edits
-  its lines.
-- What counts as an old assertion, per SRC: each `exit N unless` and
-  `raise ... unless` line in the program, plus each check.sh line that
+  stubs, D5's two; actual union corrected in section 9). Each entry
+  has a source line and indented JSON with its verdict, target, clauses
+  and frozen old/new counts; a retained driver records its shell case.
+  Phase 0 writes every verdict as `stays: todo`; each port edits its
+  entry. Stub entries name their future module or marker target.
+- What counts as an old assertion, per SRC: each `exit N unless`,
+  `exit N if` and `raise ... unless` line, plus each check.sh line that
   checks that program's output (`want=`, `grep -q`, `[ "$out" = `,
   `RIS_HEAP_STATS`). New: the top-level Bool lines of the blocks that
   ledger line names, counted by grep between `spec` and `end` (no
@@ -277,8 +283,8 @@ A port gate for the port only; it is removed when phase 5 ends.
 - check.sh: check_parallel.py loses one case per ported program and
   gains one `ris check test src/std/<m>.iyi` case per module with
   blocks (D4). The gate checks: old cases - ported + modules = new.
-- Gate script: test/cli/spec_port_counts.sh; run by `ris check`'s
-  cli part while the port lasts, not added to CI as its own job.
+- Gate script: test/cli/spec_port_counts.sh; wired into ris.yml
+  alongside the other CLI gates (heap shard), while the port lasts.
 
 ## 5. Phases, smallest first
 
@@ -325,8 +331,7 @@ Std leads because its tests are already module tests in ris code.
 
 ## 6. Open decisions for the user
 
-None from D1-D5; the review raised two scope choices, listed in the
-report to the lead.
+None; D6 and D7 settle the last two scope choices.
 
 ## 7. Left out on purpose
 
@@ -370,3 +375,74 @@ Minors left:
 - Trim the marker's JSON and `ris spec N.M` output (zoom-out 5): kept;
   they are a few lines and keep the marker visible as a todo block is.
 - Tagging the stay-behind tests (zoom-out 6): section 7.
+
+## 9. Implementation notes (2026-11-11, phases 0-1)
+
+- Ledger entries use a source line and indented JSON metadata, keeping
+  document lines within 80 columns. Frozen old counts are recorded before
+  moving anything; stays entries are recounted on every gate run.
+- Count `exit N if` too: base32 uses it for a decode error. Omitting it
+  would silently lose an assertion.
+- check_parallel.py groups shell loops as cases, not individual programs.
+  Case arithmetic therefore counts its actual blocks; retained stdout
+  and heap drivers keep their existing loop case. Each pilot gains its
+  own module case. All four existing pilot drivers keep their heap and
+  PASS checks, not only path. base64 had no check.sh case.
+- Nested tape Bool expressions are not spec assertions (spec-blocks
+  5.2). Format checks are at block top level; separate 1.5 blocks check
+  copied values after the tape closes. The gate scans statement starts
+  at two-space indentation and flips complete multiline expressions.
+- Phase 0 assigns all stub targets; marker implementation and stub
+  deletion remain phase 4. No SPEC todo marker is introduced in 0-1.
+- Full check.sh timing is deferred: this task explicitly runs only pilot
+  cases. Selected-case wall times are reported, with no full-suite claim.
+- Inventory correction: the 84 single-std-import programs overlap only
+  30 of the 43 named programs; their union is 97, plus 24 stubs gives
+  121 ledger entries. The gate records the actual union, not 108.
+- Pool stubs also target markers: there is no std/pool module in this
+  tree; these rules are implemented by the compiler/runtime.
+- Computed top-level base32/base64 tables made those libraries look like
+  programs to the test runner, which dropped the tables. Tables now live
+  inside the types using them; initialization and algorithms stay intact.
+- Pilot path exposed a test-infrastructure import cycle:
+  path -> ris_spec -> dir -> path. Pure Bool proofs now omit the unused
+  process/tmp helper import; blocks using tmp, free_port, program handles
+  or their types keep it. A regression case in spec_blocks_run.sh failed
+  before the compiler fix. This preserves the available spec vocabulary.
+- Each retained pilot loop has three shell checks (heap-stats request,
+  PASS grep, zero-heap grep). Old/new totals include those three; the
+  gate hashes the retained shell case so a dropped output or heap check
+  fails rather than being hidden by extra Bool assertions.
+- Path also exposed declaration detection omitting impl and conditional
+  declarations. The detector now keeps impl and macro branches made only
+  of declarations, rather than misclassifying the module as a program.
+- Stays entries freeze program and shell counts separately (`old` and
+  `shell_old`); ported entries combine old checks and count retained shell
+  checks alongside new Bool lines. Quoted string contents are ignored by
+  the Bool-line scan (base32 padding contains `==` but is not an operator).
+- Negative probes: deleting one base32 Bool line gives
+  `FAIL: spec port counts: test/ris/base32.ri: 12 new < 13 old`; renaming
+  its destination gives `missing target`. Both probes restore the source.
+- Flip copies keep the `std/<module>.iyi` suffix beneath .work. The
+  compiler derives a module root from its header/path agreement; a flat
+  copy of path.iyi was not an equivalent build and failed before testing.
+- Final pilot totals (including retained shell checks): base32 13 -> 13,
+  base64 7 -> 7, path 19 -> 19, semantic_version 18 -> 18, uuid 14 -> 14.
+  Format assertions name 8.1; retained copies are checked under 1.5.
+
+Verification at the phase 1 stopping point:
+
+- Phase 0: `PASS: spec port counts (0 modules, 0 flips)`; 485 cases.
+- Phase 1: `PASS: spec port counts (5 modules, 10 flips)`;
+  `485 old - 0 removed + 5 modules = 490 new`.
+- Deliberately dropped Bool: `12 new < 13 old`, exit 1; restored.
+- All seven spec_blocks_*.sh gates pass; spec_verb.py: 52 steps passed.
+- `bin/ris check spec`: 43 clauses, 19 ok, 24 todo, 0 to review,
+  0 uncovered, 0 unversioned. Clauses 1.5 and 8.1 acknowledged.
+- Actual check.sh selection: `PASS: selected ris checks`; only pilot
+  cases and their existing grouped driver cases ran.
+- Pilot-only selected-case wall time: 4.83s before, 5.79s after. This
+  excludes unrelated cases and is not the full-suite 20% timing gate.
+- LLVM 23.1.3 build and changed Crystal files' formatting check pass.
+- No commit; marker support/stub deletion and later ports remain phase 4
+  and phases 2-5 respectively. Own .work scratch is removed.

@@ -296,3 +296,9 @@ section; a removed one leaves its number unused.
 * 7.6 Any other store of a tape value into something that outlives it is
   a compile error naming the forms that work: `copy_to(owner)` or a
   long-lived container (1.x, 3.x).
+
+## 8. Library
+
+* 8.1 A std module follows the standard its header names (an RFC, a file
+  format, a published grammar); its spec blocks check that standard's
+  rules and examples.

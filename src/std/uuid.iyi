@@ -1,3 +1,4 @@
+# standard: RFC 9562
 # UUIDs, RFC 9562 (which replaced RFC 4122), written in iyi.
 #
 # `UUID.v4` is 122 random bits with version 4 and the RFC variant bits;
@@ -188,4 +189,37 @@ pub struct UUID
     return o - 65 + 10 if o >= 65 && o <= 70
     raise "UUID: not a hex digit: #{ch}"
   end
+end
+
+spec 8.1  # A std module follows the standard its header names (an RFC, a file…
+  text = "550E8400-E29B-41D4-A716-446655440000"
+  uuid = UUID.parse(text)
+  uuid.version == 4 && uuid.bytes.bytesize == 16
+  canonical = uuid.to_tape
+  canonical == "550e8400-e29b-41d4-a716-446655440000"
+  uuid.to_tape == canonical
+  w = String::Builder.new(1)
+  w << "prefix:"
+  uuid.write(w)
+  w.finish ==
+                "prefix:550e8400-e29b-41d4-a716-446655440000"
+  compact = UUID.parse("550e8400e29b41d4a716446655440000")
+  compact.to_tape == canonical
+  UUID.v4.version == 4
+  UUID.v7.version == 7
+  UUID.v4.version == 4 && UUID.v7.version == 7
+end
+
+spec 1.5  # A def builds its tape result in its caller's destination (Goose §7,…
+  kept = ""
+  tape do
+    kept = UUID.parse("550e8400-e29b-41d4-a716-446655440000").to_tape.copy_to(Program.tape)
+  end
+  UUID.parse(kept).to_tape == kept
+  owned = nil.as(UUID?)
+  tape do
+    owned = UUID.parse("550e8400-e29b-41d4-a716-446655440000").copy_to(Program.tape)
+  end
+  !owned.nil?
+  owned.to_s == kept
 end

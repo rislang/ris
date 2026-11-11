@@ -20,6 +20,15 @@ WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK" || exit 1
 
+# A pure library proof must not import process helpers back into itself.
+# ris_spec -> dir -> path used to make std/path's own proofs cyclic.
+(cd "$REPO" && "$IYI" test src/std/path.iyi) > path.out 2>&1
+if [ $? -ne 0 ]; then
+  echo 'FAIL: pure std/path spec has an import cycle'
+  tail -15 path.out
+  exit 1
+fi
+
 failed=0
 fail() { echo "FAIL: $*"; failed=1; }
 has() { grep -qF -- "$2" "$1" || { fail "$1 lacks: $2"; cat "$1"; }; }

@@ -3157,6 +3157,46 @@ for deep in "$(mktemp -d)"; do
   rm -rf "$deep"
 done
 
+# spec-port pilot base32: module proofs.
+out=$("$RIS" check test src/std/base32.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port base32"
+else
+  echo "FAILED   spec-port base32: $out"; status=1
+fi
+
+# spec-port pilot base64: module proofs.
+out=$("$RIS" check test src/std/base64.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port base64"
+else
+  echo "FAILED   spec-port base64: $out"; status=1
+fi
+
+# spec-port pilot uuid: module proofs.
+out=$("$RIS" check test src/std/uuid.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port uuid"
+else
+  echo "FAILED   spec-port uuid: $out"; status=1
+fi
+
+# spec-port pilot semantic_version: module proofs.
+out=$("$RIS" check test src/std/semantic_version.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port semantic_version"
+else
+  echo "FAILED   spec-port semantic_version: $out"; status=1
+fi
+
+# spec-port pilot path: module proofs.
+out=$("$RIS" check test src/std/path.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port path"
+else
+  echo "FAILED   spec-port path: $out"; status=1
+fi
+
 # Run heap workloads after the other gates to avoid compiler contention.
 # Keep their fixed timeouts: a hung census must still fail.
 python3 test/ris/heap_check.py || status=1
