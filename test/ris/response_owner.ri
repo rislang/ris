@@ -1,0 +1,21 @@
+# The whole response keeps its final head and repeated fields on the caller.
+import std/http::{HTTP}
+import std/cookie::{Cookie}
+
+text = "HTTP/1.1 100 Continue\r\nX-Interim: gone\r\n\r\n" +
+       "HTTP/1.1 200 OK\r\n" +
+       "Set-Cookie: a=1; Expires=Wed, 21 Oct 2037 07:28:00 GMT\r\n" +
+       "Set-Cookie: b=2\r\nContent-Length: 0\r\n\r\n"
+response = HTTP.parse_response(text)
+raise "status" unless response.status == 200
+raise "interim fields" if response.headers.has_key?("X-Interim")
+values = response.header_values("Set-Cookie")
+raise "repeated fields" unless values.size == 2
+raise "first field" unless values[0].starts_with?("a=1;")
+raise "second field" unless values[1] == "b=2"
+cookies = Cookie.from_response(response)
+raise "cookies" unless cookies.size == 2 && cookies[0].name == "a"
+chunked = HTTP.parse_response("HTTP/1.1 200 OK\r\n" +
+  "Transfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n")
+raise "body" unless chunked.body == "abc"
+raise "retained fields" unless response.header_values("Set-Cookie")[1] == "b=2"

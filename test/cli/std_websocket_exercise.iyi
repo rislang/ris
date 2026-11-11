@@ -266,14 +266,14 @@ end
 # What `work` answers, or "refused: <why>" when it panics: run as a task,
 # whose value catches the panic.
 def answer(&work : -> String) : String
-  said = "no answer"
+  said = ""
   group do |g|
     task = g.spawn { work.call }
     case got = task.value
     in Panicked
-      said = "refused: " + got.message
+      said << "refused: " << got.message
     in String
-      said = got
+      said << got
     end
     0
   end
@@ -282,7 +282,10 @@ end
 
 # A server's end of a fresh pair, for a refused call in `answer`'s task.
 def with_server_end(& : WebSocket -> String) : String
-  _, b = pair
+  pair_listener_1 = IyiSocket.listen("127.0.0.1", 0)
+  unused_peer = IyiSocket.connect("127.0.0.1", pair_listener_1.local_port).or_panic
+  b = pair_listener_1.accept.or_panic
+  pair_listener_1.close
   socket = WebSocket.new(b, "", false)
   yield socket
 end
@@ -534,15 +537,6 @@ class Raw
   end
 end
 
-# Two ends of one TCP connection: the connecting one, then the accepted.
-def pair : {IyiSocket, IyiSocket}
-  l = IyiSocket.listen("127.0.0.1", 0)
-  c = IyiSocket.connect("127.0.0.1", l.local_port).or_panic
-  s = l.accept.or_panic
-  l.close
-  {c, s}
-end
-
 # The message `receive` answered; anything else fails the check.
 def message(got : Message | Nil | Cancelled | SocketError | WebSocketError) : Message
   return got if got.is_a?(Message)
@@ -569,7 +563,10 @@ end
 # `receive` answered, then what the client read back - the close frame's
 # code, and whether the connection then ended.
 def server_fault(wire : String, max : Int32 = WebSocket::MAX_MESSAGE, deflate : PerMessageDeflate? = nil) : String
-  a, b = pair
+  pair_listener_2 = IyiSocket.listen("127.0.0.1", 0)
+  a = IyiSocket.connect("127.0.0.1", pair_listener_2.local_port).or_panic
+  b = pair_listener_2.accept.or_panic
+  pair_listener_2.close
   raw = Raw.new(a)
   ws = WebSocket.new(b, "", false, nil, max, deflate)
   b.read_timeout_ms = 5000
@@ -592,7 +589,10 @@ end
 
 # What a client's end makes of *wire*, written by a raw server.
 def client_fault(wire : String, deflate : PerMessageDeflate? = nil) : String
-  a, b = pair
+  pair_listener_3 = IyiSocket.listen("127.0.0.1", 0)
+  a = IyiSocket.connect("127.0.0.1", pair_listener_3.local_port).or_panic
+  b = pair_listener_3.accept.or_panic
+  pair_listener_3.close
   ws = WebSocket.new(a, "", true, nil, WebSocket::MAX_MESSAGE, deflate)
   a.read_timeout_ms = 5000
   # The server's part runs as a task that owns `b` and answers what it
@@ -635,10 +635,11 @@ def fake_server(lines : String, after : String = "", accept : String = "right", 
       s = l.accept.or_panic
       l.close
       raw = Raw.new(s)
-      head = ""
-      while !head.ends_with?("\r\n\r\n")
-        head = head + raw.read_exact(1)
+      head_text = ""
+      while !head_text.ends_with?("\r\n\r\n")
+        head_text << raw.read_exact(1)
       end
+      head = head_text
       key = "dGhlIHNhbXBsZSBub25jZQ=="
       if accept == "right"
         HTTP.split_crlf(head).each do |line|
@@ -719,7 +720,10 @@ class RisDeflatePair
   getter b : IyiSocket
 
   def initialize(deflate : PerMessageDeflate, client : Bool = false)
-    a, b = pair
+    pair_listener_4 = IyiSocket.listen("127.0.0.1", 0)
+    a = IyiSocket.connect("127.0.0.1", pair_listener_4.local_port).or_panic
+    b = pair_listener_4.accept.or_panic
+    pair_listener_4.close
     @a = a
     @b = b
     raw_socket = client ? b : a
@@ -897,7 +901,10 @@ def section_server_reads : Nil
   puts "\n== frames a server reads"
   # §5.7's examples, byte for byte.
   assert_str "81 85 37 fa 21 3d 7f 9f 4d 51 58", hex(frame(1, "Hello")), "the test's frame writer agrees with §5.7"
-  frames_a, b = pair
+  pair_listener_5 = IyiSocket.listen("127.0.0.1", 0)
+  frames_a = IyiSocket.connect("127.0.0.1", pair_listener_5.local_port).or_panic
+  b = pair_listener_5.accept.or_panic
+  pair_listener_5.close
   raw = Raw.new(frames_a)
   ws = WebSocket.new(b, "", false)
   raw.write(bytes([0x81, 0x85, 0x37, 0xfa, 0x21, 0x3d, 0x7f, 0x9f, 0x4d, 0x51, 0x58]))
@@ -925,7 +932,10 @@ def section_server_reads : Nil
   # (SPEC 5.1).
   frames_a.close
   b.close
-  lengths_a, lengths_b = pair
+  pair_listener_6 = IyiSocket.listen("127.0.0.1", 0)
+  lengths_a = IyiSocket.connect("127.0.0.1", pair_listener_6.local_port).or_panic
+  lengths_b = pair_listener_6.accept.or_panic
+  pair_listener_6.close
   lengths_ws = WebSocket.new(lengths_b, "", false)
   lengths_end = group do |g|
     sender = g.spawn do
@@ -972,7 +982,10 @@ def section_server_reads : Nil
   # What arrived after the handshake's head is read first: a whole frame,
   # then half of one whose rest is on the socket.
   # The writing task owns `lead_a` and closes it (SPEC 5.1).
-  lead_a, b = pair
+  pair_listener_7 = IyiSocket.listen("127.0.0.1", 0)
+  lead_a = IyiSocket.connect("127.0.0.1", pair_listener_7.local_port).or_panic
+  b = pair_listener_7.accept.or_panic
+  pair_listener_7.close
   first = frame(1, "from the handshake's read")
   second = frame(2, pattern(40000))
   lead_ws = WebSocket.new(b, first + second[0, 20000], false)
@@ -995,7 +1008,10 @@ section_server_reads
 
 def section_server_writes : Nil
   puts "\n== frames a server writes"
-  a, b = pair
+  pair_listener_8 = IyiSocket.listen("127.0.0.1", 0)
+  a = IyiSocket.connect("127.0.0.1", pair_listener_8.local_port).or_panic
+  b = pair_listener_8.accept.or_panic
+  pair_listener_8.close
   raw = Raw.new(a)
   # One task owns the server's end, `b`, and builds its WebSocket there
   # (SPEC 5.1): two tasks cannot share it, so no frame can land
@@ -1037,7 +1053,10 @@ section_server_writes
 
 def section_client_writes : Nil
   puts "\n== frames a client writes"
-  a, b = pair
+  pair_listener_9 = IyiSocket.listen("127.0.0.1", 0)
+  a = IyiSocket.connect("127.0.0.1", pair_listener_9.local_port).or_panic
+  b = pair_listener_9.accept.or_panic
+  pair_listener_9.close
   raw = Raw.new(b)
   keys = [] of String
   # The client's task owns its end, `a`, and builds its WebSocket there
@@ -1115,7 +1134,10 @@ def section_server_refuses : Nil
   end
   assert_str "1007 WebSocket: a close reason that is not UTF-8 | close 1007", server_fault(frame(8, bytes([3, 232, 0xff]))), "a close reason that is not UTF-8"
   # A connection that ends partway through a frame, with no close.
-  a, b = pair
+  pair_listener_10 = IyiSocket.listen("127.0.0.1", 0)
+  a = IyiSocket.connect("127.0.0.1", pair_listener_10.local_port).or_panic
+  b = pair_listener_10.accept.or_panic
+  pair_listener_10.close
   raw = Raw.new(a)
   ws = WebSocket.new(b, "", false)
   raw.write(frame(1, "cut short")[0, 9])
@@ -1361,7 +1383,10 @@ def section_close_handshake : Nil
   puts "\n== close handshake"
   # The peer closes: its code is echoed, and the server ends the connection.
   [1000, 1001, 1003, 1007, 1011, 1012, 1014, 3000, 4999].each do |code|
-    a, b = pair
+    pair_listener_11 = IyiSocket.listen("127.0.0.1", 0)
+    a = IyiSocket.connect("127.0.0.1", pair_listener_11.local_port).or_panic
+    b = pair_listener_11.accept.or_panic
+    pair_listener_11.close
     raw = Raw.new(a)
     ws = WebSocket.new(b, "", false)
     raw.write(frame(8, bytes([code >> 8, code & 255]) + "bye"))
@@ -1372,7 +1397,10 @@ def section_close_handshake : Nil
     assert_true raw.ended?, "the server ends the connection after the close handshake"
     a.close
   end
-  a, b = pair
+  pair_listener_12 = IyiSocket.listen("127.0.0.1", 0)
+  a = IyiSocket.connect("127.0.0.1", pair_listener_12.local_port).or_panic
+  b = pair_listener_12.accept.or_panic
+  pair_listener_12.close
   raw = Raw.new(a)
   ws = WebSocket.new(b, "", false)
   raw.write(frame(1, "last") + frame(8, ""))
@@ -1384,7 +1412,10 @@ def section_close_handshake : Nil
   a.close
   # This end closes: the close goes out, what the peer sends before its own
   # close is read past, and the peer's close ends it.
-  a12, b12 = pair
+  pair_listener_13 = IyiSocket.listen("127.0.0.1", 0)
+  a12 = IyiSocket.connect("127.0.0.1", pair_listener_13.local_port).or_panic
+  b12 = pair_listener_13.accept.or_panic
+  pair_listener_13.close
   ws12 = WebSocket.new(b12, "", false)
   # The peer's task owns `a12` and hands it back as its value.
   back12 = group do |g|
@@ -1407,7 +1438,10 @@ def section_close_handshake : Nil
   peer12.close
   # A client's close: the server answers it and ends the connection, which
   # the client waits for.
-  a13, b13 = pair
+  pair_listener_14 = IyiSocket.listen("127.0.0.1", 0)
+  a13 = IyiSocket.connect("127.0.0.1", pair_listener_14.local_port).or_panic
+  b13 = pair_listener_14.accept.or_panic
+  pair_listener_14.close
   ws13 = WebSocket.new(a13, "", true)
   group do |g|
     g.spawn do
@@ -1423,7 +1457,10 @@ def section_close_handshake : Nil
   end
   assert_true ws13.closed? && ws13.close_code == 1000, "the client's close handshake"
   # A peer that ends the connection without answering the close.
-  a14, b14 = pair
+  pair_listener_15 = IyiSocket.listen("127.0.0.1", 0)
+  a14 = IyiSocket.connect("127.0.0.1", pair_listener_15.local_port).or_panic
+  b14 = pair_listener_15.accept.or_panic
+  pair_listener_15.close
   ws14 = WebSocket.new(b14, "", false)
   unanswered = "nothing"
   group do |g|

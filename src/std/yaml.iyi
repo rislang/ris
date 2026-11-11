@@ -2761,11 +2761,30 @@ struct RisDecoded(T)
   getter value : T
 
   def initialize(value : TapeValue)
-    @value = {% if T.nilable? %}
+    result = {% if T.nilable? %}
       value.null? ? nil : YAML.read_value(value, {{ T.union_types.reject { |u| u == ::Nil }.first }})
+    {% elsif T < Hash %}
+      Hash({{ T.type_vars[0] }}, {{ T.type_vars[1] }}).new
     {% else %}
       T.new(value)
     {% end %}
+    {% if T < Hash %}
+      entries = value.as_h
+      keys = Array(TapeValue).new(entries.size)
+      entries.each { |key, item| keys << key; nil }
+      decoded = Array({{ T.type_vars[1] }}).new(keys.size) do |i|
+        YAML.read_value(entries[keys[i]], {{ T.type_vars[1] }})
+      end
+      decoded_keys = Array({{ T.type_vars[0] }}).new(keys.size) do |i|
+        YAML.read_value(keys[i], {{ T.type_vars[0] }})
+      end
+      i = 0
+      while i < keys.size
+        result[decoded_keys[i]] = decoded[i]
+        i += 1
+      end
+    {% end %}
+    @value = result
   end
 end
 
@@ -2949,15 +2968,11 @@ pub struct YAML
 
   def self.read_value(value : TapeValue, type : Array(T).class) : Array(T) forall T
     items = value.as_a
-    list = Array(T).new(items.size)
-    items.each { |item| list << read_value(item, T) }
-    list
+    Array(T).new(items.size) { |i| read_value(items[i], T) }
   end
 
   def self.read_value(value : TapeValue, type : Hash(K, V).class) : Hash(K, V) forall K, V
-    h = Hash(K, V).new
-    value.as_h.each { |key, item| h[read_value(key, K)] = read_value(item, V) }
-    h
+    RisDecoded(Hash(K, V)).new(value).value
   end
 
   # Construct in the caller's scope, including nullable derived types.

@@ -642,12 +642,9 @@ pub class PrefixSet
     @size = 0
   end
 
-  def initialize(prefixes : Array(Prefix))
-    @zero = [-1, -1]
-    @one = [-1, -1]
-    @member = [false, false]
-    @size = 0
-    prefixes.each { |prefix| add(prefix) }
+  # Fill a named set after its storage has been constructed.
+  def add_all(prefixes : Array(Prefix)) : Nil
+    prefixes.each { |prefix| add(prefix); nil }
   end
 
   # How many prefixes the set holds.

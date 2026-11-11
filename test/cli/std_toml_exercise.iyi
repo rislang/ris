@@ -139,14 +139,20 @@ end
 
 # The document `text` holds, or a failed assertion naming `msg`.
 def reads(text : String, msg : String) : TapeAny
-  answer = TOML.parse(text)
+  checked(TOML.parse(text), msg)
+end
+
+def checked(answer : TapeAny | TOMLError, msg : String) : TapeAny
   raise "ASSERTION FAILED: #{msg}: refused with #{answer.message}" if answer.is_a?(TOMLError)
   answer
 end
 
 # Read, and recorded for Python to read the same bytes to the same value.
 def corpus(text : String, msg : String) : TapeAny
-  v = reads(text, msg)
+  recorded(reads(text, msg), text)
+end
+
+def recorded(v : TapeAny, text : String) : TapeAny
   puts "CORPUS #{hex(text)}\t#{canon(v)}"
   v
 end
@@ -181,11 +187,12 @@ end
 
 # The sentence `action` panicked with, or what it answered when it did not.
 def panic_of(action : Proc(String)) : String
-  said = "unread"
+  said = ""
   group do |g|
     task = g.spawn { action.call }
     answer = task.value
-    said = answer.is_a?(Panicked) ? answer.message : answer
+    said << (answer.is_a?(Panicked) ? answer.message : answer)
+    nil
   end
   said
 end

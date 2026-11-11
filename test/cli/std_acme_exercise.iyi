@@ -491,7 +491,7 @@ def a3_key : SigningKey
 end
 
 def ed_key : SigningKey
-  SigningKey.ed25519(b(ED_SEED)).or_panic
+  SigningKey.new(nil, nil, nil, b(ED_SEED))
 end
 
 # The names a certificate request asks for, and whether its signature is
@@ -1004,7 +1004,8 @@ end
 # the caller's *store*.
 def trusting(trust : TlsConfig, store : RisCertificateStore, pem : String) : Nil
   trust.roots = pem_certs(store, pem)
-  trust.alpn = ["http/1.1"]
+  trust.alpn.clear
+  trust.alpn << "http/1.1"
 end
 
 def scripted(script : RisAcmeView, certificate_pem : String) : Nil
@@ -1195,7 +1196,7 @@ def write_artifacts(dir : String) : Nil
     head, body, signature = jws_parts(jws)
     spki = X509.request(pair[1], ["x.example"]).or_panic
     key_info = Der.parse(spki).or_panic.sequence.or_panic[0].sequence.or_panic[2].raw
-    lines << "#{pair[0]} #{hex(key_info)} #{hex(bytes("#{head}.#{body}"))} #{hex(unb64(signature))}"
+    lines << "#{pair[0]} #{hex(key_info)} #{hex(bytes("#{head}.#{body}"))} #{hex(unb64(signature))}".copy_to(Program.tape)
   end
   File.write("#{dir}/jws.txt", lines.join("\n") + "\n")
   authorization = "token-alpn.#{AcmeJws.thumbprint(a3_key.public_key)}"

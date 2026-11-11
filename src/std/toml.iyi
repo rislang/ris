@@ -2499,11 +2499,27 @@ struct RisDecoded(T)
   getter value : T
 
   def initialize(value : TapeAny)
-    @value = {% if T.nilable? %}
+    result = {% if T.nilable? %}
       TOML.read_value(value, {{ T.union_types.reject { |u| u == ::Nil }.first }})
+    {% elsif T < Hash %}
+      Hash(String, {{ T.type_vars[1] }}).new
     {% else %}
       T.new(value)
     {% end %}
+    {% if T < Hash %}
+      entries = value.as_h
+      keys = Array(String).new(entries.size)
+      entries.each { |key, item| keys << key; nil }
+      decoded = Array({{ T.type_vars[1] }}).new(keys.size) do |i|
+        TOML.read_value(entries[keys[i]], {{ T.type_vars[1] }})
+      end
+      i = 0
+      while i < keys.size
+        result[keys[i]] = decoded[i]
+        i += 1
+      end
+    {% end %}
+    @value = result
   end
 end
 
@@ -2676,16 +2692,11 @@ pub struct TOML
 
   def self.read_value(value : TapeAny, type : Array(T).class) : Array(T) forall T
     items = value.as_a
-    list = Array(T).new(items.size)
-    items.each { |item| list << read_value(item, T) }
-    list
+    Array(T).new(items.size) { |i| read_value(items[i], T) }
   end
 
-  def self.read_value(value : TapeAny, type : Hash(String,
-                                               V).class) : Hash(String, V) forall V
-    h = Hash(String, V).new
-    value.as_h.each { |key, item| h[key] = read_value(item, V) }
-    h
+  def self.read_value(value : TapeAny, type : Hash(String, V).class) : Hash(String, V) forall V
+    RisDecoded(Hash(String, V)).new(value).value
   end
 
   # Construct in the caller's scope, including nullable derived types.

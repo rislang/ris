@@ -4146,6 +4146,75 @@ struct AtAddress
   end
 end
 
+@[OnTape]
+struct RisParsedResponse
+  def self.result(parsed : RisParsedResponse) : Response
+    parsed.response
+  end
+
+  getter response : Response
+
+  def initialize(text : String, head : Bool)
+    start = 0
+    status = 0
+    reason = ""
+    headers = {} of String => String
+    held = RisHttpResponseBody.new(headers)
+    held.begin_client
+    while true
+      split_at = HTTP.find_headers_end(text, start)
+      raise "HTTP: no header terminator" unless split_at
+      lines = HTTP.split_crlf(text[start, split_at - start])
+      raise "empty response" if lines.empty?
+      parsed = HTTP.status_line(lines[0])
+      raise parsed.message if parsed.is_a?(HTTPError)
+      status, reason = parsed
+      start = split_at + 4
+      if status >= 100 && status < 200 && status != 101 && start < text.bytesize
+        why = HTTP.validate_response_fields(lines)
+        raise why if why
+        next
+      end
+      why = HTTP.fields_into(held, lines, true)
+      raise why if why
+      break
+    end
+    body = text[start, text.bytesize - start]
+    if head || HTTP.bodiless?(status)
+      body = ""
+    elsif te = header(headers, "Transfer-Encoding")
+      # Chunked, once and last, is the coding this client decodes (RFC 9112
+      # §6.3): `gzip, chunked` and two `chunked` lines were taken for no
+      # coding at all, and the chunks came back as the body of a 200,
+      # framing and all.
+      if refused = HTTP.coding_refused(te)
+        raise "HTTP: " + refused
+      end
+      body = HTTP.decode_chunked(body)
+    elsif cl = header(headers, "Content-Length")
+      n = HTTP.content_length(cl)
+      raise "HTTP: Content-Length is not a number: #{cl.inspect}" unless n
+      raise "HTTP: Content-Length #{cl.inspect} is past the 2147483647 bytes a string holds" if n > 2147483647_i64
+      length = n.to_i32
+      # Short of it is a connection that ended early, as a chunked body cut
+      # inside a chunk is: it was answered as a whole 200 with the part
+      # that came, a cut-off download read as a good one.
+      raise "HTTP: the body ended after #{body.bytesize} of its #{length} bytes" if body.bytesize < length
+      body = body[0, length] if length < body.bytesize
+    end
+    apart = held.client_lines
+    @response = Response.new(status, reason, headers, body,
+      apart.empty? ? nil : apart)
+  end
+
+  private def header(headers : Hash(String, String), name : String) : String?
+    headers.each do |key, value|
+      return value if HTTP.same_name?(key, name)
+    end
+    nil
+  end
+end
+
 pub struct HTTP
   # What an `https://` request is checked against and offers: the
   # system's roots, and ALPN's `http/1.1`, unless a program sets its own -
@@ -4225,43 +4294,7 @@ pub struct HTTP
   # why: this is the text a program has in hand; the client answers the
   # same sentences as `HTTPError`s.
   def self.parse_response(text : String, head : Bool = false) : Response
-    start = 0
-    status = 0
-    reason = ""
-    headers = {} of String => String
-    apart = nil.as(Hash(String, Array(String))?)
-    while true
-      split_at = find_headers_end(text, start)
-      raise "HTTP: no header terminator" unless split_at
-      parsed = parse_response_head(text[start, split_at - start])
-      raise parsed.message if parsed.is_a?(HTTPError)
-      status, reason, headers, apart = parsed
-      start = split_at + 4
-      break unless status >= 100 && status < 200 && status != 101 && start < text.bytesize
-    end
-    body = text[start, text.bytesize - start]
-    return Response.new(status, reason, headers, "", apart) if head || bodiless?(status)
-    if te = header_in(headers, "Transfer-Encoding")
-      # Chunked, once and last, is the coding this client decodes (RFC 9112
-      # §6.3): `gzip, chunked` and two `chunked` lines were taken for no
-      # coding at all, and the chunks came back as the body of a 200,
-      # framing and all.
-      if refused = coding_refused(te)
-        raise "HTTP: " + refused
-      end
-      body = decode_chunked(body)
-    elsif cl = header_in(headers, "Content-Length")
-      n = content_length(cl)
-      raise "HTTP: Content-Length is not a number: #{cl.inspect}" unless n
-      raise "HTTP: Content-Length #{cl.inspect} is past the 2147483647 bytes a string holds" if n > 2147483647_i64
-      length = n.to_i32
-      # Short of it is a connection that ended early, as a chunked body cut
-      # inside a chunk is: it was answered as a whole 200 with the part
-      # that came, a cut-off download read as a good one.
-      raise "HTTP: the body ended after #{body.bytesize} of its #{length} bytes" if body.bytesize < length
-      body = body[0, length] if length < body.bytesize
-    end
-    Response.new(status, reason, headers, body, apart)
+    RisParsedResponse.result(RisParsedResponse.new(text, head))
   end
 
   # A response's head - the text before its blank line - read: status,
@@ -5467,7 +5500,7 @@ pub struct HTTP
   # nil when it is `chunked` alone: it undoes no other coding, and chunked
   # twice is a body framed twice. An empty list element is no coding (RFC
   # 9110 §5.6.1).
-  private def self.coding_refused(te : String) : String?
+  protected def self.coding_refused(te : String) : String?
     chunked = 0
     te.split(',').each do |part|
       coding = trim(part)
@@ -5506,6 +5539,12 @@ pub struct HTTP
   # here: one handed in and grown would move under its caller's view.
   def self.fields_apart(lines : Array(String), unfold : Bool = false) : {Hash(String, String), Hash(String, Array::View(String))} | String
     RisHttpFields.result(RisHttpFields.new(lines, unfold))
+  end
+
+  def self.validate_response_fields(lines : Array(String)) : String?
+    headers = Hash(String, String).new
+    held = RisHttpResponseBody.new(headers)
+    fields_into(held, lines, true)
   end
 
   def self.fields_into(held : RisHttpResponseBody, lines : Array(String),

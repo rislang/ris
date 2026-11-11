@@ -147,7 +147,8 @@ refused Prefix.parse("fe80::%eth0/64"), "netip: \"fe80::%eth0/64\" is not a pref
 refused Prefix.parse("10.0.0.256/8"), "netip: \"10.0.0.256/8\" is not a prefix: \"10.0.0.256\" is not an IPv4 address: the octet 256 is past 255", "a prefix's address is read strictly"
 
 puts "== order, next and prev"
-sorted = ["::1", "10.0.0.1", "::ffff:10.0.0.1", "9.255.255.255", "fe80::1%b", "fe80::1", "fe80::1%a", "0.0.0.0"].map { |text| ip(text) }.sorted
+sort_texts = ["::1", "10.0.0.1", "::ffff:10.0.0.1", "9.255.255.255", "fe80::1%b", "fe80::1", "fe80::1%a", "0.0.0.0"]
+sorted = (0...sort_texts.size).map { |i| ip(sort_texts[i]) }.sorted
 same "0.0.0.0 9.255.255.255 10.0.0.1 ::1 ::ffff:10.0.0.1 fe80::1 fe80::1%a fe80::1%b", sorted.map { |a| a.to_s }.join(" "), "IPv4 first, then by value, then by zone"
 check ip("10.0.0.1") < ip("10.0.0.2") && ip("10.0.0.2") > ip("10.0.0.1") && ip("255.255.255.255") < ip("::"), "the comparison operators agree"
 same "10.0.1.0", (ip("10.0.0.255").next || ip("::")).to_s, "next carries into the next octet"
@@ -245,7 +246,8 @@ same "0.0.0.0/0", prefix("0.0.0.0/0").supernet.to_s, "a /0 is its own supernet"
 same "192.0.2.0/23", Prefix.new(ip("192.0.2.7"), 24).supernet(23).to_s, "a supernet is masked"
 
 puts "== prefix sets"
-set = PrefixSet.new([prefix("10.0.0.0/8"), prefix("10.1.0.0/16"), prefix("10.1.2.0/24"), prefix("2001:db8::/32"), prefix("0.0.0.0/0")])
+set = PrefixSet.new
+set.add_all([prefix("10.0.0.0/8"), prefix("10.1.0.0/16"), prefix("10.1.2.0/24"), prefix("2001:db8::/32"), prefix("0.0.0.0/0")])
 check set.size == 5 && !set.add(prefix("10.1.0.0/16")) && set.size == 5, "a prefix is held once"
 same "10.1.2.0/24", (set.lookup(ip("10.1.2.3")) || prefix("::/0")).to_s, "the longest prefix wins"
 same "10.1.0.0/16", (set.lookup(ip("10.1.3.3")) || prefix("::/0")).to_s, "the next longest after it"
@@ -256,7 +258,8 @@ same "0.0.0.0/0 10.0.0.0/8 10.1.0.0/16 10.1.2.0/24 2001:db8::/32", texts(set.pre
 same "0.0.0.0/0 2001:db8::/32", texts(set.collapsed), "collapsed into the fewest"
 check set.delete(prefix("0.0.0.0/0")) && !set.delete(prefix("0.0.0.0/0")) && set.size == 4, "delete takes a prefix out once"
 check set.lookup(ip("8.8.8.8")).nil?, "a deleted prefix holds nothing"
-halves = PrefixSet.new([prefix("192.0.2.0/25"), prefix("192.0.2.128/26"), prefix("192.0.2.192/26"), prefix("192.0.3.0/24")])
+halves = PrefixSet.new
+halves.add_all([prefix("192.0.2.0/25"), prefix("192.0.2.128/26"), prefix("192.0.2.192/26"), prefix("192.0.3.0/24")])
 same "192.0.2.0/23", texts(halves.collapsed), "two halves collapse into their whole"
 check Prefix.parse("10.1.2.3/8", mask: true).as(Prefix).masked == prefix("10.0.0.0/8") && set.add(Prefix.new(ip("172.16.5.5"), 12)) && set.includes?(prefix("172.16.0.0/12")), "a set holds a prefix masked"
 empty_set = PrefixSet.new
