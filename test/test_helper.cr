@@ -52,10 +52,31 @@ def assert_type(str, *, inject_primitives = false, flags = nil, filename = nil, 
   result
 end
 
+# ris: Crystal's prelude is gone (its String is a class); an example that
+# requires it runs on ris's own, required as the compiler injects it.
+def ris_prelude(code : String) : {String, Bool}
+  return {code, false} unless code.includes?(%(require "prelude"))
+  {code.sub(%(require "prelude"), ""), true}
+end
+
+private def with_ris_prelude(node : ASTNode) : ASTNode
+  req = Iyi::Require.new("iyi/prelude").tap(&.iyi_prelude=(true))
+  Iyi::Expressions.new([req, node] of ASTNode)
+end
+
+# As Compiler#new_program: ris's prelude runs under the tape rules.
+private def ris_prelude?(node : ASTNode) : Bool
+  first = node.as?(Iyi::Expressions).try(&.expressions.first?)
+  first.is_a?(Iyi::Require) && first.iyi_prelude?
+end
+
 def semantic(code : String, wants_doc = false, inject_primitives = false, flags = nil, filename = nil)
+  code, prelude = ris_prelude(code)
+  inject_primitives = false if prelude
   warnings = WarningCollection.new
   node = parse(code, wants_doc: wants_doc, filename: filename, warnings: warnings)
   node = inject_primitives(node) if inject_primitives
+  node = with_ris_prelude(node) if prelude
   semantic node, warnings: warnings, wants_doc: wants_doc, flags: flags
 end
 
@@ -74,6 +95,7 @@ end
 
 def semantic(node : ASTNode, *, warnings = nil, wants_doc = false, flags = nil)
   program = new_program
+  program.tape_scopes = ris_prelude?(node)
   program.warnings = warnings if warnings
   program.flags.concat(flags.split) if flags
   program.wants_doc = wants_doc
@@ -83,13 +105,17 @@ def semantic(node : ASTNode, *, warnings = nil, wants_doc = false, flags = nil)
 end
 
 def top_level_semantic(code : String, wants_doc = false, inject_primitives = false)
+  code, prelude = ris_prelude(code)
+  inject_primitives = false if prelude
   node = parse(code, wants_doc: wants_doc)
   node = inject_primitives(node) if inject_primitives
+  node = with_ris_prelude(node) if prelude
   top_level_semantic node, wants_doc: wants_doc
 end
 
 def top_level_semantic(node : ASTNode, wants_doc = false)
   program = new_program
+  program.tape_scopes = ris_prelude?(node)
   program.wants_doc = wants_doc
   node = program.normalize node
   node, _ = program.top_level_semantic node
@@ -251,6 +277,8 @@ end
 private def new_program
   program = Program.new
   program.color = false
+  # ris: as Compiler#new_program, there is no collector.
+  program.flags << "gc_none" << "ris_no_gc"
   apply_program_flags(program.flags)
   program.define_crystal_constants
   program
@@ -308,9 +336,15 @@ def create_spec_compiler
   compiler
 end
 
+RIS_STRING_FIELDS = "struct String; def initialize(@ptr : Pointer(UInt8), " \
+                    "@bytesize : Int32); end; end"
+
 def run(code, filename : String? = nil, inject_primitives = true, debug = Iyi::Debug::None, flags = nil, *, file = __FILE__) : LLVM::GenericValue | SpecRunOutput
   if inject_primitives
-    code = %(require "primitives"\n#{code})
+    # ris: String's {ptr, bytesize} live in the tape prelude; declare them
+    # so a String result can be read back. One line keeps line numbers.
+    fields = code.includes?(%(require "prelude")) ? "" : "; #{RIS_STRING_FIELDS}"
+    code = %(require "primitives"#{fields}\n#{code})
   end
 
   # Code that requires the prelude doesn't run in LLVM's MCJIT
@@ -344,13 +378,14 @@ def run(code, filename : String? = nil, inject_primitives = true, debug = Iyi::D
   else
     program = new_program
     program.flags.concat(flags) if flags
-    program.run(code, filename: filename, debug: debug)
+    # As codegen: a primitives example is a .cr file, exempt from tape rules.
+    program.run(code, filename: filename || file, debug: debug)
   end
 end
 
 def run(code, return_type : T.class, filename : String? = nil, inject_primitives = true, debug = Iyi::Debug::None, flags = nil, *, file = __FILE__) forall T
   if inject_primitives
-    code = %(require "primitives"\n#{code})
+    code = %(require "primitives"; #{RIS_STRING_FIELDS}\n#{code})
   end
 
   if code.includes?(%(require "prelude"))
@@ -358,7 +393,7 @@ def run(code, return_type : T.class, filename : String? = nil, inject_primitives
   else
     program = new_program
     program.flags.concat(flags) if flags
-    program.run(code, return_type: T, filename: filename, debug: debug)
+    program.run(code, return_type: T, filename: filename || file, debug: debug)
   end
 end
 

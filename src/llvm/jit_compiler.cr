@@ -46,6 +46,12 @@ class LLVM::JITCompiler
     LibLLVM.get_pointer_to_global(self, value)
   end
 
+  # The address MCJIT loaded the global at. `get_pointer_to_global` on a
+  # variable emits a fresh, initialized copy instead.
+  def global_value_address(name : String) : Void*
+    Pointer(Void).new(LibLLVM.get_global_value_address(self, name))
+  end
+
   def function_address(name : String) : Void*
     Pointer(Void).new(LibLLVM.get_function_address(self, name.check_no_null_byte))
   end
