@@ -52,9 +52,18 @@ module Iyi
       # through a GenericValue: the wrapper stores it in a global and
       # `to_string` reads the bytes from there.
       string_result = node.type? == string
+      # A union holding String (`String?`) is stored the same way; its type
+      # id says whether the payload is a String.
+      union_result = !string_result && (result_type = node.type?).is_a?(UnionType) &&
+                     result_type.union_types.includes?(string)
       string_global = nil
       string_fields = 0
-      if string_result
+      if union_result
+        string_fields = string.all_instance_vars_count
+        string_global = llvm_mod.globals.add(main_return_type, "__evaluate_string")
+        string_global.initializer = main_return_type.null
+        main_return_type = llvm_context.void
+      elsif string_result
         string_fields = main_return_type.struct_element_types.size
         string_global = llvm_mod.globals.add(main_return_type, "__evaluate_string")
         string_global.initializer = main_return_type.null
@@ -86,9 +95,20 @@ module Iyi
       # never happened (`JITCompiler#dispose`).
       jit = LLVM::JITCompiler.new(llvm_mod)
       value = jit.run_function wrapper, [] of LLVM::GenericValue, llvm_context
-      if string_global
+      if string_global && union_result
+        union = jit.global_value_address("__evaluate_string").as(Int32*)
+        if string_fields != 2
+          value.string_error = "String result has no fields: the program " \
+                               "did not load String's {ptr, bytesize}"
+        elsif union.value == llvm_id.type_id(string)
+          view = (union + 2).as({UInt8*, Int32}*).value
+          value.string = String.new(view[0], view[1])
+        else
+          value.string_error = "the result is not a String (type id #{union.value})"
+        end
+      elsif string_global
         if string_fields == 2
-          view = jit.get_pointer_to_global(string_global).as({UInt8*, Int32}*).value
+          view = jit.global_value_address("__evaluate_string").as({UInt8*, Int32}*).value
           value.string = String.new(view[0], view[1])
         else
           # Without the tape prelude String has no fields: no bytes to read.

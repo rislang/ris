@@ -40,7 +40,8 @@ class LLVM::GenericValue
     if error = @string_error
       raise error
     end
-    @string || to_pointer.as(String)
+    # ris's String is a struct: a pointer cast would read garbage.
+    @string || raise "the result is not a String"
   end
 
   def to_pointer : Void*
