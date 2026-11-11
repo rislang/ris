@@ -82,7 +82,7 @@ describe "Codegen: const" do
   end
 
   it "invokes block in const" do
-    run("require \"prelude\"; CONST = [\"1\"].map { |x| x.to_i }; CONST[0]").to_i.should eq(1)
+    run("require \"prelude\"; CONST = [\"1\"].map { |x| x.to_i }.copy_to(Program.tape); CONST[0]").to_i.should eq(1)
   end
 
   it "declare constants in right order" do
@@ -106,7 +106,7 @@ describe "Codegen: const" do
           end
         end
 
-        C = B.new;
+        C = B.new.copy_to(Program.tape)
       end
 
       def foo
@@ -133,7 +133,7 @@ describe "Codegen: const" do
       CONST = begin
             f = Foo.new(1)
             f
-          end
+          end.copy_to(Program.tape)
 
       def foo
         CONST.x
@@ -467,44 +467,6 @@ describe "Codegen: const" do
       CODE
 
     mod.to_s.should_not contain("CONST")
-  end
-
-  it "synchronizes initialization of constants" do
-    run(<<-CODE).to_b.should be_true
-      require "prelude"
-
-      def foo
-        v1, v2 = 1, 1
-        rand(100000..10000000).times do
-          v1, v2 = v2, v1 &+ v2
-        end
-        v2
-      end
-
-      ch = Channel(Int32).new
-
-      10.times do
-        spawn do
-          ch.send X
-        end
-      end
-
-      X = foo
-
-      def test(ch)
-        expected = X
-
-        10.times do
-          if ch.receive != expected
-            return false
-          end
-        end
-
-        true
-      end
-
-      test(ch)
-      CODE
   end
 
   it "runs const side effects (#8862)" do

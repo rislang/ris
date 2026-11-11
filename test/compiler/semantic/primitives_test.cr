@@ -73,7 +73,7 @@ describe "Semantic: primitives" do
 
   it "correctly types first hash from type vars (bug)" do
     assert_type(<<-CODE) { generic_class "Hash", int32, char }
-      class Hash(K, V)
+      struct Hash(K, V)
       end
 
       def foo(x : K, y : V) forall K, V

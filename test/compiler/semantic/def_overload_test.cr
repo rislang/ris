@@ -1455,14 +1455,15 @@ describe "Semantic: def overload" do
   end
 
   it "uses long name when no overload matches and name is the same (#1030)" do
-    assert_error <<-CODE, " - Moo::String.foo(a : Moo::String, b : Bool)"
+    # ris: `String` always names ::String (the normalizer writes it so).
+    assert_error <<-CODE, " - Moo::String.foo(a : ::String, b : Bool)"
       module Moo::String
         def self.foo(a : String, b : Bool)
-          puts a if b
+          a if b
         end
       end
 
-      Moo::String.foo("Hello, World!", true)
+      Moo::String.foo(1, true)
       CODE
   end
 

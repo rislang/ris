@@ -64,6 +64,19 @@ private def with_ris_prelude(node : ASTNode) : ASTNode
   Iyi::Expressions.new([req, node] of ASTNode)
 end
 
+# An .iyi example without the prelude: its text literals are
+# `String.view(...)`, which the prelude defines; this stands in for it.
+def with_text_view(node : ASTNode) : ASTNode
+  stub = parse(<<-CR)
+    struct String
+      def self.view(text : String) : String
+        text
+      end
+    end
+    CR
+  Iyi::Expressions.new([stub, node] of ASTNode)
+end
+
 # As Compiler#new_program: ris's prelude runs under the tape rules.
 private def ris_prelude?(node : ASTNode) : Bool
   first = node.as?(Iyi::Expressions).try(&.expressions.first?)
@@ -73,10 +86,13 @@ end
 def semantic(code : String, wants_doc = false, inject_primitives = false, flags = nil, filename = nil)
   code, prelude = ris_prelude(code)
   inject_primitives = false if prelude
+  # As codegen: a primitives example is a .cr file, exempt from tape rules.
+  filename ||= "spec.cr" if inject_primitives
   warnings = WarningCollection.new
   node = parse(code, wants_doc: wants_doc, filename: filename, warnings: warnings)
   node = inject_primitives(node) if inject_primitives
   node = with_ris_prelude(node) if prelude
+  node = with_text_view(node) if !prelude && filename.try(&.ends_with?(".iyi"))
   semantic node, warnings: warnings, wants_doc: wants_doc, flags: flags
 end
 

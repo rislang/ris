@@ -55,10 +55,14 @@ describe "Semantic: cast" do
   end
 
   it "casts pointer to another type" do
-    assert_type(<<-CODE) { types["String"] }
+    # ris: String is a struct; a pointer casts to a reference type.
+    assert_type(<<-CODE) { types["Foo"] }
+      class Foo
+      end
+
       a = 1
       p = pointerof(a)
-      p.as(String)
+      p.as(Foo)
       CODE
   end
 
@@ -88,7 +92,7 @@ describe "Semantic: cast" do
       module Moo
       end
 
-      class String
+      struct String
         include Moo
       end
 
@@ -208,7 +212,14 @@ describe "Semantic: cast" do
       require "prelude"
 
       class Foo
-        property! x : Int32
+        @x : Int32?
+
+        def x
+          @x.as(Int32)
+        end
+
+        def x=(@x : Int32)
+        end
       end
 
       a = [1, 2, 3]

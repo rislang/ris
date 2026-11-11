@@ -81,7 +81,7 @@ module Iyi
 
         static_text = node.is_a?(Call) && node.tape_literal?
         if tape_platform? && !node.simple_literal? && !static_text &&
-           node.location.try(&.original_filename).try(&.ends_with?(".ri")) &&
+           ris_program_file?(node.location) &&
            !TapePointerCheckerLibrary.library?(node.location)
           call = Call.new(nil, "__ris_program_init",
             block: Block.new([] of Var, node), global: true).at(node)
@@ -112,6 +112,18 @@ module Iyi
       end
 
       node
+    end
+
+    # ris: as a constant's (Normalizer#tape_text?): a program's .ri or
+    # .iyi file, not std, the runtime or an artifact, initializes its
+    # class variables on the program tape.
+    private def ris_program_file?(location : Location?) : Bool
+      file = location.try(&.original_filename).try(&.gsub('\\', '/'))
+      return false unless file && location
+      return true if file.ends_with?(".ri")
+      file.ends_with?(".iyi") && iyi_prelude? &&
+        !TapeScopeRuntime.runtime?(location) &&
+        !file.includes?("/src/std/")
     end
   end
 

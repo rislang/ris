@@ -555,7 +555,9 @@ describe "Code gen: generic class type" do
       class Bar < Foo(CONST)
       end
 
-      Bar.new.t_incr
+      # ris: Int128 prints with std/int; the prelude converts it.
+      bar = Bar.new
+      bar.t_incr.to_i32
       CODE
   end
 end

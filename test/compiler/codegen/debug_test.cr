@@ -263,7 +263,7 @@ describe "Code gen: debug" do
       CODE
 
     str = mod.to_s
-    str.should match(/@"Foo::x" = global (?:ptr|%String\*) null, !dbg !/)
+    str.should match(/@"Foo::x" = global (?:ptr null|%String zeroinitializer), !dbg !/)
     str.should contain("DIGlobalVariable(name: \"Foo::x\", linkageName: \"Foo::x\",")
   end
 

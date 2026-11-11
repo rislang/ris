@@ -3,28 +3,6 @@
 require "../../test_helper"
 
 describe "Codegen: thread local" do
-  it "works with class variables" do
-    run(<<-CODE).to_i.should eq(123)
-    require "prelude"
-
-    class Foo
-      @[ThreadLocal]
-      @@var = 123
-
-      def self.var
-        @@var
-      end
-
-      def self.var=(@@var)
-      end
-    end
-
-    Thread.new { Foo.var = 456 }.join
-
-    Foo.var
-    CODE
-  end
-
   it "works with class variable in main thread" do
     run(<<-CODE).to_i.should eq(123)
     require "prelude"

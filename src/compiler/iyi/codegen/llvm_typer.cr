@@ -302,6 +302,13 @@ module Iyi
         element_types = Array(LLVM::Type).new(ivars.size + (id_in_front ? 1 : 0))
         element_types.push @llvm_context.int32 if id_in_front # For the type id
 
+        # ris: String's {ptr, bytesize} are declared by the tape prelude.
+        # A program built without it (prelude "empty") still builds its
+        # literals as that pair, so the layout does not wait for them.
+        if ivars.empty? && type == @program.string
+          element_types.push @llvm_context.void_pointer, @llvm_context.int32
+        end
+
         ivars.each do |name, ivar|
           if type.extern?
             element_types.push llvm_embedded_c_type(ivar.type, wants_size)

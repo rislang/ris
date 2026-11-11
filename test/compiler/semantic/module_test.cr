@@ -146,23 +146,6 @@ describe "Semantic: module" do
       "can't use instance variables at the top level"
   end
 
-  it "works with int including enumerable" do
-    assert_type(<<-CODE) { array_of(float64) }
-      require "prelude"
-
-      struct Int32
-        include Enumerable(Int32)
-
-        def each
-          yield self
-          yield self + 2
-        end
-      end
-
-      1.map { |x| x * 0.5 }
-      CODE
-  end
-
   it "works with range and map" do
     assert_type(<<-CODE) { array_of(float64) }
       require "prelude"

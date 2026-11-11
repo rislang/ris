@@ -3,8 +3,8 @@ require "../../test_helper"
 private STABLE_ABI_TYPES = [
   Nil, Void, Int32, Float32, Bool, Char, Symbol, Pointer(Void),           # primitive scalars
   StaticArray(Int32, 1), Tuple(Int32), NamedTuple(x: Int32), Proc(Int32), # primitive aggregates
-  Reference, String,
-  Union(Int32, Char), Union(Int32, String), Union(Nil, String), Union(Nil, String, Regex), Union(Nil, Proc(Int32)), # unions
+  Reference,
+  Union(Int32, Char), Union(Nil, Proc(Int32)), # unions
 ]
 
 private UNSTABLE_ABI_TYPES = [
@@ -12,6 +12,8 @@ private UNSTABLE_ABI_TYPES = [
   Slice, Slice(Int32), Enumerable, Enumerable(Int32), Flags,
   StaticArray(Slice(Int32), 1), Tuple(Slice(Int32)), NamedTuple(x: Slice(Int32)),
   Union(Slice(Int32), Nil),
+  # ris: String is a struct whose fields the prelude declares.
+  String, Union(Int32, String), Union(Nil, String),
 ]
 
 describe "MacroExpander" do

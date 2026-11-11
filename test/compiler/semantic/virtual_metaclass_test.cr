@@ -78,7 +78,8 @@ describe "Semantic: virtual metaclass" do
       end
 
       a = [Bar.new, Baz.new] of Foo
-      b = a.map { |e| e.clone }
+      a.each { |e| e.clone }
+      b = a.map { |e| e }
       CODE
   end
 

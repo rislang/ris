@@ -164,7 +164,7 @@ describe "Semantic: static array" do
   end
 
   it "doesn't crash on instance_sizeof (#8858)" do
-    assert_error <<-CODE, "can't use instance_sizeof(String) as a generic type argument"
+    assert_error <<-CODE, "can't use instance_sizeof(::String) as a generic type argument"
       alias BadArray = Int32[instance_sizeof(String)]
       CODE
   end

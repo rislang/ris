@@ -4,6 +4,7 @@ describe "Semantic: yield with scope" do
   it "uses scope in global method" do
     run(<<-CODE).to_i.should eq(2)
       require "prelude"
+      struct Int32; def succ; self + 1; end; end
       def foo; with 1 yield; end
 
       foo do
@@ -15,6 +16,7 @@ describe "Semantic: yield with scope" do
   it "uses scope in instance method" do
     run(<<-CODE).to_i.should eq(2)
       require "prelude"
+      struct Int32; def succ; self + 1; end; end
       def foo; with 1 yield; end
 
       class Foo

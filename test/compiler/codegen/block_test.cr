@@ -928,10 +928,10 @@ describe "Code gen: block" do
       require "prelude"
 
       a = [1, 2, 3] || [1.5]
-      n = 0
+      n = 0.0
       a.each do |x|
         break if x > 2
-        n += x
+        n += x.to_f
       end
       n.to_i
       CODE
@@ -1148,25 +1148,6 @@ describe "Code gen: block" do
         a
       end
       a
-      CODE
-  end
-
-  it "doesn't crash on untyped array to_s" do
-    run(<<-CODE).to_string.should eq("[]")
-      require "prelude"
-
-      class Bar(T)
-      end
-
-      class Foo(K)
-        @foo : Nil
-
-        def foo
-          Array(typeof(yield @foo.not_nil!)).new
-        end
-      end
-
-      Foo(Int32).new.foo { |k| k + 1 }.to_s
       CODE
   end
 

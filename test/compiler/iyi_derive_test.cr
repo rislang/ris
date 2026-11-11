@@ -19,7 +19,7 @@ private def semantic_iyi(entry : String)
 
   parser = program.new_parser(File.read(entry))
   parser.filename = program.filename
-  program.semantic program.normalize(parser.parse)
+  program.semantic program.normalize(with_text_view(parser.parse))
   program
 end
 
@@ -103,6 +103,7 @@ describe "Semantic: iyi derive" do
           abstract def to_json : String
         end
 
+        @[OnTape]
         pub struct Customer
           @name : String
 
@@ -133,6 +134,7 @@ describe "Semantic: iyi derive" do
 
         import app/kinds::*
 
+        @[OnTape]
         pub struct Order
           @customer : Customer
           @count : Int32
@@ -196,6 +198,7 @@ describe "Semantic: iyi derive" do
 
         import app/derives::*
 
+        @[OnTape]
         pub struct Boxed
           getter n : Int32
           @tail : Array(Int32)

@@ -205,7 +205,8 @@ describe "Code gen: sizeof" do
         sizeof(Entry)
         CODE
 
-    size.should eq(16)
+    # ris: a String field is {pointer, size}, 16 bytes, after the type id.
+    size.should eq(24)
   end
 
   it "doesn't precompute sizeof of abstract struct (#7741)" do

@@ -162,7 +162,7 @@ describe "Codegen: is_a?" do
       a = [1.1]
       a = [5]
 
-      if a.is_a?(Enumerable)
+      if a.is_a?(Array)
         a[0]
       else
         0

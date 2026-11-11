@@ -258,7 +258,7 @@ describe Iyi::IyiMod do
       File.write path, bytes
 
       expect_raises(Iyi::IyiMod::Error,
-        /format v59, this compiler writes v61; rebuild the module/) do
+        /format v59, this compiler writes v62; rebuild the module/) do
         Iyi::IyiMod.read(path)
       end
     end
@@ -379,7 +379,7 @@ describe Iyi::IyiMod do
       effect.suspension.should be_true
       # A binding writer with no analyzed body must emit every effect.
       opaque = Iyi::TapeCallGraph::Contract.decode(read[1].tape_contract)
-      opaque.parameters.should eq [31, 31]
+      opaque.parameters.should eq [63, 63]
       opaque.allocation.should be_true
       opaque.suspension.should be_true
     end
@@ -1107,10 +1107,8 @@ describe Iyi::IyiMod do
           end
         end
 
-        pub def boxed(label : String, &block : Int32 -> Int32) : Box
-          box = Box.new(label)
+        pub def boxed(box : Box, &block : Int32 -> Int32) : Nil
           box.add(&block)
-          box
         end
         IYI
       File.write "main.iyi", <<-IYI
@@ -1118,7 +1116,8 @@ describe Iyi::IyiMod do
 
         import app/box
 
-        box = App::Box.boxed("doubling") { |n| n * 2 }
+        box = App::Box::Box.new("doubling")
+        App::Box.boxed(box) { |n| n * 2 }
         box.add { |n| n + 1 }
         puts box.label
         puts box.run(5)
@@ -1136,7 +1135,7 @@ describe Iyi::IyiMod do
 
       # Whatever the def is written on: a module's own `pub def` and a method
       # of an exported class are the same case.
-      artifact.mono_bodies.keys.should contain "app/box#boxed(label : ::String)&block : (Int32 -> Int32)"
+      artifact.mono_bodies.keys.should contain "app/box#boxed(box : Box)&block : (Int32 -> Int32)"
       artifact.mono_bodies.keys.should contain "Box#add()&block : (Int32 -> Int32)"
 
       box = artifact.exports.types.find! { |declaration| declaration.name == "Box" }
@@ -4479,9 +4478,10 @@ describe Iyi::IyiMod do
             end
           end
 
-          pub def make(name : String) : Labelled
+          pub def make(name : String) : Nil
             Box(String).new("packed")
             Labelled.new(name, Point.new(1, 2), ["t"], 3)
+            nil
           end
           IYI
         File.write "main.iyi", <<-IYI
@@ -5693,8 +5693,11 @@ describe Iyi::IyiMod do
         pub class Stack(T)
           @items = [] of T
 
-          def initialize(first : T)
-            @items << first
+          def initialize
+          end
+
+          def push(item : T) : Nil
+            @items << item
           end
 
           def size : Int32
@@ -5710,7 +5713,9 @@ describe Iyi::IyiMod do
         bag = Bag.new
         bag.add("a")
         puts bag.add("b")
-        puts Stack.new(1).size
+        stack = Stack(Int32).new
+        stack.push(1)
+        puts stack.size
         IYI
       from_source, from_artifact = iyimod_round_trip(modules, main)
       from_source.should eq "2\n1\n"
@@ -5743,7 +5748,8 @@ describe Iyi::IyiMod do
 
         import app/stack::*
 
-        puts Stack(Int32).new.push(5)
+        stack = Stack(Int32).new
+        puts stack.push(5)
         IYI
       from_source, from_artifact = iyimod_round_trip(modules, main)
       from_source.should eq "1\n"

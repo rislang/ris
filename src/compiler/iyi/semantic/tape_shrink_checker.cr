@@ -3556,6 +3556,13 @@ class Iyi::TapeShrinkChecker
       fresh_args.try &.each do |arg|
         outer[arg.name] = merge(outer[arg.name]? || EMPTY, Value.new([arg.object_id], [] of View))
       end
+      # What the block is handed is the def's, not the block's scratch:
+      # `a.map { |x| x }` gives each element back (SPEC 1.9).
+      unless @text_only
+        block.args.each do |arg|
+          outer[arg.name]?.try { |v| source_roots(v).each { |r| @yielded_roots << r } }
+        end
+      end
       @callback_chain << "#{node.name} block"
       @scopes << block.object_id
       if node.name == "tape"

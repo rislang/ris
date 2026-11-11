@@ -130,7 +130,8 @@ describe "Code gen: lib" do
         end
       end
 
-      p = Pointer(Moo::Type).malloc(1)
+      t = uninitialized Moo::Type
+      p = pointerof(t)
       p.value.func = -> (t: Moo::Type*) { 10 }
       p.value.func.call(p)
       CODE
@@ -146,7 +147,8 @@ describe "Code gen: lib" do
         end
       end
 
-      p = Pointer(Moo::Type).malloc(1)
+      t = uninitialized Moo::Type
+      p = pointerof(t)
       p.value.func = -> (t: Moo::Type*) { 10 }
       p.value.func.call(p)
       CODE

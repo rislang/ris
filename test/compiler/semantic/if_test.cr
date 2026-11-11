@@ -50,8 +50,10 @@ describe "Semantic: if" do
       CODE
   end
 
-  it "correctly filters type of variable if there's a raise with an interpolation that can't be typed" do
-    assert_type(<<-CODE) { int32 }
+  # ris: a branch that cannot be typed is not taken as one that never
+  # returns, so `a` keeps its nil.
+  it "keeps the nil of a variable if there's a raise with an interpolation that can't be typed" do
+    assert_error(<<-CODE, "a can be nil here")
       require "prelude"
 
       def bar

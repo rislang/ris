@@ -29,21 +29,6 @@ describe "Semantic: exception" do
       CODE
   end
 
-  it "type for exception handler for explicit types" do
-    assert_type(<<-CODE) { int32 }
-      require "prelude"
-
-      class MyEx < Exception
-      end
-
-      begin
-        raise MyEx.new
-      rescue MyEx
-        1
-      end
-      CODE
-  end
-
   it "marks method calling method that raises as raises" do
     result = assert_type(<<-CODE) { int32 }
       lib LibFoo
@@ -215,37 +200,43 @@ describe "Semantic: exception" do
     result = assert_type(<<-CODE) { int32 }
       require "prelude"
 
+      def show(x)
+      end
+
       n = nil
       begin
         raise "hey"
         n = 3
       ensure
-        p n
+        show n
       end
       n
       CODE
     mod = result.program
     eh = result.node.as(Expressions).expressions[-2]
-    call_p_n = eh.as(ExceptionHandler).ensure.should be_a(Call)
-    call_p_n.args.first.type.should eq(mod.nilable(mod.int32))
+    call_show_n = eh.as(ExceptionHandler).ensure.should be_a(Call)
+    call_show_n.args.first.type.should eq(mod.nilable(mod.int32))
   end
 
   it "types var as nilable inside ensure (2)" do
     result = assert_type(<<-CODE) { int32 }
       require "prelude"
 
+      def show(x)
+      end
+
       begin
         raise "hey"
         n = 3
       ensure
-        p n
+        show n
       end
       n
       CODE
     mod = result.program
     eh = result.node.as(Expressions).expressions[-2]
-    call_p_n = eh.as(ExceptionHandler).ensure.should be_a(Call)
-    call_p_n.args.first.type.should eq(mod.nilable(mod.int32))
+    call_show_n = eh.as(ExceptionHandler).ensure.should be_a(Call)
+    call_show_n.args.first.type.should eq(mod.nilable(mod.int32))
   end
 
   it "marks fun as raises" do

@@ -21,7 +21,8 @@ sections below and are listed here in order:
   time web/static_test.ri once it builds (it fails: web/spec import
   before the first `spec` block, a web-side change).
 * Benches build (section 7), including `HTTP.tls_config=` callers.
-* compiler_test passes: fix its 239 failures (section 12).
+* compiler_test passes: all but exception_test.cr (48, the user decides
+  its fate; section 12).
 * Release: Linux tarball and its job, `install_ris.sh`, tag v0.1.0;
   `ris --version` prints 0.1.0.
 
@@ -345,17 +346,24 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
 
 ## 12. Known failures
 
+* compiler_test's "Codegen: const" crashed once (signal 11) when all
+  describes ran 30 at a time on minitest (2026-11-11); alone it passes
+  three times of three. Find the race or the load-dependent fault.
+
 * Every growing tape value reserves 128 MiB of address space, even a
   128-byte builder (SIDE_RESERVE, region.iyi:529). Under
   `vm.overcommit_memory=2` each is charged: a FileServer answer holds
   up to eight (doc/drafts/fileserver-outgoing.md, Memory).
-* compiler_test: 239 failures, no segfaults, each top-level describe
-  run apart in parallel on minitest. Largest groups: General allocation
-  refused (35: Pointer.malloc, class new in semantic examples), Crystal
-  API ris dropped (not_nil!, Exception#message, Regex::Options, select,
-  p: ~40), tape rules on old examples (owner temporaries, scratch
-  returns, request tape: ~25), Semantic: iyi (25) and instance var (23).
-  Each needs the example deleted or rewritten to ris behaviour.
+* compiler_test: only test/compiler/codegen/exception_test.cr fails
+  (48 examples; its fate is the user's decision), each top-level describe
+  run apart in parallel on minitest.
+* A constant's initializer runs on the program tape only in a .ri/.iyi
+  file; a compiler_test example (source "spec") still needs
+  `.copy_to(Program.tape)` for a constant or class variable (SPEC 7.5).
+* A branch that cannot be typed (`raise "#{f}"` with `f` untyped) does
+  not narrow a variable as a NoReturn branch does (if_test.cr).
+* A local receiver of `<<` in a program without the prelude reads as
+  growing text and names `::RisTextGrowth` (iyi_test.cr, std/int case).
 * test/cli/concurrency_exercise.sh needs `ulimit -n 8192` and is not in
   check.sh; recheck on minitest.
 * test/cli/parallel_exercise.iyi:124 (a task value's Panicked arm) and

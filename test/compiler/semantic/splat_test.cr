@@ -339,10 +339,7 @@ describe "Semantic: splat" do
       def test_func(a : String, *b, c, d)
       end
 
-      if true
-        val = ""
-      end
-
+      val = true ? "" : nil
       test_func(val, 1, 2, 3, 4, 5)
       CODE
   end

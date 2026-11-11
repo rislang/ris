@@ -1633,6 +1633,9 @@ module Iyi
       # the function pointer
       if target.is_a?(InstanceVar) && context.type.extern? && target.type.proc?
         llvm_value = check_proc_is_not_closure(llvm_value, target.type)
+        # ris: building the check function the first time leaves its own
+        # last value in @last; the assignment's value is still *last*.
+        @last = last
       end
 
       assign ptr, target_type, value.type, llvm_value

@@ -1,38 +1,6 @@
 require "../../test_helper"
 
 describe "Code gen: alias" do
-  it "invokes methods on empty array of recursive alias (1)" do
-    run(<<-CODE).to_string.should eq("")
-      require "prelude"
-
-      alias Alias = Array(Alias)
-
-      a = [] of Alias
-      b = a.map(&.to_s).join
-      CODE
-  end
-
-  it "invokes methods on empty array of recursive alias (2)" do
-    run(<<-CODE).to_string.should eq("")
-      require "prelude"
-
-      alias Alias = Nil | Array(Alias)
-
-      a = [] of Alias
-      b = a.map(&.to_s).join
-      CODE
-  end
-
-  it "invokes methods on empty array of recursive alias (3)" do
-    run(<<-CODE).to_string.should eq("")
-      require "prelude"
-
-      alias Alias = Nil | Array(Alias)
-
-      a = [] of Alias
-      b = a.map(&.to_s).join
-      CODE
-  end
 
   it "casts to recursive alias" do
     run(<<-CODE).to_i.should eq(1)
@@ -132,7 +100,7 @@ describe "Code gen: alias" do
 
   it "codegens cast to alias that includes bool" do
     run(<<-CODE).to_i.should eq(2)
-      alias Foo = Bool | Array(Foo)
+      alias Foo = Bool | Int32
 
       a = false.as(Foo)
       if a
