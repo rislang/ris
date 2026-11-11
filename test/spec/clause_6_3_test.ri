@@ -1,5 +1,0 @@
-# spec: 6.3@4ddcbf0b
-# SPEC 6.3 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 6.3@4ddcbf0b`, or write
-# one; then delete this file.
-todo "6.3 untested: Validate bounds, overflow and aligned membership before mutation"

@@ -9,7 +9,7 @@
 # "...\n"`, a status, stdin, env, and a failing line that prints stdout,
 # stderr and status; (c) a background program: start, wait_for a ready
 # line, write to its stdin, wait_for the echo, and no process of it left;
-# (d) a kept def using a name only top-level code sets is refused; (e)
+# (d) computed constants survive beside program statements; (e)
 # locals named `tmp` or like the module are refused, and a `*/spec`
 # import above the section; (f) a plain `ris build` binary has no
 # RisRun or RisProcess symbol.
@@ -137,7 +137,7 @@ pgrep -f "$WORK/tmp/ris-program" > c.ps &&
 seen="$(cat "$WORK/pid" 2>/dev/null)"
 [ -n "$seen" ] && [ -e "$seen" ] && fail "(c) $seen is left after the run"
 
-# (d) a kept def using a dropped name.
+# (d) computed constants remain declarations beside program statements.
 cat > d.ri <<'EOF'
 module d
 
@@ -154,8 +154,8 @@ spec 1.2
 end
 EOF
 "$IYI" test d.ri > d.out 2>&1
-[ $? = 0 ] && fail "(d) a def using a dropped name passed"
-has d.out "\`CONFIG\` is set by d.ri's top-level code, which spec blocks do not run"
+[ $? = 0 ] || { fail "(d) computed program constant"; tail -15 d.out; }
+has d.out "1 blocks: 1 ok"
 
 # (e) locals named tmp or like the module; a */spec import above.
 cat > e1.ri <<'EOF'

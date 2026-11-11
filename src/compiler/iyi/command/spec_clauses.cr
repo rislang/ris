@@ -30,6 +30,7 @@ class Iyi::Command
     getter items = [] of {String, String?}
     property none : String? = nil
     property tagged = false
+    getter tag_lines = {} of String => Int32
     property todo : String? = nil
 
     def initialize(@path : String)
@@ -51,6 +52,7 @@ class Iyi::Command
   # Read by spec_status; set by spec_load_or_abort.
   @spec_blocks = [] of SpecBlock
   @spec_lock = {} of String => String
+  @spec_markers = {} of String => {String, Int32, String}
 
   private def spec_command
     case options.first?
@@ -156,6 +158,7 @@ class Iyi::Command
 
   private def spec_clauses(root : String) : Array(SpecClause)
     clauses = [] of SpecClause
+    @spec_markers.clear
     seen = Set(String).new
     spec_files(root).each do |file|
       shown = ::Path[file].relative_to(root).to_s
@@ -169,6 +172,18 @@ class Iyi::Command
         end
       end
       lines.each_with_index do |line, index|
+        if line.includes?("<!-- todo:")
+          entry = current
+          valid = line.starts_with?("  <!-- todo: ") && line.ends_with?(" -->") &&
+                  line.size <= 80
+          reason = valid ? line[13...-4] : ""
+          unless entry && valid && !reason.blank? && !@spec_markers.has_key?(entry[0])
+            raise SpecError.new("#{shown}:#{index + 1}: misplaced or invalid todo marker; " \
+                                "write one `  <!-- todo: reason -->` after the clause text, before a blank line")
+          end
+          @spec_markers[entry[0]] = {shown, index + 1, reason}
+          next
+        end
         if line.starts_with?("## ")
           flush.call(current)
           current = nil
@@ -196,6 +211,9 @@ class Iyi::Command
           next
         end
         if (entry = current) && !line.blank? && line[0].whitespace?
+          if @spec_markers.has_key?(entry[0])
+            raise SpecError.new("#{shown}:#{index + 1}: text after todo marker; move the marker after the clause text")
+          end
           entry[3] << line
         else
           flush.call(current)
@@ -259,6 +277,7 @@ class Iyi::Command
       if rest = spec_tag_rest(lines[index])
         test.tagged = true
         spec_parse_tag(test, rest, "#{shown}:#{index + 1}")
+        test.items.each { |number, _| test.tag_lines[number] ||= index + 1 }
       end
     end
     unless test.tagged
@@ -506,13 +525,14 @@ class Iyi::Command
   # tags' `@V` is ignored; without one, a block is not reviewed yet and a
   # tag's `@V` decides as before.
   private def spec_status(clause : SpecClause, tests : Array(SpecTest)) : {String, Array(SpecTest)}
-    files = tests.select(&.names?(clause.number))
+    marker = @spec_markers[clause.number]?
+    files = tests.select { |test| test.names?(clause.number) && (!marker || test.tagged) }
     named = spec_blocks_naming(clause)
     versions = files.flat_map { |test| test.items.select { |item| item[0] == clause.number }.map(&.[1]) }
     todo = files.all?(&.todo) && named.all?(&.todo)
     locked = @spec_lock[clause.number]?
     status =
-      if files.empty? && named.empty?
+      if files.empty? && named.empty? && !marker
         "uncovered"
       elsif locked
         locked != clause.version ? "to review" : todo ? "todo" : "ok"
@@ -550,6 +570,9 @@ class Iyi::Command
                   builder.field "version", clause.version
                   builder.field "status", status
                   builder.field "text", clause.text
+                  if marker = @spec_markers[clause.number]?
+                    builder.field "marker", marker[2]
+                  end
                   builder.field "files" { spec_files_json(builder, clause, files) }
                 end
               end
@@ -623,6 +646,9 @@ class Iyi::Command
                   builder.field "version", clause.version
                   builder.field "status", status
                   builder.field "text", clause.text
+                  if marker = @spec_markers[clause.number]?
+                    builder.field "marker", marker[2]
+                  end
                   builder.field "history" do
                     builder.array do
                       spec_history(entries, clause).each { |entry| builder.scalar entry.heading }
@@ -643,6 +669,9 @@ class Iyi::Command
       status, files = spec_status(clause, tests)
       puts "#{clause.number}@#{clause.version} #{clause.text}"
       puts "  status: #{status}"
+      if marker = @spec_markers[clause.number]?
+        puts "  marker: #{marker[0]}:#{marker[1]}"
+      end
       spec_history(entries, clause).each { |entry| puts "  changelog: #{entry.heading}" }
       files.each do |test|
         version = test.items.find { |item| item[0] == clause.number }.try(&.[1])
@@ -789,6 +818,14 @@ class Iyi::Command
                      "name a clause `#{name} spec` lists"}
         next
       end
+      if block.number == "8.1"
+        lines = File.read_lines(File.join(root, block.path))
+        header = spec_leading_block(lines)
+        unless header.any? { |i| lines[i].starts_with?("# standard: ") && !lines[i][12..].blank? }
+          failures << {"#{site}: name the standard",
+                       "add `# standard: ...` to the module header"}
+        end
+      end
       if block.label && !spec_label_ok?(block, clause)
         failures << {"the label of spec #{block.number} at #{site} differs from SPEC.md",
                      "run `#{name} check --fix`"}
@@ -801,6 +838,17 @@ class Iyi::Command
     end
     clauses.each do |clause|
       status, files = spec_status(clause, tests)
+      if marker = @spec_markers[clause.number]?
+        site = "#{marker[0]}:#{marker[1]}"
+        spec_blocks_naming(clause).each do |block|
+          message = block.todo ? "the block holds the todo; remove the marker" : "#{clause.number} is proven by #{block.path}:#{block.line}; remove its todo marker"
+          failures << {"#{site}: #{message}", "keep the todo or proof in its module"}
+        end
+        tests.select { |test| test.tagged && test.names?(clause.number) }.each do |test|
+          message = test.todo ? "the test holds the todo; remove the marker" : "#{clause.number} is proven by #{test.path}:#{test.tag_lines[clause.number]}; remove its todo marker"
+          failures << {"#{site}: #{message}", "keep the todo or proof in its test"}
+        end
+      end
       if status == "to review"
         locked = @spec_lock[clause.number]?
         blocks = spec_blocks_naming(clause)
@@ -845,13 +893,22 @@ class Iyi::Command
       abort! "spec todo takes only --json, not '#{option}'", :USAGE_ERROR unless option == "--json"
       json = true
     end
-    _root, _clauses, tests = spec_load_or_abort
+    _root, clauses, tests = spec_load_or_abort
     todos = tests.select(&.todo)
+    markers = clauses.select { |clause| @spec_markers.has_key?(clause.number) }
     if json
       JSON.build(STDOUT) do |builder|
         builder.object do
           builder.field "todo" do
             builder.array do
+              markers.each do |clause|
+                marker = @spec_markers[clause.number]
+                builder.object do
+                  builder.field "clauses" { builder.array { builder.scalar clause.number } }
+                  builder.field "file", "#{marker[0]}:#{marker[1]}"
+                  builder.field "reason", marker[2]
+                end
+              end
               todos.each do |test|
                 builder.object do
                   builder.field "clauses" { builder.array { test.items.each { |item| builder.scalar item[0] } } }
@@ -865,11 +922,16 @@ class Iyi::Command
       end
       puts
     else
+      markers.each do |clause|
+        marker = @spec_markers[clause.number]
+        puts "#{marker[0]}:#{marker[1]} #{clause.number} #{marker[2]}"
+      end
       todos.each do |test|
         clauses = test.items.empty? ? "-" : test.items.map(&.[0]).join(",")
         puts "#{clauses.ljust(10)}#{test.path}: #{test.todo}"
       end
-      puts "#{todos.size} todo test#{todos.size == 1 ? "" : "s"}"
+      total = todos.size + markers.size
+      puts "#{total} todo test#{total == 1 ? "" : "s"}"
     end
     exit
   end
@@ -883,7 +945,9 @@ class Iyi::Command
 
       Link the spec's clauses (SPEC.md or spec/*.md at the root) to their
       proofs: `spec N.M` blocks in the root's modules, and old files under
-      test/ tagged `# spec: N.M@VERSION`.
+      test/ tagged `# spec: N.M@VERSION`. A clause no module keeps may
+      carry `  <!-- todo: reason -->` after its text in SPEC.md; the
+      marker is coverage, excluded from the version, until a proof lands.
 
           (none)     one line per clause: status, proofs, first words;
                      then the counts. Status: ok, todo, to review,
@@ -894,7 +958,7 @@ class Iyi::Command
                      clause's version (tags naming it too)
           ack --from-tags
                      lock each clause whose tags all match it
-          todo       every todo test: clause, file, reason
+          todo       every todo test or SPEC.md marker: clause, file, reason
 
       `#{name} check spec` fails on an unreviewed clause, a tag, block or
       lock line naming no clause, a version no CHANGELOG.md entry

@@ -1,5 +1,0 @@
-# spec: 5.6@b5b47fbd
-# SPEC 5.6 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 5.6@b5b47fbd`, or write
-# one; then delete this file.
-todo "5.6 untested: ris uses grouped iyi fibers (5.1), not detached"

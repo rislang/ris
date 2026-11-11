@@ -1,5 +1,0 @@
-# spec: 6.4@5ba1ad49
-# SPEC 6.4 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 6.4@5ba1ad49`, or write
-# one; then delete this file.
-todo "6.4 untested: External byte images (.load(bytes)) check lengths, alignment, union"

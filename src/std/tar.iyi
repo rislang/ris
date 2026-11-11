@@ -1,3 +1,4 @@
+# standard: POSIX ustar archive format
 # Tar archives - POSIX.1-2001 pax and ustar (IEEE Std 1003.1, the `pax`
 # utility's "ustar Interchange Format" and "pax Interchange Format"),
 # read and written in iyi, with GNU's long names and the old v7 header
@@ -1403,3 +1404,20 @@ pub class TarWriter
     end
   end
 end
+
+
+spec 8.1
+  sink = Memory.new
+  writer = TarWriter.new(sink)
+  stamp = Time.unix(1700000000_i64)
+  writer.add("a.txt", "alpha", mtime: stamp)
+  writer.finish
+  source = Memory.new(sink.to_s)
+  reader = TarReader.new(source)
+  entry = reader.next_entry
+  raise "TAR entry missing" unless entry.is_a?(TarEntry)
+  entry.name == "a.txt"
+  entry.read_all == "alpha"
+end
+
+import std/io::{Memory}

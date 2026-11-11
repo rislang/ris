@@ -1,5 +1,0 @@
-# spec: 3.1@7e5647c9
-# SPEC 3.1 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 3.1@7e5647c9`, or write
-# one; then delete this file.
-todo "3.1 untested: Track (owner, field path) through aliases, branches, holders"

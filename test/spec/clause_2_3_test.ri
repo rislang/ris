@@ -1,5 +1,0 @@
-# spec: 2.3@91ca936c
-# SPEC 2.3 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 2.3@91ca936c`, or write
-# one; then delete this file.
-todo "2.3 untested: No owner byte image, raw copy/equality, FFI layout"

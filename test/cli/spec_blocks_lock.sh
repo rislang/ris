@@ -188,5 +188,26 @@ mv .spec.lock spec.lock
 has h4.out "spec.lock is the old name of .spec.lock"
 cd ..
 
+# (i) standards proofs require a nonempty leading module header.
+mkdir header
+cd header || exit 1
+printf '# Demo\n\n## 8. Library\n\n* 8.1 Follow the named standard.\n' > SPEC.md
+printf 'module codec\n\nspec 8.1\n  true\nend\n' > codec.ri
+printf '# Changelog\n\n## 2026-11-11 · %s\n\nWhy.\n' "$(version 8.1)" > CHANGELOG.md
+"$IYI" spec ack 8.1 > /dev/null 2>&1
+"$IYI" check spec > missing.out 2>&1
+[ $? = 0 ] && fail "(i) missing standard header passed"
+has missing.out 'add `# standard: ...` to the module header'
+# A comment below the module header does not count as a leading header.
+sed -i '2i# standard: RFC 4648' codec.ri
+"$IYI" check spec > late.out 2>&1
+[ $? = 0 ] && fail "(i) misplaced standard header passed"
+sed -i '2d;1i# standard: ' codec.ri
+"$IYI" check spec > blank.out 2>&1
+[ $? = 0 ] && fail "(i) empty standard header passed"
+sed -i '1c# standard: RFC 4648' codec.ri
+"$IYI" check spec > valid.out 2>&1 || fail "(i) valid header refused"
+cd ..
+
 [ "$failed" = 0 ] && echo "spec_blocks_lock: ok"
 exit "$failed"

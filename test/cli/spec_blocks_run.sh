@@ -20,6 +20,15 @@ WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK" || exit 1
 
+# A pure library proof must not import process helpers back into itself.
+# ris_spec -> dir -> path used to make std/path's own proofs cyclic.
+(cd "$REPO" && "$IYI" test src/std/path.iyi) > path.out 2>&1
+if [ $? -ne 0 ]; then
+  echo 'FAIL: pure std/path spec has an import cycle'
+  tail -15 path.out
+  exit 1
+fi
+
 failed=0
 fail() { echo "FAIL: $*"; failed=1; }
 has() { grep -qF -- "$2" "$1" || { fail "$1 lacks: $2"; cat "$1"; }; }
@@ -35,6 +44,75 @@ cat > SPEC.md <<'EOF'
 * 1.4 Nothing panics.
 * 1.5 Later work.
 EOF
+
+# Libraries keep computed constants and can derive their own types.
+cat > constants.ri <<'EOF'
+module constants
+
+VALUES = Array(Int32).new(2) { |i| i + 20 }
+
+pub def answer : Int32
+  VALUES[0] + VALUES[1] + 1
+end
+
+spec 1.1
+  answer == 42
+end
+EOF
+"$IYI" test constants.ri > constants.out 2>&1
+[ $? = 0 ] || { fail "computed library constant"; tail -15 constants.out; }
+rm constants.ri
+
+cat > derived.ri <<'EOF'
+module derived
+
+pub trait Answer
+  abstract def answer : Int32
+end
+
+pub macro own(declaration)
+  impl ::Derived::Answer for {{ declaration[:name].id }}
+    def answer : Int32
+      42
+    end
+  end
+end
+
+pub struct Value
+  derive own
+end
+
+spec 1.1
+  Value.new.answer == 42
+end
+EOF
+"$IYI" test derived.ri > derived.out 2>&1
+[ $? = 0 ] || { fail "module's own derive"; tail -15 derived.out; }
+rm derived.ri
+
+# A nested platform branch inside a declaration is still a declaration.
+cat > conditional.ri <<'EOF'
+module conditional
+{% if true %}
+  pub struct Value
+    {% if true %}
+      def answer : Int32
+        42
+      end
+    {% else %}
+      def answer : Int32
+        41
+      end
+    {% end %}
+  end
+{% end %}
+spec 1.1
+  Value.new.answer == 42
+end
+EOF
+"$IYI" test conditional.ri > conditional.out 2>&1
+[ $? = 0 ] || { fail "nested conditional declaration"; tail -15 conditional.out; }
+rm conditional.ri
 
 mkdir proj
 cat > proj/m.ri <<'EOF'

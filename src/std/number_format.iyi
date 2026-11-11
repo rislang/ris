@@ -1,3 +1,4 @@
+# standard: iyi numeric formatting
 # Numbers as people read them: digits in groups, and quantities with a
 # prefix.
 #
@@ -661,4 +662,45 @@ module NumberText
     end
     writer
   end
+end
+
+
+spec 8.1
+
+
+  kept = ""
+  writer = String::Builder.new(1)
+  writer << "prefix:"
+  1234567.format(writer)
+  writer.finish == "prefix:1,234,567"
+  writer = String::Builder.new(1)
+  1234.5678.format(writer, decimal_places: 2)
+  writer.finish == "1,234.57"
+  kept = writer.finish.copy_to(Program.tape)
+  writer = String::Builder.new(1)
+  (-9223372036854775807_i64 - 1_i64).format(writer)
+  writer.finish == "-9,223,372,036,854,775,808"
+  writer = String::Builder.new(1)
+  18446744073709551615_u64.format(writer)
+  writer.finish == "18,446,744,073,709,551,615"
+  writer = String::Builder.new(1)
+  1234567.humanize(writer)
+  writer.finish == "1.23M"
+  writer = String::Builder.new(1)
+  1536.humanize_bytes(writer)
+  writer.finish == "1.5KiB"
+  1234.5678.format(decimal_places: 2) == kept
+  1234567.humanize == "1.23M"
+  1536.humanize_bytes == "1.5KiB"
+  1.005.format(decimal_places: 2) == "1.00"
+  2.5.format(decimal_places: 0) == "2"
+  (-0.0).format(decimal_places: 2) == "0.00"
+  1e20.format == "100,000,000,000,000,000,000.0"
+  0.000_012.humanize == "12µ"
+  999999.humanize == "1M"
+  1536.humanize_bytes(precision: 2,
+    significant: false) == "1.50KiB"
+  0.1_f32.format == "0.1"
+  1234.5_f32.format == "1,234.5"
+  0.1_f32.format(decimal_places: 9) == "0.100000001"
 end

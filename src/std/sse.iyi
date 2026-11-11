@@ -1,3 +1,4 @@
+# standard: WHATWG HTML server-sent events
 # Server-sent events (the WHATWG HTML Living Standard, §9.2): a stream of
 # text events over one long HTTP response, `text/event-stream`, for both
 # ends of std/http.
@@ -643,4 +644,42 @@ pub struct SSE
     return false unless parsed
     parsed.essence == "text/event-stream"
   end
+end
+
+spec 8.1
+  expected = "event: update\nid: 7\nretry: 0\ndata: a\ndata: b\ndata:\n\n"
+  SSE.encode("a\r\nb\r", "update", "7", 0) == expected
+  SSE.comment("a\r\nb\r") == ": a\n: b\n:\n"
+  parser = EventParser.new
+  count = 0
+  data = ""
+  id = ""
+  kind = ""
+  parser.feed("\uFEFFid: 7\r") { |_| raise "early event" }
+  parser.feed("\ndata: café\r\ndata: next\r\n\r") do |event|
+    count += 1
+    data = event.data.copy_to(Program.tape)
+    id = event.id.copy_to(Program.tape)
+    kind = event.event.copy_to(Program.tape)
+  end
+  count == 1
+  parser.dispatched == 1_i64
+  data == "café\nnext"
+  id == "7"
+  kind == "message"
+  parser.feed("\nretry: 999999999999\n\n") { |_| raise "empty event" }
+  parser.retry == 2147483647
+  parser.finish
+  second = EventParser.new
+  seen = 0
+  second.feed("id: 7\r") { |_| raise "early event" }
+  second.feed("\ndata: café\ndata: next\n\n") do |event|
+    raise "wrong event" unless event.data == data && event.id == "7"
+    seen += 1
+  end
+  seen == 1
+  SSE.encode("hi") == "data: hi\n\n"
+  SSE.comment("hi") == ": hi\n"
+  second.dispatched == 1_i64
+  second.retry.nil?
 end

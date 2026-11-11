@@ -1,3 +1,4 @@
+# standard: WHATWG URL query encoding
 # Query fields borrow input bytes or decoded bytes on the caller's tape.
 module std/query
 
@@ -200,3 +201,31 @@ pub struct QueryPair
   end
 end
 
+
+def pairs(text : String) : String
+  rendered = ""
+  Query.parse(text).each do |key, value|
+    rendered << '[' << key << '=' << value << ']'
+  end
+  rendered
+end
+
+spec 8.1
+  # `Query.parse` on the tape reads what `Params.parse` reads - `&` and `;`
+  # part pairs, `+` a space, `%XX` a byte, a lone `%` itself, a leading `?`
+  # dropped, empty parts skipped - and puts nothing on the GC heap.
+
+
+  # The caller owns both parsed views and the rendered pairs.
+
+  ok = pairs("?a=1&b=2;c=3&&d&e=") == "[a=1][b=2][c=3][d=][e=]" &&
+       pairs("q=hello+world&x=%41%2c%zz&p=100%") == "[q=hello world][x=A,%zz][p=100%]" &&
+       pairs("") == "" && pairs("?") == "" && pairs("=v&k=") == "[=v][k=]"
+  found = 0
+  q = Query.parse("page=2&q=caf%C3%A9+au+lait")
+  page = q["page"]?
+  words = q["q"]?
+  found = (page ? page.bytesize : 0) + (words ? words.bytesize : 0)
+  ok &&= found == 1 + 13
+  ok == true
+end

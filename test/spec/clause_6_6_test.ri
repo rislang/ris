@@ -1,5 +1,0 @@
-# spec: 6.6@ca5f6a2f
-# SPEC 6.6 has no test that names it. Find the gate that proves it
-# (test/ris/check.sh, test/cli/) and tag it `# spec: 6.6@ca5f6a2f`, or write
-# one; then delete this file.
-todo "6.6 untested: RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste"

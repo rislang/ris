@@ -1,3 +1,4 @@
+# standard: RFC 6455
 # WebSocket (RFC 6455) over std/http: the server's handshake, the
 # client's, and the frames after them, written in iyi.
 #
@@ -1336,4 +1337,27 @@ pub class WebSocket
     abandon
     WebSocketError.new("the connection ended without a close frame", 1006)
   end
+end
+
+
+spec 8.1
+
+
+  kept = ""
+  text = "hello"
+  w = String::Builder.new(1)
+  w << "prefix:"
+  WebSocket.frame(text, w)
+  w.finish == "prefix:\x81\x05hello"
+  frame = WebSocket.frame(text, key: 0x04030201_u32)
+  frame == "\x81\x85\x01\x02\x03\x04igohn"
+  kept = frame.copy_to(Program.tape)
+  large = ""
+  65536.times { large << "a" }
+  encoded = WebSocket.frame(large)
+  encoded.bytesize == 65546
+  encoded[1] == 127_u8 && encoded[7] == 1_u8
+  medium = WebSocket.frame(large[0, 126])
+  medium[1] == 126_u8 && medium[3] == 126_u8
+  WebSocket.frame("hello", key: 0x04030201_u32) == kept
 end

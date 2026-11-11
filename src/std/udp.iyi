@@ -1,3 +1,4 @@
+# standard: RFC 768
 # Datagram sockets: UDP networking for iyi
 #
 # A native UDP socket with numeric IP resolution (IPv4 dotted-decimal, IPv6, and localhost).
@@ -1263,4 +1264,19 @@ pub class UdpSocket
       false
     end
   {% end %}
+end
+
+spec 8.1
+  server = UdpSocket.bind("127.0.0.1", 0)
+  client = UdpSocket.bind("127.0.0.1", 0)
+  client.receive_from?.nil?
+  client.send_to("ping loopback", "127.0.0.1", server.local_port)
+  datagram = server.receive_datagram.or_panic
+  datagram.text == "ping loopback"
+  datagram.port == client.local_port
+  server.send_to("pong", datagram.host, datagram.port)
+  client.receive_from.or_panic[0] == "pong"
+  server.receive?.nil?
+  server.close
+  client.close
 end

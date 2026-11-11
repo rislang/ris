@@ -1,3 +1,4 @@
+# standard: RFC 4180
 # CSV, RFC 4180, written in iyi.
 #
 # `CSV.parse` reads a document a row of fields at a time, each row
@@ -901,4 +902,18 @@ pub class CSVWriter
   private def put(b : UInt8) : Nil
     @io.write(String.build(1) { |w| w.push(b) })
   end
+end
+
+spec 8.1
+  rows = [] of Array(String)
+  CSV.parse("id,name\r\n1,\"Ada, A\"\r\n") do |row|
+    rows << row.copy_to(Program.tape)
+  end
+  rows.size == 2
+  rows[1] == ["1", "Ada, A"]
+  back = CSV.build(rows)
+  again = [] of Array(String)
+  CSV.parse(back) { |row| again << row.copy_to(Program.tape) }
+  again == rows
+  CSV.build([["\uFEFFid"]]) == "\"\uFEFFid\""
 end

@@ -57,6 +57,14 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.
 
+### 2026-11-11 · 8.1@5897720c
+
+* New: std modules follow the standard named by their header; spec 8.1
+  requires a leading `# standard: ...` comment.
+* Why: format and RFC tests need a clause before moving beside std code.
+  Reviewed design: doc/drafts/spec-port/ (3.1); the review settled the
+  header syntax, clause number and landing with pilot proofs and ack.
+
 ### 2026-11-11 · 6.7@73ca726d, 6.8@4a174319, 6.9@1e0b6a98
 
 * Was: spec.lock at the root, which `sp<tab>` completed before SPEC.md.

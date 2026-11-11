@@ -43,8 +43,10 @@ in SPEC.md is the name, and `ris test` prints it. There is no bare
 A check that proves no clause is a missing clause: write the clause
 first.
 
-D2. `todo "reason"` lives only inside a spec block. The lines before
-it are still checked: the block is broken if one fails, else todo.
+D2. `todo "reason"` lives inside a spec block. The lines before it
+are still checked: the block is broken if one fails, else todo. For a
+clause no module keeps, a SPEC.md todo marker holds the reason instead
+(../spec-port/spec-port.md 3.2); a todo lives in one place.
 
 D3. Inside a spec block every top-level line of type Bool is an
 assertion; no `assert` is written (`Post.slugify("!!!") == "post"`).
@@ -703,8 +705,9 @@ clause; other clauses refer to it by number."
 today's names (SPEC_STATUSES, spec_clauses.cr:394):
 
 - covered: at least one block or old test names N.M without `todo`;
-- todo: only todo blocks or todo tests name it;
-- uncovered: nothing names it;
+- todo: only todo blocks or todo tests name it, or it has a SPEC.md
+  todo marker and no proof;
+- uncovered: nothing names it and it has no SPEC.md todo marker;
 - to review: covered or todo, but spec.lock lacks its current hash.
 
 Pass, broken and todo outcomes come only from `ris test`. `ris check`
@@ -804,17 +807,20 @@ web through site. Step 6 builds it.
    project with no *_test.ri, so the block never ran; it now runs when
    any module holds a spec block. With its own SPEC.md, init writes no
    block (its clause 1.1 is not there) and no spec.lock.
-8. Remove `test "x" do` (D9) once ris's own test/ is moved. Gate:
-   `ris check` green with test/ holding only test/cli/ and test/speed/.
+8. Remove `test "x" do` (D9). Gate: `ris check` green. Under
+   spec-port D1 and D6, test/ keeps cli/, speed/, ris/ and the Crystal
+   suites compiler/, compiler-cli/, debug/, llvm-ir/, manual/,
+   primitives/, std/ and support/ until the compiler is written in ris.
    Done (test/cli/spec_blocks_old_test.sh): `test "x"` at a top-level
    line start is refused in every .ri/.iyi file with the 5.1 message;
    the prelude's `test` and IyiTestCases are gone; a fresh project's
-   `ris check` is green with no test/. Amended: nothing in ris's own
-   test/ used `test "x" do` (the abi `test` in test/compiler is a local
-   Crystal helper), so no file moved. Emptying test/ of compiler/,
-   std/, ris/ and the rest is a port of ~1600 Crystal and program
-   tests to spec blocks, not part of removing the form; it is left
-   to its own draft.
+   `ris check` is green with no test/. No ris test used `test "x" do`;
+   the abi `test` in test/compiler is a local Crystal helper.
+   The completed port is recorded in ../spec-port/spec-port.md:
+   module proofs live beside their code; process, lifetime, refusal,
+   oracle and heap/output checks remain program-level in test/ris/.
+   The 24 test/spec stubs became SPEC.md todo markers. Crystal suites
+   still test the host compiler/library and cannot become ris blocks.
 
 ## 7. Alternatives rejected
 

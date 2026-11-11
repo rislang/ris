@@ -1,3 +1,4 @@
+# standard: Go net/http path cleaning
 # A request router for std/http: `Router#handle(pattern) { |req, res,
 # params| ... }` registers a handler, and `router.call(req, res)` is what
 # a `Server.answer` handler's `call` runs. The patterns, their precedence and
@@ -706,4 +707,21 @@ pub class Router
     res.header("Content-Type", "text/plain; charset=utf-8")
     res.body << text
   end
+end
+
+
+spec 8.1
+
+
+  kept = ""
+  path = "/a//b/../c/./"
+  w = String::Builder.new(1)
+  w << "prefix:"
+  Router.clean(path, w)
+  w.finish == "prefix:/a/c/"
+  kept = Router.clean(path).copy_to(Program.tape)
+  Router.clean("/../../") == "/"
+  Router.clean("café/../ok") == "/ok"
+  kept == "/a/c/"
+  Router.clean("/a//b/../c/./") == kept
 end

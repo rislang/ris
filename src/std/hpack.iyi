@@ -1,3 +1,4 @@
+# standard: RFC 7541
 # Standard HPACK: Header Compression for HTTP/2 (RFC 7541)
 #
 # Implements:
@@ -1199,4 +1200,86 @@ pub class Encoder
       end
     end
   end
+end
+
+def churn(table : DynamicTable, index : Int32) : Nil
+  table.add("key#{index % 3}", "v" * (index % 23 + 1))
+end
+
+spec 8.1
+  # Tape HPACK round-trips fields through connection tables, with and
+  # without Huffman, and refuses malformed blocks. No heap.
+
+
+  encoder = Encoder.new
+  decoder = Decoder.new
+  20.times do |i|
+    encoder.use_huffman = i % 2 == 0
+    encoder.set_max_table_size(128) if i == 5
+    tape do
+      fields = TapeHeaders.new(5)
+      fields.push(TapeHeaderField.new(String.new(":method"), String.new("GET"),
+        IndexingMode::Incremental))
+      fields.push(TapeHeaderField.new(String.new(":path"), String.new("/hello?q=1"),
+        IndexingMode::Incremental))
+      fields.push(TapeHeaderField.new(String.new("x-indexed"),
+        String.new("retained by the table"), IndexingMode::Incremental))
+      fields.push(TapeHeaderField.new(String.new("authorization"),
+        String.new("secret"), IndexingMode::NeverIndexed))
+      fields.push(TapeHeaderField.new(String.new("x-raw"),
+        String.new("utf8: ü and NUL: \x00"), IndexingMode::WithoutIndexing))
+      encoded = encoder.encode(fields)
+      decoded = TapeHeaders.new(decoder.capacity(encoded))
+      failed = decoder.decode(encoded, decoded)
+      raise failed.message if failed
+      raise "field count" unless decoded.size == 5
+      k = 0
+      decoded.each do |field|
+        raise "name #{k}" unless field.name == fields[k].name
+        raise "value #{k}" unless field.value == fields[k].value
+        k += 1
+      end
+    end
+  end
+  # Bad integers, index zero, truncated literals and Huffman padding.
+  ["\x80", "\xff", "\x00\x03a", "\x00\x81\x00"].each do |text|
+    tape do
+      bad = Decoder.new
+      into = TapeHeaders.new(bad.capacity(text))
+      decoded = bad.decode(text, into)
+      raise "accepted malformed block" unless decoded.is_a?(HpackError)
+    end
+  end
+  # List limits must reject a valid indexed field before writing a slot.
+  text = "\x82"
+  counting = Decoder.new(max_header_count: 0)
+  counted = TapeHeaders.new(counting.capacity(text))
+  count = counting.decode(text, counted)
+  count.is_a?(HpackError)
+  raise "expected error" unless count
+  count.message.starts_with?("Decompression bomb")
+  sizing = Decoder.new(max_header_list_size: 41)
+  sized = TapeHeaders.new(sizing.capacity(text))
+  size = sizing.decode(text, sized)
+  size.is_a?(HpackError)
+  raise "expected error" unless size
+  size.message.starts_with?("Decompression bomb")
+  # A connection owns its runs; request text never becomes table storage.
+
+  table = DynamicTable.new(128)
+  table.add("original", "retained")
+  field = table.get(1)
+  field.nil? == false
+  raise "missing field" unless field
+  kept = field.copy_to(RisCurrentTape.new)
+  1000.times { |index| churn(table, index) }
+  table.byte_slots <= 512
+  kept.name == "original" && kept.value == "retained"
+  table.size > 0
+  table.byte_slots > 0
+  kept.name == "original"
+  kept.value == "retained"
+  table.clear
+  table.empty? && table.size == 0
+
 end
