@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# spec: 6.7@0845721d, 6.8@917c90e4
-# Spec blocks: `ris spec` on blocks, spec.lock, the clause label and the
+# spec: 6.7@73ca726d, 6.8@4a174319
+# Spec blocks: `ris spec` on blocks, .spec.lock, the clause label and the
 # hint for a missing package spec import (doc/drafts/spec-blocks/
 # spec-blocks.md 5.9, 5.10, 5.14-5.16; step 6).
 #
 #     bash test/cli/spec_blocks_lock.sh
 #
-# A block in src/ covers its clause; spec.lock holds the reviewed hash, so
+# A block in src/ covers its clause; .spec.lock holds the reviewed hash, so
 # editing the clause fails `ris check spec` until `ris spec ack` (a stale
 # old tag `@V` no longer counts); an orphan lock line fails; `ris check
 # --fix` (the suite and its spec step) writes and refreshes labels, cut at a word with `…` within 80
@@ -72,9 +72,9 @@ has a.out "1.1   to review     2"
 has a2.out "1.1 has proofs not reviewed yet"
 has a2.out "review src/post.ri:7"
 
-# (b) ack writes spec.lock and clears it despite the stale tag.
+# (b) ack writes .spec.lock and clears it despite the stale tag.
 "$IYI" spec ack 1 > b.out 2>&1 || { fail "(b) ack"; cat b.out; }
-grep -qx "1.1 $(version 1.1 | cut -d@ -f2)" spec.lock || fail "(b) no 1.1 line"
+grep -qx "1.1 $(version 1.1 | cut -d@ -f2)" .spec.lock || fail "(b) no 1.1 line"
 "$IYI" check spec > b2.out 2>&1 || { fail "(b) check after ack"; cat b2.out; }
 has b2.out "1 ok, 1 todo, 0 to review"
 
@@ -88,12 +88,12 @@ has c.out "1.1 changed since its proofs were reviewed"
 "$IYI" check spec > c2.out 2>&1 || { fail "(c) check after re-ack"; cat c2.out; }
 
 # (d) an orphan lock line fails; any ack drops it.
-echo "9.9 abcdef12" >> spec.lock
+echo "9.9 abcdef12" >> .spec.lock
 "$IYI" check spec > d.out 2>&1
 [ $? = 0 ] && fail "(d) an orphan lock line passed"
-has d.out "spec.lock holds 9.9, which is no clause of the spec"
+has d.out ".spec.lock holds 9.9, which is no clause of the spec"
 "$IYI" spec ack 1.1 > /dev/null 2>&1
-grep -q "^9.9" spec.lock && fail "(d) ack kept the orphan"
+grep -q "^9.9" .spec.lock && fail "(d) ack kept the orphan"
 
 # (e) labels: --fix writes them; the long one is cut within 80 columns.
 "$IYI" check spec --fix > e.out 2>&1 || { fail "(e) check --fix"; cat e.out; }
@@ -131,11 +131,11 @@ printf '# Demo\n\n## 1. A\n\n* 1.1 One.\n' > SPEC.md
 printf '# spec: 1.1@%s\nputs 1\n' "$("$IYI" spec 1.1 | head -1 | cut -d@ -f2 | cut -d' ' -f1)" > x_test.ri
 mkdir test && mv x_test.ri test/
 "$IYI" spec ack --from-tags > f.out 2>&1 || { fail "(f) --from-tags"; cat f.out; }
-grep -q "^1.1 " spec.lock || fail "(f) --from-tags wrote no 1.1 line"
+grep -q "^1.1 " .spec.lock || fail "(f) --from-tags wrote no 1.1 line"
 cd ..
 (cd "$REPO" && "$IYI" check spec > "$WORK/f2.out" 2>&1) ||
   { fail "(f) ris's own check spec"; tail -5 f2.out; }
-[ -f "$REPO/spec.lock" ] || fail "(f) ris has no spec.lock"
+[ -f "$REPO/.spec.lock" ] || fail "(f) ris has no .spec.lock"
 
 # (g) the hint for a missing package spec import, through site.
 mkdir g && cd g
@@ -163,7 +163,8 @@ has g.out "web/spec defines \`get\`; add \`import web/spec::*\` after the first 
 cd ..
 
 # (h) The spec's changes are the changelog: CHANGELOG.md, a `###` entry
-# under a release heading counts; a left-over SPEC_CHANGELOG.md fails.
+# under a release heading counts; a left-over SPEC_CHANGELOG.md or
+# spec.lock (now .spec.lock) fails.
 mkdir h && cd h
 printf '# Demo\n\n## 1. A\n\n* 1.1 One.\n' > SPEC.md
 printf 'module h\n\npub def one : Int32\n  1\nend\n\nspec 1.1\n  one == 1\nend\n' > h.ri
@@ -180,6 +181,11 @@ echo "# Old" > SPEC_CHANGELOG.md
 "$IYI" check spec > h3.out 2>&1
 [ $? = 0 ] && fail "(h) a left-over SPEC_CHANGELOG.md passed"
 has h3.out "SPEC_CHANGELOG.md is the old name"
+rm SPEC_CHANGELOG.md
+mv .spec.lock spec.lock
+"$IYI" check spec > h4.out 2>&1
+[ $? = 0 ] && fail "(h) a left-over spec.lock passed"
+has h4.out "spec.lock is the old name of .spec.lock"
 cd ..
 
 [ "$failed" = 0 ] && echo "spec_blocks_lock: ok"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# spec: 6.7@0845721d, 6.8@917c90e4, 6.9@b232a9c4
+# spec: 6.7@73ca726d, 6.8@4a174319, 6.9@1e0b6a98
 """`ris spec`: the spec's clauses linked to the tests that name them.
 
     IYI=./bin/ris python3 test/cli/spec_verb.py
@@ -358,10 +358,10 @@ def part_e():
     base = tempfile.mkdtemp(prefix="spec-verb-init-")
     r = run("init", "example.com/me/hello", "app", cwd=base)
     app = os.path.join(base, "app")
-    step("ris init writes SPEC.md, CHANGELOG.md and spec.lock",
+    step("ris init writes SPEC.md, CHANGELOG.md and .spec.lock",
          r.returncode == 0 and all(os.path.exists(os.path.join(app, f))
                                    for f in ("SPEC.md", "CHANGELOG.md",
-                                             "spec.lock")),
+                                             ".spec.lock")),
          r.stdout + r.stderr)
     r = run("check", cwd=app)
     step("ris check is green on arrival", r.returncode == 0,

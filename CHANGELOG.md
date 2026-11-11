@@ -57,6 +57,12 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.
 
+### 2026-11-11 · 6.7@73ca726d, 6.8@4a174319, 6.9@1e0b6a98
+
+* Was: spec.lock at the root, which `sp<tab>` completed before SPEC.md.
+* Now: .spec.lock, hidden as a machine file is; a left-over spec.lock
+  fails `ris check spec` with the rename. The user's decision; no draft.
+
 ### 2026-11-11 · 6.8@917c90e4, 6.9@b232a9c4
 
 * Was: SPEC changes went to SPEC_CHANGELOG.md, beside a CHANGELOG.md.

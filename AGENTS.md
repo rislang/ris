@@ -41,7 +41,7 @@ ris is iyi plus Goose's tape memory. These rules are for every agent.
   copy of `samples/ris/respond.ri`: change both in one go.
 * A SPEC clause is proven by a `spec N.M` block at the end of the
   module that keeps it; after reviewing the proofs run `ris spec ack
-  N.M`, which writes spec.lock. A clause not kept yet has a block holding
+  N.M`, which writes .spec.lock. A clause not kept yet has a block holding
   `todo "reason"`. `ris check spec` fails on unreviewed clauses, stale
   labels (`ris check --fix` writes them) and clauses with no proof.
   Old `# spec: N.M@VERSION` tags under test/ still count.
