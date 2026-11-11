@@ -8,6 +8,17 @@ module bench/std_dir_exercise
 # `Dir.glob`, matching with `File.match?`, is timed against a bound.
 import std/time::{Time}
 
+def keep_name(name : String, texts : String::Builder) : String
+  at = texts.bytesize
+  texts << name
+  texts.finish[at, name.bytesize]
+end
+
+def append_result(text : String::Builder, value : String) : Nil
+  text << value
+  nil
+end
+
 def assert_true(cond : Bool, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}" unless cond
 end
@@ -96,6 +107,7 @@ def refusal_of(&work : -> Nil) : String
   said
 end
 
+glob_texts = String::Builder.new(4096)
 saved_orig = Dir.current
 sandbox_env = Program.env("TEST_SANDBOX")
 sandbox = if sandbox_env && !sandbox_env.empty?
@@ -229,12 +241,12 @@ large_fill = [] of String
 seen = [] of String
 reader = Dir.new(many_dir)
 if first_seen = reader.read
-  seen << first_seen
+  seen << keep_name(first_seen, glob_texts)
 end
-2000.times { small_fill << "A" * 600 }
-8.times { large_fill << "B" * 32800 }
+2000.times { small_fill << keep_name("A" * 600, glob_texts) }
+8.times { large_fill << keep_name("B" * 32800, glob_texts) }
 while name_seen = reader.read
-  seen << name_seen
+  seen << keep_name(name_seen, glob_texts)
 end
 reader.close
 entry_names = 0
@@ -251,8 +263,8 @@ walked = 0
   Dir.glob(tree + "/**/*.txt") do |_|
     walked = walked + 1
     if walked % 7 == 0
-      8.times { small_fill << "A" * 600 }
-      large_fill << "B" * 32800
+      8.times { small_fill << keep_name("A" * 600, glob_texts) }
+      large_fill << keep_name("B" * 32800, glob_texts)
     end
   end
 end
@@ -263,66 +275,66 @@ puts "  a directory read and a glob walked across collections, nothing written o
 
 puts "\n== glob star, recursive, hidden, and no-match"
 File.write(listing_dir + "/.hidden_glob", "h")
-glob_txt = Dir.glob(listing_dir + "/*.txt")
+glob_txt = Dir.glob(listing_dir + "/*.txt", glob_texts)
 assert_true glob_txt.size == 2, "Dir.glob *.txt matches two files"
 assert_true glob_txt.any? { |p| p.includes?("file_a.txt") }, "glob includes file_a.txt"
 assert_true glob_txt.any? { |p| p.includes?("file_b.txt") }, "glob includes file_b.txt"
 
-glob_star = Dir.glob(listing_dir + "/*")
+glob_star = Dir.glob(listing_dir + "/*", glob_texts)
 assert_true glob_star.any? { |p| p.includes?("file_a.txt") }, "glob * includes visible file"
 assert_true glob_star.any? { |p| p.includes?("nested_dir") }, "glob * includes nested dir"
 assert_true !glob_star.any? { |p| p.includes?(".hidden_glob") }, "glob * skips hidden names"
 
-glob_deep = Dir.glob(listing_dir + "/**/*.txt")
+glob_deep = Dir.glob(listing_dir + "/**/*.txt", glob_texts)
 assert_true glob_deep.size == 2, "recursive glob finds both txt files"
 # `**` goes as deep as the tree does. A cap of 64 levels, all that ended a
 # walk through a link back up the tree, stopped it without a word, and a
 # file 70 down was not found; test/cli/std_dir_exercise.sh walks the link.
 bottom = sandbox + "/deep"
-70.times { bottom = bottom + "/d" }
+70.times { bottom << "/d" }
 Dir.mkdir_p(bottom)
 File.write(bottom + "/bottom.txt", "b")
-deepest = Dir.glob(sandbox + "/deep/**/bottom.txt")
+deepest = Dir.glob(sandbox + "/deep/**/bottom.txt", glob_texts)
 assert_true deepest == [bottom + "/bottom.txt"], "** finds a file 70 levels down: #{deepest.size}"
 puts "  ** to any depth"
-assert_true Dir.glob(listing_dir + "/no_such_pattern_*").empty?, "no-match glob is empty"
-assert_true Dir[listing_dir + "/*.txt"].size == 2, "Dir[] is glob"
+assert_true Dir.glob(listing_dir + "/no_such_pattern_*", glob_texts).empty?, "no-match glob is empty"
+assert_true Dir[listing_dir + "/*.txt", glob_texts].size == 2, "Dir[] is glob"
 # A wildcard before the last segment, and a pattern that starts `./`:
 # both answered `[]`. And a path spelled with the pattern's separator, on
 # every walk: on Windows one answered `\` and the other `/`.
 Dir.mkdir(listing_dir + "/nested_dir/inner")
 File.write(listing_dir + "/nested_dir/inner/deep.txt", "d")
 File.write(listing_dir + "/nested_dir/one.txt", "o")
-middle = Dir.glob(listing_dir + "/nest*/*.txt")
+middle = Dir.glob(listing_dir + "/nest*/*.txt", glob_texts)
 assert_true middle.size == 1 && middle[0] == listing_dir + "/nested_dir/one.txt", "a wildcard in a middle segment finds nested_dir/one.txt: #{middle.inspect}"
-two_down = Dir.glob(listing_dir + "/*/*/deep.txt")
+two_down = Dir.glob(listing_dir + "/*/*/deep.txt", glob_texts)
 assert_true two_down.size == 1 && two_down[0] == listing_dir + "/nested_dir/inner/deep.txt", "two wildcard segments find deep.txt: #{two_down.inspect}"
-assert_str listing_dir + "/file_a.txt", Dir.glob(listing_dir + "/file_a.*")[0], "a match is spelled with the pattern's own separator"
+assert_str listing_dir + "/file_a.txt", Dir.glob(listing_dir + "/file_a.*", glob_texts)[0], "a match is spelled with the pattern's own separator"
 here = Dir.current
 Dir.cd(listing_dir)
-dotted = Dir.glob("./*.txt").sorted
+dotted = Dir.glob("./*.txt", glob_texts).sorted
 Dir.cd(here)
 assert_true dotted == ["./file_a.txt", "./file_b.txt"], "./*.txt answers the names under ./: #{dotted.inspect}"
 # The rest of the pattern language: braces, classes, escapes, a trailing
 # separator for directories, and `**` that walks past hidden names - each
 # was literal text or found nothing, and `**/*.txt` found hidden files.
-braced = Dir.glob(listing_dir + "/file_{a,b}.{txt,md}").sorted
+braced = Dir.glob(listing_dir + "/file_{a,b}.{txt,md}", glob_texts).sorted
 assert_true braced == [listing_dir + "/file_a.txt", listing_dir + "/file_b.txt"], "glob: braces choose among names: #{braced.inspect}"
-assert_true Dir.glob(listing_dir + "/file_[a].txt") == [listing_dir + "/file_a.txt"], "glob: a class picks one character"
-assert_true Dir.glob(listing_dir + "/file_[^a].txt") == [listing_dir + "/file_b.txt"], "glob: a negated class"
-dirs = Dir.glob(listing_dir + "/*/")
+assert_true Dir.glob(listing_dir + "/file_[a].txt", glob_texts) == [listing_dir + "/file_a.txt"], "glob: a class picks one character"
+assert_true Dir.glob(listing_dir + "/file_[^a].txt", glob_texts) == [listing_dir + "/file_b.txt"], "glob: a negated class"
+dirs = Dir.glob(listing_dir + "/*/", glob_texts)
 assert_true dirs == [listing_dir + "/nested_dir/"], "glob: a trailing separator answers directories with it: #{dirs.inspect}"
 File.write(listing_dir + "/nested_dir/inner/.secret.txt", "s")
-deep_txt = Dir.glob(listing_dir + "/**/*.txt").sorted
+deep_txt = Dir.glob(listing_dir + "/**/*.txt", glob_texts).sorted
 assert_true deep_txt.size == 4 && !deep_txt.any? { |p| p.includes?(".secret") }, "glob: ** passes over hidden names: #{deep_txt.inspect}"
 File.delete(listing_dir + "/nested_dir/inner/.secret.txt")
 # A class or a brace in a middle segment, which `File.match?` reads, and
 # a brace whose branches have different depths.
-braced_middle = Dir.glob(listing_dir + "/{nested_dir,none}/*.txt")
+braced_middle = Dir.glob(listing_dir + "/{nested_dir,none}/*.txt", glob_texts)
 assert_true braced_middle == [listing_dir + "/nested_dir/one.txt"], "a brace in a middle segment: #{braced_middle.inspect}"
-classed_middle = Dir.glob(listing_dir + "/nested_[d]ir/inner/*.txt")
+classed_middle = Dir.glob(listing_dir + "/nested_[d]ir/inner/*.txt", glob_texts)
 assert_true classed_middle == [listing_dir + "/nested_dir/inner/deep.txt"], "a class in a middle segment: #{classed_middle.inspect}"
-uneven = Dir.glob(listing_dir + "/{nested_dir/inner,none}/*.txt")
+uneven = Dir.glob(listing_dir + "/{nested_dir/inner,none}/*.txt", glob_texts)
 assert_true uneven == [listing_dir + "/nested_dir/inner/deep.txt"], "a brace holding a separator: #{uneven.inspect}"
 File.delete(listing_dir + "/nested_dir/inner/deep.txt")
 File.delete(listing_dir + "/nested_dir/one.txt")
@@ -335,21 +347,21 @@ Dir.delete(listing_dir + "/nested_dir/inner")
 # for each star - nine against one forty-character name took 30 seconds.
 File.write(listing_dir + "/ü.txt", "u")
 File.write(listing_dir + "/notes.md", "m")
-one_char = Dir.glob(listing_dir + "/?.txt")
+one_char = Dir.glob(listing_dir + "/?.txt", glob_texts)
 assert_true one_char == [listing_dir + "/ü.txt"], "? is one character, both bytes of ü: #{one_char.inspect}"
-classed = Dir.glob(listing_dir + "/file_[ab].*").sorted
+classed = Dir.glob(listing_dir + "/file_[ab].*", glob_texts).sorted
 assert_true classed == [listing_dir + "/file_a.txt", listing_dir + "/file_b.txt"], "a class matches: #{classed.inspect}"
-braced = Dir.glob(listing_dir + "/*.{txt,md}").sorted
+braced = Dir.glob(listing_dir + "/*.{txt,md}", glob_texts).sorted
 assert_true braced == [listing_dir + "/file_a.txt", listing_dir + "/file_b.txt", listing_dir + "/notes.md", listing_dir + "/ü.txt"], "a brace matches: #{braced.inspect}"
 File.write(listing_dir + "/.dotted.txt", "d")
-starred_deep = Dir.glob(listing_dir + "/**/*.txt").sorted
+starred_deep = Dir.glob(listing_dir + "/**/*.txt", glob_texts).sorted
 assert_true starred_deep == [listing_dir + "/file_a.txt", listing_dir + "/file_b.txt", listing_dir + "/ü.txt"], "** and * answer no hidden name, nor the rest of one: #{starred_deep.inspect}"
-dot_named = Dir.glob(listing_dir + "/.*").sorted
+dot_named = Dir.glob(listing_dir + "/.*", glob_texts).sorted
 assert_true dot_named == [listing_dir + "/.dotted.txt", listing_dir + "/.hidden_glob"], "a segment written with a leading . answers hidden names: #{dot_named.inspect}"
 File.delete(listing_dir + "/.dotted.txt")
 File.write(listing_dir + "/" + "a" * 40, "")
 started = Time.monotonic
-starred = Dir.glob(listing_dir + "/" + "*a" * 9 + "*b")
+starred = Dir.glob(listing_dir + "/" + "*a" * 9 + "*b", glob_texts)
 assert_true starred.empty? && (Time.monotonic - started).total_milliseconds < 2000, "nine stars against a forty-character name answer in under 2 seconds"
 File.delete(listing_dir + "/" + "a" * 40)
 File.delete(listing_dir + "/ü.txt")
@@ -370,9 +382,9 @@ File.write(walk_dir + "_other/a_name_from_elsewhere", "")
 own = {} of String => Bool
 index = 0
 while index < 300
-  name = "entry_#{index}_" + "n" * 40
-  File.write(walk_dir + "/" + name, "")
-  own[name] = true
+  entry_name = "entry_#{index}_" + "n" * 40
+  File.write(walk_dir + "/" + entry_name, "")
+  own[keep_name(entry_name, glob_texts)] = true
   index = index + 1
 end
 walk_seen = 0
@@ -474,7 +486,7 @@ puts "  deletion outcomes for empty and non-empty paths"
 
   # A `\\?\` pattern globs the directory it names: the scan for a wildcard
   # stopped at that `?`, and the walk began at `\\` and answered `[]`.
-  verbatim = Dir.glob("\\\\?\\" + backslashed(sandbox) + "\\regular_*.txt")
+  verbatim = Dir.glob("\\\\?\\" + backslashed(sandbox) + "\\regular_*.txt", glob_texts)
   assert_true verbatim == ["\\\\?\\" + backslashed(sandbox) + "\\regular_file.txt"], "a \\\\?\\ pattern globs: #{verbatim.inspect}"
   puts "  a \\\\?\\ pattern globs the directory it names"
 
@@ -515,7 +527,7 @@ puts "  deletion outcomes for empty and non-empty paths"
   assert_true lone_handle.address != 0xFFFFFFFFFFFFFFFF_u64, "a name with an unpaired surrogate was made"
   LibWideName.CloseHandle(lone_handle)
   lone_children = Dir.children(lone_dir)
-  lone_glob = Dir.glob(lone_dir + "/*")
+  lone_glob = Dir.glob(lone_dir + "/*", glob_texts)
   LibWideName.DeleteFileW(lone_name)
   assert_true lone_children == ["ok.txt"] && lone_glob == [lone_dir + "/ok.txt"], "a name UTF-8 cannot spell is stepped over: #{lone_children.inspect}"
   puts "  a name UTF-8 cannot spell is stepped over"
@@ -548,13 +560,14 @@ assert_true !Dir.exists?(sandbox), "sandbox removed after exercise"
 # An empty path names no directory, as POSIX `opendir("")` fails: on
 # Windows it listed the current drive's root while `Dir.exists?("")` said
 # false.
-listed = "listed"
+listed_text = String::Builder.new(128)
 group do |g|
   empty = g.spawn { Dir.children(""); 0 }
   outcome = empty.value
-  listed = outcome.is_a?(Panicked) ? outcome.message.to_s : "listed"
+  append_result(listed_text, outcome.is_a?(Panicked) ? outcome.message.to_s : "listed")
   0
 end
+listed = listed_text.finish
 assert_true !Dir.exists?("") && listed.includes?("Cannot open directory"), "Dir.children(\"\") is refused, not #{listed}"
 
 puts "\nALL CHECKS PASSED"

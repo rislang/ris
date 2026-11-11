@@ -3411,7 +3411,7 @@ pub class RisHttpClientExchange
     take_connection(dialer.connect(client, host, port, wait, @system_resolver))
   end
 
-  private def take_connection(result : IyiSocket | Cancelled | SocketError) : IyiSocket | Cancelled | SocketError
+  def take_connection(result : IyiSocket | Cancelled | SocketError) : IyiSocket | Cancelled | SocketError
     return result unless result.is_a?(IyiSocket)
     @socket.take_descriptor(result)
     @socket
@@ -4117,8 +4117,8 @@ struct ByName
     system
   end
 
-  def by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
-    HTTP.by_records(client, origin, host, port, base, client.resolver, timeout_ms)
+  def by_records(state : RisHttpClientExchange, client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, timeout_ms : Int32) : IyiSocket | Cancelled | SocketError | HTTPError | Nil
+    HTTP.by_records(state, client, origin, host, port, base, client.resolver, timeout_ms)
   end
 end
 
@@ -4141,7 +4141,7 @@ struct AtAddress
     IyiSocket.connect_address(@address, port, wait)
   end
 
-  def by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
+  def by_records(state : RisHttpClientExchange, client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, timeout_ms : Int32) : IyiSocket | Cancelled | SocketError | HTTPError | Nil
     nil
   end
 end
@@ -4659,14 +4659,16 @@ pub struct HTTP
       reused = !conn.nil?
       unless conn
         wait = timeout_ms > 0 ? timeout_ms : -1
-        made = nil.as(Tuple(IyiSocket, TlsClient, TlsConfig)?)
+        made = nil.as(IyiSocket?)
         if recorded && (keeping = client)
-          found = dialer.by_records(keeping, origin, host, port, under, timeout_ms)
+          found = dialer.by_records(state, keeping, origin, host, port, under, timeout_ms)
           return found if found.is_a?(Cancelled) || found.is_a?(SocketError) || found.is_a?(HTTPError)
           made = found
         end
         if by = made
-          socket, tls, config = by
+          socket = by
+          tls = tls_slot
+          config = tls.config
           client.resumed if client && tls.resumed?
           tls_stream.configure(tls, tls.host)
           connection_slot.configure(socket, tls_stream)
@@ -4776,19 +4778,19 @@ pub struct HTTP
 
   # A connection to the origin *host*:*port* made by its HTTPS records for
   # *client*, under *base*, its own configuration or `HTTP.tls_config`
-  # (`HTTPClient`'s header says how): the socket, the TLS connection and
-  # the configuration it was made under. Nil when the records give no
+  # (`HTTPClient`'s header says how): the socket. The caller's *state*
+  # keeps the TLS connection and its configuration. Nil when records give no
   # endpoint to take, or every one they give failed to connect and the
   # origin may be connected to as without them; the origin's kept
   # connections are then taken under *base* again.
   # Not private: `ByName#by_records` calls it.
-  def self.by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
-    made = connect_by_records(client, origin, host, port, base, through, timeout_ms)
+  def self.by_records(state : RisHttpClientExchange, client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : IyiSocket | Cancelled | SocketError | HTTPError | Nil
+    made = connect_by_records(state, client, origin, host, port, base, through, timeout_ms)
     client.https_config(origin, base, base.ech_configs, base.alpn) if made.nil?
     made
   end
 
-  private def self.connect_by_records(client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : Tuple(IyiSocket, TlsClient, TlsConfig) | Cancelled | SocketError | HTTPError | Nil
+  private def self.connect_by_records(state : RisHttpClientExchange, client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : IyiSocket | Cancelled | SocketError | HTTPError | Nil
     return nil if IyiSocket.localhost?(host) || !DnsName.valid?(host)
     resolver = through || client.system_resolver
     store = SvcbStore.new
@@ -4815,27 +4817,30 @@ pub struct HTTP
         failed = socket
         next
       end
+      socket = state.take_connection(socket).as(IyiSocket)
       client.made
       # Where a retry goes: the address this connection reached, not one
       # a new lookup might give, which could be another server's under
       # another configuration (RFC 9849 section 6.1.6).
       address = socket.remote_address
       config = client.https_config(origin, base, endpoint.ech, endpoint.alpn)
-      tls = records_handshake(client, origin, socket, host, config, timeout_ms)
-      if tls.is_a?(TlsError) && tls.alert == TlsAlert::ECH_REQUIRED && !config.ech_configs.nil? && address
+      tls = state.tls
+      problem = records_handshake(tls, client, origin, socket, host, config, timeout_ms)
+      if problem && problem.alert == TlsAlert::ECH_REQUIRED && !config.ech_configs.nil? && address
         # Turned down, the server's certificate checked for the config's
         # public_name: asked once more under the retry_configs it sent, or
         # without ECH where it sent none. A second refusal is the failure.
         socket = IyiSocket.connect(address, endpoint.port, wait)
         return socket if socket.is_a?(Cancelled) || socket.is_a?(SocketError)
         client.made
-        sent = tls.retry_configs
+        socket = state.take_connection(socket).as(IyiSocket)
+        sent = problem.retry_configs
         retry = sent ? Array(UInt8).new(sent.bytesize) { |i| sent.byte_at(i) } : nil
         config = client.https_config(origin, base, retry, endpoint.alpn)
-        tls = records_handshake(client, origin, socket, host, config, timeout_ms)
+        problem = records_handshake(tls, client, origin, socket, host, config, timeout_ms)
       end
-      return HTTPError.new(tls.message) if tls.is_a?(TlsError)
-      return {socket, tls, config}
+      return HTTPError.new(problem.message) if problem
+      return socket
     end
     return failed if reliant && failed
     nil
@@ -4843,16 +4848,14 @@ pub struct HTTP
 
   # The handshake for *host* on *socket* under *config*, offering a ticket
   # *client* keeps for *origin* under it; it waits as long as a read does.
-  private def self.records_handshake(client : HTTPClient, origin : String, socket : IyiSocket, host : String, config : TlsConfig, timeout_ms : Int32) : TlsClient | TlsError
+  private def self.records_handshake(tls : TlsClient, client : HTTPClient, origin : String, socket : IyiSocket, host : String, config : TlsConfig, timeout_ms : Int32) : TlsError?
     if timeout_ms > 0
       socket.read_timeout_ms = timeout_ms
       socket.write_timeout_ms = timeout_ms
     end
     shake_ms = timeout_ms > 0 ? timeout_ms : TlsClient::HANDSHAKE_TIMEOUT_MS
-    tls = TlsClient.new(socket, host, config, client.session_for(origin, config))
-    problem = tls.over(shake_ms)
-    return problem if problem
-    tls
+    tls.configure(socket, host, config, client.session_for(origin, config))
+    tls.over(shake_ms)
   end
 
   # The endpoints *answer*'s ServiceMode records name for a client whose

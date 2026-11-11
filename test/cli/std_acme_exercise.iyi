@@ -152,10 +152,13 @@ class RisAcmeView
   @gap_ms : Int64 = -1_i64
   @csr_verified : Bool = false
   @csr_names : Array(String) = [] of String
+  @csr_text : String::Builder
   @rolled : Bool = false
   @after_roll : Bool = false
 
   def initialize(@base)
+    texts = String::Builder.new(256)
+    @csr_text = texts
     @plain = @base.sub("https://", "http://")
   end
 
@@ -178,7 +181,13 @@ class RisAcmeView
       @terms = current.terms
       @gap_ms = current.gap_ms
       @csr_verified = current.csr_verified
-      @csr_names = Array(String).new(current.csr_names.size) { |i| ris_heap_text(current.csr_names[i]) }
+      @csr_names.clear
+      @csr_text.clear
+      current.csr_names.each do |name|
+        at = @csr_text.bytesize
+        @csr_text << name
+        @csr_names << @csr_text.finish[at, name.bytesize]
+      end
       @rolled = current.rolled
       @after_roll = current.after_roll
     end
@@ -300,12 +309,13 @@ class RisAcmeScriptHandler
   @identity : TlsIdentity
 
   def initialize(config : {String, String})
-    @script = Script.new(ris_heap_text(config[0]), ris_heap_text(config[1]))
+    script = Script.new(ris_heap_text(config[0]), ris_heap_text(config[1]))
+    @script = script
     identity = TlsIdentity.new(LEAF_PEM, KEY_PEM)
     @identity = identity
     raise identity.error.to_s if identity.error
-    config = TlsServerConfig.new(identity)
-    @tls = config
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
   end
 
   def listening(port : Int32) : Nil
@@ -334,7 +344,8 @@ class RisAcmeChallengeHandler
   @responder : AcmeHttp01
 
   def initialize(config)
-    @responder = AcmeHttp01.new
+    responder = AcmeHttp01.new
+    @responder = responder
   end
 
   def listening(port : Int32) : Nil
@@ -1156,7 +1167,8 @@ def scripted_checks : Nil
     task = g.spawn do
       run = RisBoard.take(RisAcmeScriptRun)
       raise "script cancelled" if run.is_a?(Cancelled)
-      scripted(RisAcmeView.new(run.base), run.pem)
+      view = RisAcmeView.new(run.base)
+      scripted(view, run.pem)
       "held"
     end
     got = task.value

@@ -227,29 +227,35 @@ half_client.write("last words").or_panic
 if refusal = half_client.close_write
   raise "close_write: a connected socket refused: #{refusal.message}"
 end
-half_heard = ""
-while true
-  case peer_piece = half_peer.read(64)
-  in String
-    break if peer_piece.empty?
-    half_heard = half_heard + peer_piece
-  in Cancelled, SocketError
-    raise "close_write: the peer's read waited for an end that never came: #{peer_piece.message}"
+def append_socket_text(text : String::Builder, value : String) : Nil
+  text << value
+  nil
+end
+
+half_heard_text = String::Builder.new(64)
+def read_half(socket : IyiSocket, text : String::Builder,
+              label : String) : Nil
+  while true
+    piece = socket.read(64)
+    if piece.is_a?(String)
+      break if piece.empty?
+      append_socket_text(text, piece)
+    else
+      raise "close_write: #{label}: #{piece.message}"
+    end
   end
 end
+
+read_half(half_peer, half_heard_text,
+  "the peer's read waited for an end that never came")
+half_heard = half_heard_text.finish
 raise "close_write: the peer heard #{half_heard.inspect} before the end" unless half_heard == "last words"
 half_peer.write("an answer after the end").or_panic
 half_peer.close
-half_answer = ""
-while true
-  case client_piece = half_client.read(64)
-  in String
-    break if client_piece.empty?
-    half_answer = half_answer + client_piece
-  in Cancelled, SocketError
-    raise "close_write: the answer after the end was not read: #{client_piece.message}"
-  end
-end
+half_answer_text = String::Builder.new(64)
+read_half(half_client, half_answer_text,
+  "the answer after the end was not read")
+half_answer = half_answer_text.finish
 raise "close_write: the answer after the end read as #{half_answer.inspect}" unless half_answer == "an answer after the end"
 {% if flag?(:linux) %}
   raise "close_write: a connection both ends closed was not refused" unless half_client.close_write.is_a?(SocketError)
@@ -485,7 +491,7 @@ unix_conn.close
 # And an accept that parks before anybody connects - on Windows that is
 # `AcceptEx` on a unix socket, where the one above found its connection
 # already queued.
-parked_heard = ""
+parked_text = String::Builder.new(64)
 group do |g|
   g.spawn do
     sleep(20)
@@ -495,9 +501,10 @@ group do |g|
     0
   end
   waiting = unix.accept.or_panic
-  parked_heard = waiting.read(64).or_panic
+  append_socket_text(parked_text, waiting.read(64).or_panic)
   waiting.close
 end
+parked_heard = parked_text.finish
 raise "unix: the parked accept read #{parked_heard.inspect}" unless parked_heard == "after the park"
 unix.close
 gone = IyiSocket.connect_unix(unix_path)
@@ -599,7 +606,7 @@ b_conn = b_server.accept.or_panic
 b_client.write_timeout_ms = 300
 b_big = "b" * 67108864
 b_started = __iyi_monotonic_ns
-b_answer = "unwritten"
+b_answer_text = String::Builder.new(64)
 group do |g|
   g.spawn do
     sleep(50)
@@ -607,8 +614,9 @@ group do |g|
     0
   end
   w = b_client.write(b_big)
-  b_answer = w.is_a?(SocketError) && w.timed_out? ? "timed out" : w.inspect
+  append_socket_text(b_answer_text, w.is_a?(SocketError) && w.timed_out? ? "timed out" : w.inspect)
 end
+b_answer = b_answer_text.finish
 b_sibling_ms = read_number
 raise "timeout: a 64 MB write to a peer that never reads answered #{b_answer}" unless b_answer == "timed out"
 raise "timeout: a 64 MB write held its thread: a 50 ms sleep beside it woke at #{b_sibling_ms} ms" if b_sibling_ms > 1000
@@ -704,18 +712,25 @@ puts "closed_under_read: ok"
   puts "reset_after_chunk: ok"
 {% end %}
 
-# A socket as a stream: lines through `to_io`, which is the same stream
-# every time - two lines sent in one write reach the second `read_line`
+def keep_stream_line(line : String, text : String::Builder) : String
+  at = text.bytesize
+  text << line
+  text.finish[at, line.bytesize]
+end
+
+# A caller-owned stream keeps its buffers across reads: two lines sent
+# in one write reach the second `read_line`
 # from the first one's read-ahead - a long line through the buffers, and a
 # read the socket refuses as the end, which `read_failed?` tells apart.
 stream_server = IyiSocket.listen("127.0.0.1", 0)
 stream_port = stream_server.local_port
 stream_heard = [] of String
+stream_texts = String::Builder.new(100_128)
 long_line = "x" * 100_000
 group do |g|
   g.spawn do
     talker = IyiSocket.connect("127.0.0.1", stream_port).or_panic
-    io = talker.to_io
+    io = Std::Socket::SocketIO.new(talker)
     io.write("one\ntwo\n")
     io.flush
     replies = [io.read_line(chomp: true), io.read_line(chomp: true)]
@@ -729,18 +744,19 @@ group do |g|
   end
   peer = stream_server.accept.or_panic
   peer.read_timeout_ms = 2000
-  while line = peer.to_io.read_line(chomp: true)
-    stream_heard << line
-    peer.to_io.puts "echo #{line.bytesize > 20 ? line.bytesize.to_s : line}"
-    peer.to_io.flush
+  stream = Std::Socket::SocketIO.new(peer)
+  while line = stream.read_line(chomp: true)
+    stream_heard << keep_stream_line(line, stream_texts)
+    stream.puts "echo #{line.bytesize > 20 ? line.bytesize.to_s : line}"
+    stream.flush
   end
-  peer.to_io.close
+  stream.close
 end
 raise "stream: the server heard #{stream_heard.size} lines" unless stream_heard.size == 3 && stream_heard[2] == long_line
 quiet_talker = IyiSocket.connect("127.0.0.1", stream_port).or_panic
 quiet_peer = stream_server.accept.or_panic
 quiet_peer.read_timeout_ms = 50
-quiet = quiet_peer.to_io
+quiet = Std::Socket::SocketIO.new(quiet_peer)
 raise "stream: a timed-out read is the end, and read_failed? says it failed" unless quiet.read_line.nil? && quiet.read_failed?
 quiet.close
 quiet_talker.close

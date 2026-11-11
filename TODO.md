@@ -185,76 +185,85 @@ Unknown must be refused (SPEC 3.6).
   struct) and `fix printed its edit` (split.iyi already clean).
 
 * Build each test/cli program, group refusals by message, fix per group.
-  2026-11-11, minitest: 83 of 139 pass --no-codegen, up from 80.
-  The 56 remaining programs are grouped below by their first refusal.
-  Final test/ris/check.sh: PASS: all ris checks; zero FAILED lines.
-  Runtime, named_tuple and io now pass --no-codegen. Runtime runs to
-  `runtime exercise: every property held`; io runs to ALL CHECKS PASSED.
-  named_tuple's full driver passes plain/release, mutation and missing-key
-  gates. NamedTuple#to_h takes the caller's Hash; clone takes an explicit
-  owner. IyiIO#lines takes caller-owned text backing its returned views.
-  The io fixture's second Sized now reads its second, unconsumed source.
-  The checker remains unchanged.
-  Partial API ports remain open at their next refusal; passing a first
-  refusal does not count a program as built:
-  - API drift, 6: fuzz still has byte-View argument mismatches and the
-    removed HTTP parser surface. Its mutator owns writable destinations;
-    TLS identities and record ciphers are named at the call sites.
+  2026-11-11, minitest: 87 of 139 pass --no-codegen, up from 83.
+  The step is incomplete: 52 programs still fail. The scratch-result,
+  round-data and def-data groups are not finished. No new user decision
+  is needed for their routine ports. Keep the five deferred programs
+  (wasm32, xml and the three private http2_tape comparisons) open.
+  Socket, dir, ct_timing and time now build with code generation too.
+  Socket runs to `socket_exercise: all checks passed`; dir runs to
+  `ALL CHECKS PASSED`. ct_timing still crashes in its RSA self-check;
+  time still fails `noon UTC is 14:00 CEST`. Neither runtime is green.
+  Final `bash test/ris/check.sh` on minitest: PASS: all ris checks;
+  zero FAILED lines. The reduced RSA lifetime gate passes.
+  The checker, SPEC.md and CHANGELOG.md are unchanged.
+
+  SocketIO is declared and reused by the caller; socket descriptor moves
+  still refuse a socket with a stream. Dir.glob takes the caller's text
+  builder for retained paths; its pending paths and brace expansion use
+  stable text storage. ct_timing keeps Euclid's limbs and candidate
+  messages before their rounds. RSA's PEM reader writes decoded bytes
+  into caller-owned backing. A reduced PEM-signing lifetime test fails
+  without the inner return copy and passes with it; broader RSA signing
+  and signature verification still need investigation.
+  TzRule's names view its input directly; retained Location results use
+  explicit copies. ACME's snapshot names refill stable backing.
+  HTTPS-record handshakes use the existing exchange's TLS and socket,
+  and return the socket rather than a new TLS owner. ACME and WebSocket
+  still stop at later refusals, so neither counts as built.
+
+  Remaining groups (names omit std_ and _exercise where present):
+  - API drift, 6: fuzz still has byte-View mismatches, owner factories
+    and the removed Server.parse_request/handle surface. Its byte
+    readers now accept views and its receive buffer compacts in place.
     http2_tape_frames, http2_tape_request and http2_tape_response still
-    use private Conn/H2Connection hooks. Decide whether to replace them
-    with public HTTP network benches or retire the old comparisons.
-    xml's fixture expects the removed full XPath value API, while std
-    now documents a subset: restore that coverage or port the fixture
-    to the subset. wasm32 tests removed GC APIs (IyiMark, IyiWeak,
-    collect and alloc_atomic): replace with tape coverage or retire it.
-  - Scratch results, SPEC 1.9, 5: std's tally, png's picture, time's
-    read_zoneinfo, yaml's read_value and toml's reads. Hash results need
-    caller-owned destinations; compound results need backing storage.
-    TOML's generator now uses caller-owned pools and text, and recursive
-    canonical/syntax writers append into a builder; its parser wrappers,
-    generated tables and derived Hash readers still fail lifetime checks.
-  - Round data stored past it, 3: ct_timing, cookie and dir. Keep output
-    storage before the round and write into it; copy what is retained.
-  - Def data stored past it, 2: socket's cached SocketIO and http_server's
-    current multipart Part. Keep backing storage on the receiving owner
-    and refill it rather than storing a helper's temporary.
-  - Block data stored past it, 9: big, bzip2, eiy, indexable, rsa, slice,
-    sse, user and xz. Split reused locals from outer bindings, append to
-    stable storage, or copy retained values to their destination owner.
+    use private Conn/H2Connection hooks: public benches or retirement
+    is deferred. xml's removed XPath API and wasm32's removed GC APIs
+    are also deferred user decisions.
+  - Scratch results, SPEC 1.9, 4: std's tally, png's picture, yaml's
+    read_value and toml's reads. Hash results need caller-owned
+    destinations; compound results need backing storage. TOML's parser
+    wrappers, generated tables and derived Hash readers remain open.
+  - Round data stored past it, 1: cookie. Keep output before the round
+    and write into it; parse_header also needs a caller-owned Hash.
+  - Def data stored past it, 2: http_server's current multipart Part,
+    and acme's trust.alpn assignment in scripted. Keep backing on the
+    receiving owner and refill it. ACME also has scratch results and
+    block data after that refusal.
+  - Block data stored past it, 10: big, bzip2, eiy, indexable, rsa,
+    slice, sse, user, xz and websocket. Use stable storage or explicit
+    copies to the destination owner. WebSocket's factory owners are
+    named; its raw peer's head/field parsing and retained messages are
+    still open, including HTTP.split_crlf at its current line 644.
   - Views stored past owners, 4: compress, secure_dns, tar and zstd.
-    Keep source/decoder storage with its consumer, or write/copy output
-    into a caller-owned destination. secure_dns stops at socket.iyi:4178.
-  - TLS/HPKE/upgrade owners, 10: http2, tls, autocert, http_latency,
-    http_resume, hpke, http, http_stop, acme and websocket. Declare the
-    identity, config, client, HPKE context or Upgraded at its caller.
-    ACME and WebSocket's owner factories are ported; both now reach
-    HTTP.records_handshake, which returns a new TLS owner (section 4).
+    Keep source/decoder storage with its consumer, or write output into
+    caller-owned backing. secure_dns stops at Resolver#txt.
+  - TLS/HPKE/upgrade owners, 8: http2, tls, autocert, http_latency,
+    http_resume, hpke, http and http_stop. Declare identity, config,
+    client, HPKE context or Upgraded at its caller.
   - An owner answered by a def, 1: benchmark's bm, then IPS Entry owners
     kept in an Array. Caller-owned jobs need stable entry storage.
   - Procs outliving their tape, 5: dns, file, file_utils, router and
     http_https_records. Move socket/file creation inside tasks and send
-    copied text/config; keep direct callbacks inside their owners.
-    HTTPS records now uses DnsLookup/reply destinations, named TLS server
-    configs and named encrypted upstreams; its captured UdpSocket is next.
+    copied text/config; keep callbacks inside their owners. DNS still
+    captures server; HTTPS records still captures dns (UdpSocket).
   - Request data on the program tape, 3: log, ocsp and x509. Make retained
     parents, zones and certificates in program-owned storage explicitly.
-  - Live views across reset/growth, 2: csv and zip. Finish using each row
-    or chunk before refill, or copy retained views. Reduce a suspected
-    checker-summary error before changing any checker; none proven here.
-  - Opaque callback, 1: iterator's to_a over a map/each_slice-produced
-    element. Use a directly known consumer or provide a summary proof;
-    do not weaken unknown-effect refusals.
+  - Live views across reset/growth, 2: csv and zip. Consume each row or
+    chunk before refill, or copy retained views. Reduce suspected
+    summary errors before changing the checker.
+  - Opaque callback, 1: iterator's to_a over map/each_slice output. Use
+    a known consumer or provide a summary proof.
   - In-place constructor growth, 1: netip's PrefixSet(prefixes). Make
     the set first, then add prefixes in a separate method.
   - Growing owner in a runtime Array, 1: p256's private keys. Give each
     key stable storage; collect handles rather than growing owners.
-  - Read after its round, 1: process's line. Consume it inside the round
-    or append it to the caller's builder.
-  - Raw String pointer, 1: tls_probe. Use String/byte APIs; only the
-    actual OS handoff belongs in a small annotated std def.
-  - Invalid constant, 1: number's FOLDED_SIZE. Reduce constant folding of
-    the compound modulo expression; do not replace the tested expression
-    by a literal.
+  - Read after its round, 1: process's line. Consume it in the round or
+    append it to the caller's builder.
+  - Raw String pointer, 1: tls_probe. Use String/byte APIs; only the OS
+    handoff belongs in a small annotated std def.
+  - Invalid constant, 1: number's FOLDED_SIZE. Reduce folding of the
+    compound modulo expression; keep the tested expression.
   Known failures outside this round: format on main, text's chomp-CR
   assertion, and std_regex's task stack overflow at deepest nesting.
   Known checker hole: shuffled.map { |s| SemanticVersion.parse(s) },

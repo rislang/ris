@@ -496,13 +496,17 @@ struct TzRule
   # The rule *text* writes, or nil when it is not one.
   def self.parse(text : String) : TzRule?
     t = TzText.new(text)
-    std = t.name
-    return nil unless std
+    std_from = t.position
+    return nil unless t.name
+    std = text[std_from, t.position - std_from]
+    std = std[1, std.bytesize - 2] if std.starts_with?("<")
     west = t.clock(24)
     return nil unless west
     return TzRule.fixed(std, -west) if t.at_end?
-    dst = t.name
-    return nil unless dst
+    dst_from = t.position
+    return nil unless t.name
+    dst = text[dst_from, t.position - dst_from]
+    dst = dst[1, dst.bytesize - 2] if dst.starts_with?("<")
     dst_offset = 3600 - west
     unless t.at_end? || t.peek == 44_u8
       dst_west = t.clock(24)
@@ -585,6 +589,10 @@ class TzText
     @bytes = text
     @len = text.bytesize
     @pos = 0
+  end
+
+  def position : Int32
+    @pos
   end
 
   def at_end? : Bool
@@ -901,7 +909,7 @@ pub struct Location
         rule = TzRule.parse(bytes_at(p, stop + 1, close - stop - 1))
       end
     end
-    Location.new(name, zones, transitions, transition_zones, rule)
+    Location.new(name, zones, transitions, transition_zones, rule).copy_to(RisCurrentTape.new)
   end
 
   # The machine's zone; see the type's comment for where it comes from.
@@ -923,14 +931,14 @@ pub struct Location
       if tz.starts_with?("/")
         if data = read_file(tz)
           loaded = read_zoneinfo("Local", data)
-          return loaded if loaded.is_a?(Location)
+          return loaded.copy_to(Program.tape) if loaded.is_a?(Location)
         end
         return UTC
       end
       loaded = load(tz)
-      return loaded if loaded.is_a?(Location)
+      return loaded.copy_to(Program.tape) if loaded.is_a?(Location)
       if rule = TzRule.parse(tz)
-        return Location.new(tz, [Zone.new(rule.std_name, rule.std_offset, false)], [] of Int64, [] of Int32, rule)
+        return Location.new(tz, [Zone.new(rule.std_name, rule.std_offset, false)], [] of Int64, [] of Int32, rule).copy_to(Program.tape)
       end
       return UTC
     end
@@ -939,7 +947,7 @@ pub struct Location
     {% else %}
       if data = read_file("/etc/localtime")
         loaded = read_zoneinfo("Local", data)
-        return loaded if loaded.is_a?(Location)
+        return loaded.copy_to(Program.tape) if loaded.is_a?(Location)
       end
       UTC
     {% end %}
@@ -1002,7 +1010,7 @@ pub struct Location
            else
              TzRule.fixed(std_name, std_offset.to_i32)
            end
-    Location.new(name, [Zone.new(std_name, std_offset.to_i32, false)], [] of Int64, [] of Int32, rule)
+    Location.new(name, [Zone.new(std_name, std_offset.to_i32, false)], [] of Int64, [] of Int32, rule).copy_to(RisCurrentTape.new)
   end
 
   # The SYSTEMTIME at *at*: wYear, wMonth, wDayOfWeek, wDay, wHour,
@@ -1043,7 +1051,7 @@ pub struct Location
       directories << "/usr/share/lib/zoneinfo"
       directories << "/etc/zoneinfo"
     {% end %}
-    directories
+    directories.copy_to(RisCurrentTape.new)
   end
 
   # The bytes of the file at *path*, or nil when there is none to read: no

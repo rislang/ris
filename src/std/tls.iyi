@@ -2410,7 +2410,7 @@ pub class TlsClient < TlsConnection
   @reply : TlsServerHello
   @public_name : Bool = false
   @early_storage : Array(UInt8)
-  @config : TlsConfig
+  getter config : TlsConfig
   # *host* as server_name carries it and the certificate is checked for
   # (`server_name_for`), set when the handshake starts.
   # Where this connection's tickets are kept and a resumption's was taken

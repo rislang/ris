@@ -114,7 +114,7 @@ end
 
 HEX_DIGITS = "0123456789abcdef"
 
-def hex(bytes : Array(UInt8)) : String
+def hex(bytes : Array(UInt8) | Array::View(UInt8)) : String
   digits = HEX_DIGITS
   String.from_bytes(bytes.size * 2) do |buf|
     i = 0
@@ -148,16 +148,16 @@ def u32(v : Int32) : Array(UInt8)
   [((v >> 24) & 0xFF).to_u8, ((v >> 16) & 0xFF).to_u8, ((v >> 8) & 0xFF).to_u8, (v & 0xFF).to_u8]
 end
 
-def at16(data : Array(UInt8), at : Int32) : Int32
+def at16(data : Array(UInt8) | Array::View(UInt8), at : Int32) : Int32
   (data[at].to_i32 << 8) | data[at + 1].to_i32
 end
 
-def at24(data : Array(UInt8), at : Int32) : Int32
+def at24(data : Array(UInt8) | Array::View(UInt8), at : Int32) : Int32
   (data[at].to_i32 << 16) | (data[at + 1].to_i32 << 8) | data[at + 2].to_i32
 end
 
 # Where *needle* first is in *hay*, or -1.
-def find_bytes(hay : Array(UInt8), needle : Array(UInt8)) : Int32
+def find_bytes(hay : Array(UInt8) | Array::View(UInt8), needle : Array(UInt8)) : Int32
   return -1 if needle.empty? || needle.size > hay.size
   i = 0
   last = hay.size - needle.size
@@ -1152,7 +1152,11 @@ class Wire
       return false
     end
     if @at > 0
-      @buffer = @buffer[@at, @buffer.size - @at]
+      remaining = @buffer.size - @at
+      remaining.times { |i| @buffer[i] = @buffer[@at + i] }
+      while @buffer.size > remaining
+        @buffer.pop
+      end
       @at = 0
     end
     bytes = bytes_of(got)
@@ -1460,10 +1464,10 @@ def mutate_units(data : Array(UInt8), corpus : Array(Array(UInt8)), words : Arra
       units = units[0, to] + [theirs[m.below(theirs.size)]] + units[to, units.size - to]
     end
   end
-  res = data[0, lead]
+  res = data[0, lead].to_a
   units.each { |x| res.concat(x) }
   res.concat(rest)
-  res.size > Mutator::LIMIT ? res[0, Mutator::LIMIT] : res
+  res.size > Mutator::LIMIT ? res[0, Mutator::LIMIT].to_a : res
 end
 
 def split_messages(data : Array(UInt8)) : {Array(Array(UInt8)), Array(UInt8)}
@@ -1537,7 +1541,7 @@ def hello_fields(msg : Array(UInt8), server : Bool) : HelloFields?
 end
 
 # The secret the peer's key and the module's share give, in their group.
-def shared_with(group : Int32, peer : Array(UInt8)) : Array(UInt8)?
+def shared_with(group : Int32, peer : Array(UInt8) | Array::View(UInt8)) : Array(UInt8)?
   if group == 0x1D
     got = X25519.shared(SCRIPT_X25519, peer)
     return got.is_a?(CurveError) ? nil : bytes_of(got)
@@ -1647,7 +1651,8 @@ def send13(wire : Wire, chunk : Int32, suite : Int32, secret : Array(UInt8), hel
   # A client's application keys hang on the handshake to the server's
   # Finished, which is where it is now; a server's, on its own Finished.
   app = server ? mine : schedule.derive_secret(master, "c ap traffic", transcript)
-  cipher = TlsRecordCipher.new(suite, schedule, mine)
+  cipher = TlsRecordCipher.new
+  cipher.configure(suite, schedule, mine)
   flight = [] of UInt8
   finished = false
   msgs.each do |raw|
@@ -1655,7 +1660,7 @@ def send13(wire : Wire, chunk : Int32, suite : Int32, secret : Array(UInt8), hel
       wire.write(records(22_u8, raw, chunk, cipher))
       if raw.size == 5 && raw[0] == 24_u8
         app = schedule.next_secret(app)
-        cipher = TlsRecordCipher.new(suite, schedule, app)
+        cipher.configure(suite, schedule, app)
       end
       next
     end
@@ -1666,7 +1671,7 @@ def send13(wire : Wire, chunk : Int32, suite : Int32, secret : Array(UInt8), hel
       wire.write(records(22_u8, flight, chunk, cipher))
       flight = [] of UInt8
       app = schedule.derive_secret(master, "s ap traffic", transcript) if server
-      cipher = TlsRecordCipher.new(suite, schedule, app)
+      cipher.configure(suite, schedule, app)
       finished = true
     end
   end
@@ -2150,7 +2155,7 @@ def run_h_client(input : Array(UInt8), h2 : Bool) : String
   })
 end
 
-def frame(type : Int32, flags : Int32, id : Int32, payload : Array(UInt8)) : Array(UInt8)
+def frame(type : Int32, flags : Int32, id : Int32, payload : Array(UInt8) | Array::View(UInt8)) : Array(UInt8)
   u24(payload.size) + [type.to_u8, flags.to_u8] + u32(id) + payload
 end
 
