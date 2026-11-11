@@ -1406,7 +1406,9 @@ def run_pebble(directory : String, minica : String, challtestsrv : String, folde
   if rsa_pems.empty?
     puts "  no RSA keys given, so RS256 and the rollover from it go unasked"
   else
-    rsa = AcmeClient.new(directory, SigningKey.from_pem(File.read(rsa_pems[0])).or_panic, http: http)
+    rsa_pem = File.read(rsa_pems[0])
+    rsa_key = SigningKey.from_pem(rsa_pem).or_panic
+    rsa = AcmeClient.new(directory, rsa_key, http: http)
     if problem = rsa.error
       raise problem.message
     end

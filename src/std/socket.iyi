@@ -4167,18 +4167,19 @@ pub class Resolver
   # a domain's SPF) is written in full.
   def txt(name : String, texts : Array(String), into : String::Builder) : DnsError | Cancelled | Nil
     why = DnsName.why(name)
-    return DnsError.new(DnsError::INVALID_NAME, name, "", why) if why.is_a?(String)
+    return DnsError.new(DnsError::INVALID_NAME, name, "", why).kept(into) if why.is_a?(String)
     at = DnsLookup.new
     found = [] of String
     got = records(DnsName.relative(name), DnsTapeRecord::TXT, nil, at, found)
-    return got unless got.is_a?(DnsEnd)
+    return got.kept(into) if got.is_a?(DnsError)
+    return got if got.is_a?(Cancelled)
     label = got.label
     index = 0
     while index < found.size
       data = found[index]
       index = index + 1
       strings = DnsTapeRecord.character_strings(data)
-      return DnsTapeMessage.malformed("a TXT record's strings run past its data").about(name, label) if strings.nil?
+      return DnsTapeMessage.malformed("a TXT record's strings run past its data").about(name, label).kept(into) if strings.nil?
       from = into.bytesize
       strings.each { |piece| into << piece }
       texts << into.finish[from, into.bytesize - from]

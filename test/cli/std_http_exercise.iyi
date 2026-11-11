@@ -443,8 +443,9 @@ class RisHttp10Handler
       boundary = Multipart.boundary(req.header("Content-Type") || "")
       if boundary
         parts = Multipart.new(req.body_io, boundary)
+        slot = Std::Http::Part.new(parts)
         while true
-          part = parts.next_part
+          part = parts.next_part(slot)
           break if part.nil?
           if part.is_a?(Part)
             data = part.read_all

@@ -329,6 +329,7 @@ pub class AcmeClient
   property timeout_ms : Int32
   @directory_url : String
   @nonce : String? = nil
+  @texts = String::Builder.new
   @thumbprint : String
 
   @http : HTTPClient?
@@ -385,7 +386,7 @@ pub class AcmeClient
   end
 
   protected def account=(url : String?) : String?
-    @account_url = url
+    @account_url = url ? keep(url) : nil
   end
 
   # The account key's JWK thumbprint (RFC 7638), SHA-256 and base64url.
@@ -436,8 +437,15 @@ pub class AcmeClient
     object = AcmeJson.object(response.body, "the account")!
     status = AcmeJson.text(object, "status")
     return AcmeError.new("the account #{url} is #{status || "without a status"}, not valid") unless status == "valid"
-    @account_url = url
-    url
+    kept = keep(url)
+    @account_url = kept
+    kept
+  end
+
+  private def keep(text : String) : String
+    at = @texts.bytesize
+    @texts << text
+    @texts.finish[at, text.bytesize]
   end
 
   # The account moved to *new_key* (section 7.3.5): keyChange's inner JWS
@@ -571,7 +579,8 @@ pub class AcmeClient
       return AcmeError.new("a request to #{url} before the account is known: register first") unless use_jwk || kid
       body = AcmeJws.sign(@key, AcmeJws.header(@key, nonce, url, kid), payload)
       response = AcmeClient.exchange("POST", url, body, accept, @timeout_ms, @http)!
-      @nonce = response.nonce
+      nonce = response.nonce
+      @nonce = nonce ? keep(nonce) : nil
       problem = response.problem("POST #{url}")
       if problem && problem.problem_type == AcmeError::BAD_NONCE && retries < MAX_BAD_NONCE
         retries = retries + 1
@@ -642,6 +651,18 @@ pub class AcmeClient
   # One HTTP exchange, its answer read whole up to `MAX_BODY`; nothing
   # sent to a URL that is not `https://`.
   protected def self.exchange(method : String, url : String, body : String, accept : String?, timeout_ms : Int32, http : HTTPClient? = nil) : AcmeResponse | AcmeError
+    exchange_into(method, url, body, accept, timeout_ms, http,
+      String::Builder.new)
+  end
+
+  private def self.keep(text : String?, into : String::Builder) : String?
+    return nil unless text
+    at = into.bytesize
+    into << text
+    into.finish[at, text.bytesize]
+  end
+
+  private def self.exchange_into(method : String, url : String, body : String, accept : String?, timeout_ms : Int32, http : HTTPClient?, into : String::Builder) : AcmeResponse | AcmeError
     refused = https(url, method)
     return refused if refused
     headers = {"User-Agent" => USER_AGENT}
@@ -650,12 +671,15 @@ pub class AcmeClient
     answer = HTTP.open(method, url, headers, body, redirects: 0, decompress: false, timeout_ms: timeout_ms, client: http) do |r|
       text = r.body_io.read_all(MAX_BODY)
       if text.is_a?(String)
-        AcmeResponse.new(r.status, r.header("Replay-Nonce"), r.header("Location"), r.header("Retry-After"), r.header("Content-Type") || "", text)
+        AcmeResponse.new(r.status, keep(r.header("Replay-Nonce"), into),
+          keep(r.header("Location"), into), keep(r.header("Retry-After"), into),
+          keep(r.header("Content-Type") || "", into).as(String),
+          keep(text, into).as(String))
       else
-        AcmeError.new("#{method} #{url}: the answer: #{text.message}")
+        AcmeError.new(keep("#{method} #{url}: the answer: #{text.message}", into).as(String))
       end
     end
-    return AcmeError.new("#{method} #{url}: #{answer.message}") if answer.is_a?(SocketError) || answer.is_a?(HTTPError) || answer.is_a?(Cancelled)
+    return AcmeError.new(keep("#{method} #{url}: #{answer.message}", into).as(String)) if answer.is_a?(SocketError) || answer.is_a?(HTTPError) || answer.is_a?(Cancelled)
     answer
   end
 end
@@ -896,12 +920,16 @@ end
 pub class AcmeHttp01
   PATH = "/.well-known/acme-challenge/"
   @answers : Hash(String, String) = {} of String => String
+  @texts = String::Builder.new
 
   def initialize
   end
 
   def add(token : String, key_authorization : String) : Nil
-    @answers[token] = key_authorization
+    start = @texts.bytesize
+    @texts << token << key_authorization
+    @answers[@texts.finish[start, token.bytesize]] =
+      @texts.finish[start + token.bytesize, key_authorization.bytesize]
   end
 
   def remove(token : String) : Nil

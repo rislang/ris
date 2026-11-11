@@ -965,7 +965,7 @@ def run_http1(input : Array(UInt8)) : String
     req.form
     if parts = req.multipart
       while true
-        part = parts.next_part
+        part = parts.next_part(slot)
         break unless part.is_a?(Std::Http::Part)
         part.name
         part.filename
@@ -996,8 +996,9 @@ def run_http1(input : Array(UInt8)) : String
   HTTP.absolute_form(t)
   if boundary = Multipart.boundary(t)
     parts = Multipart.new(BodyReader.text(t), boundary)
+    slot = Std::Http::Part.new(parts)
     while true
-      part = parts.next_part
+      part = parts.next_part(slot)
       break unless part.is_a?(Std::Http::Part)
       break unless part.read_all(1_000_000_i64).is_a?(String)
     end
