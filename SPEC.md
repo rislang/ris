@@ -252,7 +252,8 @@ section; a removed one leaves its number unused.
 * 6.8 `ris check spec` fails on a spec, tag or spec.lock that does not
   parse, a tag or block naming no clause, a clause with proofs whose
   version spec.lock lacks, a lock line for no clause, a version no
-  SPEC_CHANGELOG.md entry records, a clause with no proof, and a block
+  CHANGELOG.md entry records (`## DATE` or, under a release, `### DATE`;
+  a left-over SPEC_CHANGELOG.md fails), a clause with no proof, and a block
   label that differs from its clause: `spec 1.5  # text` (the text cut
   at a word with `…` within 80 columns). `ris check --fix` writes the
   labels; a label is no review. Each failure names the next command.
@@ -260,7 +261,7 @@ section; a removed one leaves its number unused.
   as todo, neither pass nor fail, and exits 0 when the rest pass. A
   clause named only by todo tests passes `ris check spec`; `ris spec
   todo` lists them. `ris init` writes SPEC.md with one clause,
-  SPEC_CHANGELOG.md recording it, spec.lock reviewing it and a spec
+  CHANGELOG.md recording it, spec.lock reviewing it and a spec
   block proving it at the end of the root module; no test/.
 
 ## 7. Types, memory and Ruby syntax (doc/TAPE_TYPES.md; Goose §1.2, §3.7)

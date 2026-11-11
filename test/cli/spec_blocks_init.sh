@@ -8,7 +8,7 @@
 # It wrote test/NAME_test.ri: a `# spec: 1.1@HASH` tag and a todo, with
 # no `module` header, and an AGENTS.md teaching tags.
 #
-# spec: 6.9@9d41266e
+# spec: 6.9@b232a9c4
 
 set -u
 

@@ -46,8 +46,8 @@ cd "$WORK" || exit 1
 "$IYI" init example.com/me/hello app > init.txt 2>&1
 say "init writes a project and says what it wrote" \
   "$([ $? -eq 0 ] && grep -qE 'wrote app[/\\]hello.ri' init.txt && grep -q 'run hello.ri' init.txt; echo $?)"
-say "AGENTS.md, SPEC.md, SPEC_CHANGELOG.md, ris.mod, hello.ri, spec.lock" \
-  "$([ "$(ls app | LC_ALL=C sort | tr '\n' ' ')" = "AGENTS.md SPEC.md SPEC_CHANGELOG.md hello.ri ris.mod spec.lock " ]; echo $?)"
+say "AGENTS.md, CHANGELOG.md, SPEC.md, ris.mod, hello.ri, spec.lock" \
+  "$([ "$(ls app | LC_ALL=C sort | tr '\n' ' ')" = "AGENTS.md CHANGELOG.md SPEC.md hello.ri ris.mod spec.lock " ]; echo $?)"
 grep -q '^\* 1\.1 Running hello.ri prints `hello from hello`\.$' app/SPEC.md &&
   grep -q '^spec 1\.1 ' app/hello.ri
 say "SPEC.md has one clause and a spec block proves it (SPEC 6.9)" $?
@@ -102,7 +102,7 @@ say "a directory with ; or \$ in its name is one word to cd" \
 # ── the name, the current directory, and the refusals ────────────────────
 mkdir -p here && (cd here && "$IYI" init kemal) > here.txt 2>&1
 say "init kemal writes its files into the current directory" \
-  "$([ "$(ls here | LC_ALL=C sort | tr '\n' ' ')" = "AGENTS.md SPEC.md SPEC_CHANGELOG.md kemal.ri ris.mod spec.lock " ] && grep -q '^module kemal$' here/ris.mod; echo $?)"
+  "$([ "$(ls here | LC_ALL=C sort | tr '\n' ' ')" = "AGENTS.md CHANGELOG.md SPEC.md kemal.ri ris.mod spec.lock " ] && grep -q '^module kemal$' here/ris.mod; echo $?)"
 "$IYI" init github.com/me/iyi-web dash > dash.txt 2>&1
 say "a repository name with - is a module name with _" \
   "$([ -f dash/iyi_web.ri ] && grep -q '^module iyi_web$' dash/iyi_web.ri; echo $?)"

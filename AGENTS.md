@@ -97,12 +97,12 @@ temporaries and response on one tape.
   iyi's draft spec is doc/archive/iyi/SPEC.md, cited as "iyi SPEC".
   SPEC.md is ris's specification; ris's own docs include CONTRIBUTING.md.
 * Change SPEC.md only with a dated entry and its reason in
-  [SPEC_CHANGELOG.md](SPEC_CHANGELOG.md), in the same commit.
+  [CHANGELOG.md](CHANGELOG.md), in the same commit.
 * EGM is required: every SPEC change or design proposal gets an EGM
   review of its draft before SPEC.md or code changes, and a drift report
   after ([CONTRIBUTING.md](CONTRIBUTING.md), Design checks). Keep only
   consolidated_review_report.md next to the draft; the stage reports
-  are not committed. The SPEC_CHANGELOG entry names the draft folder.
+  are not committed. The CHANGELOG entry names the draft folder.
 * Cite doc/reference/iyi/ for unchanged iyi rules, doc/reference/goose/
   for Goose designs, doc/reference/koja/ for messages between tasks.
   Record only ris differences; check snapshot versions.

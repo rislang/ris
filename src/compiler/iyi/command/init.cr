@@ -194,11 +194,12 @@ class Iyi::Command
         * 1.1 #{clause}
 
         MD
-      {"SPEC_CHANGELOG.md", <<-MD},
-        # SPEC.md changelog
+      {"CHANGELOG.md", <<-MD},
+        # Changelog
 
-        Every change to SPEC.md gets an entry here, newest first: a heading
-        `## DATE · N.M@VERSION` naming each clause version it records, then
+        The spec is the software: every change to SPEC.md gets an entry
+        here, newest first: a heading `## DATE · N.M@VERSION` (`###` under
+        a release's `## 0.2.0`) naming each clause version it records, then
         the reason. `#{program} check spec` asks for one per version.
 
         ## #{Time.local.to_s("%Y-%m-%d")} · #{version}
@@ -238,7 +239,7 @@ class Iyi::Command
     directory when it is left out. Nothing that is already there is
     overwritten; an AGENTS.md saying `ris check` decides
     when the work is done is written unless one is there, and so are
-    SPEC.md (one clause), SPEC_CHANGELOG.md and spec.lock, unless a
+    SPEC.md (one clause), CHANGELOG.md and spec.lock, unless a
     SPEC.md is there; NAME.ri ends with a spec block proving the clause.
 
     MODULE is the path other projects would import this one by — a URL's

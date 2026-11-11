@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# spec: 6.7@0845721d, 6.8@9832e912
+# spec: 6.7@0845721d, 6.8@917c90e4
 # Spec blocks: `ris spec` on blocks, spec.lock, the clause label and the
 # hint for a missing package spec import (doc/drafts/spec-blocks/
 # spec-blocks.md 5.9, 5.10, 5.14-5.16; step 6).
@@ -30,7 +30,7 @@ has() { grep -qF -- "$2" "$1" || { fail "$1 lacks: $2"; cat "$1"; }; }
 version() { "$IYI" spec "$1" | head -1 | cut -d' ' -f1; }
 changelog() {
   printf '## 2026-01-0%s · %s %s\n\nWhy.\n\n' "$1" "$(version 1.1)" \
-    "$(version 1.2)" >> SPEC_CHANGELOG.md
+    "$(version 1.2)" >> CHANGELOG.md
 }
 
 cat > SPEC.md <<'EOF'
@@ -42,7 +42,7 @@ cat > SPEC.md <<'EOF'
 * 1.2 A post's slug is its title in lower case, with every run of spaces
   and punctuation turned into one dash and no dash at either end of it.
 EOF
-echo "# Changelog" > SPEC_CHANGELOG.md
+echo "# Changelog" > CHANGELOG.md
 changelog 1
 
 mkdir -p src test
@@ -160,6 +160,26 @@ EOF
 "$IYI" test blog.ri > g.out 2>&1
 [ $? = 0 ] && fail "(g) an undefined get passed"
 has g.out "web/spec defines \`get\`; add \`import web/spec::*\` after the first \`spec\` block"
+cd ..
+
+# (h) The spec's changes are the changelog: CHANGELOG.md, a `###` entry
+# under a release heading counts; a left-over SPEC_CHANGELOG.md fails.
+mkdir h && cd h
+printf '# Demo\n\n## 1. A\n\n* 1.1 One.\n' > SPEC.md
+printf 'module h\n\npub def one : Int32\n  1\nend\n\nspec 1.1\n  one == 1\nend\n' > h.ri
+"$IYI" spec ack 1.1 > /dev/null 2>&1
+printf '# Changelog\n\n## 0.2.0 (unreleased)\n\n### 2026-01-01 · %s\n\nWhy.\n' \
+  "$(version 1.1)" > CHANGELOG.md
+"$IYI" check spec > h.out 2>&1 || { fail "(h) a ### entry under a release"; cat h.out; }
+printf '# Changelog\n\n## 0.2.0\n\n%s\n' "$(version 1.1)" > CHANGELOG.md
+"$IYI" check spec > h2.out 2>&1
+[ $? = 0 ] && fail "(h) a version under a release heading alone counted"
+has h2.out "no CHANGELOG.md entry records 1.1@"
+printf '# Changelog\n\n## 2026-01-01 · %s\n\nWhy.\n' "$(version 1.1)" > CHANGELOG.md
+echo "# Old" > SPEC_CHANGELOG.md
+"$IYI" check spec > h3.out 2>&1
+[ $? = 0 ] && fail "(h) a left-over SPEC_CHANGELOG.md passed"
+has h3.out "SPEC_CHANGELOG.md is the old name"
 cd ..
 
 [ "$failed" = 0 ] && echo "spec_blocks_lock: ok"

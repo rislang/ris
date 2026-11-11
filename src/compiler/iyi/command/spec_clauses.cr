@@ -453,15 +453,22 @@ class Iyi::Command
   end
 
   private def spec_changelog(root : String) : Array(SpecEntry)
-    file = File.join(root, "SPEC_CHANGELOG.md")
+    file = File.join(root, "CHANGELOG.md")
     return [] of SpecEntry unless File.file?(file)
     entries = [] of SpecEntry
     heading = nil
     versions = [] of String
     File.each_line(file) do |line|
-      if line.starts_with?("## ") && spec_dated?(line[3..])
+      # `## DATE` or, under a release's `## 0.2.0`, `### DATE`.
+      level = line.starts_with?("### ") ? 4 : line.starts_with?("## ") ? 3 : 0
+      if level > 0 && spec_dated?(line[level..])
         entries << SpecEntry.new(heading, versions) if heading
-        heading = line[3..].strip
+        heading = line[level..].strip
+        versions = [] of String
+      elsif level > 0
+        # A release heading ends the entry above it.
+        entries << SpecEntry.new(heading, versions) if heading
+        heading = nil
         versions = [] of String
       end
       spec_version_tokens(line, versions) if heading
@@ -759,6 +766,10 @@ class Iyi::Command
     by_number = clauses.to_h { |clause| {clause.number, clause} }
     recorded = spec_changelog(root).flat_map(&.versions).to_set
     failures = [] of {String, String}
+    if File.file?(File.join(root, "SPEC_CHANGELOG.md"))
+      failures << {"SPEC_CHANGELOG.md is the old name: the spec's changes are the changelog",
+                   "move its entries into CHANGELOG.md (`###` under a release heading), then delete it"}
+    end
     tests.each do |test|
       next unless test.tagged
       test.items.each do |number, _|
@@ -805,8 +816,8 @@ class Iyi::Command
         end
       end
       unless recorded.includes?("#{clause.number}@#{clause.version}")
-        failures << {"#{clause.number}: no SPEC_CHANGELOG.md entry records #{clause.number}@#{clause.version}",
-                     "add `## #{Time.local.to_s("%Y-%m-%d")} · #{clause.number}@#{clause.version}` to SPEC_CHANGELOG.md with the reason"}
+        failures << {"#{clause.number}: no CHANGELOG.md entry records #{clause.number}@#{clause.version}",
+                     "add `## #{Time.local.to_s("%Y-%m-%d")} · #{clause.number}@#{clause.version}` to CHANGELOG.md with the reason"}
       end
       if status == "uncovered"
         failures << {"#{clause.number} has no proof",
@@ -882,7 +893,7 @@ class Iyi::Command
           todo       every todo test: clause, file, reason
 
       `#{name} check spec` fails on an unreviewed clause, a tag, block or
-      lock line naming no clause, a version no SPEC_CHANGELOG.md entry
+      lock line naming no clause, a version no CHANGELOG.md entry
       records, a clause with no proof and a stale block label
       (`#{name} check --fix` writes labels).
       USAGE
