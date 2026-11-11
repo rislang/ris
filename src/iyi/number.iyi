@@ -138,6 +138,11 @@ end
 # loaded a formatter to do it - which `std/time` found the moment the
 # formatter stopped being everybody's.
 struct UInt8
+  def ==(other : Char) : Bool
+    {% raise "A String index is a UInt8 byte: compare it with '['.ord.to_u8
+or 91_u8. To compare characters, use each_char instead." %}
+  end
+
   def to_s : String
     to_i32.to_s
   end
@@ -175,8 +180,8 @@ struct UInt64
 
   def to_s(base : Int32) : String
     {% if (!flag?(:gc_none) || flag?(:linux) || flag?(:darwin)) && !flag?(:gc_boehm) &&
-          ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
-          flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
+            ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+              flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
       raise "base out of range" if base < 2 || base > 36
       return "0" if self == 0
       return String.build(65) { |w| to_s(w, base) }
@@ -273,8 +278,8 @@ struct Int64
   # twice Go's time.
   def to_s(base : Int32) : String
     {% if (!flag?(:gc_none) || flag?(:linux) || flag?(:darwin)) && !flag?(:gc_boehm) &&
-          ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
-          flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
+            ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+              flag?(:darwin) || flag?(:win32) || flag?(:wasm32)) %}
       raise "base out of range" if base < 2 || base > 36
       return "0" if self == 0
       return String.build(65) { |w| to_s(w, base) }

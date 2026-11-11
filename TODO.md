@@ -17,8 +17,9 @@ How to work (fewer tokens, faster to the goal):
 What CHANGELOG's 0.1.0 promises must work; the items stay in their
 sections below and are listed here in order:
 
-* Checking time per nested block (sections 1 and 2): web's examples
-  must check in seconds.
+* Checking time per nested block: testing_test.ri now checks in 16 s;
+  time web/static_test.ri once it builds (it fails: web/spec import
+  before the first `spec` block, a web-side change).
 * Benches build (section 7), including `HTTP.tls_config=` callers.
 * compiler_test passes: fix its 239 failures (section 12).
 * Release: Linux tarball and its job, `install_ris.sh`, tag v0.1.0;
@@ -35,14 +36,6 @@ sections below and are listed here in order:
   back `form`, `multipart` and `cookies`, which `Request` had.
 
 * The user's own ris programs: each obstacle becomes an item here.
-
-* Checking time doubles per nested block: each loop's two final
-  rounds re-walk every inner block and keep their events, so a body d
-  blocks deep costs 4^d walks. web's examples/testing_test.ri checks
-  for 1182 s, web/static_test.ri for 11 min. Caching alone does not
-  help: events and the final pairing pass still grow 2^d. Plan, gate
-  and open questions: doc/drafts/checker-nested-blocks.md (EGM review
-  first).
 
 Breakage between steps is fine; no transition stages.
 
@@ -63,12 +56,6 @@ Unknown must be refused (SPEC 3.6).
 
 * A `tape` block's value is checked as leaving even where the tape
   call's own value is dropped: such blocks end with `nil` to pass.
-
-* The tape check takes exponential time in nested yield blocks: a def
-  nesting `wrap(text) do |text| ... end` (wrap yields its String) 8
-  deep spends 8.7 s in "Semantic (tape check)", 12 deep over 120 s.
-  checker_deep (check.sh) gates ifs, calls and operators only; add
-  blocks to it once a block's check no longer repeats per level.
 
 * An untyped class default still loses its roots at a cycle store
   when the def answers the Array it stored into: in
@@ -197,42 +184,75 @@ Unknown must be refused (SPEC 3.6).
   before ris check; test/cli/verbs_exercise.sh: a reopen of String (now a
   struct) and `fix printed its edit` (split.iyi already clean).
 
-* Build each test/cli program, group refusals by message, fix per group (old
-  step 5). Known before the new rules: 5.1 task captures (tls server
-  configs, udp:274, dns:951, http.iyi:2154 serve's `handle`, sse.iyi:513
-  and :543, std_compress's opaque source proc); drop std/gc imports
-  from its importers and server_load. 2026-11-10: 70 of 139 benches
-  pass --no-codegen (40 before the group fixes); 77 after the second
-  round (box, capsule, deque, number_format, semantic_version, atomic,
-  udp). Left, by first refusal:
-  - a def's or block's result made in its scratch, SPEC 1.9 (benchmark's
-    IPS Entry class kept in an Array, std's and named_tuple's Hash
-    results, png, sse, steppable, time, mlkem, runtime; yaml's read_value
-    of a Hash, which a derived Hash field needs a destination for);
-  - block or round data stored past it (big, bzip2, xz, rsa, user,
-    indexable, dir, io, cookie, http_server, ct_timing, socket, process;
-    slice's fresh Slice keys in a Hash);
-  - iterator: to_a's `each { |e| result << e }` of an element a map or
-    each_slice made is an opaque callback;
-  - procs outliving their tape block (file, file_utils: a task takes a
-    local File or path; router);
-  - certificates and Times in constants (ocsp, x509), log's @parent:
-    even `NOW = Time.utc(2026, 6, 1)` is refused at Zone's @name, and a
-    constant RisCertificateStore at its kept certificates;
-  - std_tls: from_pem and configs returned from defs; http2_exercise;
-  - API drift: hpack (encode answers a String, decode takes
-    TapeHeaders), dns (SvcbRecord.parse takes a String), secure_dns
-    (https_records), toml (Any), xml, websocket, http_https_records,
-    acme and fuzz (Array::View), slice, wasm32, http2_tape_*;
-  - TLS owners: autocert, http_latency, http_resume, hpke; Upgraded
-    (http, http_stop); views in csv, zip, zstd, tar, compress, netip;
-  - number (invalid constant), eiy (its run step).
+* Build each test/cli program, group refusals by message, fix per group.
+  2026-11-11, minitest: 80 of 139 pass --no-codegen (fresh baseline
+  77). HPACK, ML-KEM and steppable now also run to ALL CHECKS PASSED.
+  DNS's partial API port is kept and extended; it now reaches a captured
+  UdpSocket. Secure DNS uses caller-owned SVCB/TXT/reply storage and named
+  encrypted resolvers; it now reaches a view store in Resolver#txt.
+  UInt8 == Char is refused; its callers in dir, file, mail, text and
+  ocsp compare bytes. No live HTTP.tls_config= caller remains; its
+  refusal test is intentional. The checker was not weakened or edited.
+  The 59 remaining programs, counted once by their first refusal:
+  - API drift, 10: acme and fuzz take Array where slicing gives a View;
+    borrow read-only views and give mutations their own destination.
+    http2_tape_frames, http2_tape_request and http2_tape_response import
+    private Conn/H2Connection; port to the public HTTP surface.
+    http_https_records needs DnsUpstream#exchange's DnsLookup and replies
+    parameters. toml and xml need their caller-owned tree APIs;
+    websocket needs a named WebSocket then its instance connect method;
+    wasm32 needs the current task API instead of IyiTask.collect.
+  - TLS/HPKE/upgrade owners, 8: http2, tls, autocert, http_latency,
+    http_resume, hpke, http and http_stop. Declare identity, config,
+    client, HPKE context or Upgraded at the caller and operate on it;
+    do not answer a new owner from a helper.
+  - An owner answered by a def, 1: benchmark's bm, then IPS Entry owners
+    kept in an Array. Caller-owned jobs need stable entry storage.
+  - Scratch results, SPEC 1.9, 6: runtime's make_pipe, std's tally,
+    named_tuple's to_h, png's picture, time's read_zoneinfo and yaml's
+    read_value. Write into caller-owned destinations; keep backing
+    buffers beside compound results. Hash results need a destination.
+  - Block data stored past it, 9: big, bzip2, eiy, indexable, rsa, slice,
+    sse, user and xz. Split reused locals from outer bindings, append to
+    stable storage, or copy retained values to their destination owner.
+  - Round data stored past it, 4: ct_timing, cookie, dir and io. Keep
+    output storage before the round and write into it; copy what is kept.
+  - Def data stored past it, 2: socket's cached SocketIO and http_server's
+    current multipart Part. Keep backing storage on the receiving owner
+    and refill it, rather than storing a helper's temporary.
+  - Procs outliving their tape, 4: dns, file, file_utils and router. Move
+    socket/file creation inside tasks and send copied text/config data;
+    keep direct callbacks inside their owners' scopes.
+  - Views stored past owners, 4: compress, secure_dns, tar and zstd.
+    Keep source/decoder storage with its consumer, or write/copy output
+    into a caller-owned destination. secure_dns stops at socket.iyi:4178.
+  - Request data on the program tape, 3: log, ocsp and x509. Make retained
+    parents, zones and certificates in program-owned storage explicitly.
+  - Live views across reset/growth, 2: csv and zip. Finish using each row
+    or chunk before refill, or copy retained views. Reduce a suspected
+    checker-summary error before changing any checker; none proven here.
+  - Opaque callback, 1: iterator's to_a over a map/each_slice-produced
+    element. Use a directly known consumer or provide a summary proof;
+    do not weaken unknown-effect refusals.
+  - In-place constructor growth, 1: netip's PrefixSet(prefixes). Make
+    the set first, then add prefixes in a separate method.
+  - Growing owner in a runtime Array, 1: p256's private keys. Give each
+    key stable storage; collect handles rather than growing owners.
+  - Read after its round, 1: process's line. Consume it inside the round
+    or append it to the caller's builder.
+  - Raw String pointer, 1: tls_probe. Use String/byte APIs; only the
+    actual OS handoff belongs in a small annotated std def.
+  - Invalid constant, 1: number's FOLDED_SIZE. Reduce constant folding of
+    the compound modulo expression; do not replace the tested expression
+    by a literal.
+  Verification: full test/ris/check.sh prints PASS: all ris checks;
+  ris check still fails at format on 290 existing files. Keep this open.
+  text builds but running it panics at the unchanged chomp-CR assertion
+  (std_text_exercise.iyi:112); mail, HPACK, ML-KEM and steppable run green.
   std_regex builds but overflows a task's stack at the deepest nesting.
-  A String byte compared with a Char (`host[0] == '['`) is always false
-  and compiles (std/udp had one): refuse UInt8 == Char.
-  Checker hole: `shuffled.map { |s| SemanticVersion.parse(s) }`, where
-  shuffled holds views of another Array's Strings, is refused as a block
-  result made in its scratch (semantic_version maps over indices).
+  Known checker hole: shuffled.map { |s| SemanticVersion.parse(s) },
+  where shuffled holds views of another Array's Strings, is refused as
+  a block result made in scratch (semantic_version maps over indices).
 * std_http_exercise's and std_fuzz's parse checks call
   `Server.parse_request`, gone with `Request`: read through
   `Server.parse_head` or a socket round trip. Most of

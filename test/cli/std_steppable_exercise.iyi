@@ -70,12 +70,20 @@ def collect_vals(iter : NumericStepIterator(StepInt)) : Array(Int32)
 end
 
 # What the block panicked with, or what it answered when it did not.
+def say_outcome(outcome, into : String::Builder) : Nil
+  if outcome.is_a?(Panicked)
+    into << outcome.message
+  else
+    into << "answered " << outcome
+  end
+end
+
 def refusal(&block : -> String) : String
-  said = "nothing"
+  said = ""
   group do |g|
     attempt = g.spawn { block.call }
     outcome = attempt.value
-    said = outcome.is_a?(Panicked) ? outcome.message.to_s : "answered #{outcome}"
+    say_outcome(outcome, said)
     0
   end
   said

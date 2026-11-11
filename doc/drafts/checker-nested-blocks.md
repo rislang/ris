@@ -1,159 +1,125 @@
 # Draft: linear-time checking of nested blocks
 
-First draft, 2026-11-10, before any implementation; not yet reviewed
-by EGM. Code citations are tape_shrink_checker.cr at 2138039be
-(src/compiler/iyi/semantic/).
+Second draft, 2026-11-10, after the EGM review (design, codebase
+details, implementation readiness). Code is cited by method name in
+src/compiler/iyi/semantic/tape_shrink_checker.cr.
 
 ## Problem
 
-The checker walks a loop or block body in `loop_value` (:1563): it
-repeats the body until the entry state settles (at least two rounds),
-then runs two final rounds (:1603) whose events it keeps. Round 2
-exists so that its uses are checked against round 1's shrinks: a view
-read in round 2 after round 1's `clear` is refused. Each round re-walks
-every inner block in full, so a body nested d blocks deep is walked
-at least 4^d times, and 2^d copies of its events are kept.
+The checker walks a loop or block body in `loop_value`. It repeats the
+body until the entry state settles (the settling rounds, at least one),
+then runs two final rounds whose events it keeps. Round 2 exists so
+that its uses are checked against round 1's shrinks: a view carried
+into the next round and read there after round 1's `clear` is refused.
+Each round re-walks every inner block in full, so a body d blocks
+deep is walked 3^d to 4^d times, and 2^d copies of its events are kept.
 
-Uses and shrinks are not judged as they are recorded. They go into
-two flat lists, `@uses` and `@shrinks`, and the end of `check`
-(:1436-1460) pairs every shrink with every later use: a use at index
-i conflicts with shrink s when i >= s.at, i < s.last_use (if set),
-guards are compatible, and one of the use's views has
-`born <= s.at` and a root in `s.roots`. That pass is quadratic in the
-event count.
+Uses and shrinks go into two flat lists, `@uses` and `@shrinks`; the
+end of `check` pairs every shrink with every later use. A use at index
+i conflicts with shrink s when i >= s.at, i < s.last_use (if set), the
+use's and shrink's guards are compatible, and one of the use's views
+has born <= s.at, compatible guards, a root in s.roots, and is not an
+index view of a growth shrink. A growth shrink is judged only if one
+of its roots passes the growth filter (`@pooled_roots`, parameter
+roots of Array type). Only that pass and `loop_env`'s cap read `born`.
 
-Measured (debug compiler, `build --no-codegen`): a 10-deep chain of
-`step(x) do |v| ... end` takes 7.4 s, about doubling per level. web's
-examples/testing_test.ri (about 10 deep) checks for 1182 s,
-web/static_test.ri for 11 min.
+Measured (release compiler on minitest, `build --no-codegen`), a chain
+of d nested `step(x) do |v| ... end` blocks: d=8 13 s, d=9 60 s,
+d=10 265 s, about 4.5x per level. web's examples/testing_test.ri
+checks for 1182 s, web/static_test.ri for 11 min.
 
-Caching each block's settled state per entry removes only the settling
-rounds' share (tried, reverted): the two final rounds still double the
-work and the events per level. Linear cost needs four parts together.
+## Design
 
-## 1. Per-loop cross-round check, then drop round 1
+Two changes in `loop_value`, nothing else; no summaries are replayed
+and no positions are renumbered.
 
-When a loop's two final rounds R1 (uses `[a, b)` of `@uses`) and R2
-(`[b, c)`) end, the checker judges R1's events itself and removes them.
+### 1. A settling walk walks inner bodies once
 
-Checked at the loop's end, with the same rule and message as :1446:
+A settling round's events are dropped and only its environment is
+kept. While any loop is settling (a depth counter, restored in an
+`ensure`), an inner `loop_value` walks its body once from
+`loop_env(env, start)`, joins the round into that entry and returns:
+no settling, no final round.
 
-* every use in R1 against every shrink recorded so far (all shrinks
-  before the loop, and R1's own);
-* every shrink in R1 against every use in R2.
+Why the settled state is still reached: every variable a body binds,
+the inner body's too, is joined into the outer environment, so the
+outer settling loop runs until one walk of each inner body adds
+nothing. That is the inner fixpoint as well. Each inner loop then
+settles again in full, from that state, in its own final walk below.
+Refusals raised during a walk (`refuse`) are raised again there.
 
-Then it removes R1's uses and shrinks, and renumbers every position at
-or after b down by `b - a` (shrink `at`, `last_use`, view `born`, in
-`@uses`, `@shrinks`, the environment and pending values). A position
-inside `[a, b)` becomes a.
+Cost: a settling walk of a body costs its text size; a loop k deep
+settles in about d - k + 2 rounds.
 
-Why this keeps every refusal (the final pass sees the rest):
+### 2. One final round, and round 2's pairs from it
 
-* *R1 uses lose no partner.* A use pairs only with shrinks at or
-  before it, and those are all recorded when R1 ends: shrinks are
-  appended in walk order. A `last_use` set later by `leave_branch`
-  (:802) is at or after the branch's end, so it never cuts R1 off from
-  a shrink before the branch.
-* *R1 shrinks lose no partner.* Their partners are uses in R1 (judged
-  above), in R2 (judged above) or after the loop. For a use after the
-  loop, R2 holds the same shrink node, s2, with `s2.at > s1.at`; every
-  view with `born <= s1.at` also has `born <= s2.at`, so s2 refuses
-  whatever s1 would, provided s2's roots contain s1's and its guards
-  are no narrower. Where no such s2 exists (R2 took another branch, or
-  rebound the shrunk local), s1 is kept, moved to position a.
-* *Renumbering changes no answer.* A view born inside R1 gets
-  born = a. Only shrinks with `at` in `[a, b)` could tell a and its
-  old position apart, and those are removed or moved to a, where
-  `born <= at` holds exactly as before for views born before them.
+Only one final round R1 is walked. Before it the checker:
 
-Open: the growth filter at :1439 reads `@pooled_roots`, parameter
-roots and root types that may be filled later in the walk. Judged at
-the loop's end it may see less. Either keep R1's uses that view a
-growth shrink's roots until the final pass, or show that those sets
-are complete before the first loop is walked.
+* appends an empty marker use at position a, so every view made in R1
+  is born after a;
+* gives every view of the entry state a mark: a negative `born`, one
+  per (variable or slot, view), remembering its source and its real
+  `born`. A negative `born` is <= every position, as the capped one
+  was, so R1 pairs exactly as before.
 
-## 2. A loop's summary per entry, replayed
+After R1 (uses `[a, b)`), round 2 is derived instead of walked. R2
+starts from R1's end state E and takes the same walk, so a use u in R1
+reads in R2:
 
-Within one outermost loop, the checker records for each
-(inner body, key) what its `loop_value` produced:
+* for a marked view from source x: the views of E at x (a marked one
+  standing for its real `born`);
+* a view born <= a (made before the loop) unchanged;
+* nothing for a view made in R1: in R2 it is made again, after R1's
+  shrinks, so it pairs only with R2's copies of them, as in R1.
 
-* its result `Value` and its effect on the environment (the joined
-  vars and slots);
-* its events after part 1, as offsets from its `start`;
-* what it merged into `@returns` and `@kept_returns`.
+Every R1 shrink s without a `last_use` (one set inside R1 ends before
+R2) is paired with these derived uses by the rule above. A conflict is
+not raised at once: the (shrink, derived use) pair is kept and judged
+in the final pass with the growth filter, right after s's own uses, so
+the message and its order stay as they were.
 
-When the same body is reached again with an equal key, the checker
-replays that summary instead of walking: it appends the events
-shifted to the current `@uses.size`, applies the environment effect
-and merges the returns. With part 1, each body is walked a bounded
-number of times per distinct key, and each loop keeps one round's
-events, so the work grows with the program text, not with 2^d.
+Then every mark is replaced by its real `born` in R1's uses, the end
+state, the result and `@returns`/`@kept_returns`. A mark left elsewhere
+only refuses more, never less. The state after the loop is
+`join_env(head, E)`: E's views made in R1 stand where R2's would, on
+the same side of every R1 shrink.
 
-The record lives for one outermost `loop_value`: callee summaries do
-not change inside it (they are fixed per pass of the call graph), so
-a stale record cannot be read. The depth counter is restored in an
-`ensure`, so a raised refusal cannot leave it wrong.
+Inner loops keep their own marks; an outer mark seen by an inner loop
+is a view from before that loop.
 
-Replay does not repeat refusals: a refusal raises during the first
-walk, before any record is made. Under `RIS_SCOPE_ERRORS=all` the
-first walk lists it once, which is enough.
+Why this keeps every refusal:
 
-Every other side effect of a walk must be safe to skip on replay: it
-is keyed by an AST node or root id that the first walk set already,
-or is a set union. Open: audit the ~60 instance variables;
-`@dead`, `@root_scopes`, `@root_tapes`, `@unproved` and
-`@first_refusal` first.
+* R1's own pairs, and pairs with shrinks before or after the loop, are
+  judged as before: R1 is the same walk with the same `born` order.
+* R2's uses are R1's uses read from E; their partners among R1's
+  shrinks are kept as pairs. A view made in R2 is born after every R1
+  shrink, so it has no R1 partner; its R2 partners mirror R1's.
+* After the loop, a use pairs with an R1 shrink where it paired with
+  the R2 copy: views carried round to round are also in `head`, born
+  <= a.
 
-## 3. A key relative to the loop's start
+Events: each loop keeps one round, so the event count and the final
+pass grow with the text, not 2^d. The derived pairs cost
+(uses x shrinks) of R1 per loop, and only conflicts are kept.
 
-`loop_env(env, start)` (:1545) caps every view's `born` at `start`,
-an absolute position, so a body entered at another position never
-matches a record. The key stores each `born` as `start - born`, an
-offset back from the entry. Replay maps offsets back with the current
-start: pairing with shrinks before the loop then uses the true
-positions, because the final pass reads absolute values only after
-the mapping.
+## Answers to the review
 
-The key also holds the state a walk reads besides the environment:
-`@guards`, `@loop_storage`, `@condition_storage`, `@scopes`,
-`@tape_blocks`, `@checking`, `@text_only`, and the loop's `kind` and
-condition node.
-
-## 4. Merging repeated shrinks
-
-Replay and part 1 can leave runs of shrinks from the same node with
-no use between them. Two shrinks with the same node, roots, guards and
-growth flag, and no use between their positions, pair with exactly the
-same uses; the later one also covers every view the earlier does
-(`born <= at` holds for a larger `at`). Keep the later one. Shrinks
-with a use between them are both kept: the earlier one alone pairs
-with that use.
+* Renumbering (Blocker): dropped; nothing is removed or moved.
+* Growth filter judged early (Major): pairs are kept and judged at
+  the end.
+* Part 1 in settling rounds (Major): settling rounds keep no events.
+* Replay audit and key equality (Blocker, Major): no replay, no keys.
+* Solve phase: `solve` uses the same `loop_value`, so it gains too.
+* `RIS_CHECK_STATS`: not added; the gate times a 16-deep chain under
+  a timeout that the old cost misses by hours.
 
 ## Gate
 
-* test/ris/nested_blocks_depth.ri: a chain of 16 nested blocks,
-  each binding a local and appending to an outer Array; it must build
-  and print its known output under `timeout 120` in check.sh. Today it
-  does not finish.
-* A structural counter, not a timing: `RIS_CHECK_STATS=1` prints how
-  many times `loop_value` walked a body. The gate expects at most
-  8 x 16 walks for the 16-deep chain, so a return of the exponential
-  cost fails in any load.
-* test/ris/refused/nested_clear_deep.ri: the same chain with a
-  `clear` at depth 8 and a view taken before it read at depth 12 in
-  the next round; expected message `shrink tape storage with a live
-  view`. It checks that part 1 still pairs across rounds deep inside.
-* All existing refused programs and check.sh pass unchanged.
-* Before and after times for web's two tests in the commit body.
-
-## Open questions for review
-
-1. The growth filter judged at the loop's end (part 1, last item).
-2. Whether R2's shrink always dominates R1's (same node, roots
-   containing R1's) or the fallback that keeps s1 is common enough to
-   matter for cost.
-3. Which side effects replay may skip (part 2's audit).
-4. Whether a key equal under `==` of `Env` is cheap enough: each
-   comparison walks every variable; a hash of the key may be needed.
-5. Whether `RIS_CHECK_STATS` belongs with `RIS_TAPE_STATS` in
-   SPEC 6.6 or stays a compiler debug switch.
+* test/ris/nested_blocks_depth.ri: 16 nested blocks, each binding a
+  local and appending to an outer Array; check.sh builds and runs it
+  under a 60 s timeout and compares its output.
+* test/ris/refused/nested_clear_deep.ri: a deep chain with a loop
+  that reads a view taken in the previous round after the round's
+  `clear`; expected `shrink tape storage with a live view`.
+* All refused programs and check.sh pass unchanged.
+* web's two tests: times before and after in the commit body.

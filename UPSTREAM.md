@@ -8,6 +8,9 @@ back.
 
 ## To take to iyi
 
+* Refuse UInt8 == Char instead of silently answering false. Suggest a
+  byte literal or each_char. Gate: refused/byte_char_equal.ri.
+
 * `iyi doc MODULE` skips `protected` defs, as the prelude listing does
   (`IyiMod.surface_type`): a caller cannot call them. Gate: check.sh's
   option_parser doc.

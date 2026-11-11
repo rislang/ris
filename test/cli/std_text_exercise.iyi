@@ -265,10 +265,10 @@ s_utf8 = "héllo"
 raise "utf8: size counts characters" unless s_utf8.size == 5
 raise "utf8: bytesize counts bytes" unless s_utf8.bytesize == 6
 # Indexing is byte-indexed:
-raise "utf8: byte indexing byte 0" unless s_utf8[0] == 'h'
+raise "utf8: byte indexing byte 0" unless s_utf8[0] == 104_u8
 raise "utf8: byte indexing byte 1 (fragment)" unless s_utf8[1] == 195
 raise "utf8: byte indexing byte 2 (fragment)" unless s_utf8[2] == 169
-raise "utf8: byte indexing byte 3" unless s_utf8[3] == 'l'
+raise "utf8: byte indexing byte 3" unless s_utf8[3] == 108_u8
 raise "utf8: byte offset index" unless s_utf8.index('l') == 3
 
 # Char encoding preservation:
@@ -447,8 +447,9 @@ raise "string: backwards range is empty" unless "hello"[3..1] == ""
 raise "string: range to the end of Int32" unless "hello"[1..2147483647] == "ello" && "b"[1...-2147483648] == ""
 puts "    to_u64 and a range of a string verified"
 
-built = begin; io = ""; io << "aé€" << '🎉'
-io
+built = begin
+  io = ""; io << "aé€" << '🎉'
+  io
 end
 raise "utf8: a built string counts its code points when asked" unless built.size == 4
 raise "utf8: a built string's count stays what it was" unless built.size == 4 && built.bytesize == 10

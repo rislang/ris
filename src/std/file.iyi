@@ -2032,7 +2032,7 @@ class ::File
     # One trailing separator off, as `Dir.tempdir` does: darwin's TMPDIR
     # ends with one, and the name below adds its own.
     last = tmpdir[tmpdir.bytesize - 1]
-    if tmpdir.bytesize > 1 && (last == '/' || last == File::SEPARATOR)
+    if tmpdir.bytesize > 1 && (last == 47_u8 || last == File::SEPARATOR.ord.to_u8)
       tmpdir = tmpdir[0, tmpdir.bytesize - 1]
     end
     # One path refilled per attempt: a round's String would end with it.

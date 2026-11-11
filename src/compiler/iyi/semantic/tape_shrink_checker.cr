@@ -1421,6 +1421,8 @@ class Iyi::TapeShrinkChecker
     @root_sets.clear
     @uses.clear
     @shrinks.clear
+    @marks.clear
+    @late_pairs.clear
     @returns = EMPTY
     @kept_returns = EMPTY
     @checking = true
@@ -1481,7 +1483,7 @@ class Iyi::TapeShrinkChecker
       @leaving = nil
     end
     @checking = false
-    @shrinks.each do |shrink|
+    @shrinks.each_with_index do |shrink, s|
       if shrink.growth
         next unless shrink.roots.any? do |root|
           @pooled_roots.includes?(root) ||
@@ -1489,10 +1491,15 @@ class Iyi::TapeShrinkChecker
              possible_array?(@text_only ? root_type(root) : @root_types[root]?))
         end
       end
-      @uses.each_with_index do |use, i|
-        next if i < shrink.at
-        next if (last = shrink.last_use) && i >= last
-        next unless compatible?(shrink.guards, use.guards)
+      late = @late_pairs[s]? || [] of Use
+      (@uses.size + late.size).times do |i|
+        # Round 2's uses follow, derived from round 1 (final_round).
+        use = i < @uses.size ? @uses[i] : late[i - @uses.size]
+        if i < @uses.size
+          next if i < shrink.at
+          next if (last = shrink.last_use) && i >= last
+          next unless compatible?(shrink.guards, use.guards)
+        end
         if live = use.views.find { |view| !(shrink.growth && view.index) && view.born <= shrink.at && compatible?(view.guards, shrink.guards) && contains_root?(shrink.roots, view.root) }
           action = shrink.growth ? "grow a pool run" : "shrink tape storage"
           shrink.node.raise "cannot #{action} with a live view " \
@@ -1610,6 +1617,110 @@ class Iyi::TapeShrinkChecker
     result
   end
 
+  # Nonzero while a loop's settling rounds walk: their events are dropped.
+  @settling = 0
+  # Marks for the entry views of a final round: born -1 - i is mark i.
+  @marks = [] of Tuple(String | UInt64, Int32)
+  # Round 2's pairs, derived from round 1: shrink index => uses.
+  @late_pairs = Hash(Int32, Array(Use)).new
+
+  private def mark_value(v : Value, source : String | UInt64) : Value
+    return v if v.views.empty?
+    Value.new(v.roots, v.views.map do |x|
+      @marks << {source, x.born}
+      x.copy_with(born: -@marks.size)
+    end, v.procs, v.unknown_proc)
+  end
+
+  # A mark's real birth, through marks of outer rounds kept as marks.
+  private def unmark(born : Int32, from : Int32) : Int32
+    while born < 0 && -born - 1 >= from
+      born = @marks[-born - 1][1]
+    end
+    born
+  end
+
+  private def unmark_value(v : Value, from : Int32) : Value
+    return v unless v.views.any? { |x| x.born < 0 && -x.born - 1 >= from }
+    Value.new(v.roots, v.views.map { |x| x.copy_with(born: unmark(x.born, from)) }.uniq,
+      v.procs, v.unknown_proc)
+  end
+
+  private def unmark_env(env : Env, from : Int32) : Env
+    Env.new(env.vars.transform_values { |v| unmark_value(v, from) },
+      env.slots.transform_values { |v| unmark_value(v, from) })
+  end
+
+  # Walks a loop's one final round from its settled head. Round 2 is
+  # not walked: its uses are round 1's read from round 1's end state,
+  # and their pairs with round 1's shrinks are kept for the final pass.
+  private def final_round(body : ASTNode, cond : ASTNode?,
+                          head : Env) : Tuple(Value, Env)
+    # What round 1 makes is born after every entry view.
+    @uses << Use.new([] of View, body, @guards.dup)
+    a = @uses.size - 1
+    shrink_start = @shrinks.size
+    from = @marks.size
+    round = Env.new(head.vars.map { |k, v| {k, mark_value(v, k)} }.to_h,
+      head.slots.map { |k, v| {k, mark_value(v, k)} }.to_h)
+    # The loop condition lends an owner's field until this round ends.
+    # Re-reading the getter after a clear must not create a new borrow.
+    previous = @condition_storage
+    fields = [] of UInt64
+    @condition_storage = fields
+    value(cond, round) if cond
+    @condition_storage = previous
+    outer_storage = @loop_storage
+    @loop_storage += fields.uniq.map { |r| view(r) }
+    result = value(body, round)
+    @loop_storage = outer_storage
+    late_pairs(a, shrink_start, from, round) if @checking
+    (a...@uses.size).each do |i|
+      use = @uses[i]
+      next unless use.views.any? { |x| x.born < 0 && -x.born - 1 >= from }
+      @uses[i] = use.copy_with(views: use.views.map { |x| x.copy_with(born: unmark(x.born, from)) })
+    end
+    @returns = unmark_value(@returns, from)
+    @kept_returns = unmark_value(@kept_returns, from)
+    result = unmark_value(result, from)
+    round = unmark_env(round, from)
+    {result, loop_env(round)}
+  end
+
+  # Round 2's uses of views carried from round 1, paired with round 1's
+  # shrinks by the final pass's rule.
+  private def late_pairs(a : Int32, shrink_start : Int32, from : Int32,
+                         finish : Env) : Nil
+    shrinks = (shrink_start...@shrinks.size).select { |i| @shrinks[i].last_use.nil? }
+    return if shrinks.empty?
+    b = @uses.size
+    (a...b).each do |i|
+      use = @uses[i]
+      next unless use.views.any? { |x| x.born < 0 && -x.born - 1 >= from }
+      views = [] of View
+      use.views.each do |x|
+        if x.born < 0 && -x.born - 1 >= from
+          source = @marks[-x.born - 1][0]
+          carried = source.is_a?(String) ? finish[source]? : finish.slots[source]?
+          carried.try &.views.each do |w|
+            views << View.new(w.root, unmark(w.born, from), x.guards, w.index)
+          end
+        elsif x.born <= a
+          views << x
+        end
+      end
+      next if views.empty?
+      views.uniq!
+      shrinks.each do |s|
+        shrink = @shrinks[s]
+        next unless compatible?(shrink.guards, use.guards)
+        if live = views.find { |view| !(shrink.growth && view.index) && view.born <= shrink.at && compatible?(view.guards, shrink.guards) && contains_root?(shrink.roots, view.root) }
+          (@late_pairs[s] ||= [] of Use) << use.copy_with(views: [live])
+        end
+      end
+    end
+  end
+
   private def loop_value(body : ASTNode, env : Env,
                          cond : ASTNode? = nil, kind = "loop round",
                          fresh_args : Array(Var)? = nil) : Value
@@ -1631,42 +1742,41 @@ class Iyi::TapeShrinkChecker
     returns = @returns
     kept_returns = @kept_returns
     entry = loop_env(env, start)
-    head = entry
-    loop do
-      round = head.dup
+    if @settling > 0
+      # A settling round keeps no events: one walk is enough, the outer
+      # settling loop repeats it until nothing changes.
+      round = entry.dup
       value(cond, round) if cond
-      value(body, round)
-      # Join with the last head, not the entry: a round that rebinds a
-      # variable must not drop what earlier rounds made live, or the
-      # state swings back and forth and never settles.
-      updated = loop_env(join_env(head, round), start)
-      # Speculative rounds establish the environment, not event order.
-      @uses.truncate(0, start)
-      @shrinks.truncate(0, shrink_start)
-      @returns = returns
-      @kept_returns = kept_returns
-      break if updated == head
-      head = updated
-    end
-    round = head.dup
-    result = EMPTY
-    2.times do
-      # The loop condition lends an owner's field until this round ends.
-      # Re-reading the getter after a clear must not create a new borrow.
-      previous = @condition_storage
-      fields = [] of UInt64
-      @condition_storage = fields
-      value(cond, round) if cond
-      @condition_storage = previous
-      outer_storage = @loop_storage
-      @loop_storage += fields.uniq.map { |r| view(r) }
       result = value(body, round)
-      @loop_storage = outer_storage
-      round = loop_env(round)
+      joined = join_env(entry, round)
+    else
+      head = entry
+      loop do
+        round = head.dup
+        @settling += 1
+        begin
+          value(cond, round) if cond
+          value(body, round)
+        ensure
+          @settling -= 1
+        end
+        # Join with the last head, not the entry: a round that rebinds a
+        # variable must not drop what earlier rounds made live, or the
+        # state swings back and forth and never settles.
+        updated = loop_env(join_env(head, round), start)
+        # Speculative rounds establish the environment, not event order.
+        @uses.truncate(0, start)
+        @shrinks.truncate(0, shrink_start)
+        @returns = returns
+        @kept_returns = kept_returns
+        break if updated == head
+        head = updated
+      end
+      result, round = final_round(body, cond, head)
+      # A while condition is evaluated once more on the exit edge.
+      value(cond, round) if cond
+      joined = join_env(head, round)
     end
-    # A while condition is evaluated once more on the exit edge.
-    value(cond, round) if cond
-    joined = join_env(head, round)
     joined.vars.each { |key, v| env[key] = v }
     joined.slots.each { |key, v| env.slots[key] = v }
     @scopes.pop
