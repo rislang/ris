@@ -27,7 +27,7 @@ module bench/std_http_https_records
 import std/indexable
 
 import std/http::{HTTPClient, HTTPError, Response}
-import std/socket::{DnsUpstream, IyiSocket, Resolver, SocketError}
+import std/socket::{DnsUpstream, DnsLookup, IyiSocket, Resolver, SocketError}
 import std/tls::{TlsConfig, TlsEchKey, TlsError, TlsIdentity, TlsIdentitySource, TlsServer, TlsServerConfig}
 import std/dns::{DnsError, DnsTapeMessage, DnsTapeRecord}
 import std/udp::{UdpSocket}
@@ -180,7 +180,8 @@ class Zone
   def answer(query : String) : String?
     parsed = DnsTapeMessage.parse(query)
     return nil unless parsed.is_a?(DnsTapeMessage)
-    question = DnsTapeMessage.read_name(query, 12)
+    name_text = String::Builder.new(query.bytesize)
+    question = DnsTapeMessage.read_name(query, 12, name_text)
     return nil if question.nil?
     name = parsed.question_name.downcase
     type = parsed.question_type
@@ -235,8 +236,10 @@ class LocalUpstream
     false
   end
 
-  def exchange(queries : Array(String), timeout_ms : Int32) : Array(String) | DnsError | Cancelled
-    queries.map { |query| @zone.answer(query) || "" }
+  def exchange(queries : Array(String), timeout_ms : Int32,
+               at : DnsLookup, replies : Array(String)) : DnsError | Cancelled | Nil
+    queries.each { |query| replies << at.keep(@zone.answer(query) || "") }
+    nil
   end
 
   def close : Nil
@@ -269,8 +272,8 @@ end
 def serve_one(socket : IyiSocket, id : Int32, config : TlsServerConfig, seen : Seen) : Nil
   seen.connections = seen.connections + 1
   under = seen.plans.shift? || config
-  conn = TlsServer.over(socket, under, 5000, early_data: false)
-  if conn.is_a?(TlsError)
+  conn = TlsServer.new(socket, under)
+  if conn.accept(5000, early_data: false)
     socket.close
     return
   end
@@ -316,27 +319,32 @@ def said(got : Response | HTTPError | SocketError | Cancelled, ports : Array({In
   text
 end
 
-def server_config(keys : Array(TlsEchKey), offered : Seen) : TlsServerConfig
-  config = TlsServerConfig.from_pem(INNER_CERT_PEM + ROOT_PEM, INNER_KEY_PEM).or_panic
-  config.add_identity(TlsIdentity.from_pem(PUBLIC_CERT_PEM + ROOT_PEM, PUBLIC_KEY_PEM).or_panic)
+def configure_server(config : TlsServerConfig, public_identity : TlsIdentity,
+                     keys : Array(TlsEchKey), offered : Seen) : Nil
+  config.add_identity(public_identity)
   config.alpn = ["http/1.1"]
   config.ech_keys = keys
   config.identity_source = offered
-  config
 end
 
 key = TlsEchKey.generate("public.test", 1).or_panic
 list = TlsEchKey.config_list([key])
 stale = TlsEchKey.config_list([TlsEchKey.generate("public.test", 1).or_panic])
 seen = Seen.new
-main = server_config([key], seen)
+inner_identity = TlsIdentity.new(INNER_CERT_PEM + ROOT_PEM, INNER_KEY_PEM)
+public_identity = TlsIdentity.new(PUBLIC_CERT_PEM + ROOT_PEM, PUBLIC_KEY_PEM)
+main = TlsServerConfig.new(inner_identity)
+configure_server(main, public_identity, [key], seen)
 # Two servers behind one address that disagree: each turns down the
 # other's config, and sends its own.
-first_of_two = server_config([TlsEchKey.generate("public.test", 2).or_panic], seen)
-second_of_two = server_config([TlsEchKey.generate("public.test", 3).or_panic], seen)
+first_of_two = TlsServerConfig.new(inner_identity)
+configure_server(first_of_two, public_identity, [TlsEchKey.generate("public.test", 2).or_panic], seen)
+second_of_two = TlsServerConfig.new(inner_identity)
+configure_server(second_of_two, public_identity, [TlsEchKey.generate("public.test", 3).or_panic], seen)
 # A server that holds no ECH keys: it turns every encrypted ClientHello
 # down and sends no configs to retry with.
-keyless = server_config([] of TlsEchKey, seen)
+keyless = TlsServerConfig.new(inner_identity)
+configure_server(keyless, public_identity, [] of TlsEchKey, seen)
 
 listener = IyiSocket.listen("127.0.0.1", 0)
 port = listener.local_port
@@ -353,7 +361,9 @@ zone.addressed << "inner.test"
 zone.addressed << "svc.test"
 ports = [{other_port, "OTHER"}, {dead_port, "DEAD"}, {port, "PORT"}, {dns.local_port, "DNS"}]
 plain = Resolver.new(["127.0.0.1:#{dns.local_port}"], timeout_ms: 2000, attempts: 1)
-encrypted = Resolver.new([] of String, timeout_ms: 2000, attempts: 1).encrypted(LocalUpstream.new(zone).as(DnsUpstream))
+upstream = LocalUpstream.new(zone)
+encrypted = Resolver.new([] of String, timeout_ms: 2000, attempts: 1)
+encrypted.encrypt(upstream.as(DnsUpstream))
 base = TlsConfig.new
 pem_store_1 = RisCertificateStore.new
 base.roots = pem_certs(pem_store_1, ROOT_PEM)

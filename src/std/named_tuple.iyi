@@ -107,25 +107,25 @@ struct ::NamedTuple
     reverse_merge(other)
   end
 
-  # Deep clone of this named tuple, as far as the values allow: each value
+  # Deep clone onto owner, as far as the values allow: each value
   # whose type has `clone` is cloned and any other is kept as it is.
   # Asking every value for `clone` refused `{a: 1, b: "x"}`: the prelude
   # gives `clone` to neither `Int32` nor `String`, so only a named tuple of
   # values that all had one compiled.
-  def clone
+  def clone(owner)
     {% if T.keys.size == 0 %}
-      NamedTuple.new
+      NamedTuple.new.copy_to(owner)
     {% else %}
       NamedTuple.new(
         {% for k in T.keys %}
-          {{k.stringify}}: clone_value(self[{{k.symbolize}}]),
+          {% if T[k].has_method?(:clone) %}
+            {{k.stringify}}: self[{{k.symbolize}}].clone,
+          {% else %}
+            {{k.stringify}}: self[{{k.symbolize}}],
+          {% end %}
         {% end %}
-      )
+      ).copy_to(owner)
     {% end %}
-  end
-
-  private def clone_value(value)
-    value.responds_to?(:clone) ? value.clone : value
   end
 
   # Converts this named tuple into an Array of {Symbol, Value} pairs.
@@ -141,16 +141,11 @@ struct ::NamedTuple
     {% end %}
   end
 
-  # Converts this named tuple into a Hash.
-  def to_h
-    {% if T.keys.size == 0 %}
-      {} of Symbol => NoReturn
-    {% else %}
-      {
-        {% for k in T.keys %}
-          {{k.symbolize}} => self[{{k.symbolize}}],
-        {% end %}
-      }
+  # Writes this named tuple into the caller's Hash.
+  def to_h(into : Hash(Symbol, V)) : Hash(Symbol, V) forall V
+    {% for k in T.keys %}
+      into[{{k.symbolize}}] = self[{{k.symbolize}}]
     {% end %}
+    into
   end
 end

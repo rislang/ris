@@ -127,7 +127,7 @@ def hex(bytes : Array(UInt8)) : String
   end
 end
 
-def text(bytes : Array(UInt8)) : String
+def text(bytes : Array(UInt8) | Array::View(UInt8)) : String
   String.from_bytes(bytes.size) { |buf| (bytes.size).times { |k_| buf[k_] = bytes[k_] } }
 end
 
@@ -240,7 +240,7 @@ class Mutator
     count = 1 + below(3)
     count = count + below(8) if chance(6)
     count.times { res = once(res, corpus, words) }
-    res.size > LIMIT ? res[0, LIMIT] : res
+    res.size > LIMIT ? res[0, LIMIT].to_a : res
   end
 
   def once(data : Array(UInt8), corpus : Array(Array(UInt8)), words : Array(Array(UInt8))) : Array(UInt8)
@@ -292,7 +292,7 @@ class Mutator
       cut = below(n - at + 1)
       data[0, at] + other[from, size] + data[at + cut, n - at - cut]
     when 9
-      data[0, below(n)]
+      data[0, below(n)].to_a
     when 10
       # a word the format is made of, put in or written over
       return length_edit(data) if words.empty?
@@ -325,7 +325,8 @@ class Mutator
       size = 1 + below(room < 16 ? room : 16)
       times = 2 + below(chance(3) ? 3000 : 40)
       piece = data[from, size]
-      res = data[0, from + size]
+      res = Array(UInt8).new(LIMIT + 32)
+      (0...from + size).each { |i| res << data[i] }
       times.times do
         break if res.size > LIMIT
         res.concat(piece)
@@ -375,15 +376,15 @@ end
 # lenient reader, the harness's own: what it cannot read is mutated as
 # bytes instead.
 class Tlv
-  property ident : Array(UInt8)
-  property content : Array(UInt8)
+  property ident : Array(UInt8) | Array::View(UInt8)
+  property content : Array(UInt8) | Array::View(UInt8)
   property children : Array(Tlv)?
   # 0: the shortest length; 1: long form a byte longer than it needs; 2:
   # indefinite (0x80); 3: one more than the content; 4: one less; 5: four
   # bytes of long form.
   property style : Int32 = 0
 
-  def initialize(@ident : Array(UInt8), @content : Array(UInt8), @children : Array(Tlv)?)
+  def initialize(@ident : Array::View(UInt8), @content : Array::View(UInt8), @children : Array(Tlv)?)
   end
 
   def self.read(data : Array(UInt8), at : Int32, stop : Int32, depth : Int32) : {Tlv, Int32}?
@@ -436,7 +437,7 @@ class Tlv
 
   def body : Array(UInt8)
     kids = @children
-    return @content unless kids
+    return @content.to_a unless kids
     res = [] of UInt8
     kids.each { |k| res.concat(k.encode) }
     res
@@ -815,7 +816,8 @@ def run_pem(input : Array(UInt8)) : String
   X509.pem(t, "CERTIFICATE")
   X509.pem(t, "PRIVATE KEY")
   Certificate.pem_blocks(t)
-  TlsIdentity.from_pem(t, t)
+  identity = TlsIdentity.new(t, t)
+  identity.error
   store = RisCertificateStore.new
   if problem = store.read_pem(t)
     return refused(problem)
@@ -832,8 +834,10 @@ SIGNED = bytes_of("what a CertificateVerify signs, near enough")
 def run_keys(input : Array(UInt8)) : String
   return "empty" if input.empty?
   chain = chain_pem(KEY_NAMES[input[0] % 3])
-  identity = TlsIdentity.from_pem(chain, text(input[1, input.size - 1]))
-  return refused(identity) if identity.is_a?(TlsError)
+  identity = TlsIdentity.new(chain, text(input[1, input.size - 1]))
+  if problem = identity.error
+    return refused(problem)
+  end
   key = identity.leaf.public_key
   identity.schemes.each do |scheme|
     signature = identity.sign(scheme, SIGNED)
@@ -853,15 +857,17 @@ end
 
 # A record cipher keyed from fixed secrets: TLS 1.3's three suites, and
 # TLS 1.2's AES-GCM and ChaCha20-Poly1305, by the input's first byte.
-def record_cipher(pick : Int32) : TlsRecordCipher
+def configure_record(cipher : TlsRecordCipher, pick : Int32) : Nil
   secret = Array(UInt8).new(48) { |i| ((i * 7 + 1) & 0xFF).to_u8 }
+  schedule256 = TlsKeySchedule.new(false)
+  schedule384 = TlsKeySchedule.new(true)
   case pick
-  when 0 then TlsRecordCipher.new(0x1301, TlsKeySchedule.new(false), secret[0, 32])
-  when 1 then TlsRecordCipher.new(0x1302, TlsKeySchedule.new(true), secret)
-  when 2 then TlsRecordCipher.new(0x1303, TlsKeySchedule.new(false), secret[0, 32])
-  when 3 then TlsRecordCipher.new(0xC02B, secret[0, 16], secret[16, 4])
-  when 4 then TlsRecordCipher.new(0xC02C, secret[0, 32], secret[32, 4])
-  else        TlsRecordCipher.new(0xCCA9, secret[0, 32], secret[32, 12])
+  when 0 then cipher.configure(0x1301, schedule256, secret[0, 32].to_a)
+  when 1 then cipher.configure(0x1302, schedule384, secret)
+  when 2 then cipher.configure(0x1303, schedule256, secret[0, 32].to_a)
+  when 3 then cipher.configure(0xC02B, secret[0, 16], secret[16, 4])
+  when 4 then cipher.configure(0xC02C, secret[0, 32], secret[32, 4])
+  else        cipher.configure(0xCCA9, secret[0, 32], secret[32, 12])
   end
 end
 
@@ -874,7 +880,8 @@ def record_seeds : Array(Array(UInt8))
   seeds = [] of Array(UInt8)
   6.times do |pick|
     [{23_u8, bytes_of("hello")}, {22_u8, [24_u8, 0_u8, 0_u8, 1_u8, 1_u8]}, {21_u8, [1_u8, 0_u8]}, {23_u8, [] of UInt8}, {23_u8, Array(UInt8).new(300) { |i| (i & 0xFF).to_u8 }}].each do |pair|
-      cipher = record_cipher(pick)
+      cipher = TlsRecordCipher.new
+      configure_record(cipher, pick)
       seeds << [pick.to_u8] + cipher.seal(pair[0], pair[1])
     end
   end
@@ -888,14 +895,18 @@ end
 def run_record(input : Array(UInt8)) : String
   return "empty" if input.size < 2
   pick = (input[0] & 7_u8).to_i32 % 6
+  sender = TlsRecordCipher.new
+  receiver = TlsRecordCipher.new
+  configure_record(sender, pick)
+  configure_record(receiver, pick)
   if input[0] & 8_u8 != 0
     # Up to a record's 2^14 bytes and 256 of padding.
     inner = input[1, input.size - 1 < 16640 ? input.size - 1 : 16640]
-    sealed = record_cipher(pick).seal(inner[inner.size - 1], inner[0, inner.size - 1])
-    opened = record_cipher(pick).open(sealed[0, 5], sealed[5, sealed.size - 5])
+    sealed = sender.seal(inner[inner.size - 1], inner[0, inner.size - 1])
+    opened = receiver.open(sealed[0, 5], sealed[5, sealed.size - 5])
   else
     return "empty" if input.size < 6
-    opened = record_cipher(pick).open(input[1, 5], input[6, input.size - 6])
+    opened = receiver.open(input[1, 5], input[6, input.size - 6])
   end
   return refused(opened) if opened.is_a?(TlsError)
   "read type #{opened[0]}, #{opened[1].size} bytes"
@@ -1009,10 +1020,10 @@ def hpack_blocks(input : Array(UInt8)) : Array(Array(UInt8))
   while at + 2 <= input.size
     n = at16(input, at)
     break if at + 2 + n > input.size
-    blocks << input[at + 2, n]
+    blocks << input[at + 2, n].to_a
     at = at + 2 + n
   end
-  blocks << input[at, input.size - at] if at < input.size
+  blocks << input[at, input.size - at].to_a if at < input.size
   blocks
 end
 
@@ -1028,7 +1039,7 @@ def hpack_decoded(input : Array(UInt8)) : String
   decoder = Decoder.new
   begin; io = "";
     hpack_blocks(input).each do |block|
-      got = decoder.decode(slice_of(block))
+      got = decoder.decode(block)
       if got.is_a?(HpackError)
         io << "refused: " << got.message
         break
@@ -1047,11 +1058,11 @@ end
 
 def run_hpack(input : Array(UInt8)) : String
   answer = hpack_decoded(input)
-  whole = slice_of(input)
+  whole = input
   Huffman.decode(whole)
   Integer.decode(whole, 0, 1 + input[0].to_i32 % 8) unless input.empty?
   small = Decoder.new(max_table_size: 256, protocol_max_table_size: 256, max_header_list_size: 512, max_header_count: 8)
-  hpack_blocks(input).each { |block| break if small.decode(slice_of(block)).is_a?(HpackError) }
+  hpack_blocks(input).each { |block| break if small.decode(block).is_a?(HpackError) }
   cut = answer.index("refused: ")
   cut ? answer[cut, answer.bytesize - cut] : "read #{answer.bytesize}"
 end
@@ -1401,10 +1412,10 @@ def cut_units(data : Array(UInt8), h2 : Bool) : {Array(Array(UInt8)), Int32, Arr
   while at + head <= data.size
     n = h2 ? at24(data, at) : at24(data, at + 1)
     break if at + head + n > data.size
-    units << data[at, head + n]
+    units << data[at, head + n].to_a
     at = at + head + n
   end
-  {units, lead, data[at, data.size - at]}
+  {units, lead, data[at, data.size - at].to_a}
 end
 
 H2_STREAMS = [0, 1, 2, 3, 5, 0x7FFFFFFF]
@@ -1421,7 +1432,7 @@ def mutate_units(data : Array(UInt8), corpus : Array(Array(UInt8)), words : Arra
   u = units[k]
   case m.below(8)
   when 0, 1, 2, 3
-    body = m.mutate(u[head, u.size - head], corpus, words)
+    body = m.mutate(u[head, u.size - head].to_a, corpus, words)
     top = u[0, head]
     len = u24(body.size)
     at = h2 ? 0 : 1

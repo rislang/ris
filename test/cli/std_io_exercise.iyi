@@ -95,7 +95,8 @@ assert_str("", mem.read_all, "read_all at the end is empty")
 mem.pos = 11
 assert_str("second line\nthird 3\né", mem.read_all, "pos= moves the cursor; read_all takes the rest")
 mem.rewind
-assert_true(mem.lines(true) == ["first line", "second line", "third 3", "é"], "lines(chomp) splits every line")
+mem_lines_text = String::Builder.new(256)
+assert_true(mem.lines(mem_lines_text, true) == ["first line", "second line", "third 3", "é"], "lines(chomp) splits every line")
 mem.rewind
 count = 0
 mem.each_line do |line|
@@ -183,11 +184,13 @@ assert_true(file.read_char == 'b', "read_char across the buffer")
 assert_true(file.read_char == 'é', "a two-byte character split across buffers")
 assert_true(file.read_char == '\u0442', "another")
 assert_true(file.read_char == '\u0430', "and another")
-assert_true(file.lines(true) == ["", "gamma"], "lines(chomp) on a file")
+file_lines_text = String::Builder.new(256)
+assert_true(file.lines(file_lines_text, true) == ["", "gamma"], "lines(chomp) on a file")
 cr_path = sandbox + "/std_io_exercise_cr_#{args.size}.txt"
 File.write(cr_path, "one\r\ntwo\r")
 cr_file = File.open(cr_path, "r", 4)
-assert_true(cr_file.lines(true) == ["one", "two\r"], "lines(chomp) on a file keeps a CR that ends it")
+cr_file_lines_text = String::Builder.new(256)
+assert_true(cr_file.lines(cr_file_lines_text, true) == ["one", "two\r"], "lines(chomp) on a file keeps a CR that ends it")
 cr_file.close
 cr_file = File.open(cr_path, "r", 4)
 cr_file.read_byte
@@ -209,8 +212,11 @@ moved = IyiIO.copy(file, limited, 7)
 assert_int(7_i64, moved, "copy with a limit stops at the limit")
 assert_str("alpha\nb", limited.to_s, "the limited copy")
 seen = [] of String
+seen_text = String::Builder.new(256)
 file.each_line(true) do |line|
-  seen << line
+  from = seen_text.bytesize
+  seen_text << line
+  seen << seen_text.finish[from, line.bytesize]
 end
 file.close
 assert_true(seen == ["\u00e9\u0442\u0430", "gamma"], "each_line continues after the limited copy")
@@ -391,7 +397,7 @@ assert_str(" wörld\nsecond\n", sized_source.read_all, "the inner stream continu
 puts "  sized: héllo"
 
 sized_source2 = Memory.new("one\ntwo\nthree")
-sized2 = Sized.new(sized_source, 8)
+sized2 = Sized.new(sized_source2, 8)
 assert_str("one", sized2.read_line(true).to_s, "read_line on a Sized")
 assert_true(sized2.read_byte == 116_u8, "read_byte on a Sized")
 assert_str("wo\n", sized2.read_bytes(10), "read_bytes on a Sized is cut to the limit")
@@ -399,7 +405,8 @@ assert_true(sized2.read_line.nil?, "spent")
 assert_str("three", sized_source2.read_all, "the rest is the inner stream's")
 memory_5 = Memory.new("x\r\r\ny\rz")
 carriage = Sized.new(memory_5, 6)
-assert_true(carriage.lines(true) == ["x\r", "y\r"], "lines(chomp) on a Sized keeps a CR that ends it")
+carriage_lines_text = String::Builder.new(256)
+assert_true(carriage.lines(carriage_lines_text, true) == ["x\r", "y\r"], "lines(chomp) on a Sized keeps a CR that ends it")
 
 # A count is a most: reading two bytes under a limit of 100 MB allocates
 # about two bytes, not the limit - through a reader, and through a Sized

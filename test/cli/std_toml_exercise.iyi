@@ -14,7 +14,7 @@
 
 module bench/std_toml_exercise
 
-import std/toml::{TOML, Any, TOMLError, TOMLDateTime, toml_serializable}
+import std/toml::{TOML, TapeAny, TapeMap, TapePair, TOMLError, TOMLDateTime, toml_serializable}
 import std/yaml::{YAML, yaml_serializable}
 import std/json::{JSON, serializable}
 
@@ -72,19 +72,40 @@ end
 # `tomllib` reads: every scalar its type and its text, a float by its
 # bits (or nan, inf, -inf), a date or time to the microsecond, which is
 # as far as Python's `datetime` goes.
-def canon(v : Any) : String
+def canon(v : TapeAny) : String
+  String.build { |writer| canon(v, writer) }
+end
+
+def canon(v : TapeAny, writer : String::Builder) : Nil
+  if v.kind == TapeAny::KIND_TABLE
+    writer << "{"
+    first = true
+    v.as_h.each do |key, item|
+      writer << "," unless first
+      first = false
+      writer << json_string(key) << ":"
+      canon(item, writer)
+    end
+    writer << "}"
+  elsif v.kind == TapeAny::KIND_ARRAY
+    writer << "["
+    v.as_a.each_with_index do |item, i|
+      writer << "," if i > 0
+      canon(item, writer)
+    end
+    writer << "]"
+  else
+    writer << canon_scalar(v)
+  end
+end
+
+def canon_scalar(v : TapeAny) : String
   k = v.kind
-  if k == Any::KIND_TABLE
-    parts = [] of String
-    v.as_h.each { |key, item| parts << json_string(key) + ":" + canon(item) }
-    "{" + parts.join(",") + "}"
-  elsif k == Any::KIND_ARRAY
-    "[" + v.as_a.map { |item| canon(item) }.join(",") + "]"
-  elsif k == Any::KIND_STRING
+  if k == TapeAny::KIND_STRING
     tagged("string", v.as_s)
-  elsif k == Any::KIND_INT
+  elsif k == TapeAny::KIND_INT
     tagged("integer", v.as_i.to_s)
-  elsif k == Any::KIND_FLOAT
+  elsif k == TapeAny::KIND_FLOAT
     f = v.as_f
     if f != f
       tagged("float", "nan")
@@ -95,7 +116,7 @@ def canon(v : Any) : String
     else
       tagged("float", IyiFloatText.bits_of(f).to_s(16).rjust(16, '0'))
     end
-  elsif k == Any::KIND_BOOL
+  elsif k == TapeAny::KIND_BOOL
     tagged("bool", v.as_bool ? "true" : "false")
   else
     d = v.as_datetime
@@ -117,14 +138,14 @@ def canon(v : Any) : String
 end
 
 # The document `text` holds, or a failed assertion naming `msg`.
-def reads(text : String, msg : String) : Any
+def reads(text : String, msg : String) : TapeAny
   answer = TOML.parse(text)
   raise "ASSERTION FAILED: #{msg}: refused with #{answer.message}" if answer.is_a?(TOMLError)
   answer
 end
 
 # Read, and recorded for Python to read the same bytes to the same value.
-def corpus(text : String, msg : String) : Any
+def corpus(text : String, msg : String) : TapeAny
   v = reads(text, msg)
   puts "CORPUS #{hex(text)}\t#{canon(v)}"
   v
@@ -170,7 +191,7 @@ def panic_of(action : Proc(String)) : String
 end
 
 # `dump` of `v` reads back to `v`; recorded for Python to read too.
-def round_trip(v : Any, msg : String) : String
+def round_trip(v : TapeAny, msg : String) : String
   text = TOML.dump(v)
   back = reads(text, "#{msg}: the dump reads back")
   assert_true(back == v, "#{msg}: the dump reads back equal\n#{text}")
@@ -271,39 +292,58 @@ def gen_datetime(rng : Rng) : TOMLDateTime
   end
 end
 
-def gen_scalar(rng : Rng) : Any
-  r = rng.below(6)
-  return Any.new(gen_string(rng)) if r < 2
-  return Any.new(gen_int(rng)) if r == 2
-  return Any.new(gen_float(rng)) if r == 3
-  return Any.new(rng.chance(2)) if r == 4
-  Any.new(gen_datetime(rng))
+def keep_text(text : String, into : String::Builder) : String
+  from = into.bytesize
+  into << text
+  into.finish[from, text.bytesize]
 end
 
-def gen_table(rng : Rng, depth : Int32, least : Int32) : Hash(String, Any)
-  pairs = Hash(String, Any).new
+def gen_scalar(rng : Rng, texts : String::Builder) : TapeAny
+  r = rng.below(6)
+  return TapeAny.new(keep_text(gen_string(rng), texts)) if r < 2
+  return TapeAny.new(gen_int(rng)) if r == 2
+  return TapeAny.new(gen_float(rng)) if r == 3
+  return TapeAny.new(rng.chance(2)) if r == 4
+  TapeAny.new(gen_datetime(rng))
+end
+
+def gen_table(rng : Rng, depth : Int32, least : Int32,
+              arrays : SlicePool(TapeAny),
+              maps : SlicePool(TapePair(TapeAny)?),
+              texts : String::Builder) : TapeMap(TapeAny)
+  pairs = TapeMap(TapeAny).new(maps)
   n = least + rng.below(5)
   tries = 0
   while pairs.size < n && tries < 20
-    key = gen_key(rng)
-    pairs[key] = gen_value(rng, depth + 1) unless pairs.has_key?(key)
-    tries = tries + 1
+    key = keep_text(gen_key(rng), texts)
+    unless pairs[key]?
+      pairs[key] = gen_value(rng, depth + 1, arrays, maps, texts)
+    end
+    tries += 1
   end
   pairs
 end
 
-def gen_value(rng : Rng, depth : Int32) : Any
+def gen_value(rng : Rng, depth : Int32, arrays : SlicePool(TapeAny),
+              maps : SlicePool(TapePair(TapeAny)?),
+              texts : String::Builder) : TapeAny
   r = rng.below(20)
-  return gen_scalar(rng) if r < 10 || depth > 4
+  return gen_scalar(rng, texts) if r < 10 || depth > 4
   if r < 13
-    items = [] of Any
-    rng.below(4).times { items << gen_value(rng, depth + 1) }
-    return Any.new(items)
+    items = arrays.alloc_slice(rng.below(4))
+    items.size.times do |i|
+      items[i] = gen_value(rng, depth + 1, arrays, maps, texts)
+    end
+    return TapeAny.new(items)
   end
-  return Any.new(gen_table(rng, depth, 0)) if r < 17
-  tables = [] of Any
-  (1 + rng.below(3)).times { tables << Any.new(gen_table(rng, depth + 1, 0)) }
-  Any.new(tables)
+  if r < 17
+    return TapeAny.new(gen_table(rng, depth, 0, arrays, maps, texts))
+  end
+  tables = arrays.alloc_slice(1 + rng.below(3))
+  tables.size.times do |i|
+    tables[i] = TapeAny.new(gen_table(rng, depth + 1, 0, arrays, maps, texts))
+  end
+  TapeAny.new(tables)
 end
 
 # Writes a value as TOML in syntax chosen at random from everything the
@@ -312,9 +352,13 @@ end
 class Scribe
   @rng : Rng
   @out : String::Builder
+  @paths : SlicePool(String)
+  @value_pairs : SlicePool(Tuple(SlicePool::Run(String), TapeAny))
 
   def initialize(@rng : Rng)
     @out = String::Builder.new
+    @paths = SlicePool(String).new
+    @value_pairs = SlicePool(Tuple(SlicePool::Run(String), TapeAny)).new
   end
 
   def text : String
@@ -504,7 +548,7 @@ class Scribe
     basic(key)
   end
 
-  def key_path(parts : Array(String)) : String
+  def key_path(parts : Array(String) | SlicePool::Run(String)) : String
     out = ""
     parts.each_with_index do |part, i|
       if i > 0
@@ -574,7 +618,7 @@ class Scribe
       if d.nanosecond != 0 || @rng.chance(5)
         digits = d.nanosecond.to_s.rjust(9, '0')
         count = 9
-        while count > 1 && digits[count - 1] == '0'
+        while count > 1 && digits[count - 1] == 48_u8
           count = count - 1
         end
         out << "." << digits[0, count]
@@ -605,13 +649,20 @@ class Scribe
     out.to_s
   end
 
+  def path_with(prefix : Array(String) | SlicePool::Run(String),
+                key : String) : SlicePool::Run(String)
+    path = @paths.alloc_slice(prefix.size + 1)
+    prefix.each_with_index { |part, i| path[i] = part }
+    path[prefix.size] = key
+    path
+  end
+
   # A table's pairs as dotted keys: a sub-table with something in it
   # spread into longer keys, now and then.
-  def flatten(pairs : Hash(String, Any), prefix : Array(String), into : Array(Tuple(Array(String), Any))) : Nil
+  def flatten(pairs : TapeMap(TapeAny), prefix : Array(String) | SlicePool::Run(String), into : Array(Tuple(SlicePool::Run(String), TapeAny))) : Nil
     pairs.each do |key, item|
-      parts = prefix.dup
-      parts << key
-      if item.kind == Any::KIND_TABLE && item.size > 0 && @rng.chance(2)
+      parts = path_with(prefix, key)
+      if item.kind == TapeAny::KIND_TABLE && item.size > 0 && @rng.chance(2)
         flatten(item.as_h, parts, into)
       else
         into << {parts, item}
@@ -619,67 +670,80 @@ class Scribe
     end
   end
 
-  def value_text(v : Any) : String
+  def value_pairs(v : TapeAny) : SlicePool::Run(Tuple(SlicePool::Run(String), TapeAny))
+    pairs = [] of Tuple(SlicePool::Run(String), TapeAny)
+    flatten(v.as_h, [] of String, pairs)
+    empty_path = @paths.alloc_slice(0, "")
+    run = @value_pairs.alloc_slice(pairs.size, {empty_path, TapeAny.new})
+    pairs.each_with_index { |pair, i| run[i] = pair }
+    run
+  end
+
+  def value_text(v : TapeAny) : String
+    String.build { |writer| value_text(v, writer) }
+  end
+
+  def value_text(v : TapeAny, writer : String::Builder) : Nil
     k = v.kind
-    if k == Any::KIND_STRING
-      string_text(v.as_s)
-    elsif k == Any::KIND_INT
-      int_text(v.as_i)
-    elsif k == Any::KIND_FLOAT
-      float_text(v.as_f)
-    elsif k == Any::KIND_BOOL
-      v.as_bool ? "true" : "false"
-    elsif k == Any::KIND_DATETIME
-      datetime_text(v.as_datetime)
-    elsif k == Any::KIND_ARRAY
-      out = String::Builder.new
-      out << "["
+    if k == TapeAny::KIND_STRING
+      writer << string_text(v.as_s)
+    elsif k == TapeAny::KIND_INT
+      writer << int_text(v.as_i)
+    elsif k == TapeAny::KIND_FLOAT
+      writer << float_text(v.as_f)
+    elsif k == TapeAny::KIND_BOOL
+      writer << (v.as_bool ? "true" : "false")
+    elsif k == TapeAny::KIND_DATETIME
+      writer << datetime_text(v.as_datetime)
+    elsif k == TapeAny::KIND_ARRAY
+      writer << "["
       items = v.as_a
       items.each_with_index do |item, i|
-        out << array_space << value_text(item) << array_space
-        out << "," if i < items.size - 1 || @rng.chance(3)
+        writer << array_space
+        value_text(item, writer)
+        writer << array_space
+        writer << "," if i < items.size - 1 || @rng.chance(3)
       end
-      out << array_space << "]"
-      out.to_s
+      writer << array_space << "]"
     else
-      pairs = [] of Tuple(Array(String), Any)
-      flatten(v.as_h, [] of String, pairs)
-      return "{" + blanks + "}" if pairs.empty?
-      out = String::Builder.new
-      out << "{" << blanks
+      pairs = value_pairs(v)
+      writer << "{" << blanks
       pairs.each_with_index do |pair, i|
-        out << "," << blanks if i > 0
-        out << key_path(pair[0]) << blanks << "=" << blanks << value_text(pair[1]) << blanks
+        writer << "," << blanks if i > 0
+        writer << key_path(pair[0]) << blanks << "=" << blanks
+        value_text(pair[1], writer)
+        writer << blanks
       end
-      out << "}"
-      out.to_s
+      writer << "}"
     end
   end
 
-  def array_of_tables?(v : Any) : Bool
-    v.kind == Any::KIND_ARRAY && v.size > 0 && v.as_a.all? { |item| item.kind == Any::KIND_TABLE }
+  def array_of_tables?(v : TapeAny) : Bool
+    return false unless v.kind == TapeAny::KIND_ARRAY && v.size > 0
+    v.as_a.each { |item| return false unless item.kind == TapeAny::KIND_TABLE }
+    true
   end
 
   # One table section: its pairs, in a shuffled order (dotted keys may
   # come out of order), then the tables and arrays of tables chosen to
   # go under headers of their own.
-  def section(pairs : Hash(String, Any), path : Array(String)) : Nil
-    lines = [] of Tuple(Array(String), Any)
-    headed = [] of Tuple(String, Any)
+  def section(pairs : TapeMap(TapeAny), path : Array(String) | SlicePool::Run(String)) : Nil
+    lines = [] of Tuple(SlicePool::Run(String), TapeAny)
+    headed = [] of Tuple(String, TapeAny)
     pairs.each do |key, item|
-      if item.kind == Any::KIND_TABLE
+      if item.kind == TapeAny::KIND_TABLE
         r = @rng.below(3)
         if r == 0
           headed << {key, item}
         elsif r == 1 && item.size > 0
-          flatten(item.as_h, [key], lines)
+          flatten(item.as_h, path_with([] of String, key), lines)
         else
-          lines << {[key], item}
+          lines << {path_with([] of String, key), item}
         end
       elsif array_of_tables?(item) && !@rng.chance(3)
         headed << {key, item}
       else
-        lines << {[key], item}
+        lines << {path_with([] of String, key), item}
       end
     end
     i = lines.size - 1
@@ -695,10 +759,9 @@ class Scribe
       line_end
     end
     headed.each do |head|
-      inner = path.dup
-      inner << head[0]
+      inner = path_with(path, head[0])
       item = head[1]
-      if item.kind == Any::KIND_TABLE
+      if item.kind == TapeAny::KIND_TABLE
         @out << "[" << (@rng.chance(4) ? blanks : "") << key_path(inner) << (@rng.chance(4) ? blanks : "") << "]"
         line_end
         section(item.as_h, inner)
@@ -875,7 +938,7 @@ VALID_EDGES = [
 ]
 
 # Every refusal, with its sentence. Python's tomllib refuses each too.
-REFUSALS = [
+refusals = [
   {"key = # INVALID\n", "'#' cannot start a value at line 1, column 7"},
   {"first = \"Tom\" last = \"Preston-Werner\" # INVALID\n", "'l' after the end of a statement, where the line should end at line 1, column 15"},
   {"= \"no key name\"  # INVALID\n", "'=' cannot start a key at line 1, column 1"},
@@ -1067,6 +1130,7 @@ REFUSALS = [
 # Derived types. `Inner` and `Record` derive std/json's and std/yaml's
 # too, which is how a type that is all three spells it, and what lets the
 # corpus hand Python the same value as JSON.
+@[OnTape]
 struct Inner
   getter x : Int32
   getter label : String?
@@ -1077,6 +1141,7 @@ struct Inner
   derive serializable, yaml_serializable, toml_serializable
 end
 
+@[OnTape]
 struct Record
   getter name : String
   getter tags : Array(String)
@@ -1098,18 +1163,20 @@ struct Record
   derive serializable, yaml_serializable, toml_serializable
 end
 
+@[OnTape]
 struct Stamped
   getter at : TOMLDateTime
   getter days : Array(TOMLDateTime)
-  getter extra : Any
+  getter extra : TapeAny
   getter by_name : Hash(String, Inner)
 
-  def initialize(@at : TOMLDateTime, @days : Array(TOMLDateTime), @extra : Any, @by_name : Hash(String, Inner))
+  def initialize(@at : TOMLDateTime, @days : Array(TOMLDateTime), @extra : TapeAny, @by_name : Hash(String, Inner))
   end
 
   derive toml_serializable
 end
 
+@[OnTape]
 struct Spot
   getter x : Float64
   getter name : String
@@ -1119,6 +1186,7 @@ struct Spot
 end
 
 # Fields with defaults, as the json and yaml exercises' `Listener` has them.
+@[OnTape]
 struct Listener
   @port : Int32 = 8080
   @host : String? = "localhost"
@@ -1148,7 +1216,7 @@ assert_true(doc["c"].as_f == 1.5, "a float")
 assert_true(doc["d"].as_bool, "a boolean")
 assert_true(doc["a"].as_f == 1.0, "an integer widens to a float")
 assert_true(doc["c"].as_i?.nil?, "a float is not an integer")
-assert_true(Any.new(1) != Any.new(1.0), "1 and 1.0 are different values")
+assert_true(TapeAny.new(1) != TapeAny.new(1.0), "1 and 1.0 are different values")
 doc = reads(VALID[0], "bare keys")
 assert_true(doc["1234"].as_i == 4_i64, "a bare key of digits is a string key")
 assert_true(doc["-_-"].as_i == 5_i64, "a bare key of dashes and underscores")
@@ -1246,7 +1314,7 @@ doc = reads(VALID[48], "local times")
 assert_true(doc["lt1"].as_datetime.local_time? && doc["lt2"].as_datetime.nanosecond == 999999000, "local times")
 assert_str("00:00:00.0000001", doc["lt4"].as_datetime.to_s, "a local time with a seventh fraction digit")
 assert_str("an offset date-time", odt.kind_name, "the kind's name")
-assert_str("a local time", doc["lt1"].kind_name, "a local time's kind name through Any")
+assert_str("a local time", doc["lt1"].kind_name, "a local time's kind name through TapeAny")
 assert_true(TOMLDateTime.local_date(1979, 5, 27) == reads(VALID[47], "again")["ld1"].as_datetime, "a built date equals a read one")
 assert_true(TOMLDateTime.offset_date_time(1979, 5, 27, 0, 32, 0, 0, -420).hash == reads(VALID[44], "again")["odt2"].as_datetime.hash, "equal values hash the same")
 assert_true(TOMLDateTime.problem(TOMLDateTime::LOCAL_DATE, 2024, 2, 29, 0, 0, 0, 0, 0).nil?, "2024-02-29 is a date")
@@ -1292,7 +1360,7 @@ assert_true(reads("a = [1]", "index")["a"][5]?.nil?, "[]? past the end of an arr
 puts "  headers, dotted keys, inline tables and arrays of tables build the tables they say"
 
 puts "== what the reader refuses"
-REFUSALS.each { |pair| refused(pair[0], pair[1]) }
+refusals.each { |pair| refused(pair[0], pair[1]) }
 refused("a = \"\xFF\"\n", "the byte 0xFF, which is not UTF-8 at line 1, column 6")
 refused("a = \"\xC0\xAF\"\n", "the byte 0xC0, which is not UTF-8 at line 1, column 6")
 refused("a = \"\xED\xA0\x80\"\n", "the byte 0xED followed by 0xA0, which is not UTF-8 at line 1, column 6")
@@ -1311,7 +1379,7 @@ own_refusal("a = 0b" + "1" * 64 + "\n", "0b#{"1" * 64} is past 92233720368547758
 own_refusal("a = 99999999999999999999999\n", "99999999999999999999999 is outside -9223372036854775808 to 9223372036854775807, the TOML integers at line 1, column 5")
 error = TOML.parse("a = 1\nb = 01\n")
 assert_true(error.is_a?(TOMLError) && error.line == 2 && error.column == 5 && error.reason == "01 has a leading zero, which only 0 may", "a TOMLError's line, column and reason")
-puts "  #{REFUSALS.size + 10} refusals, each with its line and column; 6 integers past Int64 refused here alone"
+puts "  #{refusals.size + 10} refusals, each with its line and column; 6 integers past Int64 refused here alone"
 
 puts "== the redefinition rules"
 refused("[fruit]\napple.color = \"red\"\napple.taste.sweet = true\n\n[fruit.apple]\n", "[fruit.apple] declares a table dotted keys made at line 5, column 8")
@@ -1370,7 +1438,10 @@ rng = Rng.new(0x70B1_5EED_2026_1017_u64)
 documents = 0
 bytes = 0
 256.times do |n|
-  tree = Any.new(gen_table(rng, 0, 1))
+  arrays = SlicePool(TapeAny).new
+  maps = SlicePool(TapePair(TapeAny)?).new
+  texts = String::Builder.new(4096)
+  tree = TapeAny.new(gen_table(rng, 0, 1, arrays, maps, texts))
   scribe = Scribe.new(rng)
   scribe.section(tree.as_h, [] of String)
   text = scribe.text
@@ -1390,37 +1461,40 @@ puts "== dump round trip"
 (SPEC_EXAMPLES + VALID + VALID_EDGES).each_with_index do |text, i|
   round_trip(reads(text, "corpus #{i + 1}"), "corpus #{i + 1}")
 end
-special = Hash(String, Any).new
-special[""] = Any.new("empty key")
-special["a b"] = Any.new("\"quoted\" \\ \u0000\u001F\u007F\b\t\n\f\r é 😀 \uFEFF")
-special["nan"] = Any.new(0.0 / 0.0)
-special["neg"] = Any.new(-1.0 / 0.0)
-special["zero"] = Any.new(-0.0)
-special["deep"] = Any.new([Any.new([Any.new(Hash(String, Any).new)])])
-special["tables"] = Any.new([Any.new(Hash(String, Any).new), Any.new(Hash(String, Any).new)])
-special["mixed"] = Any.new([Any.new(Hash(String, Any).new), Any.new(1)])
-inner = Hash(String, Any).new
-inner["x.y"] = Any.new(TOMLDateTime.offset_date_time(1979, 5, 27, 7, 32, 0, 1, -1439))
-special["t"] = Any.new(inner)
-dumped = round_trip(Any.new(special), "the special values")
+special_arrays = SlicePool(TapeAny).new
+special_maps = SlicePool(TapePair(TapeAny)?).new
+special = Hash(String, TapeAny).new
+special[""] = TapeAny.new("empty key")
+special["a b"] = TapeAny.new("\"quoted\" \\ \u0000\u001F\u007F\b\t\n\f\r é 😀 \uFEFF")
+special["nan"] = TapeAny.new(0.0 / 0.0)
+special["neg"] = TapeAny.new(-1.0 / 0.0)
+special["zero"] = TapeAny.new(-0.0)
+special["deep"] = TOML.to_any([TOML.to_any([TOML.to_any(Hash(String, TapeAny).new, special_arrays, special_maps)], special_arrays, special_maps)], special_arrays, special_maps)
+special["tables"] = TOML.to_any([TOML.to_any(Hash(String, TapeAny).new, special_arrays, special_maps), TOML.to_any(Hash(String, TapeAny).new, special_arrays, special_maps)], special_arrays, special_maps)
+special["mixed"] = TOML.to_any([TOML.to_any(Hash(String, TapeAny).new, special_arrays, special_maps), TapeAny.new(1)], special_arrays, special_maps)
+inner = Hash(String, TapeAny).new
+inner["x.y"] = TapeAny.new(TOMLDateTime.offset_date_time(1979, 5, 27, 7, 32, 0, 1, -1439))
+special["t"] = TOML.to_any(inner, special_arrays, special_maps)
+dumped = round_trip(TOML.to_any(special, special_arrays, special_maps), "the special values")
 assert_true(dumped.includes?("\"\" = \"empty key\"") && dumped.includes?("nan = nan") && dumped.includes?("neg = -inf") && dumped.includes?("zero = -0.0"), "the empty key, nan, -inf and -0.0 written\n#{dumped}")
 assert_true(dumped.includes?("\"a b\" = \"\\\"quoted\\\" \\\\ \\u0000\\u001F\\u007F\\b\\t\\n\\f\\r é 😀 \uFEFF\""), "a string with every control escaped\n#{dumped}")
 assert_true(dumped.includes?("[[tables]]") && dumped.includes?("mixed = [{}, 1]") && dumped.includes?("[t]\n\"x.y\" = 1979-05-27T07:32:00.000000001-23:59"), "arrays of tables under headers, mixed arrays inline, quoted keys\n#{dumped}")
 assert_str("x = 1\n", TOML.dump(reads("x = 1", "one")), "a one-pair document")
 assert_str("", TOML.dump(reads("", "none")), "the empty document")
 assert_str("{ a = [1, \"b\", 1.5, true, 07:32:00] }", reads("a = [1, 'b', 1.5, true, 07:32:00]", "inspect").inspect, "inspect writes TOML inline")
-assert_str("TOML.dump: a document is a table, not an integer", panic_of(-> { TOML.dump(Any.new(1)) }), "a non-table cannot be a document")
+assert_str("TOML.dump: a document is a table, not an integer", panic_of(-> { TOML.dump(TapeAny.new(1)) }), "a non-table cannot be a document")
 puts "  every document above and the random ones written back to the same value"
 
 puts "== nesting and DEPTH_LIMIT"
-deep_array = "a = " + "[" * 64 + "]" * 64 + "\n"
-deep_inline = "a = " + "{b = " * 63 + "1" + "}" * 63 + "\n"
-deep_dotted = "x." * 63 + "y = 1\n"
 deep_header = "[" + (["h"] * 64).join(".") + "]\n"
-deep_mixed = "a = " + "[{b = " * 31 + "[1]" + "}]" * 31 + "\n"
 said = panic_of(-> {
+  task_deep_array = "a = " + "[" * 64 + "]" * 64 + "\n"
+  task_deep_inline = "a = " + "{b = " * 63 + "1" + "}" * 63 + "\n"
+  task_deep_dotted = "x." * 63 + "y = 1\n"
+  task_deep_header = "[" + (["h"] * 64).join(".") + "]\n"
+  task_deep_mixed = "a = " + "[{b = " * 31 + "[1]" + "}]" * 31 + "\n"
   checked = 0
-  [deep_array, deep_inline, deep_dotted, deep_header, deep_mixed].each do |text|
+  [task_deep_array, task_deep_inline, task_deep_dotted, task_deep_header, task_deep_mixed].each do |text|
     v = reads(text, "a document DEPTH_LIMIT deep")
     w = reads(TOML.dump(v), "a deep document's dump")
     raise "ASSERTION FAILED: a deep document's dump reads back equal" unless v == w && v.hash == w.hash
@@ -1459,9 +1533,9 @@ text2 = rec2.to_toml
 assert_str(rec2.to_json, Record.from_toml(text2).to_json, "a record of empties reads back")
 puts "DERIVE #{rec2.to_json}\t#{hex(text2)}"
 stamped = Stamped.new(TOMLDateTime.offset_date_time(1979, 5, 27, 7, 32, 0, 0, 60), [TOMLDateTime.local_date(2000, 2, 29), TOMLDateTime.local_time(7, 32, 0, 500000000)],
-  reads("x = [1, {y = 'z'}]", "an Any field"), {"k" => Inner.new(9, "nine")})
+  reads("x = [1, {y = 'z'}]", "an TapeAny field"), {"k" => Inner.new(9, "nine")})
 stamped_back = Stamped.from_toml(stamped.to_toml)
-assert_true(stamped_back.at == stamped.at && stamped_back.days == stamped.days && stamped_back.extra == stamped.extra && stamped_back.by_name["k"].x == 9, "dates, an Any and a hash of derived values read back")
+assert_true(stamped_back.at == stamped.at && stamped_back.days == stamped.days && stamped_back.extra == stamped.extra && stamped_back.by_name["k"].x == 9, "dates, an TapeAny and a hash of derived values read back")
 spot = Spot.from_toml("x = 2\nname = \"s\"\nunknown = [1]\n")
 assert_true(spot.x == 2.0 && spot.name == "s" && spot.note.nil?, "an integer widens to a Float64 field, a missing nilable key is nil, an unknown key is passed over")
 assert_str("x = 2.0\nname = \"s\"\n", spot.to_toml, "a nil field is not written")

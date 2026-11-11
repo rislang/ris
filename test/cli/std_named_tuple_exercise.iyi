@@ -16,7 +16,7 @@ end
 import std/named_tuple
 import std/tuple
 
-class CloneBox
+pub class CloneBox
   getter val : Int32
 
   def initialize(@val : Int32)
@@ -150,23 +150,24 @@ assert_true rm == {a: 1, b: 2, c: 30}, "reverse_merge matches pairs"
 pairs = {x: 10, y: 20}.to_a
 assert_true pairs == [{:x, 10}, {:y, 20}], "to_a pairs"
 
-hash = {x: 10, y: 20}.to_h
+hash = Hash(Symbol, Int32).new
+{x: 10, y: 20}.to_h(hash)
 assert_true hash[:x] == 10, "to_h key x"
 assert_true hash[:y] == 20, "to_h key y"
 assert_true hash.size == 2, "to_h size"
 
 box = CloneBox.new(42)
 box_nt = {item: box}
-cloned_nt = box_nt.clone
+cloned_nt = box_nt.clone(Program.tape)
 assert_true cloned_nt[:item].val == 42, "clone value preserved"
 assert_true cloned_nt[:item] != box_nt[:item], "clone creates distinct instance"
 # A value with no `clone` of its own is kept as it is: asking every value
 # for `clone` refused `{a: 1, b: "two"}`, since the prelude gives `clone`
 # to neither `Int32` nor `String`, and this did not compile.
 plain_nt = {a: 1, b: "two"}
-plain_clone = plain_nt.clone
+plain_clone = plain_nt.clone(Program.tape)
 assert_true plain_clone == plain_nt, "clone of plain values"
-mixed_clone = {n: 7, item: box}.clone
+mixed_clone = {n: 7, item: box}.clone(Program.tape)
 assert_true mixed_clone[:n] == 7 && mixed_clone[:item].val == 42 && mixed_clone[:item] != box, "clone of a plain value beside a cloneable one"
 puts "  merge, reverse_merge, to_a, to_h, and clone"
 
@@ -176,7 +177,8 @@ assert_true hetero_a.size == 2, "hetero to_a size"
 assert_true hetero_a[0] == {:a, 1}, "hetero to_a first"
 assert_true hetero_a[1] == {:b, "two"}, "hetero to_a second"
 
-hetero_h = {a: 1, b: "two"}.to_h
+hetero_h = Hash(Symbol, Int32 | String).new
+{a: 1, b: "two"}.to_h(hetero_h)
 assert_true hetero_h[:a] == 1, "hetero to_h a"
 assert_true hetero_h[:b] == "two", "hetero to_h b"
 assert_true hetero_h.size == 2, "hetero to_h size"
@@ -184,9 +186,10 @@ assert_true hetero_h.size == 2, "hetero to_h size"
 empty_nt = NamedTuple.new
 empty_a = empty_nt.to_a
 assert_true empty_a.size == 0, "empty to_a size"
-empty_h = empty_nt.to_h
+empty_h = Hash(Symbol, Int32).new
+empty_nt.to_h(empty_h)
 assert_true empty_h.size == 0, "empty to_h size"
-empty_c = empty_nt.clone
+empty_c = empty_nt.clone(Program.tape)
 assert_true empty_c.size == 0, "empty clone size"
 assert_true empty_c.empty? == true, "empty clone empty?"
 empty_m = empty_nt.merge(empty_nt)
