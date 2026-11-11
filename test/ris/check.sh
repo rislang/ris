@@ -3197,6 +3197,22 @@ else
   echo "FAILED   spec-port path: $out"; status=1
 fi
 
+# spec-port phase 2 eiy: module proofs.
+out=$("$RIS" check test src/std/eiy.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port eiy"
+else
+  echo "FAILED   spec-port eiy: $out"; status=1
+fi
+
+# spec-port phase 2 deque: module proofs.
+out=$("$RIS" check test src/std/deque.iyi 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo "runs     spec-port deque"
+else
+  echo "FAILED   spec-port deque: $out"; status=1
+fi
+
 # Run heap workloads after the other gates to avoid compiler contention.
 # Keep their fixed timeouts: a hung census must still fail.
 python3 test/ris/heap_check.py || status=1

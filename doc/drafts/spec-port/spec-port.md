@@ -1,7 +1,7 @@
 # Draft: port test/ to spec blocks
 
 Status: reviewed 2026-11-11; decisions D1-D7 accepted.
-Implementation stops after phase 1 in this worktree.
+Phases 0-1 are committed; phase 2 batch results are recorded below.
 
 Context: spec blocks (doc/drafts/spec-blocks/spec-blocks.md, steps
 1-8) are merged. A module file may end with `spec N.M ... end` blocks;
@@ -446,3 +446,79 @@ Verification at the phase 1 stopping point:
 - LLVM 23.1.3 build and changed Crystal files' formatting check pass.
 - No commit; marker support/stub deletion and later ports remain phase 4
   and phases 2-5 respectively. Own .work scratch is removed.
+
+## 10. Phase 2 batch results (2026-11-11)
+
+Phase 2 was attempted with the whole-batch rollback rule in section 5.
+Only deque and eiy remain ported. No compiler or library algorithm was
+changed to force a batch through the gate. Failed batches keep their
+original programs, shell cases and `stays: todo` ledger entries.
+
+- Text: rolled back all ten listed modules. CSV's stream reader refuses
+  a live view of CSVReader.@bytes in the module proof. TOML and YAML
+  cannot resolve their own derive macros in the module's test build.
+  JSON's computed POW10 is dropped as program initialization. The gate
+  failed on CSV; selected module cases also exposed the other failures.
+- Net: rolled back the whole batch. After adapting nullable assertions,
+  separate owner declarations and String locals, Cookie.parse still
+  refuses its loop-local lowercased domain escaping the round. The
+  mutation gate fails to build cookie, so passing router, websocket,
+  mime and sse cases are not kept on their own.
+- Compression: rolled back all six modules. HPACK's computed
+  HUFFMAN_CODES is dropped as program initialization; ZIP's default
+  modification time reaches Time.read_local, whose result is refused
+  under SPEC 1.9. The gate also mistakes HPACK's loop for a Bool line
+  because its indented body contains comparisons; the mutation is a
+  syntax error, not the required BROKEN result. None of these failures
+  is accepted as a successful flip.
+- Rest: deque and eiy pass. All seven original eiy assertions move;
+  deque gains direct assertions for its printed operations. Their
+  original output/heap shell cases remain byte-for-byte unchanged.
+  eiy keeps a small allocation driver; deque keeps its output driver.
+  debug stays program-level for the handle limitation below.
+
+Corrections to the draft's assumptions:
+
+- Phase 2's area lists total 35, not 36: option_parser is missing.
+  It belongs in the text batch and remains unported with that rejected
+  batch. The phase still has 36 candidates, of which 34 remain.
+- Section 5 overstates the process vocabulary. RisProgram runs only the
+  plain program-under-test via RIS_SPEC_PROGRAM. A library spec block
+  has no `ris build` source handle to compile and run an arbitrary
+  fixture. debug needs that separate panicking process; its ledger
+  records the missing handle. tmp alone cannot supply that capability.
+  Adding a general build handle is outside this test-port phase.
+- Output-comparing drivers need not print a PASS sentinel: deque prints
+  its operation results. The port gate no longer requires that literal;
+  it still requires the driver file and the exact retained shell-case
+  hash, so its output and zero-heap checks cannot disappear silently.
+- Repeated assignments to an owner cannot be flattened into one spec
+  scope. The net attempt used a separate EventParser declaration for
+  the second SSE stream. Append-only String.build forms also need
+  String locals in module proofs; this alone did not require changing
+  library APIs or compiler behavior.
+
+Verification of the retained phase 2 result:
+
+- Before: `PASS: spec port counts (5 modules, 10 flips)`;
+  `485 old - 0 removed + 5 modules = 490 new`.
+- After: `PASS: spec port counts (7 modules, 12 flips)`;
+  `485 old - 0 removed + 7 modules = 492 new`.
+- Counts including retained shell checks: deque 3 -> 18, eiy 10 -> 10.
+- The failed text, net and compression batches remain fully reverted.
+  Their failures are recorded above, not reported as green ports.
+- No full check.sh or full-suite timing claim: only module cases and
+  the retained drivers are selected, as requested for this task.
+
+- LLVM 23.1.3 build passes. All seven spec_blocks_*.sh gates pass;
+  spec_verb.py reports `52 steps passed`.
+- `bin/ris check spec`: 43 clauses, 19 ok, 24 todo, 0 to review,
+  0 uncovered, 0 unversioned. Clause 8.1 acknowledged after review.
+- Retained module and driver selection: `PASS: selected ris checks`.
+  The full check.sh and the full suite were not run.
+
+- The broader phase 2 selection also passes: 33 check.sh cases,
+  including the original drivers of the rejected batches and their
+  grouped loops, end with `PASS: selected ris checks`.
+- No commit was made. Own scripts, compiler cache and temporary files
+  under test/cli/.work/ were removed; existing scratch was preserved.

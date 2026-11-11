@@ -1,3 +1,4 @@
+# standard: Crystal Deque API
 # `Deque`, a double-ended queue over a ring buffer.
 #
 # A `Deque(T)` adds and removes at both ends in amortised O(1) (`push`,
@@ -432,4 +433,32 @@ end
 
 impl Enumerable for Deque(T) forall T
   type Elem = T
+end
+
+spec 8.1  # A std module follows the standard its header names (an RFC, a file…
+  w = Deque(Int32).new(4)
+  w.push(1).push(2).push(3).push(4)
+  w.to_s == "Deque{1, 2, 3, 4}"
+  w.shift == 1
+  w.shift == 2
+  w.push(5).push(6)
+  w.to_s == "Deque{3, 4, 5, 6}"
+  w.push(7)
+  w.to_s == "Deque{3, 4, 5, 6, 7}"
+  w.unshift(2).unshift(1).unshift(0)
+  w.unshift(-1)
+  w.size == 9
+  w.rotate_in_place(3)
+  w.insert(2, 100)
+  w.delete_at(5) == 6
+  w.pop == 1
+  w.shift == 2
+  w.size == 7
+  w[0] == 3
+  w[-1] == 0
+  s = Deque(String).new
+  "s0 s1 s2 s3 s4 s5 s6 s7 s8 s9".split(" ").each { |t| s.unshift(t) }
+  s.first == "s9"
+  s.last == "s0"
+  s.size == 10
 end

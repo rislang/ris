@@ -114,15 +114,28 @@ test/ris/csv.ri
   }
 test/ris/debug.ri
   {
-    "state": "stays: todo",
+    "state": "stays: program-level",
     "old": 0,
-    "shell_old": 6
+    "shell_old": 6,
+    "reason": [
+      "Panic/backtrace requires a separate program.",
+      "Library blocks have no source-build handle for a fixture.",
+      "RisProgram only runs the RIS_SPEC_PROGRAM binary."
+    ]
   }
 test/ris/deque.ri
   {
-    "state": "stays: todo",
-    "old": 0,
-    "shell_old": 3
+    "state": "ported",
+    "old": 3,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/deque.ri 2>&1)",
+    "case_hash": "4fe6a83d71e707d1",
+    "dest": "src/std/deque.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 18
   }
 test/ris/dir_children.ri
   {
@@ -138,9 +151,17 @@ test/ris/dns.ri
   }
 test/ris/eiy.ri
   {
-    "state": "stays: todo",
-    "old": 7,
-    "shell_old": 3
+    "state": "ported",
+    "old": 10,
+    "driver": true,
+    "retained": 3,
+    "case": "out=$(RIS_HEAP_STATS=1 \"$RIS\" run test/ris/eiy.ri 2>&1)",
+    "case_hash": "bdff55bf97584054",
+    "dest": "src/std/eiy.iyi",
+    "clauses": [
+      "8.1"
+    ],
+    "new": 10
   }
 test/ris/escape.ri
   {

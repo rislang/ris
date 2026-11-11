@@ -1,3 +1,4 @@
+# standard: Crystal ECR template syntax
 # Eiy: embedded iyi. A template is text with iyi code inside it, and this
 # module turns the template into iyi source — at compile time, so a rendered
 # template is ordinary compiled code by the time the program runs.
@@ -1041,4 +1042,21 @@ pub struct Eiy
       ::Std::Eiy::Eiy.render({{filename}})
     end
   end
+end
+
+spec 8.1  # A std module follows the standard its header names (an RFC, a file…
+  text = "héllo <%= name %>\n  <%- if ok -%>\nend<% end %>"
+  w = String::Builder.new(1)
+  w << "prefix:"
+  Eiy.process_string(text, w)
+  code = Eiy.process_string(text)
+  w.finish == ("prefix:" + code)
+  code.starts_with?("__io__.print(\"héllo \")")
+  Eiy.process_string?("<%= bad").nil?
+  lexer = Eiy::TapeLexer.new("abc<%=x%>")
+  lexer.next_token.value == "abc"
+  lexer.next_token.value == "x"
+  Eiy.process_string(
+    "héllo <%= name %>\n  <%- if ok -%>\nend<% end %>") == code
+  Eiy.process_string?("<% bad").nil?
 end
