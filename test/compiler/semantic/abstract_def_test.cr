@@ -1039,7 +1039,7 @@ describe "Semantic: abstract def" do
   end
 
   it "extra keyword arguments must have compatible type to double splat" do
-    assert_error <<-CODE, "abstract `def Foo#foo(**kargs : String)` must be implemented by Bar"
+    assert_error <<-CODE, "abstract `def Foo#foo(**kargs : ::String)` must be implemented by Bar"
       abstract class Foo
         abstract def foo(**kargs : String)
       end

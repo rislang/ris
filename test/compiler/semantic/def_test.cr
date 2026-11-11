@@ -420,20 +420,6 @@ describe "Semantic: def" do
       CODE
   end
 
-  it "clones regex literal value (#2384)" do
-    assert_type(<<-CODE) { int32 }
-      require "prelude"
-
-      def foo(x : String = "")
-        /\#{1}/
-        10
-      end
-
-      foo
-      foo("")
-      CODE
-  end
-
   it "doesn't find type in namespace through free var" do
     assert_error <<-CODE, "undefined constant T::String"
       def foo(x : T) forall T

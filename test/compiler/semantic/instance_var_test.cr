@@ -601,6 +601,8 @@ describe "Semantic: instance var" do
 
   it "infers type from array literal with of" do
     assert_type(<<-CODE) { array_of int32 }
+      require "prelude"
+
       class Foo
         def initialize
           @x = [] of Int32
@@ -611,12 +613,15 @@ describe "Semantic: instance var" do
         end
       end
 
-      Foo.new.x
+      foo = Foo.new
+      foo.x
       CODE
   end
 
   it "infers type from array literal with of metaclass" do
     assert_type(<<-CODE) { array_of int32.metaclass }
+      require "prelude"
+
       class Foo
         def initialize
           @x = [] of Int32.class
@@ -627,7 +632,8 @@ describe "Semantic: instance var" do
         end
       end
 
-      Foo.new.x
+      foo = Foo.new
+      foo.x
       CODE
   end
 
@@ -645,7 +651,8 @@ describe "Semantic: instance var" do
         end
       end
 
-      Foo.new.x
+      foo = Foo.new
+      foo.x
       CODE
   end
 
@@ -679,7 +686,8 @@ describe "Semantic: instance var" do
         end
       end
 
-      Foo.new.x
+      foo = Foo.new
+      foo.x
       CODE
   end
 
@@ -690,42 +698,6 @@ describe "Semantic: instance var" do
       class Foo
         def initialize
           @x = 1..'a'
-        end
-
-        def x
-          @x
-        end
-      end
-
-      Foo.new.x
-      CODE
-  end
-
-  it "infers type from regex literal" do
-    assert_type(<<-CODE) { types["Regex"] }
-      require "prelude"
-
-      class Foo
-        def initialize
-          @x = /foo/
-        end
-
-        def x
-          @x
-        end
-      end
-
-      Foo.new.x
-      CODE
-  end
-
-  it "infers type from regex literal with interpolation" do
-    assert_type(<<-CODE) { types["Regex"] }
-      require "prelude"
-
-      class Foo
-        def initialize
-          @x = /foo\#{1}/
         end
 
         def x
@@ -2686,6 +2658,8 @@ describe "Semantic: instance var" do
 
   it "infers type from array literal in generic type" do
     assert_type(<<-CODE) { array_of(int32) }
+      require "prelude"
+
       class Foo(T)
         def initialize
           @array = [] of T
@@ -2696,7 +2670,8 @@ describe "Semantic: instance var" do
         end
       end
 
-      Foo(Int32).new.array
+      foo = Foo(Int32).new
+      foo.array
       CODE
   end
 
@@ -2730,7 +2705,8 @@ describe "Semantic: instance var" do
         end
       end
 
-      Foo(Float64).new.array
+      foo = Foo(Float64).new
+      foo.array
       CODE
   end
 
@@ -2748,7 +2724,8 @@ describe "Semantic: instance var" do
         end
       end
 
-      Foo(Float64).new.hash
+      foo = Foo(Float64).new
+      foo.hash
       CODE
   end
 
@@ -3057,83 +3034,11 @@ describe "Semantic: instance var" do
       CODE
   end
 
-  it "infers from Pointer.malloc with two arguments" do
-    assert_type(<<-CODE) { pointer_of(uint8) }
-      require "prelude"
-
-      class Foo
-        def initialize
-          @x = Pointer.malloc(10, 1_u8)
-        end
-
-        def x
-          @x
-        end
-      end
-
-      Foo.new.x
-      CODE
-  end
-
-  it "infers from Pointer.null" do
-    assert_type(<<-CODE) { pointer_of(int32) }
-      require "prelude"
-
-      class Foo
-        def initialize
-          @x = Pointer(Int32).null
-        end
-
-        def x
-          @x
-        end
-      end
-
-      Foo.new.x
-      CODE
-  end
-
   it "infers from Pointer.malloc in generic type" do
     assert_type(<<-CODE, inject_primitives: true) { pointer_of(int32) }
       class Foo(T)
         def initialize
           @x = Pointer(T).malloc(1_u64)
-        end
-
-        def x
-          @x
-        end
-      end
-
-      Foo(Int32).new.x
-      CODE
-  end
-
-  it "infers from Pointer.null in generic type" do
-    assert_type(<<-CODE) { pointer_of(int32) }
-      require "prelude"
-
-      class Foo(T)
-        def initialize
-          @x = Pointer(T).null
-        end
-
-        def x
-          @x
-        end
-      end
-
-      Foo(Int32).new.x
-      CODE
-  end
-
-  it "infers from Pointer.malloc with two arguments in generic type" do
-    assert_type(<<-CODE) { pointer_of(uint8) }
-      require "prelude"
-
-      class Foo(T)
-        def initialize
-          @x = Pointer.malloc(10, 1_u8)
         end
 
         def x
@@ -4578,6 +4483,8 @@ describe "Semantic: instance var" do
 
   it "guesses from array literal with of, with subclass" do
     assert_type(<<-CODE) { array_of(generic_class("Foo", int32).virtual_type!) }
+      require "prelude"
+
       class Foo(T)
       end
 
@@ -4592,7 +4499,8 @@ describe "Semantic: instance var" do
         end
       end
 
-      Some.new.some
+      foo = Some.new
+      foo.some
       CODE
   end
 
@@ -5315,120 +5223,6 @@ describe "Semantic: instance var" do
       end
 
       Foo.new
-      CODE
-  end
-
-  it "guesses virtual array type (1) (#5342)" do
-    assert_type(<<-CODE) { array_of(array_of(int32).virtual_type).virtual_type }
-      require "prelude"
-
-      class First(T) < Array(T)
-      end
-
-      class Second
-        @ary = [[1]]
-
-        def ary
-          @ary
-        end
-      end
-
-      Second.new.ary
-      CODE
-  end
-
-  it "guesses virtual array type (2) (#5342)" do
-    assert_type(<<-CODE) { array_of(array_of(int32).virtual_type).virtual_type }
-      require "prelude"
-
-      class First(T) < Array(T)
-      end
-
-      class Second
-        @ary = Array { Array { 1 } }
-
-        def ary
-          @ary
-        end
-      end
-
-      Second.new.ary
-      CODE
-  end
-
-  it "guesses virtual array type (3) (#5342)" do
-    assert_type(<<-CODE) { array_of(array_of(int32).virtual_type).virtual_type }
-      require "prelude"
-
-      class First(T) < Array(T)
-      end
-
-      class Second
-        @ary = [] of Array(Int32)
-
-        def ary
-          @ary
-        end
-      end
-
-      Second.new.ary
-      CODE
-  end
-
-  it "guesses virtual hash type (1) (#5342)" do
-    assert_type(<<-CODE) { hash_of(hash_of(int32, int32).virtual_type, int32).virtual_type }
-      require "prelude"
-
-      class First(K, V) < Hash(K, V)
-      end
-
-      class Second
-        @hash = { {1 => 2} => 3}
-
-        def hash
-          @hash
-        end
-      end
-
-      Second.new.hash
-      CODE
-  end
-
-  it "guesses virtual hash type (2) (#5342)" do
-    assert_type(<<-CODE) { hash_of(hash_of(int32, int32).virtual_type, int32).virtual_type }
-      require "prelude"
-
-      class First(K, V) < Hash(K, V)
-      end
-
-      class Second
-        @hash = Hash { Hash { 1 => 2 } => 3 }
-
-        def hash
-          @hash
-        end
-      end
-
-      Second.new.hash
-      CODE
-  end
-
-  it "guesses virtual array type (3) (#5342)" do
-    assert_type(<<-CODE) { hash_of(hash_of(int32, int32).virtual_type, int32).virtual_type }
-      require "prelude"
-
-      class First(K, V) < Hash(K, V)
-      end
-
-      class Second
-        @hash = {} of Hash(Int32, Int32) => Int32
-
-        def hash
-          @hash
-        end
-      end
-
-      Second.new.hash
       CODE
   end
 

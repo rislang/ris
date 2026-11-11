@@ -84,7 +84,7 @@ describe "Code gen: c union" do
   end
 
   it "does to_s" do
-    run(<<-CODE).to_string.should eq("LibNVG::Color(@array=0)")
+    run(<<-CODE).to_string.should eq("LibNVG::Color")
       require "prelude"
 
       lib LibNVG
@@ -164,9 +164,9 @@ describe "Code gen: c union" do
         end
       end
 
-      class String
+      struct String
         def to_unsafe
-          pointerof(@c)
+          @ptr
         end
       end
 
@@ -233,11 +233,18 @@ describe "Code gen: c union" do
 
       def foo
         a = uninitialized Lib::Bar
-        a.padding.fill { |i| 1_u8 + i }
+        padding = uninitialized UInt8[6]
+        bytes = pointerof(padding).as(UInt8*)
+        6.times { |i| bytes[i] = (i + 1).to_u8 }
+        a.padding = padding
         a
       end
 
-      foo.padding.sum
+      padding = foo.padding
+      bytes = pointerof(padding).as(UInt8*)
+      total = 0
+      6.times { |i| total += bytes[i].to_i }
+      total
       CODE
   end
 end

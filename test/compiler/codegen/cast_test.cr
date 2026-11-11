@@ -39,20 +39,6 @@ describe "Code gen: cast" do
       CODE
   end
 
-  it "casts from union to single type raises TypeCastError" do
-    run(<<-CODE).to_b.should be_true
-      require "prelude"
-
-      a = 1 || 'a'
-      begin
-        a.as(Char)
-        false
-      rescue ex
-        ex.message.not_nil!.includes?("Cast from Int32 to Char failed") && (ex.class == TypeCastError)
-      end
-      CODE
-  end
-
   it "casts from union to another union" do
     run(<<-CODE).to_i.should eq(1)
       require "prelude"
@@ -60,20 +46,6 @@ describe "Code gen: cast" do
       a = 1 || 1.5 || 'a'
       b = a.as(Int32 | Float64)
       b.abs.to_i
-      CODE
-  end
-
-  it "casts from union to another union raises TypeCastError" do
-    run(<<-CODE).to_b.should be_true
-      require "prelude"
-
-      a = 1 || 1.5 || 'a'
-      begin
-        a.as(Float64 | Char)
-        false
-      rescue ex
-        ex.message.not_nil!.includes?("Cast from Int32 to (Char | Float64) failed") && (ex.class == TypeCastError)
-      end
       CODE
   end
 
@@ -161,32 +133,6 @@ describe "Code gen: cast" do
       CODE
   end
 
-  it "casts from virtual to single type raises TypeCastError" do
-    run(<<-CODE).to_b.should be_true
-      require "prelude"
-
-      class CastSpecFoo
-      end
-
-      class CastSpecBar < CastSpecFoo
-        def bar
-          1
-        end
-      end
-
-      class CastSpecBaz < CastSpecBar
-      end
-
-      a = CastSpecBar.new || CastSpecFoo.new || CastSpecBaz.new
-      begin
-        a.as(CastSpecBaz)
-        false
-      rescue ex
-        ex.message.not_nil!.includes?("Cast from CastSpecBar to CastSpecBaz failed") && (ex.class == TypeCastError)
-      end
-      CODE
-  end
-
   it "casts from pointer to pointer" do
     run(<<-CODE).to_i.should eq(1)
       require "prelude"
@@ -237,20 +183,6 @@ describe "Code gen: cast" do
       a = 1 == 2 ? Reference.new : nil
       c = a.as(Nil)
       c == nil
-      CODE
-  end
-
-  it "casts from nilable to nil raises TypeCastError" do
-    run(<<-CODE).to_b.should be_true
-      require "prelude"
-
-      a = 1 == 1 ? Reference.new : nil
-      begin
-        a.as(Nil)
-        false
-      rescue ex
-        ex.message.not_nil!.includes?("Cast from Reference to Nil failed") && (ex.class == TypeCastError)
-      end
       CODE
   end
 

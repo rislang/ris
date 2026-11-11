@@ -71,7 +71,7 @@ describe "Code gen: var" do
         end
       end
 
-      class String
+      struct String
         def foo
           2
         end
@@ -95,7 +95,7 @@ describe "Code gen: var" do
         end
       end
 
-      class String
+      struct String
         def foo
           2
         end
@@ -121,7 +121,7 @@ describe "Code gen: var" do
 
   it "works with typeof with assignment (#828)" do
     run(<<-CODE).to_i.should eq(123)
-      class String; def to_i!; 0; end; end
+      struct String; def to_i!; 0; end; end
 
       a = 123
       typeof(a = "hello")

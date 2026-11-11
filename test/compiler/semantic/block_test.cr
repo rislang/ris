@@ -66,6 +66,12 @@ describe "Block inference" do
   it "infer type with union" do
     assert_type(<<-CODE) { union_of(array_of(int32), array_of(float64)) }
       require "prelude"
+      struct Array(T)
+        def tap
+          yield self
+          self
+        end
+      end
       a = [1] || [1.1]
       a.tap { |x| x }
       CODE
@@ -447,24 +453,6 @@ describe "Block inference" do
       CODE
   end
 
-  it "allows yielding multiple types when a union is expected" do
-    assert_type(<<-CODE) { array_of(float64) }
-      require "prelude"
-
-      class Foo
-        include Enumerable(Int32 | Float64)
-
-        def each
-          yield 1
-          yield 1.5
-        end
-      end
-
-      foo = Foo.new
-      foo.map &.to_f
-      CODE
-  end
-
   it "allows initialize with yield (#224)" do
     assert_type(<<-CODE, inject_primitives: true) { int32 }
       class Foo
@@ -826,9 +814,9 @@ describe "Block inference" do
     assert_type(<<-CODE) { array_of int32 }
       require "prelude"
 
-      class Hash
+      struct Hash
         def map
-          ary = Array(typeof(yield first_key, first_value)).new(@size)
+          ary = Array(typeof(yield first_key, first_value)).new(size)
           each do |k, v|
             ary.push yield k, v
           end

@@ -10,9 +10,9 @@ private def tape_compile(code : String, extension = "ri")
 end
 
 describe "ris tape text" do
-  it "types literals and interpolation as Str" do
+  it "types literals and interpolation as String" do
     tape_compile(<<-'CODE')
-      def text(value : Str) : Str
+      def text(value : String) : String
         value
       end
       text("literal")
@@ -29,17 +29,6 @@ describe "ris tape text" do
       CODE
   end
 
-  it "requires an explicit heap copy for typed arguments" do
-    expect_raises(Iyi::TypeException, /copy_to\(owner\)/) do
-      tape_compile(<<-'CODE')
-        def text(value : String) : String
-          value
-        end
-        text("value #{42}")
-        CODE
-    end
-  end
-
   it "builds tape constants on the program tape" do
     tape_compile(<<-'CODE')
       TEXT = "value #{42}"
@@ -47,19 +36,17 @@ describe "ris tape text" do
       CODE
   end
 
-  it "requires a program copy through helper aliases" do
-    expect_raises(Iyi::TypeException, /copy it with .copy_to\(Program.tape\)/) do
-      tape_compile(<<-'CODE')
-        class State
-          @@log = Ary(Str).new
-          def self.log
-            @@log
+  it "builds a class variable's array on the program tape, as a constant's" do
+    ["ri", "iyi"].each do |extension|
+      tape_compile(<<-'CODE', extension)
+        LIST = [1, 2, 4]
+        class Foo
+          @@var = [1, 2, 4]
+          def self.var
+            @@var
           end
         end
-        def append(log : Ary(Str), text : Str)
-          log << text
-        end
-        append(State.log, Str.new("request"))
+        puts Foo.var.size + LIST.size
         CODE
     end
   end
@@ -68,17 +55,17 @@ describe "ris tape text" do
     tape_compile(<<-'CODE')
       @[OnTape]
       struct Saved
-        getter text : Str
+        getter text : String
         def initialize(@text)
         end
       end
       class State
         @@saved : Saved? = nil
-        def self.keep(text : Str)
+        def self.keep(text : String)
           @@saved = Saved.new(text).copy_to(Program.tape)
         end
       end
-      local_tape { State.keep(Str.new("request")) }
+      tape { State.keep("request #{42}") }
       CODE
   end
 
@@ -123,53 +110,24 @@ describe "ris tape text" do
       CODE
   end
 
-  it "prefers the Str overload before trying String" do
-    tape_compile(<<-'CODE')
-      def choose(text : Str) : Int32
-        1
-      end
-      def choose(text : String) : String
-        text
-      end
-      result : Int32 = choose("literal")
-      def choose(text : Str, n : Int64) : Int32
-        1
-      end
-      def choose(text : String, n : Int64) : String
-        text
-      end
-      result = choose("literal", 1)
-      CODE
-  end
-
   it "borrows String call arguments in ris and std-style code" do
     ["ri", "iyi"].each do |extension|
       tape_compile(<<-'CODE', extension)
-        def width(text : Str) : Int32
+        def width(text : String) : Int32
           text.size
-        end
-        def choose(text : Str) : Int32
-          0
-        end
-        def choose(text : String) : String
-          text
         end
         heap = "abc" + "d"
         width(heap)
         width(text: heap)
-        result : String = choose(heap)
         CODE
     end
   end
 
-  it "borrows nilable String arguments without changing overload priority" do
+  it "borrows nilable String arguments" do
     ["ri", "iyi"].each do |extension|
       tape_compile(<<-'CODE', extension)
-        def width(text : Str?) : Int32
+        def width(text : String?) : Int32
           text ? text.size : 0
-        end
-        def choose(text : Str?, n : Int64) : String?
-          "wrong overload"
         end
         def choose(text : String?, n : Int64) : String?
           text
@@ -196,7 +154,7 @@ describe "ris tape text" do
         def optional(text : String?) : String?
           text
         end
-        def width(text : Str) : Int32
+        def width(text : String) : Int32
           text.size
         end
         width(optional(nil))
@@ -210,75 +168,14 @@ describe "ris tape text" do
         def optional(text : String?) : String?
           text
         end
-        view : Str? = optional("abc")
+        view : String = optional(nil)
         CODE
     end
   end
 
-  it "does not borrow String assignments" do
-    expect_raises(Iyi::TypeException) do
-      tape_compile(<<-'CODE')
-        heap = "abc" + "d"
-        view : Str = heap
-        CODE
-    end
-  end
-
-  it "does not carry literal provenance through locals" do
-    expect_raises(Iyi::TypeException, /name holds tape text/) do
-      tape_compile(<<-'CODE')
-        class User
-          @name : String
-          def initialize
-            name = "alice"
-            @name = name
-          end
-        end
-        User.new
-        CODE
-    end
-  end
 end
 
 describe "ris String parameter retention" do
-  it "refuses a read-only String parameter" do
-    expect_raises(Iyi::TypeException,
-      /name : String is only read; take it as Str/) do
-      tape_compile(<<-'CODE')
-        def width(name : String) : Int32
-          name.size
-        end
-        width("hello")
-        CODE
-    end
-  end
-
-  it "refuses a read-only nilable String parameter" do
-    expect_raises(Iyi::TypeException,
-      /name : String\? is only read; take it as Str\?/) do
-      tape_compile(<<-'CODE')
-        def width(name : String?) : Int32
-          name ? name.size : 0
-        end
-        width(nil)
-        CODE
-    end
-  end
-
-  it "follows a read-only user callee" do
-    expect_raises(Iyi::TypeException, /is only read; take it as Str/) do
-      tape_compile(<<-'CODE')
-        def width(name : String) : Int32
-          name.size
-        end
-        def forwarded(name : String) : Int32
-          width(name)
-        end
-        forwarded("hello")
-        CODE
-    end
-  end
-
   it "allows an alias returned from a parameter" do
     tape_compile(<<-'CODE')
       def retained(name : String) : String

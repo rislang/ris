@@ -86,7 +86,7 @@ describe "Code gen: new" do
 
   it "overloads new and initialize, 1 (#2489)" do
     run(<<-CODE).to_i.should eq(10)
-      class String
+      struct String
         def size
           10
         end
@@ -271,14 +271,6 @@ describe "Code gen: new" do
 
       color = Color.new("foo")
       color.value
-      CODE
-  end
-
-  it "can create Tuple with Tuple.new" do
-    run(<<-CODE).to_i.should eq(0)
-      require "prelude"
-
-      Tuple.new.size
       CODE
   end
 

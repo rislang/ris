@@ -1034,8 +1034,9 @@ module Iyi
           else
             size_comp = Call.new(size_call, "!=", NumberLiteral.new(node.targets.size)).at(value)
           end
-          index_error = Call.new(Path.global("IndexError"), "new", StringLiteral.new("Multiple assignment count mismatch")).at(value)
-          raise_call = Call.global("raise", index_error).at(value)
+          # ris: no exception classes; a mismatch panics with the message.
+          message = StringLiteral.new("Multiple assignment count mismatch").at(value)
+          raise_call = Call.global("raise", message).at(value)
           assigns << If.new(size_comp, raise_call).at(value)
         end
 

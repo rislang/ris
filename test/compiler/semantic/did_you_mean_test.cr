@@ -233,7 +233,7 @@ describe "Semantic: did you mean" do
            def rand(x : Int32)
            end
 
-           class String
+           struct String
              def bytes
                self
              end

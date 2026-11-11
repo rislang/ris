@@ -112,13 +112,13 @@ def both(a : String, b : String) : Tuple(String, String) | Timeout | Panicked
 end
 
 case both("one", "two")
-in Tuple(String, String)       then puts it # => {"<one>", "<two>"}
+in Tuple(String, String) then puts it # => {"<one>", "<two>"}
 in Timeout               then puts it.message
 in Panicked              then puts "panicked"
 end
 
 case both("one", "slow")
-in Tuple(String, String)       then puts it
+in Tuple(String, String) then puts it
 in Timeout               then puts "#{it.message} timed out" # => slow timed out
 in Panicked              then puts "panicked"
 end

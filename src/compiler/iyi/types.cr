@@ -1829,8 +1829,11 @@ module Iyi
 
     def self.borrowable?(type : Type?) : Bool
       return false unless type
+      # A union borrows only when every member does, or is Nil or a view:
+      # `as_view` on `Int32 | String` would meet an Int32.
       (type.is_a?(UnionType) &&
-       type.union_types.any? { |part| borrowable?(part) }) ||
+       type.union_types.any? { |part| borrowable?(part) } &&
+       type.union_types.all? { |part| part.nil_type? || borrowable?(part) || view?(part) }) ||
         (type.is_a?(GenericClassInstanceType) &&
          type.generic_type.name == "Array") ||
         type == type.program.string ||

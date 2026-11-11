@@ -43,6 +43,7 @@ describe "Semantic: NoReturn" do
   it "computes NoReturn in a lazy way inside if then (#314) (1)" do
     assert_type(<<-CODE) { union_of(int32, string) }
       require "prelude"
+      class Object; def must; self; end; end; abstract struct Value; def must; self; end; end; struct Nil; def must : NoReturn; raise "nil"; end; end
 
       a = 1
       b = 1
@@ -51,7 +52,7 @@ describe "Semantic: NoReturn" do
       while a < 10
         if a == 2
           b = "hello"
-          x.not_nil!
+          x.must
         end
 
         x = 1
@@ -65,6 +66,7 @@ describe "Semantic: NoReturn" do
   it "computes NoReturn in a lazy way inside if then (#314) (2)" do
     assert_type(<<-CODE) { int32 }
       require "prelude"
+      class Object; def must; self; end; end; abstract struct Value; def must; self; end; end; struct Nil; def must : NoReturn; raise "nil"; end; end
 
       a = 1
       b = 1
@@ -73,7 +75,7 @@ describe "Semantic: NoReturn" do
       while a < 10
         if a == 2
           b = "hello"
-          x.not_nil!
+          x.must
         end
 
         a += 1
@@ -86,6 +88,7 @@ describe "Semantic: NoReturn" do
   it "computes NoReturn in a lazy way inside if then (#314) (3)" do
     assert_type(<<-CODE) { nilable(string) }
       require "prelude"
+      class Object; def must; self; end; end; abstract struct Value; def must; self; end; end; struct Nil; def must : NoReturn; raise "nil"; end; end
 
       a = 1
       c = nil
@@ -94,7 +97,7 @@ describe "Semantic: NoReturn" do
       while a < 10
         if a == 2
           b = "hello"
-          x.not_nil!
+          x.must
         end
 
         if b
@@ -112,6 +115,7 @@ describe "Semantic: NoReturn" do
   it "computes NoReturn in a lazy way inside if then (#314) (4)" do
     assert_type(<<-CODE) { nil_type }
       require "prelude"
+      class Object; def must; self; end; end; abstract struct Value; def must; self; end; end; struct Nil; def must : NoReturn; raise "nil"; end; end
 
       a = 1
       c = nil
@@ -120,7 +124,7 @@ describe "Semantic: NoReturn" do
       while a < 10
         if a == 2
           b = "hello"
-          x.not_nil!
+          x.must
         end
 
         if b
@@ -137,13 +141,14 @@ describe "Semantic: NoReturn" do
   it "computes NoReturn in a lazy way inside if then (#314) (5)" do
     assert_error <<-CODE, "undefined method 'size' for Nil"
       require "prelude"
+      class Object; def must; self; end; end; abstract struct Value; def must; self; end; end; struct Nil; def must : NoReturn; raise "nil"; end; end
 
       a = 1
       x = nil
 
       while a < 10
         if a == 1
-          x.not_nil!
+          x.must
         else
           b = "hello"
         end
@@ -161,6 +166,7 @@ describe "Semantic: NoReturn" do
   it "computes NoReturn in a lazy way inside if else (#314) (1)" do
     assert_type(<<-CODE) { union_of(int32, string) }
       require "prelude"
+      class Object; def must; self; end; end; abstract struct Value; def must; self; end; end; struct Nil; def must : NoReturn; raise "nil"; end; end
 
       a = 1
       b = 1
@@ -170,7 +176,7 @@ describe "Semantic: NoReturn" do
         if a == 2
         else
           b = "hello"
-          x.not_nil!
+          x.must
         end
 
         x = 1
@@ -184,6 +190,7 @@ describe "Semantic: NoReturn" do
   it "computes NoReturn in a lazy way inside if else (#314) (2)" do
     assert_type(<<-CODE) { int32 }
       require "prelude"
+      class Object; def must; self; end; end; abstract struct Value; def must; self; end; end; struct Nil; def must : NoReturn; raise "nil"; end; end
 
       a = 1
       b = 1
@@ -193,7 +200,7 @@ describe "Semantic: NoReturn" do
         if a == 2
         else
           b = "hello"
-          x.not_nil!
+          x.must
         end
 
         a += 1
@@ -206,6 +213,7 @@ describe "Semantic: NoReturn" do
   it "computes NoReturn in a lazy way inside if else (#314) (3)" do
     assert_type(<<-CODE) { nilable(string) }
       require "prelude"
+      class Object; def must; self; end; end; abstract struct Value; def must; self; end; end; struct Nil; def must : NoReturn; raise "nil"; end; end
 
       a = 1
       c = nil
@@ -215,7 +223,7 @@ describe "Semantic: NoReturn" do
         if a == 2
         else
           b = "hello"
-          x.not_nil!
+          x.must
         end
 
         if b
@@ -233,6 +241,7 @@ describe "Semantic: NoReturn" do
   it "computes NoReturn in a lazy way inside if else (#314) (4)" do
     assert_type(<<-CODE) { nil_type }
       require "prelude"
+      class Object; def must; self; end; end; abstract struct Value; def must; self; end; end; struct Nil; def must : NoReturn; raise "nil"; end; end
 
       a = 1
       c = nil
@@ -242,7 +251,7 @@ describe "Semantic: NoReturn" do
         if a == 2
         else
           b = "hello"
-          x.not_nil!
+          x.must
         end
 
         if b
@@ -259,6 +268,7 @@ describe "Semantic: NoReturn" do
   it "computes NoReturn in a lazy way inside if else (#314) (5)" do
     assert_error <<-CODE, "undefined method 'size' for Nil"
       require "prelude"
+      class Object; def must; self; end; end; abstract struct Value; def must; self; end; end; struct Nil; def must : NoReturn; raise "nil"; end; end
 
       a = 1
       x = nil
@@ -267,7 +277,7 @@ describe "Semantic: NoReturn" do
         if a == 1
           b = "hello"
         else
-          x.not_nil!
+          x.must
         end
 
         b.size

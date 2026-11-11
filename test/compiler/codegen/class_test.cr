@@ -924,7 +924,8 @@ describe "Code gen: class" do
         end
       end
 
-      Foo.new.sum
+      foo = Foo.new
+      foo.sum
       CODE
   end
 
@@ -940,7 +941,8 @@ describe "Code gen: class" do
         end
       end
 
-      Foo(Int32).new.sum
+      foo = Foo(Int32).new
+      foo.sum
       CODE
   end
 

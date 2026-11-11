@@ -30,7 +30,7 @@ describe "Semantic: pointer" do
   end
 
   it "type pointer casting of object type" do
-    assert_type("a = 1; pointerof(a).as(String)") { string }
+    assert_type("class Foo; end; a = 1; pointerof(a).as(Foo)") { types["Foo"] }
   end
 
   it "pointer malloc creates new type" do

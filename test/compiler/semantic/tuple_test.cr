@@ -384,7 +384,7 @@ describe "Semantic: tuples" do
       require "prelude"
 
       def foo(type, *args)
-        foo 1, args.to_a
+        foo 1, {args}
       end
 
       foo "foo", 1
@@ -547,6 +547,12 @@ describe "Semantic: tuples" do
   it "errors on tuple too big (#3816)" do
     assert_error <<-CODE, "tuple size cannot be greater than 300 (size is 302)"
       require "prelude"
+
+      struct Tuple
+        def +(other : Tuple(*U)) forall U
+          {*self, *other}
+        end
+      end
 
       pos = {0, 0}
       while true

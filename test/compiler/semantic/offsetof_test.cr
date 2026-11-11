@@ -2,7 +2,6 @@ require "../../test_helper"
 
 describe "Semantic: offsetof" do
   it "types offsetof" do
-    assert_type("offsetof(String, @length)") { int32 }
     assert_type("offsetof({Int32, Int32}, 1)") { int32 }
   end
 

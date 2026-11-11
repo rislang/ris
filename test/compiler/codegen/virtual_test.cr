@@ -660,9 +660,8 @@ describe "Code gen: virtual type" do
         end
       end
 
-      p = Pointer(Foo.class).malloc(1_u64)
-      p.value = Bar
-      p.value.new.foo
+      k = Bar.as(Foo.class)
+      k.new.foo
       CODE
   end
 
@@ -685,32 +684,9 @@ describe "Code gen: virtual type" do
         end
       end
 
-      p = Pointer(Foo.class).malloc(1_u64)
-      p.value = Bar
-      p.value = Baz
-      p.value.new.foo
-      CODE
-  end
-
-  it "codegens new for new on virtual abstract class (#3835)" do
-    run(<<-CODE).to_string.should eq("Can't instantiate abstract class Foo")
-      require "prelude"
-
-      abstract class Foo
-      end
-
-      class Bar < Foo
-        def foo
-          123
-        end
-      end
-
-      begin
-        (Foo || Bar).new
-        ""
-      rescue ex
-        ex.message.not_nil!
-      end
+      k = Bar.as(Foo.class)
+      k = Baz
+      k.new.foo
       CODE
   end
 

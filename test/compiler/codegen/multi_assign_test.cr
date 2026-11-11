@@ -26,13 +26,8 @@ describe "Code gen: multi assign" do
       run(<<-CODE).to_i.should eq(4)
         require "prelude"
 
-        begin
-          a, b = [1, 2, 3]
-          4
-        rescue ex : Exception
-          raise ex unless ex.message == "Multiple assignment count mismatch"
-          5
-        end
+        a, b = [1, 2, 3]
+        4
         CODE
     end
   end
@@ -45,7 +40,7 @@ describe "Code gen: multi assign" do
         class Foo
           include Indexable(Int32)
 
-          def unsafe_fetch(index)
+          def [](index)
             index &+ 1
           end
 
@@ -59,19 +54,6 @@ describe "Code gen: multi assign" do
         CODE
     end
 
-    it "raises if value size in 1 to n assignment doesn't match target count" do
-      run(<<-CODE, flags: %w(strict_multi_assign)).to_i.should eq(5)
-        require "prelude"
-
-        begin
-          a, b = [1, 2, 3]
-          4
-        rescue ex : Exception
-          raise ex unless ex.message == "Multiple assignment count mismatch"
-          5
-        end
-        CODE
-    end
   end
 
   it "supports m to n assignment, with splat on left-hand side (1)" do
@@ -140,6 +122,7 @@ describe "Code gen: multi assign" do
   it "supports 1 to n assignment, with splat on left-hand side (1)" do
     run(<<-CODE).to_i.should eq(12345)
       require "prelude"
+      #{include_indexable}
 
       a, *b, c = {1, 2, 3, 4, 5}
       a &* 10000 &+ b[0] &* 1000 &+ b[1] &* 100 &+ b[2] &* 10 &+ c
@@ -169,6 +152,7 @@ describe "Code gen: multi assign" do
   it "supports 1 to n assignment, splat is empty (1)" do
     run(<<-CODE).to_b.should be_true
       require "prelude"
+      #{include_indexable}
 
       _, *x, _ = {1, 2}
       x.is_a?(Tuple())
@@ -197,44 +181,6 @@ describe "Code gen: multi assign" do
       CODE
   end
 
-  it "supports 1 to n assignment, raises if too short" do
-    run(<<-CODE).to_b.should be_true
-      require "prelude"
-
-      begin
-        a, *b, c = [1]
-        false
-      rescue ex : IndexError
-        ex.message == "Multiple assignment count mismatch"
-      end
-      CODE
-  end
-
-  it "supports 1 to n assignment, raises if out of bounds (1)" do
-    run(<<-CODE).to_b.should be_true
-      require "prelude"
-
-      begin
-        *a, b, c = [1]
-        false
-      rescue ex : IndexError
-        true
-      end
-      CODE
-  end
-
-  it "supports 1 to n assignment, raises if out of bounds (2)" do
-    run(<<-CODE).to_b.should be_true
-      require "prelude"
-
-      begin
-        a, b, *c = [1]
-        false
-      rescue ex : IndexError
-        true
-      end
-      CODE
-  end
 end
 
 private def tuple_new

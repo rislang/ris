@@ -332,30 +332,6 @@ describe "Code gen: primitives" do
         str.should contain("va_arg #{type} %list")
       end
 
-      it "works with C code" do
-        test_c(<<-C, <<-CODE, &.to_i.should eq(6))
-          extern int foo_f(int,...);
-          int foo() {
-            return foo_f(3,1,2,3);
-          }
-          C
-          lib LibFoo
-            fun foo() : LibC::Int
-          end
-
-          fun foo_f(count : Int32, ...) : LibC::Int
-            sum = 0
-            VaList.open do |list|
-              count.times do |i|
-                sum += list.next(Int32)
-              end
-            end
-            sum
-          end
-
-          LibFoo.foo
-          CODE
-      end
     {% end %}
   end
 

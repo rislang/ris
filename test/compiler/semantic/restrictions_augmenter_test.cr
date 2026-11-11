@@ -10,7 +10,8 @@ private def expect_no_augment(code : String, flags = nil)
   result.node.to_s.chomp.should eq(code.chomp)
 end
 
-private def it_augments_for_ivar(ivar_type : String, expected_type : String, file = __FILE__, line = __LINE__)
+# ris: a declared String or Array names its global type after semantic.
+private def it_augments_for_ivar(ivar_type : String, expected_type : String, ivar_after = ivar_type, file = __FILE__, line = __LINE__)
   it "augments #{ivar_type}", file, line do
     before = <<-CODE
       class Foo
@@ -23,7 +24,7 @@ private def it_augments_for_ivar(ivar_type : String, expected_type : String, fil
 
     after = <<-CODE
       class Foo
-        @x : #{ivar_type}
+        @x : #{ivar_after}
         def initialize(value : #{expected_type})
           @x = value
         end
@@ -41,19 +42,19 @@ describe "Semantic: restrictions augmenter" do
   it_augments_for_ivar "Int32", "::Int32"
   it_augments_for_ivar "Float32", "::Float32"
   it_augments_for_ivar "Symbol", "::Symbol"
-  it_augments_for_ivar "String", "::String"
-  it_augments_for_ivar "Array(String)", "::Array(::String)"
+  it_augments_for_ivar "String", "::String", "::String"
+  it_augments_for_ivar "Array(String)", "::Array(::String)", "::Array(::String)"
   it_augments_for_ivar "Tuple(Int32, Char)", "::Tuple(::Int32, ::Char)"
   it_augments_for_ivar "NamedTuple(a: Int32, b: Char)", "::NamedTuple(a: ::Int32, b: ::Char)"
   it_augments_for_ivar "Proc(Int32, Char)", "::Int32 -> ::Char"
   it_augments_for_ivar "Proc(Int32, Nil)", "::Int32 -> _"
   it_augments_for_ivar "Pointer(Void)", "::Pointer(::Void)"
   it_augments_for_ivar "StaticArray(Int32, 8)", "::StaticArray(::Int32, 8)"
-  it_augments_for_ivar "Char | Int32 | String", "::Char | ::Int32 | ::String"
-  it_augments_for_ivar "Char | Int32 | String", "::Char | ::Int32 | ::String"
+  it_augments_for_ivar "Char | Int32 | String", "::Char | ::Int32 | ::String", "Char | Int32 | ::String"
+  it_augments_for_ivar "Char | Int32 | String", "::Char | ::Int32 | ::String", "Char | Int32 | ::String"
   it_augments_for_ivar "Int32.class", "::Int32.class"
   it_augments_for_ivar "NoReturn", "::NoReturn"
-  it_augments_for_ivar "Array(Int32).class", "::Array(::Int32).class"
+  it_augments_for_ivar "Array(Int32).class", "::Array(::Int32).class", "::Array(Int32).class"
   it_augments_for_ivar "Enumerable(Int32).class", "::Enumerable(::Int32).class"
 
   it "augments relative public type" do
@@ -166,7 +167,7 @@ describe "Semantic: restrictions augmenter" do
 
     after = <<-CODE
       class Foo(T)
-        @x : Array(T)
+        @x : ::Array(T)
         def initialize(value : ::Array(T))
           @x = value
         end
@@ -249,28 +250,6 @@ describe "Semantic: restrictions augmenter" do
         end
       end
       CODE
-  end
-
-  it "augments recursive alias type (#12134)" do
-    before = <<-CODE
-      alias BasicObject = Array(BasicObject) | Hash(String, BasicObject)
-      class Foo
-        def initialize(value = Hash(String, BasicObject).new)
-          @x = value
-        end
-      end
-      CODE
-
-    after = <<-CODE
-      alias BasicObject = Array(BasicObject) | Hash(String, BasicObject)
-      class Foo
-        def initialize(value : ::Hash(::String, ::BasicObject) = Hash(String, BasicObject).new)
-          @x = value
-        end
-      end
-      CODE
-
-    expect_augment before, after
   end
 
   it "augments typedef" do
@@ -373,7 +352,7 @@ describe "Semantic: restrictions augmenter" do
 
     after = <<-CODE
       class Foo(T)
-        @x : Array(*T)
+        @x : ::Array(*T)
         def initialize(value : ::Array(*T))
           @x = value
         end

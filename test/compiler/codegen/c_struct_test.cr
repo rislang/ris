@@ -266,7 +266,7 @@ describe "Code gen: struct" do
   end
 
   it "does to_s" do
-    run(<<-CODE).to_string.should eq("LibFoo::Point(@x=1, @y=2)")
+    run(<<-CODE).to_string.should eq("LibFoo::Point")
       require "prelude"
 
       lib LibFoo

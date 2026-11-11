@@ -62,7 +62,7 @@ describe "Normalize: multi assign" do
       assert_expand "d = 1; a, b, c = d", <<-CODE, flags: "strict_multi_assign"
         __temp_1 = d
         if __temp_1.size != 3
-          ::raise(::IndexError.new("Multiple assignment count mismatch"))
+          ::raise("Multiple assignment count mismatch")
         end
         a = __temp_1[0]
         b = __temp_1[1]
@@ -74,7 +74,7 @@ describe "Normalize: multi assign" do
       assert_expand "a = 1; b = 2; a[0], b[1] = 2", <<-CODE, flags: "strict_multi_assign"
         __temp_1 = 2
         if __temp_1.size != 2
-          ::raise(::IndexError.new("Multiple assignment count mismatch"))
+          ::raise("Multiple assignment count mismatch")
         end
         a[0] = __temp_1[0]
         b[1] = __temp_1[1]
@@ -85,7 +85,7 @@ describe "Normalize: multi assign" do
       assert_expand "a = 1; b = 2; a.foo, b.bar = 2", <<-CODE, flags: "strict_multi_assign"
         __temp_1 = 2
         if __temp_1.size != 2
-          ::raise(::IndexError.new("Multiple assignment count mismatch"))
+          ::raise("Multiple assignment count mismatch")
         end
         a.foo = __temp_1[0]
         b.bar = __temp_1[1]
@@ -158,7 +158,7 @@ describe "Normalize: multi assign" do
     assert_expand "c = 1; d = 2; a, b, *c.foo, d[0], e, f = 3", <<-CODE
       __temp_1 = 3
       if __temp_1.size < 5
-        ::raise(::IndexError.new("Multiple assignment count mismatch"))
+        ::raise("Multiple assignment count mismatch")
       end
       a = __temp_1[0]
       b = __temp_1[1]
@@ -193,7 +193,7 @@ describe "Normalize: multi assign" do
     assert_expand "a, *_, b, c = 1", <<-CODE
       __temp_1 = 1
       if __temp_1.size < 3
-        ::raise(::IndexError.new("Multiple assignment count mismatch"))
+        ::raise("Multiple assignment count mismatch")
       end
       a = __temp_1[0]
       b = __temp_1[-2]

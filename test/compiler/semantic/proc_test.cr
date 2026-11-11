@@ -628,7 +628,7 @@ describe "Semantic: proc" do
         block
       end
 
-      block = foo { |elems| Bar.new(elems[0].as(Bar).value) }
+      block = foo { |elems| elems[0] }
       elems = [Foo.new, Bar.new(1)]
       block
       CODE

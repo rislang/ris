@@ -131,6 +131,7 @@ describe "Code gen: module" do
   it "codegens pointer of module with block" do
     run(<<-CODE).to_i.should eq(1)
       require "prelude"
+      class Object; def must; self; end; end; abstract struct Value; def must; self; end; end; struct Nil; def must : NoReturn; raise "nil"; end; end
 
       module Moo
       end
@@ -149,13 +150,13 @@ describe "Code gen: module" do
         end
       end
 
-      a = Pointer(Moo).malloc(1_u64)
-      a.value = Foo.new
+      m = Foo.new.as(Moo)
+      a = pointerof(m)
       x = nil
       a.each do |io|
         x = io
       end
-      x.not_nil!.foo
+      x.must.foo
       CODE
   end
 
@@ -254,25 +255,6 @@ describe "Code gen: module" do
 
       z = ->(x : Moo) { x.foo }
       z.call(Foo(Int32).new)
-      CODE
-  end
-
-  it "invokes method on yielded module that has no instances (#1079)" do
-    run(<<-CODE).to_i.should eq(456)
-      require "prelude"
-
-      module Mod
-      end
-
-      def foo
-        ptr = Pointer(Mod).malloc(1_u64)
-        yield ptr.value
-        123
-      rescue
-        456
-      end
-
-      foo { |x| x.coco }
       CODE
   end
 

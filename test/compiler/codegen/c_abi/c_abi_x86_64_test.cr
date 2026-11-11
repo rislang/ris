@@ -157,7 +157,7 @@ describe "Code gen: C ABI x86_64" do
     if LibLLVM::IS_LT_120
       str.should contain("sret, i32") # sret goes as first argument
     else
-      str.should contain("sret(%\"struct.LibFoo::Struct\") %0, i32") # sret goes as first argument
+      str.should contain("sret(%\"struct.LibFoo::Struct\"), i32") # sret goes as first argument
     end
   end
 end

@@ -4,7 +4,7 @@ describe "Semantic: special vars" do
   ["$~", "$?"].each do |name|
     it "infers #{name}" do
       assert_type(<<-CODE) { nilable string }
-        class Object; def not_nil!; self; end; end
+        class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
         def foo
           #{name} = "hey"
@@ -15,17 +15,9 @@ describe "Semantic: special vars" do
         CODE
     end
 
-    it "types #{name} when not defined as no return" do
-      assert_type(<<-CODE) { no_return }
-        require "prelude"
-
-        #{name}
-        CODE
-    end
-
     it "types #{name} when not defined as no return (2)" do
       assert_type(<<-CODE) { nilable string }
-        class Object; def not_nil!; self; end; end
+        class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
         def foo
           #{name} = "hey"
@@ -45,7 +37,7 @@ describe "Semantic: special vars" do
 
   it "infers when assigning inside block" do
     assert_type(<<-CODE) { nilable string }
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def bar
         yield
@@ -64,7 +56,7 @@ describe "Semantic: special vars" do
 
   it "infers in block" do
     assert_type(<<-CODE) { nilable string }
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def foo
         $~ = "hey"
@@ -81,7 +73,7 @@ describe "Semantic: special vars" do
 
   it "infers in block with nested block" do
     assert_type(<<-CODE) { nilable string }
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def bar
         yield
@@ -104,7 +96,7 @@ describe "Semantic: special vars" do
 
   it "infers after block" do
     assert_type(<<-CODE) { nilable string }
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def foo
         $~ = "hey"

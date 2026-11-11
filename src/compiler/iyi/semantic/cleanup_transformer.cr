@@ -415,7 +415,7 @@ module Iyi
         # not `Indexable`
         # also disallows `a, b, c = ...` if the strict flag is set
         if node.targets.any?(Splat) || has_strict_multi_assign
-          unless type.implements?(@program.indexable)
+          unless indexable_rhs?(type)
             node.values.first.raise "right-hand side of one-to-many assignment must be an Indexable, not #{type}"
           end
         end
@@ -442,6 +442,18 @@ module Iyi
       end
 
       node
+    end
+
+    # ris: Tuple and Array include no Indexable module; they index all
+    # the same.
+    private def indexable_rhs?(type) : Bool
+      return true if type.implements?(@program.indexable)
+      types = type.is_a?(UnionType) ? type.union_types : [type]
+      types.all? do |member|
+        member.is_a?(TupleInstanceType) ||
+          (member.is_a?(GenericClassInstanceType) &&
+            member.generic_type == @program.array)
+      end
     end
 
     private def constant_size(type)

@@ -31,7 +31,7 @@ private def semantic_iyi(entry : String, iyi_module_dir : String? = nil,
 
   parser = program.new_parser(File.read(entry))
   parser.filename = program.filename
-  node = program.normalize(parser.parse)
+  node = program.normalize(with_text_view(parser.parse))
   program.semantic node
 
   program
@@ -361,13 +361,13 @@ describe "Semantic: iyi import" do
           module lib/badge
 
           pub struct Badge
-            @name : String
+            @id : Int32
 
-            def initialize(@name : String)
+            def initialize(@id : Int32)
             end
 
-            pub def name : String
-              @name
+            pub def id : Int32
+              @id
             end
           end
           IYI
@@ -377,9 +377,9 @@ describe "Semantic: iyi import" do
           import lib/holder::{Holder}
           import lib/badge::{Badge}
 
-          kept = ""
-          Holder(Badge).new(Badge.new("kept")).each do |badge|
-            kept = badge.name
+          kept = 0
+          Holder(Badge).new(Badge.new(7)).each do |badge|
+            kept = badge.id
           end
           IYI
       }) do

@@ -1165,27 +1165,6 @@ describe "Restrictions" do
       CODE
   end
 
-  it "matches alias against alias in block type" do
-    assert_type(<<-CODE) { types["Rec"].metaclass }
-      class Foo(T)
-        def self.new(&block : -> T)
-          Foo(T).new
-        end
-
-        def initialize
-        end
-
-        def t
-          T
-        end
-      end
-
-      alias Rec = Nil | Array(Rec)
-
-      Foo.new { nil.as(Rec)}.t
-      CODE
-  end
-
   it "matches free variable for type variable" do
     assert_type(<<-CODE) { generic_class "Foo", int32 }
       class Foo(Type)

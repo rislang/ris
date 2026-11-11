@@ -839,8 +839,8 @@ describe "Code gen: macro" do
       require "prelude"
 
       class Global
-        @@x = [] of String
-        @@runnables = [] of Runnable.class
+        @@x = ([] of String).copy_to(Program.tape)
+        @@runnables = ([] of Runnable.class).copy_to(Program.tape)
 
         def self.x=(@@x)
         end
@@ -1309,7 +1309,7 @@ describe "Code gen: macro" do
 
   it "executes with named arguments for positional arg (3)" do
     run(<<-CODE).to_i.should eq(6)
-      class String
+      struct String
         def bytesize
           @bytesize
         end
@@ -1791,12 +1791,10 @@ describe "Code gen: macro" do
         {{ yield }}
       end
 
-      def foo
-        {:foo => 1}
-      end
+      h = {:foo => 1}
 
       expand do
-        x = foo[:foo] += 1
+        x = h[:foo] += 1
         puts x
       end
       CODE

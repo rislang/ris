@@ -2362,6 +2362,14 @@ struct NamedTuple
   end
 end
 
+# A type value (`Array(Foo.class)`) is a type id: it copies as itself.
+class Class
+  # A virtual type value (`Foo+.class`) goes to a `Foo.class` slot.
+  def __iyi_copy_into(target : Pointer(T), work : RisCopyWork) : Nil forall T
+    target.value = self
+  end
+end
+
 class Object
   def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
     {% if @type < ::Enum || @type < ::Number || @type == ::Bool || @type == ::Char || @type == ::Symbol || @type == ::Nil %}

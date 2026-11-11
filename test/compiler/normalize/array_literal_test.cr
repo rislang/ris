@@ -2,25 +2,23 @@ require "../../test_helper"
 
 describe "Normalize: array literal" do
   it "normalizes empty with of" do
-    assert_expand "[] of Int", "::Array(Int).new"
+    assert_expand "[] of Int", "__temp_1 = ::Array(Int).new(4)\n__temp_1"
   end
 
   it "normalizes non-empty with of" do
     assert_expand "[1, 2] of Int8", <<-CODE
-      __temp_1 = ::Array(Int8).unsafe_build(2)
-      __temp_2 = __temp_1.to_unsafe
-      __temp_2[0] = 1
-      __temp_2[1] = 2
+      __temp_1 = ::Array(Int8).new(4)
+      __temp_1.push(1)
+      __temp_1.push(2)
       __temp_1
       CODE
   end
 
   it "normalizes non-empty without of" do
     assert_expand "[1, 2]", <<-CODE
-      __temp_1 = ::Array(typeof(1, 2)).unsafe_build(2)
-      __temp_2 = __temp_1.to_unsafe
-      __temp_2[0] = 1
-      __temp_2[1] = 2
+      __temp_1 = ::Array(typeof(1, 2)).new(4)
+      __temp_1.push(1)
+      __temp_1.push(2)
       __temp_1
       CODE
   end
@@ -60,9 +58,8 @@ describe "Normalize: array literal" do
   it "hoists complex element expressions" do
     assert_expand "[[1]]", <<-CODE
       __temp_1 = [1]
-      __temp_2 = ::Array(typeof(__temp_1)).unsafe_build(1)
-      __temp_3 = __temp_2.to_unsafe
-      __temp_3[0] = __temp_1
+      __temp_2 = ::Array(typeof(__temp_1)).new(4)
+      __temp_2.push(__temp_1)
       __temp_2
       CODE
   end

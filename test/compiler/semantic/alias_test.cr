@@ -98,7 +98,7 @@ describe "Semantic: alias" do
   end
 
   it "errors if alias is already defined as another type" do
-    assert_error <<-CODE, "can't alias String because it's already defined as a class"
+    assert_error <<-CODE, "can't alias String because it's already defined as a struct"
       alias String = Int32
       CODE
   end
@@ -323,23 +323,6 @@ describe "Semantic: alias" do
       alias Bar = Foo(Bar | Int32)
 
       Foo(Bar).new(Foo.new(1).as(Bar))
-      CODE
-  end
-
-  it "can pass recursive alias to proc" do
-    assert_type(<<-CODE, inject_primitives: true) { nil_type }
-      class Object
-        def itself
-          self
-        end
-      end
-
-      alias Rec = Int32 | Array(Rec)
-
-      a = uninitialized Rec
-
-      f = ->(x : Rec) {}
-      f.call(a.itself)
       CODE
   end
 

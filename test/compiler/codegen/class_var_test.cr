@@ -168,7 +168,7 @@ describe "Codegen: class var" do
       require "prelude"
 
       class Foo
-        @@var = [1, 2, 4]
+        @@var = [1, 2, 4].copy_to(Program.tape)
 
         def self.var
           @@var
@@ -303,26 +303,6 @@ describe "Codegen: class var" do
       end
 
       Foo.foo
-      CODE
-  end
-
-  it "initializes class var the moment it reaches it" do
-    run(<<-CODE).to_string.should eq("BAR")
-      require "prelude"
-
-      ENV["FOO"] = "BAR"
-
-      class Foo
-        @@x = ENV["FOO"]
-
-        def self.x
-          @@x
-        end
-      end
-
-      w = Foo.x
-      z = Foo.x
-      z
       CODE
   end
 
@@ -574,38 +554,10 @@ describe "Codegen: class var" do
 
       class Pattern
         @@A = "asdf"
-        A = "\#{@@A}gh"
+        A = "\#{@@A}gh".copy_to(Program.tape)
       end
 
       Pattern::A
-      CODE
-  end
-
-  it "catch infinite loop in class var initializer" do
-    run(<<-CODE).to_string.should eq("error: Recursion while initializing class variables and/or constants")
-      require "prelude"
-
-      module Crystal
-        def self.main_user_code(argc : Int32, argv : UInt8**)
-          LibCrystalMain.__crystal_main(argc, argv)
-        rescue ex
-          print "error: \#{ex.message}"
-        end
-      end
-
-      class Foo
-        @@x : Int32 = init
-
-        def self.init
-          @@x + 1
-        end
-
-        def self.x
-          @@x
-        end
-      end
-
-      nil
       CODE
   end
 

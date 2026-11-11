@@ -237,7 +237,14 @@ describe "Code gen: C ABI" do
       end
 
       module Global
-        class_property x = 0i64
+        @@x = 0i64
+
+        def self.x
+          @@x
+        end
+
+        def self.x=(@@x)
+        end
       end
 
       fun callback(v : LibFoo::S)

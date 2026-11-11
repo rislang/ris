@@ -4,7 +4,7 @@ describe "Codegen: special vars" do
   ["$~", "$?"].each do |name|
     it "codegens #{name}" do
       run(<<-CODE).to_string.should eq("hey")
-        class Object; def not_nil!; self; end; end
+        class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
         def foo(z)
           #{name} = "hey"
@@ -14,51 +14,11 @@ describe "Codegen: special vars" do
         #{name}
         CODE
     end
-
-    it "codegens #{name} with nilable (1)" do
-      run(<<-CODE).to_string.should eq("ouch")
-        require "prelude"
-
-        def foo
-          if 1 == 2
-            #{name} = "foo"
-          end
-        end
-
-        foo
-
-        begin
-          #{name}
-        rescue ex
-          "ouch"
-        end
-        CODE
-    end
-
-    it "codegens #{name} with nilable (2)" do
-      run(<<-CODE).to_string.should eq("foo")
-        require "prelude"
-
-        def foo
-          if 1 == 1
-            #{name} = "foo"
-          end
-        end
-
-        foo
-
-        begin
-          #{name}
-        rescue ex
-          "ouch"
-        end
-        CODE
-    end
   end
 
   it "codegens $~ two levels" do
     run(<<-CODE).to_string.should eq("hey")
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def foo
         $? = "hey"
@@ -74,38 +34,11 @@ describe "Codegen: special vars" do
       CODE
   end
 
-  it "works lazily" do
-    run(<<-CODE).to_string.should eq("bar")
-      require "prelude"
-
-      class Foo
-        getter string
-
-        def initialize(@string : String)
-        end
-      end
-
-      def bar(&block : Foo -> _)
-        block
-      end
-
-      block = bar do |foo|
-        case foo.string
-        when /foo-(.+)/
-          $1
-        else
-          "baz"
-        end
-      end
-      block.call(Foo.new("foo-bar"))
-      CODE
-  end
-
   it "codegens in block" do
     run(<<-CODE).to_string.should eq("hey")
       require "prelude"
 
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def foo
         $~ = "hey"
@@ -124,7 +57,7 @@ describe "Codegen: special vars" do
     run(<<-CODE).to_string.should eq("hey")
       require "prelude"
 
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def bar
         yield
@@ -149,7 +82,7 @@ describe "Codegen: special vars" do
     run(<<-CODE).to_string.should eq("hey")
       require "prelude"
 
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def foo
         $~ = "hey"
@@ -164,7 +97,7 @@ describe "Codegen: special vars" do
 
   it "codegens after block 2" do
     run(<<-CODE).to_string.should eq("bye")
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def baz
         $~ = "bye"
@@ -183,7 +116,7 @@ describe "Codegen: special vars" do
 
   it "codegens with default argument" do
     run(<<-CODE).to_string.should eq("bye")
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def baz(x = 1)
         $~ = "bye"
@@ -196,7 +129,7 @@ describe "Codegen: special vars" do
 
   it "preserves special vars in macro expansion with call with default arguments (#824)" do
     run(<<-CODE).to_string.should eq("yes")
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def bar(x = 0)
         $~ = "yes"
@@ -213,7 +146,7 @@ describe "Codegen: special vars" do
 
   it "allows with primitive" do
     run(<<-CODE).to_i.should eq(123)
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def foo
         $~ = 123
@@ -228,7 +161,7 @@ describe "Codegen: special vars" do
 
   it "allows with struct" do
     run(<<-CODE).to_i.should eq(123)
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       struct Foo
         def initialize(@x : Int32)
@@ -256,7 +189,7 @@ describe "Codegen: special vars" do
 
   it "preserves special vars if initialized inside block (#2194)" do
     run(<<-CODE).to_string.should eq("foo")
-      class Object; def not_nil!; self; end; end
+      class Object; def not_nil!; self; end; end; struct Nil; def not_nil!; self; end; end; struct String; def not_nil!; self; end; end
 
       def foo
         $~ = "foo"
