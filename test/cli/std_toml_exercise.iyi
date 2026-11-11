@@ -318,7 +318,14 @@ def gen_table(rng : Rng, depth : Int32, least : Int32,
               arrays : SlicePool(TapeAny),
               maps : SlicePool(TapePair(TapeAny)?),
               texts : String::Builder) : TapeMap(TapeAny)
-  pairs = TapeMap(TapeAny).new(maps)
+  gen_table_into(TapeMap(TapeAny).new(maps), rng, depth, least,
+    arrays, maps, texts)
+end
+
+def gen_table_into(pairs : TapeMap(TapeAny), rng : Rng, depth : Int32,
+                   least : Int32, arrays : SlicePool(TapeAny),
+                   maps : SlicePool(TapePair(TapeAny)?),
+                   texts : String::Builder) : TapeMap(TapeAny)
   n = least + rng.below(5)
   tries = 0
   while pairs.size < n && tries < 20
@@ -585,7 +592,7 @@ class Scribe
       prefix = r == 2 ? "0x" : (r == 3 ? "0o" : "0b")
       digits = v.to_u64.to_s(base)
       digits = digits.upcase if @rng.chance(2)
-      @rng.below(3).times { digits = "0" + digits }
+      digits = "0" * @rng.below(3) + digits
       return prefix + underscored(digits)
     end
     text = v.to_s

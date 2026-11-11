@@ -382,11 +382,11 @@ by_name = List.new([1, 2, 3, 4, 5]).tally_by { |x| {parity: x % 2} }
 assert_str("#{by_name.size} #{by_name[{parity: 1}]}", "2 3", "traits: tally_by a named tuple")
 
 # 57. index_by
-ib = small_seq.index_by { |x| x.to_s }
+ib = small_seq.index_by { |x| x.to_s.copy_to(Program.tape) }
 assert_eq(ib["3"], 3, "enum: index_by")
 
 # 58. to_h
-th = small_seq.to_h { |x| {x.to_s, x * 10} }
+th = small_seq.to_h { |x| {x.to_s.copy_to(Program.tape), x * 10} }
 assert_eq(th["3"], 30, "enum: to_h")
 
 # 59. each_slice
@@ -405,7 +405,7 @@ assert_eq(cons.size, 6, "enum: each_cons count")
 
 # 62. each_cons_pair
 cons_pairs = [] of String
-small_seq.each_cons_pair { |a, b| cons_pairs << "#{a}-#{b}" }
+small_seq.each_cons_pair { |a, b| cons_pairs << "#{a}-#{b}".copy_to(Program.tape) }
 assert_str(cons_pairs.join(" "), "3-1 1-4", "enum: each_cons_pair")
 
 # 63. each_step
@@ -461,7 +461,7 @@ assert_eq(seq.sum_by { |x| x * 2 }, 62, "enum: sum_by")
 # asking the block, and a fold that began at a nil restarted without the
 # block. What the other library answers for the same three.
 nil_pairs = [] of String
-([nil, 2, nil, 3] of Int32?).each_cons_pair { |a, b| nil_pairs << "#{a.inspect}-#{b.inspect}" }
+([nil, 2, nil, 3] of Int32?).each_cons_pair { |a, b| nil_pairs << "#{a.inspect}-#{b.inspect}".copy_to(Program.tape) }
 assert_str(nil_pairs.join(" "), "nil-2 2-nil nil-3", "enum: each_cons_pair after a nil element")
 nil_chunks = ([nil, nil, 1] of Int32?).chunk_while { |a, b| false }
 assert_eq(nil_chunks.size, 3, "enum: chunk_while after a nil element")

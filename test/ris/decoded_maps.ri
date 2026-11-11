@@ -7,6 +7,9 @@ def check_maps : Nil
   numbers = YAML.read_value(yaml, Hash(String, Int32))
   raise "YAML typed map" unless numbers["a"] == 1 && numbers["b"] == 2
   toml = TOML.parse("a = 3\nb = 4\n").or_panic
+  maybe = TOML.parse?("a = 3\nb = 4\n")
+  raise "TOML optional document" unless maybe && maybe["a"].as_i == 3
+  raise "TOML optional error" unless TOML.parse?("a = [").nil?
   more = TOML.read_value(toml, Hash(String, Int32))
   raise "TOML typed map" unless more["a"] == 3 && more["b"] == 4
 end

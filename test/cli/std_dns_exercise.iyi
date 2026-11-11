@@ -180,7 +180,7 @@ end
 
 # Bytes from hex digits, anything else between them passed over: RFC 9460
 # appendix D's vectors as the RFC prints them.
-def hex_bytes(text : String) : Bytes
+def hex_bytes(text : String) : Array(UInt8)
   digits = [] of Int32
   raw = text
   index = 0
@@ -193,7 +193,7 @@ def hex_bytes(text : String) : Bytes
     end
     index = index + 1
   end
-  out = Bytes.new(digits.size // 2)
+  out = Array(UInt8).new(digits.size // 2, 0_u8)
   index = 0
   while index < out.size
     out[index] = ((digits[index * 2] << 4) | digits[index * 2 + 1]).to_u8
@@ -219,7 +219,10 @@ end
 # The SVCB record in *text*'s hex, read as one owned by example.com, which
 # must read.
 def svcb_ok(text : String, label : String) : SvcbRecord
-  got = SvcbRecord.parse(hex_text(text), "example.com")
+  svcb_ok(SvcbRecord.parse(hex_text(text), "example.com"), label)
+end
+
+def svcb_ok(got : SvcbRecord | DnsError, label : String) : SvcbRecord
   raise "ASSERTION FAILED: #{label}: #{got.message}" if got.is_a?(DnsError)
   got
 end
@@ -246,8 +249,13 @@ end
 # prerequisites passed over, and from its update section each record of
 # type HTTPS's owner and data; nil when it does not read.
 def update_records(packet : String) : Array(Tuple(String, String))?
+  update_records(packet, String::Builder.new(512),
+    Array(Tuple(String, String)).new)
+end
+
+def update_records(packet : String, names : String::Builder,
+                   found : Array(Tuple(String, String))) : Array(Tuple(String, String))?
   raw = packet
-  names = String::Builder.new(512)
   zones = (raw.byte_at(4).to_i32 << 8) | raw.byte_at(5).to_i32
   prerequisites = (raw.byte_at(6).to_i32 << 8) | raw.byte_at(7).to_i32
   updates = (raw.byte_at(8).to_i32 << 8) | raw.byte_at(9).to_i32
@@ -259,7 +267,6 @@ def update_records(packet : String) : Array(Tuple(String, String))?
     at = read[1] + 4
     index = index + 1
   end
-  found = [] of Tuple(String, String)
   index = 0
   while index < prerequisites + updates
     read = DnsTapeMessage.read_name(packet, at, names)
@@ -270,7 +277,11 @@ def update_records(packet : String) : Array(Tuple(String, String))?
     length = (raw.byte_at(at + 8).to_i32 << 8) | raw.byte_at(at + 9).to_i32
     return nil if at + 10 + length > packet.size
     if index >= prerequisites && type == DnsTapeRecord::HTTPS
-      found << {owner.downcase, packet[at + 10, length]}
+      start = names.bytesize
+      owner.each_byte do |byte|
+        names.push(byte >= 65_u8 && byte <= 90_u8 ? byte + 32_u8 : byte)
+      end
+      found << {names.finish[start, owner.bytesize], packet[at + 10, length]}
     end
     at = at + 10 + length
     index = index + 1
@@ -511,8 +522,8 @@ check said.includes?("cut short"), "a key and length cut short are refused: #{sa
 said = svcb_refused("00")
 check said.includes?("shorter than"), "a record shorter than a priority and a target is refused: #{said}"
 ["0000", "0001", "0003", "0004", "0006"].each do |key|
-  said = svcb_refused("0001 #{FOO_COM} #{key} 0000")
-  check said.includes?("bytes, where") || said.includes?("empty, where"), "key #{key} without a value is refused (D.3): #{said}"
+  refusal = svcb_refused("0001 #{FOO_COM} #{key} 0000")
+  check refusal.includes?("bytes, where") || refusal.includes?("empty, where"), "key #{key} without a value is refused (D.3): #{refusal}"
 end
 said = svcb_refused("0001 #{FOO_COM} 0001 0003 026832 0002 0003 616263")
 check said.includes?("where it is empty"), "no-default-alpn with a value is refused (D.3): #{said}"
@@ -527,8 +538,8 @@ check said.includes?("without alpn"), "no-default-alpn without alpn is refused: 
  "0001 00 0004 0005 c000020100"                   => "five bytes of ipv4hint",
  "0001 00 0006 000f 20010db800000000000000000000" => "fifteen bytes of ipv6hint",
  "0001 00 0005 0006 0005 01020304"                => "an ECHConfigList whose length is not its own"}.each do |text, what|
-  said = svcb_refused(text)
-  check said.starts_with?("SvcParamKey "), "#{what} is refused: #{said}"
+  refusal = svcb_refused(text)
+  check refusal.starts_with?("SvcParamKey "), "#{what} is refused: #{refusal}"
 end
 said = svcb_refused("0001 c00c")
 check said.includes?("compressed"), "a compressed target is refused: #{said}"
@@ -538,33 +549,22 @@ puts "svcb_malformed: ok"
 
 # --- A name server in this process ---
 
-# TCP's port first, and UDP on the same number, tried again on a refusal:
-# Windows holds port ranges back (its excluded ranges) and answers a bind
-# in one "access denied". An ephemeral UDP port fell in one on a CI runner,
-# and then a UDP bind on the port an ephemeral TCP listener had taken.
-#
-# A refused port's listener is kept open until one is found: Windows hands
-# out ephemeral TCP ports one after another, and an excluded UDP range is
-# wider than twenty of them - twenty tries closed and reopened, a CI run
-# panicked at 127.0.0.1:51853 and its artifact run at 51873, twenty on. Held,
-# each try is a port the last did not cover, and two hundred step past a
-# range.
-tcp = IyiSocket.listen("127.0.0.1", 0)
-port = tcp.local_port
-bound = UdpSocket.bind?("127.0.0.1", port)
-refused = [] of IyiSocket
-while bound.is_a?(SocketError) && refused.size < 200
-  refused << tcp
-  tcp = IyiSocket.listen("127.0.0.1", 0)
-  port = tcp.local_port
-  bound = UdpSocket.bind?("127.0.0.1", port)
+# Probe both transports; the serving tasks bind the selected number.
+def dns_port : Int32
+  200.times do
+    listener = IyiSocket.listen("127.0.0.1", 0)
+    port = listener.local_port
+    udp = UdpSocket.bind?("127.0.0.1", port)
+    listener.close
+    if udp.is_a?(UdpSocket)
+      udp.close
+      return port
+    end
+  end
+  raise "no port available for both DNS transports"
 end
-refused.each(&.close)
-raise bound.message if bound.is_a?(SocketError)
-server = bound
-forger = UdpSocket.bind("127.0.0.1", 0)
-log = [] of String
-slow_seen = 0
+
+port = dns_port
 
 # An SVCB record's data: *priority*, *target* ("." for the root), and the
 # params as hex.
@@ -626,12 +626,12 @@ def https_answer(query : String | Bytes, name : String) : Array(UInt8)
 end
 
 # The answer to one query, by name: what each section below asks about.
-def respond(server : UdpSocket, forger : UdpSocket, query : String, host : String, peer_port : Int32, log : Array(String), slow_seen : Int32) : Int32
+def respond(server : UdpSocket, forger : UdpSocket, query : String, host : String, peer_port : Int32, slow_seen : Int32) : Int32
   parsed = DnsTapeMessage.parse(query)
   return slow_seen unless parsed.is_a?(DnsTapeMessage)
   name = parsed.question_name.downcase
   type = parsed.question_type
-  log << "#{name}/#{type == DnsTapeRecord::A ? "A" : (type == DnsTapeRecord::AAAA ? "AAAA" : "HTTPS")}"
+  RisBoard.post(RisDnsQuestion.new("#{name}/#{type == DnsTapeRecord::A ? "A" : (type == DnsTapeRecord::AAAA ? "AAAA" : "HTTPS")}"))
   if type == DnsTapeRecord::HTTPS
     server.send_to(bytes_of(https_answer(query, name)), host, peer_port)
     return slow_seen
@@ -870,6 +870,30 @@ def happy_eyeballs : Nil
   live.close
 end
 
+@[OnTape]
+struct RisDnsRaceConfig
+  getter hole : String
+  def initialize(@hole : String)
+  end
+end
+
+struct RisDnsRaceWon
+  getter connected : Bool
+  def initialize(@connected : Bool)
+  end
+end
+
+struct RisDnsRaceRelease
+end
+
+@[OnTape]
+struct RisDnsRaceCancelled
+  getter answer : String
+  getter spent : Int64
+  def initialize(@answer : String, @spent : Int64)
+  end
+end
+
 def he_races(he : Resolver, has_six : Bool, hole : String, live : IyiSocket, he_port : Int32) : Nil
   at_hole = IyiSocket.endpoint(hole, he_port)
 
@@ -907,18 +931,30 @@ def he_races(he : Resolver, has_six : Bool, hole : String, live : IyiSocket, he_
   # Twenty races at once, each with a losing attempt still under way when
   # it is won: every loser's socket is closed.
   before = open_descriptors
-  won = [] of IyiSocket
+  won = 0
   group do |r|
     20.times do
+      RisBoard.post(RisDnsRaceConfig.new(hole))
       r.spawn do
-        got = IyiSocket.connect("slow.he.test", he_port, he, 5000)
-        won << got if got.is_a?(IyiSocket)
+        config = RisBoard.take(RisDnsRaceConfig)
+        unless config.is_a?(Cancelled)
+          racer = Resolver.new([] of String,
+            hosts: "#{config.hole} slow.he.test\n127.0.0.1 slow.he.test\n")
+          got = IyiSocket.connect("slow.he.test", he_port, racer, 5000)
+          RisBoard.post(RisDnsRaceWon.new(got.is_a?(IyiSocket)))
+          RisBoard.take(RisDnsRaceRelease)
+          got.close if got.is_a?(IyiSocket)
+        end
         0
       end
     end
+    20.times do
+      result = RisBoard.take(RisDnsRaceWon)
+      won += 1 if result.is_a?(RisDnsRaceWon) && result.connected
+    end
+    20.times { RisBoard.post(RisDnsRaceRelease.new) }
   end
-  check won.size == 20, "twenty connects raced at once all connect: #{won.size} did"
-  won.each(&.close)
+  check won == 20, "twenty connects raced at once all connect: #{won} did"
   index = 0
   while index < 20
     peer = live.accept
@@ -946,19 +982,27 @@ def he_races(he : Resolver, has_six : Bool, hole : String, live : IyiSocket, he_
 
   # The caller's task cancelled 600 ms in, three attempts under way.
   before = open_descriptors
-  answer = ""
-  spent = 0_i64
+  RisBoard.post(RisDnsRaceConfig.new(hole))
   group do |c|
     c.spawn do
-      started = Resolver.now_ms
-      got = IyiSocket.connect("hang.he.test", he_port, he, 10000)
-      spent = Resolver.now_ms - started
-      answer = connected_to(got)
+      config = RisBoard.take(RisDnsRaceConfig)
+      unless config.is_a?(Cancelled)
+        racer = Resolver.new([] of String,
+          hosts: "#{config.hole} hang.he.test\n" * 3)
+        started = Resolver.now_ms
+        got = IyiSocket.connect("hang.he.test", he_port, racer, 10000)
+        RisBoard.post(RisDnsRaceCancelled.new(connected_to(got),
+          Resolver.now_ms - started))
+      end
       0
     end
     sleep(600)
     c.cancel_children
   end
+  result = RisBoard.take(RisDnsRaceCancelled)
+  raise "cancelled result was not sent" if result.is_a?(Cancelled)
+  answer = result.answer
+  spent = result.spent
   same "cancelled", answer, "a connect whose task is cancelled answers Cancelled"
   check spent < 1500, "cancelling the caller cancels every attempt: the connect took #{spent} ms of its 10000"
   after = open_descriptors
@@ -966,22 +1010,85 @@ def he_races(he : Resolver, has_six : Bool, hole : String, live : IyiSocket, he_
   puts "he_cancel: ok (cancelled at 600 ms, answered Cancelled within 1500 ms, every attempt's socket closed)"
 end
 
-hosts_file = "192.0.2.50 pinned.test\n2001:db8::50 pinned.test\n"
-resolver = Resolver.new(["127.0.0.1:#{port}"], search: ["corp.test", "test"], ndots: 1,
-  timeout_ms: 300, attempts: 2, hosts: hosts_file)
+@[OnTape]
+struct RisDnsQuestion
+  getter name : String
 
+  def initialize(@name : String)
+  end
+end
+
+class RisDnsLog
+  @entries = Array(String).new
+  @text = String::Builder.new
+
+  private def drain : Nil
+    loop do
+      message = RisBoard.poll(RisDnsQuestion)
+      break if message.is_a?(Cancelled)
+      question = message[0]
+      break unless question
+      at = @text.bytesize
+      @text << question.name
+      @entries << @text.finish[at, question.name.bytesize]
+    end
+  end
+
+  def clear : Nil
+    drain
+    @entries.clear
+    @text.clear
+  end
+
+  def join(separator : String) : String
+    drain
+    @entries.join(separator)
+  end
+
+  def count(& : String -> Bool) : Int32
+    drain
+    @entries.count { |entry| yield entry }
+  end
+
+  def empty? : Bool
+    drain
+    @entries.empty?
+  end
+
+  def includes?(name : String) : Bool
+    drain
+    @entries.includes?(name)
+  end
+end
+
+struct RisDnsUdpReady
+end
+
+struct RisDnsTcpReady
+end
+
+# The tasks bind the chosen number and own their sockets until cancellation.
 group do |g|
   g.spawn do
+    udp_server = UdpSocket.bind("127.0.0.1", port)
+    udp_forger = UdpSocket.bind("127.0.0.1", 0)
+    defer udp_server.close
+    defer udp_forger.close
+    RisBoard.post(RisDnsUdpReady.new)
+    slow_seen = 0
     while true
-      got = server.receive_from(1500)
+      got = udp_server.receive_from(1500)
       break if got.is_a?(Cancelled)
-      slow_seen = respond(server, forger, got[0], got[1], got[2], log, slow_seen)
+      slow_seen = respond(udp_server, udp_forger, got[0], got[1], got[2], slow_seen)
     end
     0
   end
   g.spawn do
+    tcp_server = IyiSocket.listen("127.0.0.1", port)
+    defer tcp_server.close
+    RisBoard.post(RisDnsTcpReady.new)
     while true
-      conn = tcp.accept
+      conn = tcp_server.accept
       break if conn.is_a?(Cancelled)
       if conn.is_a?(IyiSocket)
         respond_tcp(conn)
@@ -991,6 +1098,12 @@ group do |g|
     0
   end
   g.spawn do
+    RisBoard.take(RisDnsUdpReady)
+    RisBoard.take(RisDnsTcpReady)
+    log = RisDnsLog.new
+    resolver = Resolver.new(["127.0.0.1:#{port}"],
+      search: ["corp.test", "test"], ndots: 1, timeout_ms: 300,
+      attempts: 2, hosts: "192.0.2.50 pinned.test\n2001:db8::50 pinned.test\n")
     same "192.0.2.1 2001:db8::1", show(resolver.resolve("a.test")), "A and then AAAA"
     puts "a_record: ok"
     puts "aaaa_record: ok"
@@ -1167,9 +1280,7 @@ group do |g|
 
     happy_eyeballs
 
-    server.close
-    forger.close
-    tcp.close
+    g.cancel_children
     0
   end
 end

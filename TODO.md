@@ -186,6 +186,10 @@ Unknown must be refused (SPEC 3.6).
 
 * Build each test/cli program, group refusals by message, fix per group.
   2026-11-11, minitest: 91 of 139 pass --no-codegen, up from 87.
+  A later round stopped at a usage limit before its count: its ports
+  (acme, toml, yaml, http exercises; Enumerable and multipart results)
+  are in, 5 more of test/cli/*.iyi build, and the groups below are not
+  yet rewritten for them.
   This round is incomplete: 48 programs still fail. The partly ported
   programs and scratch-result and def-data groups still need work; no
   new user decision is needed for their routine ports. The five deferred

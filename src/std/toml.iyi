@@ -2530,7 +2530,10 @@ pub struct TOML
   end
 
   def self.parse?(text : String) : TapeAny?
-    parsed = parse(text)
+    parsed_or_nil(parse(text))
+  end
+
+  private def self.parsed_or_nil(parsed : TapeAny | TOMLError) : TapeAny?
     parsed.is_a?(TOMLError) ? nil : parsed
   end
 

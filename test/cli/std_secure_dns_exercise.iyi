@@ -73,11 +73,20 @@ end
 # The addresses of one family: what dig asks for with one type.
 def family(got : Array(IPAddress) | DnsError | Cancelled, type : String) : String
   return show(got) unless got.is_a?(Array(IPAddress))
-  kept = [] of String
+  text = ""
+  write_family(got, type, text)
+  text
+end
+
+def write_family(got : Array(IPAddress), type : String,
+                 writer : String::Builder) : Nil
   got.each do |address|
-    kept << address.to_s if (type == "A") == address.is_a?(IPv4Address)
+    if (type == "A") == address.is_a?(IPv4Address)
+      writer << " " unless writer.bytesize == 0
+      writer << address.to_s
+    end
   end
-  kept.join(" ")
+  nil
 end
 
 # The zone's HTTPS record at svc.zone.test, as `SvcbRecord#to_s` and dig
@@ -127,14 +136,21 @@ def answers(via : String, resolver : Resolver) : Nil
 end
 
 def stats(resolver : Resolver) : Hash(String, Int32)
-  txt_2_texts = [] of String
-  txt_2_bytes = String::Builder.new(1024)
+  stats(resolver, Hash(String, Int32).new, Array(String).new,
+    String::Builder.new(1024))
+end
+
+def stats(resolver : Resolver, read : Hash(String, Int32),
+          txt_2_texts : Array(String),
+          txt_2_bytes : String::Builder) : Hash(String, Int32)
   got = (resolver.txt("stats.zone.test", txt_2_texts, txt_2_bytes) || txt_2_texts)
   raise "ASSERTION FAILED: the server's stats: #{show_txt(got)}" unless got.is_a?(Array(String)) && got.size == 1
-  read = {} of String => Int32
   got[0].split(' ').each do |pair|
     parts = pair.split('=')
-    read[parts[0]] = parts[1].to_i
+    key = parts[0]
+    at = txt_2_bytes.bytesize
+    txt_2_bytes << key
+    read[txt_2_bytes.finish[at, key.bytesize]] = parts[1].to_i
   end
   read
 end
@@ -144,8 +160,11 @@ end
 # how many not padded as RFC 7830 and RFC 8467 4.1 have a client pad - and
 # the sentence it said them in, which names the first fault.
 def padding(resolver : Resolver) : Tuple(Int32, Int32, Int32, String)
-  txt_3_texts = [] of String
-  txt_3_bytes = String::Builder.new(1024)
+  padding(resolver, Array(String).new, String::Builder.new(1024))
+end
+
+def padding(resolver : Resolver, txt_3_texts : Array(String),
+            txt_3_bytes : String::Builder) : Tuple(Int32, Int32, Int32, String)
   got = (resolver.txt("padding.zone.test", txt_3_texts, txt_3_bytes) || txt_3_texts)
   raise "ASSERTION FAILED: the server's padding counts: #{show_txt(got)}" unless got.is_a?(Array(String)) && got.size == 1
   words = got[0].split(' ')

@@ -367,7 +367,10 @@ pub trait Enumerable
   end
 
   def tally : Hash(Elem, Int32) where Elem : Hashable
-    counts = {} of Elem => Int32
+    tally(Hash(Elem, Int32).new)
+  end
+
+  def tally(counts : Hash(Elem, Int32)) : Hash(Elem, Int32) where Elem : Hashable
     each { |e| counts[e] = (counts[e]? || 0) + 1 }
     counts
   end
@@ -410,27 +413,23 @@ pub trait Enumerable
   end
 
   def group_by(& : Elem -> U) : Hash(U, Array(Elem)) forall U : Hashable
-    groups = {} of U => Array(Elem)
-    each do |e|
-      key = yield e
-      bucket = groups[key]?
-      if bucket.nil?
-        groups[key] = [e]
-      else
-        bucket << e
-      end
-    end
-    groups
+    RisGrouped(Elem, U).new(to_a) { |e| yield e }.value
   end
 
   def index_by(& : Elem -> U) : Hash(U, Elem) forall U : Hashable
-    result = {} of U => Elem
+    index_by(Hash(U, Elem).new) { |e| yield e }
+  end
+
+  def index_by(result : Hash(U, Elem), & : Elem -> U) : Hash(U, Elem) forall U : Hashable
     each { |e| result[yield e] = e }
     result
   end
 
   def to_h(& : Elem -> Tuple(K, V)) : Hash(K, V) forall K : Hashable, V
-    result = {} of K => V
+    to_h(Hash(K, V).new) { |e| yield e }
+  end
+
+  def to_h(result : Hash(K, V), & : Elem -> Tuple(K, V)) : Hash(K, V) forall K : Hashable, V
     each do |e|
       pair = yield e
       result[pair[0]] = pair[1]
@@ -452,7 +451,7 @@ pub trait Enumerable
       current << e
       if current.size == n
         yield current
-        current = [] of Elem
+        current.clear
       end
     end
     yield current unless current.empty?
@@ -471,7 +470,7 @@ pub trait Enumerable
       current << e
       if current.size == n
         slices << current
-        current = [] of Elem
+        current.clear
       end
     end
     slices << current unless current.empty?
@@ -501,7 +500,7 @@ pub trait Enumerable
     each do |e|
       window << e
       window.shift if window.size > n
-      result << window.dup if window.size == n
+      result << window if window.size == n
     end
     result
   end
@@ -541,7 +540,8 @@ pub trait Enumerable
         current << e
       else
         chunks << current
-        current = [e]
+        current.clear
+        current << e
       end
       previous = e
       started = true
@@ -785,7 +785,10 @@ pub trait Enumerable
   end
 
   def tally_by(& : Elem -> U) : Hash(U, Int32) forall U : Hashable
-    counts = {} of U => Int32
+    tally_by(Hash(U, Int32).new) { |e| yield e }
+  end
+
+  def tally_by(counts : Hash(U, Int32), & : Elem -> U) : Hash(U, Int32) forall U : Hashable
     each do |e|
       key = yield e
       counts[key] = (counts[key]? || 0) + 1
@@ -833,3 +836,31 @@ end
 # Methods taking block transforms map element keys into `Comparable`, `Num`, or
 # `Hashable` traits, providing full coverage for sorting, min/max calculations,
 # grouping, counting, and slicing.
+
+# Build the map and its bucket storage at the caller's constructor scope.
+@[OnTape]
+struct RisGrouped(E, U)
+  getter value : Hash(U, Array(E))
+
+  def initialize(elements : Array(E), & : E -> U)
+    groups = Hash(U, Array(E)).new
+    indexes = Hash(U, Int32).new
+    buckets = Array(Array(E)).new(elements.size) { [] of E }
+    buffer = Array(E).new(1)
+    used = 0
+    elements.each do |element|
+      key = yield element
+      if index = indexes[key]?
+        buckets[index] << element
+      else
+        buffer.clear
+        buffer << element
+        buckets[used] = buffer
+        indexes[key] = used
+        used += 1
+      end
+    end
+    indexes.each { |key, index| groups[key] = buckets[index] }
+    @value = groups
+  end
+end

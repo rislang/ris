@@ -3413,6 +3413,10 @@ pub class RisHttpClientExchange
 
   def take_connection(result : IyiSocket | Cancelled | SocketError) : IyiSocket | Cancelled | SocketError
     return result unless result.is_a?(IyiSocket)
+    adopt_socket(result)
+  end
+
+  def adopt_socket(result : IyiSocket) : IyiSocket
     @socket.take_descriptor(result)
     @socket
   end
@@ -4818,12 +4822,24 @@ pub struct HTTP
   # connections are then taken under *base* again.
   # Not private: `ByName#by_records` calls it.
   def self.by_records(state : RisHttpClientExchange, client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : IyiSocket | Cancelled | SocketError | HTTPError | Nil
-    made = connect_by_records(state, client, origin, host, port, base, through, timeout_ms)
+    by_records_into(state, client, origin, host, port, base, through,
+      timeout_ms, String::Builder.new)
+  end
+
+  private def self.by_records_into(state : RisHttpClientExchange, client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32, errors : String::Builder) : IyiSocket | Cancelled | SocketError | HTTPError | Nil
+    records_result(client, origin, base,
+      connect_by_records(state, client, origin, host, port, base, through,
+        timeout_ms, errors))
+  end
+
+  private def self.records_result(client : HTTPClient, origin : String,
+                                  base : TlsConfig,
+                                  made : IyiSocket | Cancelled | SocketError | HTTPError | Nil) : IyiSocket | Cancelled | SocketError | HTTPError | Nil
     client.https_config(origin, base, base.ech_configs, base.alpn) if made.nil?
     made
   end
 
-  private def self.connect_by_records(state : RisHttpClientExchange, client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32) : IyiSocket | Cancelled | SocketError | HTTPError | Nil
+  private def self.connect_by_records(state : RisHttpClientExchange, client : HTTPClient, origin : String, host : String, port : Int32, base : TlsConfig, through : Resolver?, timeout_ms : Int32, errors : String::Builder) : IyiSocket | Cancelled | SocketError | HTTPError | Nil
     return nil if IyiSocket.localhost?(host) || !DnsName.valid?(host)
     resolver = through || client.system_resolver
     store = SvcbStore.new
@@ -4831,7 +4847,7 @@ pub struct HTTP
     return found if found.is_a?(Cancelled)
     if found.is_a?(DnsError)
       return nil if found.not_found? || found.no_address? || found.malformed? || resolver.upstreams.empty?
-      return HTTPError.new("#{found.message}; a failed lookup of HTTPS records over encrypted upstreams is not passed over (RFC 9460 section 3.1)")
+      return kept_http_error("#{found.message}; a failed lookup of HTTPS records over encrypted upstreams is not passed over (RFC 9460 section 3.1)", errors)
     end
     endpoints = https_endpoints(found, base.alpn, port)
     # RFC 9848 section 5.1: where every endpoint is encrypted, none that
@@ -4847,10 +4863,10 @@ pub struct HTTP
       socket = through ? IyiSocket.connect(endpoint.host, endpoint.port, through, wait) : IyiSocket.connect(endpoint.host, endpoint.port, wait)
       return socket if socket.is_a?(Cancelled)
       if socket.is_a?(SocketError)
-        failed = socket
+        failed = socket.kept(errors)
         next
       end
-      socket = state.take_connection(socket).as(IyiSocket)
+      socket = state.adopt_socket(socket)
       client.made
       # Where a retry goes: the address this connection reached, not one
       # a new lookup might give, which could be another server's under
@@ -4863,20 +4879,29 @@ pub struct HTTP
         # Turned down, the server's certificate checked for the config's
         # public_name: asked once more under the retry_configs it sent, or
         # without ECH where it sent none. A second refusal is the failure.
-        socket = IyiSocket.connect(address, endpoint.port, wait)
-        return socket if socket.is_a?(Cancelled) || socket.is_a?(SocketError)
+        retry_socket = IyiSocket.connect(address, endpoint.port, wait)
+        return retry_socket if retry_socket.is_a?(Cancelled)
+        return retry_socket.kept(errors) if retry_socket.is_a?(SocketError)
         client.made
-        socket = state.take_connection(socket).as(IyiSocket)
+        adopted = state.adopt_socket(retry_socket)
         sent = problem.retry_configs
         retry = sent ? Array(UInt8).new(sent.bytesize) { |i| sent.byte_at(i) } : nil
-        config = client.https_config(origin, base, retry, endpoint.alpn)
-        problem = records_handshake(tls, client, origin, socket, host, config, timeout_ms)
+        retry_config = client.https_config(origin, base, retry, endpoint.alpn)
+        retry_problem = records_handshake(tls, client, origin, adopted, host, retry_config, timeout_ms)
+        return kept_http_error(retry_problem.message, errors) if retry_problem
+        return adopted
       end
-      return HTTPError.new(problem.message) if problem
+      return kept_http_error(problem.message, errors) if problem
       return socket
     end
     return failed if reliant && failed
     nil
+  end
+
+  private def self.kept_http_error(message : String, errors : String::Builder) : HTTPError
+    from = errors.bytesize
+    errors << message
+    HTTPError.new(errors.finish[from, message.bytesize])
   end
 
   # The handshake for *host* on *socket* under *config*, offering a ticket
@@ -4903,8 +4928,26 @@ pub struct HTTP
   # *alpn* with the protocols the record's alpn lists first, in *alpn*'s
   # order otherwise.
   def self.https_endpoints(answer : SvcbAnswer, alpn : Array(String), port : Int32) : Array(HttpsEndpoint)
+    https_endpoints(answer, alpn, port, endpoint_bytes(answer),
+      Array(String).new(answer.records.size * alpn.size, ""))
+  end
+
+  private def self.endpoint_bytes(answer : SvcbAnswer) : Array(UInt8)
+    count = 0
+    answer.records.each do |record|
+      if ech = record.ech
+        count += ech.bytesize
+      end
+    end
+    Array(UInt8).new(count, 0_u8)
+  end
+
+  def self.https_endpoints(answer : SvcbAnswer, alpn : Array(String), port : Int32,
+                           ech_bytes : Array(UInt8), protocols : Array(String)) : Array(HttpsEndpoint)
     spoken = alpn.empty? ? ["http/1.1"] : alpn
-    found = [] of HttpsEndpoint
+    candidates = [] of {String, Int32, Int32, Int32, Int32, Int32}
+    ech_at = 0
+    protocol_at = 0
     answer.records.each do |record|
       next if record.alias?
       next unless record.mandatory.all? { |key| key <= SvcbRecord::IPV6HINT }
@@ -4914,14 +4957,38 @@ pub struct HTTP
       next unless spoken.any? { |protocol| offered.includes?(protocol) }
       host = record.endpoint
       next unless DnsName.valid?(host)
-      ech = nil.as(Array(UInt8)?)
+      ech_start = ech_at
+      ech_size = -1
       if list = record.ech
         bytes = Array(UInt8).new(list.bytesize) { |index| list.byte_at(index) }
         configs = TlsEchConfig.read_list(bytes)
-        ech = bytes if configs.is_a?(Array(TlsEchConfig)) && configs.any? { |config| !config.hpke_suite.nil? }
+        if configs.is_a?(Array(TlsEchConfig)) && configs.any? { |config| !config.hpke_suite.nil? }
+          bytes.each_with_index { |byte, i| ech_bytes[ech_at + i] = byte }
+          ech_size = bytes.size
+          ech_at += bytes.size
+        end
       end
-      ordered = alpn.select { |protocol| listed.includes?(protocol) } + alpn.reject { |protocol| listed.includes?(protocol) }
-      found << HttpsEndpoint.new(host, record.port || port, ech, ordered)
+      protocol_start = protocol_at
+      alpn.each do |protocol|
+        if listed.includes?(protocol)
+          protocols[protocol_at] = protocol
+          protocol_at += 1
+        end
+      end
+      alpn.each do |protocol|
+        unless listed.includes?(protocol)
+          protocols[protocol_at] = protocol
+          protocol_at += 1
+        end
+      end
+      candidates << {host, record.port || port, ech_start, ech_size,
+        protocol_start, alpn.size}
+    end
+    found = [] of HttpsEndpoint
+    candidates.each do |entry|
+      ech = entry[3] < 0 ? nil : ech_bytes[entry[2], entry[3]]
+      found << HttpsEndpoint.new(entry[0], entry[1], ech,
+        protocols[entry[4], entry[5]])
     end
     found
   end
@@ -6112,17 +6179,18 @@ pub struct HTTP
 end
 
 # A `multipart/form-data` body (RFC 7578) read a part at a time, as it
-# arrives: `next_part` answers the next `Part`, nil after the last, and a
+# arrives: `next_part(part)` refills a caller-owned `Part`, nil at the end;
 # part's `read` answers its bytes up to the boundary, "" at its end. A part
 # not read to its end is read past by the next `next_part`. The body of a
-# request is `Request#multipart`'s; any `BodyReader` and boundary will do.
+# request is its `Incoming#body_io`; any `BodyReader` and boundary will do.
 # A part's head is refused past 16 KiB, and a body that ends before its
 # closing boundary is an `HTTPError`.
 pub class Multipart
   @body : BodyReader
   # `\r\n--` and the boundary: what ends a part.
   @delimiter : String
-  @held : String
+  @input : String::Builder
+  @offset : Int32
   @started : Bool
   @done : Bool
   @current : Part?
@@ -6137,7 +6205,10 @@ pub class Multipart
     @delimiter = "\r\n--" + boundary
     # A body starts with its first boundary without a CRLF before it; one
     # is put there, so every boundary is found the same way.
-    @held = "\r\n"
+    input = String::Builder.new
+    input << "\r\n"
+    @input = input
+    @offset = 0
     @started = false
     @done = false
     @current = nil
@@ -6160,12 +6231,17 @@ pub class Multipart
     found
   end
 
+  macro next_part
+    {% raise "Multipart#next_part takes a caller-owned Part.\n" +
+             "Declare part = Part.new(parts), then parts.next_part(part)." %}
+  end
+
   # The next part, nil after the last.
-  def next_part : Part | Nil | Cancelled | SocketError | HTTPError
+  def next_part(part : Part) : Part | Nil | Cancelled | SocketError | HTTPError
     return nil if @done
-    if part = @current
-      until part.finished?
-        got = part.read(65536)
+    if current = @current
+      until current.finished?
+        got = current.read(65536)
         return got unless got.is_a?(String)
       end
       @current = nil
@@ -6174,11 +6250,11 @@ pub class Multipart
       until @started
         found = find(@delimiter)
         if found >= 0
-          @held = @held[found + @delimiter.bytesize, @held.bytesize - found - @delimiter.bytesize]
+          @offset += found + @delimiter.bytesize
           @started = true
         else
           keep = @delimiter.bytesize - 1
-          @held = @held[@held.bytesize - keep, keep] if @held.bytesize > keep
+          @offset += held.bytesize - keep if held.bytesize > keep
           more = pull
           return more unless more.is_a?(Bool)
           return HTTPError.new("multipart body ends before its first boundary") unless more
@@ -6186,66 +6262,68 @@ pub class Multipart
       end
     end
     # After a boundary: `--` ends the body, CRLF begins a part's head.
-    while @held.bytesize < 2
+    while held.bytesize < 2
       more = pull
       return more unless more.is_a?(Bool)
       return HTTPError.new("multipart body ends after a boundary") unless more
     end
-    if @held.starts_with?("--")
+    if held.starts_with?("--")
       @done = true
       return nil
     end
     # Transport padding (spaces and tabs) may stand before the CRLF.
     skip = 0
     while true
-      while skip >= @held.bytesize
+      while skip >= held.bytesize
         more = pull
         return more unless more.is_a?(Bool)
         return HTTPError.new("multipart body ends after a boundary") unless more
       end
-      c = @held.byte_at(skip)
+      c = held.byte_at(skip)
       break unless c == 32_u8 || c == 9_u8
       skip = skip + 1
     end
-    @held = @held[skip, @held.bytesize - skip] if skip > 0
-    while @held.bytesize < 2
+    @offset += skip if skip > 0
+    while held.bytesize < 2
       more = pull
       return more unless more.is_a?(Bool)
       return HTTPError.new("multipart body ends after a boundary") unless more
     end
-    return HTTPError.new("a multipart boundary is not followed by CRLF") unless @held.starts_with?("\r\n")
-    @held = @held[2, @held.bytesize - 2]
+    return HTTPError.new("a multipart boundary is not followed by CRLF") unless held.starts_with?("\r\n")
+    @offset += 2
     head_end = find("\r\n\r\n")
     while head_end < 0
-      return HTTPError.new("a multipart part's head past #{HEAD_LIMIT} bytes") if @held.bytesize > HEAD_LIMIT
+      return HTTPError.new("a multipart part's head past #{HEAD_LIMIT} bytes") if held.bytesize > HEAD_LIMIT
       more = pull
       return more unless more.is_a?(Bool)
       unless more
         # A part with no fields at all: its blank line is the head's end.
-        return HTTPError.new("multipart body ends inside a part's head") unless @held.starts_with?("\r\n")
+        return HTTPError.new("multipart body ends inside a part's head") unless held.starts_with?("\r\n")
         break
       end
       head_end = find("\r\n\r\n")
     end
-    headers = {} of String => String
-    if @held.starts_with?("\r\n")
-      @held = @held[2, @held.bytesize - 2]
+    part.begin_part
+    if held.starts_with?("\r\n")
+      @offset += 2
     else
-      lines = HTTP.split_crlf("\r\n" + @held[0, head_end])
-      fields = HTTP.parse_fields(lines)
+      lines = HTTP.split_crlf("\r\n" + held[0, head_end])
+      fields = part.read_fields(lines)
       return HTTPError.new("a multipart part's head: #{fields}") if fields.is_a?(String)
-      headers = fields
-      @held = @held[head_end + 4, @held.bytesize - head_end - 4]
+      @offset += head_end + 4
     end
-    part = Part.new(self, headers)
     @current = part
     @part_done = false
     part
   end
 
+  private def held : String
+    @input.finish[@offset, @input.bytesize - @offset]
+  end
+
   # Where *pattern* is in what is held, -1 when it is not there yet.
   protected def find(pattern : String) : Int32
-    @held.byte_index(pattern) || -1
+    held.byte_index(pattern) || -1
   end
 
   # One more piece of the body onto what is held: false at its end.
@@ -6253,7 +6331,7 @@ pub class Multipart
     got = @body.read(65536)
     return got unless got.is_a?(String)
     return false if got.bytesize == 0
-    @held = @held + got
+    @input << got
     true
   end
 
@@ -6262,21 +6340,21 @@ pub class Multipart
   protected def part_read(max : Int32) : String | Cancelled | SocketError | HTTPError
     return "" if @part_done
     while true
-      if at = @held.byte_index(@delimiter)
+      if at = held.byte_index(@delimiter)
         take = at < max ? at : max
-        piece = @held[0, take]
-        @held = @held[take, @held.bytesize - take]
+        piece = held[0, take]
+        @offset += take
         if take == at
-          @held = @held[@delimiter.bytesize, @held.bytesize - @delimiter.bytesize]
+          @offset += @delimiter.bytesize
           @part_done = true
         end
         return piece
       end
-      safe = @held.bytesize - (@delimiter.bytesize - 1)
+      safe = held.bytesize - (@delimiter.bytesize - 1)
       if safe > 0
         take = safe < max ? safe : max
-        piece = @held[0, take]
-        @held = @held[take, @held.bytesize - take]
+        piece = held[0, take]
+        @offset += take
         return piece
       end
       more = pull
@@ -6292,11 +6370,23 @@ pub class Part
   getter headers : Hash(String, String)
   @owner : Multipart
   @finished : Bool
-  @pending : String?
+  @fields : RisHttpResponseBody
 
-  def initialize(@owner : Multipart, @headers : Hash(String, String))
+  def initialize(@owner : Multipart)
+    headers = Hash(String, String).new
+    fields = RisHttpResponseBody.new(headers)
+    @headers = headers
+    @fields = fields
     @finished = false
-    @pending = nil
+  end
+
+  def begin_part : Nil
+    @fields.begin_client
+    @finished = false
+  end
+
+  def read_fields(lines : Array(String)) : String?
+    HTTP.fields_into(@fields, lines, false)
   end
 
   def header(name : String) : String?

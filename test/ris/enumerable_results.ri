@@ -1,0 +1,25 @@
+# Collection results keep backing in their caller's constructor scope.
+import std/list::{List}
+
+source = List.new([1, 2, 1, 3])
+counts = source.tally
+raise "tally" unless counts[1] == 2 && counts[3] == 1
+parity = source.tally_by { |value| value % 2 }
+raise "tally_by" unless parity[0] == 1 && parity[1] == 3
+groups = source.group_by { |value| value % 2 }
+raise "group_by" unless groups[1] == [1, 1, 3] && groups[0] == [2]
+indexed = source.index_by { |value| value % 2 }
+raise "index_by" unless indexed[0] == 2 && indexed[1] == 3
+pairs = source.to_h { |value| {value, value * 10} }
+raise "to_h" unless pairs[1] == 10 && pairs[3] == 30
+windows = source.each_cons(2)
+raise "windows" unless windows == [[1, 2], [2, 1], [1, 3]]
+slices = source.each_slice(3)
+raise "slices" unless slices == [[1, 2, 1], [3]]
+chunks = source.chunk_while { |left, right| left < right }
+raise "chunks" unless chunks == [[1, 2], [1, 3]]
+more = source.appended(4)
+raise "append" unless more.size == 5 && more[4] == 4 && source.size == 4
+both = source.concatenated(more)
+raise "concatenate" unless both.size == 9 && both[8] == 4
+raise "inspect" unless more.to_s == "List[1, 2, 1, 3, 4]"

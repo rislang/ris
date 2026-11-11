@@ -1,0 +1,23 @@
+# Each part refills caller-owned fields; pulling a body keeps its bytes.
+import std/http::{BodyReader, Multipart, Part}
+
+text = "--B\r\nContent-Disposition: form-data; name=\"one\"\r\n\r\n" +
+       "first\r\n--B\r\nContent-Disposition: form-data; name=\"two\"\r\n" +
+       "Content-Type: text/plain\r\n\r\nsecond\r\n--B\r\n\r\nlast\r\n--B--\r\n"
+faults = String::Builder.new
+body = BodyReader.new(faults, nil, BodyReader::TEXT,
+  text.bytesize.to_i64, 9223372036854775807_i64, text)
+parts = Multipart.new(body, "B")
+slot = Part.new(parts)
+first = parts.next_part(slot).or_panic
+raise "first part" unless first && first.name == "one"
+# Leaving the first body unread must drain it before refilling the slot.
+second = parts.next_part(slot).or_panic
+raise "second part" unless second && second.name == "two"
+raise "content type" unless second.content_type == "text/plain"
+raise "second body" unless second.read_all.or_panic == "second"
+third = parts.next_part(slot).or_panic
+raise "third part" unless third && third.name.nil?
+raise "old fields" unless third.content_type.nil?
+raise "third body" unless third.read_all.or_panic == "last"
+raise "closing boundary" unless parts.next_part(slot).or_panic.nil?

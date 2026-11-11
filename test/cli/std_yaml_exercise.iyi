@@ -187,8 +187,6 @@ assert_str("b c", reads("a: b\n  \tc\n", "a tab after a continuation line's inde
 # the two take about as long; copying, 140 times as long here.
 quoted_lines = "xxxxxxxxxx\n" * 20000
 quoted_line = "xxxxxxxxxx " * 20000
-double_lines = TapeValue.new(nil)
-single_lines = TapeValue.new(nil)
 lines_ns = 9223372036854775807_i64
 line_ns = 9223372036854775807_i64
 3.times do
@@ -201,8 +199,9 @@ line_ns = 9223372036854775807_i64
   quoted_ended = __iyi_monotonic_ns
   lines_ns = quoted_folded - quoted_started if quoted_folded - quoted_started < lines_ns
   line_ns = quoted_ended - quoted_folded if quoted_ended - quoted_folded < line_ns
+  assert_true(double_lines.as_s == "xxxxxxxxxx " * 20000 && single_lines == double_lines, "quoted scalars of 20,000 lines fold to one line each")
 end
-assert_true(double_lines.as_s == "xxxxxxxxxx " * 20000 && single_lines == double_lines, "quoted scalars of 20,000 lines fold to one line each")
+
 assert_true(lines_ns < line_ns * 4, "quoted scalars of 20,000 lines read in under four times the same bytes on one line, not #{lines_ns // 1000000} ms against #{line_ns // 1000000} ms")
 puts "  a double- and a single-quoted scalar of 20,000 lines read in under four times one line of them"
 puts "  integers, floats, null, 1.2 strings, quotes, folded, literal and verbatim tags"
@@ -397,12 +396,19 @@ refused("[" * 101 + "]" * 101, "nesting deeper than 100 levels at line 1, column
 # is two levels a line as written and N as built, and 110 such lines
 # parsed in a task whose `==` then took the process down with a stack
 # overflow. The chain to `a99` is as deep as the limit allows.
-chained = "a0: &a0 x\n"
+def append_chain(writer : String::Builder, link : Int32) : Nil
+  writer << "a#{link}: &a#{link} [*a#{link - 1}]\n"
+  nil
+end
+
+chained_bytes = String::Builder.new
+chained_bytes << "a0: &a0 x\n"
 link = 1
 while link < 100
-  chained = chained + "a#{link}: &a#{link} [*a#{link - 1}]\n"
+  append_chain(chained_bytes, link)
   link = link + 1
 end
+chained = chained_bytes.finish
 refused(chained + "a100: &a100 [*a99]\n", "nesting deeper than 100 levels at line 101, column 14")
 # The deepest document read is one a task can use: parse, compare, print,
 # hash and dump. At a limit of 256 a task died of a stack overflow parsing

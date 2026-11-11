@@ -36,19 +36,6 @@ pub struct List(T)
     @items = items.dup.view
   end
 
-  # A list over an array nothing else holds: the one `appended` or
-  # `concatenated` has just built. The copy above is for a caller's array,
-  # which the caller still has; one made here has no other owner.
-  protected def self.owning(items : Array(T)) : List(T)
-    list = List(T).new([] of T)
-    list.adopt(items)
-    list
-  end
-
-  protected def adopt(items : Array(T)) : Nil
-    @items = items.view
-  end
-
   def size : Int32
     @items.size
   end
@@ -108,17 +95,25 @@ pub struct List(T)
   # constructor, which copied it a third time: an append to a list of n
   # elements wrote 4n words where n + 1 is the whole of the work.
   def appended(item : T) : List(T)
-    copy = Array(T).new(@items.size + 1)
-    copy.concat(@items)
+    List(T).new(@items, item)
+  end
+
+  def initialize(items : Array::View(T), item : T)
+    copy = Array(T).new(items.size + 1)
+    copy.concat(items)
     copy << item
-    List(T).owning(copy)
+    @items = copy.view
   end
 
   def concatenated(other : List(T)) : List(T)
-    copy = Array(T).new(@items.size + other.size)
-    copy.concat(@items)
+    List(T).new(@items, other)
+  end
+
+  def initialize(items : Array::View(T), other : List(T))
+    copy = Array(T).new(items.size + other.size)
+    copy.concat(items)
     other.each { |x| copy << x }
-    List(T).owning(copy)
+    @items = copy.view
   end
 
   # ---- value ---------------------------------------------------------------
@@ -177,9 +172,19 @@ pub struct List(T)
   # `List["pear", "fig"]`, telling a reader the elements are strings, where
   # printing them loses that with no way to get it back.
   def to_s : String
-    items = [] of String
-    @items.each { |value| items << value.inspect }
-    "List[" + items.join(", ") + "]"
+    text = ""
+    to_s(text)
+    text
+  end
+
+  def to_s(writer : String::Builder) : Nil
+    writer << "List["
+    @items.each_with_index do |value, index|
+      writer << ", " if index > 0
+      writer << value.inspect
+    end
+    writer << "]"
+    nil
   end
 
   # Written down the same way it prints, because a list has no second form:
