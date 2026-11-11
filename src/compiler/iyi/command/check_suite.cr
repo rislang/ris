@@ -245,7 +245,7 @@ class Iyi::Command
     steps = parts.map do |part|
       args = ["check", part]
       case part
-      when "format", "deps"
+      when "format", "deps", "spec"
         args << "--fix" if fix
       when "types"
         args << "--json" if json

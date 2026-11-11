@@ -111,7 +111,7 @@ class Iyi::Command
     end
 
     # ris: the promises (SPEC 6.9): one clause, the entry recording its
-    # version and spec.lock reviewing it; NAME.ri's spec block proves it,
+    # version and .spec.lock reviewing it; NAME.ri's spec block proves it,
     # so `ris check` is green. A SPEC.md already here is the project's
     # own: then none of the three is written.
     unless File.exists?(File.join(directory, "SPEC.md"))
@@ -194,11 +194,12 @@ class Iyi::Command
         * 1.1 #{clause}
 
         MD
-      {"SPEC_CHANGELOG.md", <<-MD},
-        # SPEC.md changelog
+      {"CHANGELOG.md", <<-MD},
+        # Changelog
 
-        Every change to SPEC.md gets an entry here, newest first: a heading
-        `## DATE · N.M@VERSION` naming each clause version it records, then
+        The spec is the software: every change to SPEC.md gets an entry
+        here, newest first: a heading `## DATE · N.M@VERSION` (`###` under
+        a release's `## 0.2.0`) naming each clause version it records, then
         the reason. `#{program} check spec` asks for one per version.
 
         ## #{Time.local.to_s("%Y-%m-%d")} · #{version}
@@ -206,7 +207,7 @@ class Iyi::Command
         * 1.1: the project's first promise, written by `#{program} init`.
 
         MD
-      {"spec.lock", "1.1 #{spec_version(clause)}\n"},
+      {".spec.lock", "1.1 #{spec_version(clause)}\n"},
     ]
   end
 
@@ -222,7 +223,7 @@ class Iyi::Command
       SPEC.md holds what the program promises. A clause is proven by a
       `spec N.M` block at the end of the module that keeps it; after
       reviewing the proof run `#{name} spec ack N.M`, which writes
-      spec.lock. A promise not kept yet is a block holding `todo "reason"`;
+      .spec.lock. A promise not kept yet is a block holding `todo "reason"`;
       `#{name} spec todo` lists the open ones.
 
       MD
@@ -238,7 +239,7 @@ class Iyi::Command
     directory when it is left out. Nothing that is already there is
     overwritten; an AGENTS.md saying `ris check` decides
     when the work is done is written unless one is there, and so are
-    SPEC.md (one clause), SPEC_CHANGELOG.md and spec.lock, unless a
+    SPEC.md (one clause), CHANGELOG.md and .spec.lock, unless a
     SPEC.md is there; NAME.ri ends with a spec block proving the clause.
 
     MODULE is the path other projects would import this one by — a URL's

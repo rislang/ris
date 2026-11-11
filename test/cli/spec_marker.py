@@ -21,8 +21,8 @@ def main():
     with tempfile.TemporaryDirectory(dir=work, prefix='marker-') as tmp:
         root = Path(tmp)
         (root / 'ris.mod').write_text('')
-        (root / 'SPEC_CHANGELOG.md').write_text(
-            '## 2026-11-11 · 1.1@' + VERSION + '\n\nFixture.\n')
+        (root / 'CHANGELOG.md').write_text(
+            '# Changelog\n\n## 2026-11-11 · 1.1@' + VERSION + '\n\nFixture.\n')
 
         def spec(text=BASE + MARK):
             (root / 'SPEC.md').write_text(text)

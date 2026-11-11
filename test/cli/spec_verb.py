@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# spec: 6.7@0845721d, 6.8@9832e912, 6.9@9d41266e
+# spec: 6.7@73ca726d, 6.8@4a174319, 6.9@1e0b6a98
 """`ris spec`: the spec's clauses linked to the tests that name them.
 
     IYI=./bin/ris python3 test/cli/spec_verb.py
@@ -80,7 +80,7 @@ def project(spec=SPEC, changelog=CHANGELOG, tests=None):
     if spec is not None:
         write(root, "SPEC.md", spec)
     if changelog is not None:
-        write(root, "SPEC_CHANGELOG.md", changelog)
+        write(root, "CHANGELOG.md", changelog)
     for rel, text in (tests if tests is not None else {
         "test/start_test.ri":
             f"# spec: 1.1@{V11}\nmodule blog_test\n\nassert true\n",
@@ -258,7 +258,7 @@ def part_c():
          code == 1 and f"test/posts_test.ri tag holds {V21}" in out and
          "spec ack 2.1" in out, out)
     step("the changed clause has no changelog entry either",
-         "no SPEC_CHANGELOG.md entry records 2.1@" in out and
+         "no CHANGELOG.md entry records 2.1@" in out and
          "next: add `## " in out, out)
     write(root, "SPEC.md", SPEC)
 
@@ -277,7 +277,7 @@ def part_c():
     nolog = project(changelog=CHANGELOG.replace(f"2.1@{V21}", ""))
     code, out = check(nolog)
     step("a version no entry records fails", code == 1 and
-         f"no SPEC_CHANGELOG.md entry records 2.1@{V21}" in out, out)
+         f"no CHANGELOG.md entry records 2.1@{V21}" in out, out)
 
     bare = project(spec=None, changelog=None)
     r = run("check", cwd=bare)
@@ -358,10 +358,10 @@ def part_e():
     base = tempfile.mkdtemp(prefix="spec-verb-init-")
     r = run("init", "example.com/me/hello", "app", cwd=base)
     app = os.path.join(base, "app")
-    step("ris init writes SPEC.md, SPEC_CHANGELOG.md and spec.lock",
+    step("ris init writes SPEC.md, CHANGELOG.md and .spec.lock",
          r.returncode == 0 and all(os.path.exists(os.path.join(app, f))
-                                   for f in ("SPEC.md", "SPEC_CHANGELOG.md",
-                                             "spec.lock")),
+                                   for f in ("SPEC.md", "CHANGELOG.md",
+                                             ".spec.lock")),
          r.stdout + r.stderr)
     r = run("check", cwd=app)
     step("ris check is green on arrival", r.returncode == 0,
@@ -373,7 +373,7 @@ def part_e():
     run("init", "mine", cwd=own)
     step("an existing SPEC.md is kept and nothing else spec is written",
          read(own, "SPEC.md") == SPEC and
-         not os.path.exists(os.path.join(own, "SPEC_CHANGELOG.md")) and
+         not os.path.exists(os.path.join(own, "CHANGELOG.md")) and
          not os.path.exists(os.path.join(own, "test")), os.listdir(own))
 
 

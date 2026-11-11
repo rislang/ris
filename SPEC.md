@@ -265,21 +265,23 @@ section; a removed one leaves its number unused.
   a module under the root (the walk `ris test` uses), or an old file
   under test/ naming the clause in its leading `#` comment block
   (`# spec: 1.3@a4f20c19`, or a `# ... SPEC 1.3` comment). After review
-  `ris spec ack N.M` writes N.M and its version to ROOT/spec.lock; with
+  `ris spec ack N.M` writes N.M and its version to ROOT/.spec.lock; with
   a lock line a tag's `@VERSION` is ignored. `ris spec ack --from-tags`
   locks each clause whose versioned tags all match it.
-* 6.8 `ris check spec` fails on a spec, tag or spec.lock that does not
+* 6.8 `ris check spec` fails on a spec, tag or .spec.lock that does not
   parse, a tag or block naming no clause, a clause with proofs whose
-  version spec.lock lacks, a lock line for no clause, a version no
-  SPEC_CHANGELOG.md entry records, a clause with no proof, and a block
-  label that differs from its clause: `spec 1.5  # text` (the text cut
-  at a word with `…` within 80 columns). `ris check --fix` writes the
-  labels; a label is no review. Each failure names the next command.
+  version .spec.lock lacks, a lock line for no clause, a version no
+  CHANGELOG.md entry records (`## DATE` or, under a release, `### DATE`;
+  a left-over SPEC_CHANGELOG.md or spec.lock fails), a clause with no
+  proof, and a block label that differs from its clause:
+  `spec 1.5  # text` (the text cut at a word with `…` within 80
+  columns). `ris check --fix` writes the labels; a label is no review.
+  Each failure names the next command.
 * 6.9 `todo "reason"` ends a test with exit code 77: `ris test` reports it
   as todo, neither pass nor fail, and exits 0 when the rest pass. A
   clause named only by todo tests passes `ris check spec`; `ris spec
   todo` lists them. `ris init` writes SPEC.md with one clause,
-  SPEC_CHANGELOG.md recording it, spec.lock reviewing it and a spec
+  CHANGELOG.md recording it, .spec.lock reviewing it and a spec
   block proving it at the end of the root module; no test/.
 
 ## 7. Types, memory and Ruby syntax (doc/TAPE_TYPES.md; Goose §1.2, §3.7)

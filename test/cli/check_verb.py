@@ -125,7 +125,10 @@ def main():
     for flag in ("--fix", "-f"):
         fixme = new_project("fixme")
         src = os.path.join(fixme, "fixme.ri")
-        write(src, "module fixme\n\ndef  f( a )\na\nend\nputs f(1)\n")
+        # init's spec 1.1 stays proved, so only format and ris.sum fail.
+        write(src, "module fixme\n\ndef  f( a )\na\nend\n"
+              "puts \"hello from #{f(\"fixme\")}\"\n\n"
+              "spec 1.1\n  fixme == \"hello from fixme\\n\"\nend\n")
         sum_path = os.path.join(fixme, "ris.sum")
         write(sum_path, "example.com/gone v1.0.0 s1:abc\n", "a")
         proc = run("check", cwd=fixme)
@@ -143,7 +146,7 @@ def main():
     typo = new_project("typo")
     src = os.path.join(typo, "typo.ri")
     write(src, "module typo\n\ndef greet : String\n  \"hi\"\nend\n\n"
-               "puts gret\n")
+               "puts gret\n\nspec 1.1\n  todo \"prints hello\"\nend\n")
     proc = run("check", "--json", cwd=typo)
     verdict = json.loads(proc.stdout or "{}")
     types = [s for s in verdict.get("steps", []) if s["name"] == "types"]
@@ -174,7 +177,10 @@ def main():
     step("a failing test fails at test",
          proc.returncode == 1 and "test   FAIL" in proc.stdout
          and "next: fix the failing test" in proc.stdout, proc.stdout)
-    write(os.path.join(par, "par.ri"), "undefined_thing_here\n", "a")
+    # Above init's spec section: code may not follow the first block.
+    par_src = os.path.join(par, "par.ri")
+    text = open(par_src).read()
+    write(par_src, text.replace("\nspec ", "\nundefined_thing_here\n\nspec ", 1))
     proc = run("check", "-j", "4", cwd=par)
     step("a check error and a failing test: types is the failure",
          proc.returncode == 1 and "types  FAIL" in proc.stdout

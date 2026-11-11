@@ -41,7 +41,7 @@ ris is iyi plus Goose's tape memory. These rules are for every agent.
   copy of `samples/ris/respond.ri`: change both in one go.
 * A SPEC clause is proven by a `spec N.M` block at the end of the
   module that keeps it; after reviewing the proofs run `ris spec ack
-  N.M`, which writes spec.lock. A clause not kept yet has a block holding
+  N.M`, which writes .spec.lock. A clause not kept yet has a block holding
   `todo "reason"`, or a SPEC.md todo marker when no module keeps it.
   `ris check spec` fails on unreviewed clauses, stale labels (`ris check
   --fix` writes them) and clauses with no proof.
@@ -98,13 +98,12 @@ temporaries and response on one tape.
   iyi's draft spec is doc/archive/iyi/SPEC.md, cited as "iyi SPEC".
   SPEC.md is ris's specification; ris's own docs include CONTRIBUTING.md.
 * Except for todo marker lines, change SPEC.md only with a dated entry
-  and its reason in [SPEC_CHANGELOG.md](SPEC_CHANGELOG.md), in the same
-  commit.
+  and its reason in [CHANGELOG.md](CHANGELOG.md), in the same commit.
 * EGM is required: every SPEC change or design proposal gets an EGM
   review of its draft before SPEC.md or code changes, and a drift report
   after ([CONTRIBUTING.md](CONTRIBUTING.md), Design checks). Keep only
   consolidated_review_report.md next to the draft; the stage reports
-  are not committed. The SPEC_CHANGELOG entry names the draft folder.
+  are not committed. The CHANGELOG entry names the draft folder.
 * Cite doc/reference/iyi/ for unchanged iyi rules, doc/reference/goose/
   for Goose designs, doc/reference/koja/ for messages between tasks.
   Record only ris differences; check snapshot versions.
