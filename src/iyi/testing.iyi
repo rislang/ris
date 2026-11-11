@@ -159,7 +159,13 @@ end
 # `block` and ends with `finish`. A failed line is recorded and the block
 # goes on; a panic ends only its block where a task can end alone.
 class RisSpecRun
-  @@failures = [] of String
+  # Made on first use: every program carries this class, and an array
+  # made at start costs a plain `ris run` a mapping (check.sh counts them).
+  @@failures : Array(String)? = nil
+
+  protected def self.failures : Array(String)
+    @@failures ||= [] of String
+  end
   @@reason : String? = nil
   @@ok = 0
   @@broken = 0
@@ -171,7 +177,7 @@ class RisSpecRun
       if hint
         said += "\n    line " + line.to_s + " is a Bool, so it is checked; write `_ = ...` to run it without checking"
       end
-      @@failures << said.copy_to(Program.tape)
+      RisSpecRun.failures << said.copy_to(Program.tape)
     end
     value
   end
@@ -182,7 +188,7 @@ class RisSpecRun
 
   def self.compare(value : Bool, left, right, text : String, file : String, line : Int32) : Bool
     unless value
-      @@failures << ("  " + file + ":" + line.to_s + "  " + text + "\n    left:  " + left.inspect + "\n    right: " + right.inspect).copy_to(Program.tape)
+      RisSpecRun.failures << ("  " + file + ":" + line.to_s + "  " + text + "\n    left:  " + left.inspect + "\n    right: " + right.inspect).copy_to(Program.tape)
     end
     value
   end
@@ -198,7 +204,7 @@ class RisSpecRun
     # The pattern is the side that is not the text: a String, or a
     # RisRun's stdout (5.7) on the left.
     pattern, subject = right.is_a?(String) ? {left, right} : {right, left}
-    @@failures << ("  " + file + ":" + line.to_s + "  " + text + "\n    pattern: " + pattern.inspect + "\n    text:    " + subject.inspect).copy_to(Program.tape)
+    RisSpecRun.failures << ("  " + file + ":" + line.to_s + "  " + text + "\n    pattern: " + pattern.inspect + "\n    text:    " + subject.inspect).copy_to(Program.tape)
     false
   end
 
@@ -209,7 +215,7 @@ class RisSpecRun
   {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) || (flag?(:win32) && flag?(:x86_64)) %}
     def self.block(clause : String, ordinal : Int32, file : String, line : Int32, &body : -> _) : Nil
       STDOUT.flush
-      @@failures.clear
+      RisSpecRun.failures.clear
       @@reason = nil
       said = nil
       group do |g|
@@ -227,7 +233,7 @@ class RisSpecRun
     # No task here: a panic ends the program (5.8, wasm32).
     def self.block(clause : String, ordinal : Int32, file : String, line : Int32, &body : -> _) : Nil
       STDOUT.flush
-      @@failures.clear
+      RisSpecRun.failures.clear
       @@reason = nil
       body.call
       report(clause, ordinal, file, line, nil)
@@ -235,7 +241,7 @@ class RisSpecRun
   {% end %}
 
   private def self.report(clause : String, ordinal : Int32, file : String, line : Int32, panic : String?) : Nil
-    failures = @@failures
+    failures = RisSpecRun.failures
     if panic
       failures << "  panic: " + panic
     end
