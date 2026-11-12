@@ -120,7 +120,7 @@ pub enum RsaHash
   SHA384
   SHA512
 
-  def digest(data : Array::View(UInt8)) : Array(UInt8)
+  def digest(data : String | Array::View(UInt8)) : Array(UInt8)
     case self
     when RsaHash::SHA1   then Std::Digest::SHA1.hash_bytes(data)
     when RsaHash::SHA256 then Std::Digest::SHA256.hash_bytes(data)
@@ -287,7 +287,7 @@ pub struct RsaPublicKey
     expected[1] = 1_u8
     expected[@size - t_len - 1] = 0_u8
     prefix.each_with_index { |b, i| expected[@size - t_len + i] = b }
-    hash.digest(RsaBytes.of(message)).each_with_index { |b, i| expected[@size - hash.size + i] = b }
+    hash.digest(message).each_with_index { |b, i| expected[@size - hash.size + i] = b }
     em == expected
   end
 
@@ -322,8 +322,8 @@ pub struct RsaPublicKey
       i = i + 1
     end
     return false unless db[pad] == 1_u8
-    m_prime = Array(UInt8).new(8, 0_u8) + hash.digest(RsaBytes.of(message)) + db[db_len - s_len, s_len]
-    hash.digest(m_prime) == h
+    m_prime = Array(UInt8).new(8, 0_u8) + hash.digest(message) + db[db_len - s_len, s_len]
+    h == hash.digest(m_prime)
   end
 
   # RSAVP1 (section 5.2.2) and I2OSP into the modulus's length: the
@@ -392,7 +392,10 @@ pub struct RsaPrivateKey
     return RsaError.new("a private key whose dp is not d mod (p - 1)") unless bd % p1 == bdp
     return RsaError.new("a private key whose dq is not d mod (q - 1)") unless bd % q1 == bdq
     return RsaError.new("a private key whose qi is not the inverse of q mod p") unless bqi < bp && (bqi * bq) % bp == one
-    RsaPrivateKey.new(public, bp, bq, bdp, bdq, bqi, SHA256.hash_bytes(RsaBytes.of("std/rsa signing") + d)).copy_to(RisCurrentTape.new)
+    prf = SHA256.new
+    prf.update("std/rsa signing")
+    prf.update(d)
+    RsaPrivateKey.new(public, bp, bq, bdp, bdq, bqi, prf.final).copy_to(RisCurrentTape.new)
   end
 
   def initialize(@public_key : RsaPublicKey, @p : BigInt, @q : BigInt, @dp : BigInt, @dq : BigInt, @qi : BigInt, @prf : Array(UInt8))
@@ -538,7 +541,7 @@ pub struct RsaPrivateKey
   # 0x01, the 0xFF padding, 0x00, the hash's DigestInfo and the digest.
   def sign_pkcs1v15(hash : RsaHash, message : Array::View(UInt8) | String) : Array(UInt8)
     signable(hash)
-    t = hash.digest_info_prefix + hash.digest(RsaBytes.of(message))
+    t = hash.digest_info_prefix + hash.digest(message)
     em = Array(UInt8).new(size, 0xFF_u8)
     em[0] = 0_u8
     em[1] = 1_u8
@@ -552,7 +555,7 @@ pub struct RsaPrivateKey
   # digest, drawn as the module's header says.
   def sign_pss(hash : RsaHash, message : Array::View(UInt8) | String) : Array(UInt8)
     signable(hash)
-    m_hash = hash.digest(RsaBytes.of(message))
+    m_hash = hash.digest(message)
     h_len = hash.size
     salt = RsaBytes.mac(hash, @prf, [2_u8] + m_hash)
     em_bits = bits - 1
@@ -717,14 +720,6 @@ struct RsaBytes
 
   def self.borrow_error(error : RsaError) : RsaError
     error
-  end
-
-  def self.of(message : Array::View(UInt8)) : Array::View(UInt8)
-    message
-  end
-
-  def self.of(message : String) : Array::View(UInt8)
-    Array(UInt8).new(message.bytesize) { |i| message[i] }.view
   end
 
   def self.from_hex(hex : String) : Array(UInt8)

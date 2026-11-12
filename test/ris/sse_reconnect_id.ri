@@ -1,0 +1,12 @@
+import std/sse::{EventParser}
+
+parser = EventParser.new
+parser.feed("id: 2\ndata: complete\n\nid: 3\ndata: partial") { |event| }
+raise "committed id" unless parser.last_event_id == "2"
+parser.reconnect
+count = 0
+parser.feed("id: 4\0invalid\ndata: resumed\n\n") do |event|
+  count += 1
+  raise "partial id survived reconnect" unless event.id == "2"
+end
+raise "resumed event" unless count == 1

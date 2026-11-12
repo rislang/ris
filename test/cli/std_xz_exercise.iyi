@@ -131,6 +131,28 @@ def whole(format : XzFormat, stream : String, label : String) : String
   end
 end
 
+def whole_refused(format : XzFormat, stream : String, expected : String,
+                  label : String) : Nil
+  got = Xz.decompress(stream, format)
+  case got
+  when XzError
+    assert_true got.message == expected,
+      "#{label} refused with #{got.message.inspect}, not #{expected.inspect}"
+  else
+    raise "ASSERTION FAILED: #{label} read #{got.bytesize} bytes instead of refusing"
+  end
+end
+
+def crc_piece(reader : XzReader, crc : UInt32) : {Int32, UInt32}
+  piece = reader.read(65536)
+  case piece
+  when XzError
+    raise "ASSERTION FAILED: 64 MiB refused with #{piece.message}"
+  else
+    {piece.bytesize, CRC32.update(crc, piece, piece.bytesize)}
+  end
+end
+
 ONE_TO_SEVEN = [1, 2, 3, 4, 5, 6, 7]
 
 # The stream whole, then fed a byte, seven bytes, one to seven bytes and
@@ -259,13 +281,7 @@ puts "  the first read answers after #{feed.at} of #{kilobyte.bytesize} bytes fe
 puts "\n== refused as a value"
 bad.each do |v|
   stream = unhex(v[2])
-  got = Xz.decompress(stream, v[1])
-  case got
-  when XzError
-    assert_true got.message == v[3], "#{v[0]} refused with #{got.message.inspect}, not #{v[3].inspect}"
-  else
-    raise "ASSERTION FAILED: #{v[0]} read #{got.bytesize} bytes instead of refusing"
-  end
+  whole_refused(v[1], stream, v[3], v[0])
   [[1], ONE_TO_SEVEN, [stream.bytesize]].each do |pieces|
     refused(v[1], stream, pieces, v[3], "#{v[0]}, pieces of #{pieces}")
   end
@@ -294,8 +310,8 @@ puts "  #{bad.size} of XZ Utils' bad and unsupported files, each by the sentence
   next if pair[1] == XzFormat::Lzma
   at = 0
   while at < stream.bytesize
-    got = stream_through(pair[1], flip(stream, at, 0x55_u8), [5], [65536])
-    assert_true got.is_a?(XzError), "#{pair[0]} with byte #{at} flipped read back"
+    flipped = stream_through(pair[1], flip(stream, at, 0x55_u8), [5], [65536])
+    assert_true flipped.is_a?(XzError), "#{pair[0]} with byte #{at} flipped read back"
     at = at + 1
   end
 end
@@ -387,15 +403,9 @@ if args.size > 0
   reads = 0
   t0 = __iyi_monotonic_ns
   while true
-    piece = reader.read(65536)
-    case piece
-    when XzError
-      raise "ASSERTION FAILED: 64 MiB refused with #{piece.message}"
-    else
-      break if piece.empty?
-      total = total + piece.bytesize.to_i64
-      crc = CRC32.update(crc, piece, piece.bytesize)
-    end
+    count, crc = crc_piece(reader, crc)
+    break if count == 0
+    total = total + count.to_i64
     reads = reads + 1
   end
   t1 = __iyi_monotonic_ns

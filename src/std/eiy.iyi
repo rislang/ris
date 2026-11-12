@@ -51,22 +51,22 @@ pub struct Eiy
   # Collects what a template prints, for `render` or for a caller that wants
   # the text rather than a stream.
   pub class Buffer
-    @parts : Array(String)
+    @text : String::Builder
 
     def initialize
-      @parts = [] of String
+      @text = String::Builder.new
     end
 
     def print(text : String) : Nil
-      @parts << text
+      @text << text
     end
 
     def print(value) : Nil
-      @parts << value.to_s
+      @text << value.to_s
     end
 
     def to_s : String
-      @parts.join("")
+      @text.finish
     end
 
     # `print`, the one verb a template's target has, so a Buffer can be one.
@@ -126,7 +126,7 @@ pub struct Eiy
     end
 
     @string : String
-    @bytes : Pointer(UInt8)
+    @bytes : String
     @len : Int32
     @pos : Int32
     @line_number : Int32
@@ -139,7 +139,7 @@ pub struct Eiy
     @token_text : String::Builder
 
     def initialize(@string : String)
-      @bytes = @string.to_unsafe
+      @bytes = @string
       @len = @string.bytesize
       @pos = 0
       @line_number = 1
@@ -270,7 +270,9 @@ pub struct Eiy
         tail = @string[start_pos, end_pos - start_pos]
         close_tag = suppress_trailing ? "-%>" : "%>"
         @token.type = Token::Type::String
-        @token.value = "#{head}#{tail}#{close_tag}"
+        from = @token_text.length
+        @token_text << head << tail << close_tag
+        @token.value = @token_text.finish[from, @token_text.length - from]
       elsif is_output
         @token.type = Token::Type::Output
         @token.value = @string[start_pos, end_pos - start_pos]

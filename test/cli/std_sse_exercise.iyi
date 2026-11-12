@@ -187,24 +187,45 @@ def event_text(e : Event) : String
   "#{e.event}|#{e.data}|#{e.id}"
 end
 
+def append_event(event : Event, sink : String::Builder) : Nil
+  sink << event.event << "|" << event.data << "|" << event.id << "\n"
+end
+
 # *text* parsed as a whole stream - fed whole, or in pieces of *piece*
 # bytes - its events one a line, then the last event ID and the
 # reconnection time.
 def parse(text : String, piece : Int32 = 0) : String
   parser = EventParser.new
-  seen = [] of String
+  seen = ""
   if piece == 0
-    parser.feed(text) { |e| seen << event_text(e) }
+    parser.feed(text) { |event| append_event(event, seen) }
   else
     at = 0
     while at < text.bytesize
-      parser.feed(text[at, piece]) { |e| seen << event_text(e) }
+      parser.feed(text[at, piece]) { |event| append_event(event, seen) }
       at = at + piece
     end
   end
   parser.finish
   seen << "last=#{parser.last_event_id} retry=#{parser.retry || "-"}"
-  seen.join("\n")
+  seen
+end
+
+def retain_text(text : String, values : Array(String),
+                backing : String::Builder) : Nil
+  at = backing.length
+  backing << text
+  values << backing.finish[at, backing.length - at]
+end
+
+def capture_outcome(sink : String::Builder, value) : Nil
+  sink.clear
+  sink << outcome_text(value)
+end
+
+def read_status(sink : String::Builder, url : String) : Nil
+  sink.clear
+  sink << HTTP.get(url).or_panic.body
 end
 
 def chunk(text : String) : String
@@ -235,23 +256,24 @@ def scripted(answers : Array(String), & : String -> Nil) : {Array(String), Array
       heads = [] of String
       gaps = [] of Int64
       last = 0_i64
+      head_text = String::Builder.new
       script.split(SCRIPT_SEPARATOR).each do |answer|
         s = l.accept
         break unless s.is_a?(IyiSocket)
         now = __iyi_monotonic_ns
-        head = ""
-        while !head.ends_with?("\r\n\r\n")
+        head_at = head_text.length
+        while !head_text.finish[head_at, head_text.length - head_at].ends_with?("\r\n\r\n")
           piece = s.read(1)
           break unless piece.is_a?(String) && piece.bytesize > 0
-          head = head + piece
+          head_text << piece
         end
-        if head.empty?
+        if head_text.length == head_at
           s.close
           break
         end
         gaps << (last == 0_i64 ? 0_i64 : (now - last) // 1000000_i64)
         last = now
-        heads << head
+        heads << head_text.finish[head_at, head_text.length - head_at]
         s.write(answer)
         s.close
       end
@@ -261,10 +283,14 @@ def scripted(answers : Array(String), & : String -> Nil) : {Array(String), Array
     yield base
     stop = IyiSocket.connect("127.0.0.1", port)
     stop.close if stop.is_a?(IyiSocket)
-    server.value
+    result = server.value
+    if result.is_a?(Tuple)
+      result.copy_to(RisCurrentTape.new)
+    else
+      raise "scripted: the server task ended with #{result.inspect}"
+    end
   end
-  return got if got.is_a?(Tuple)
-  raise "scripted: the server task ended with #{got.inspect}"
+  got.copy_to(RisCurrentTape.new)
 end
 
 def header_in(head : String, name : String) : String?
@@ -486,13 +512,14 @@ puts "  BOMs, CR, exact names, colons, NUL ids, retry forms, types, ill-formed b
 
 puts "\n== pieces of any size"
 split = EventParser.new
+retained_text = String::Builder.new
 seen = [] of String
-["data: a\r", "\ndata: b\r", "\n\r", "\n"].each { |part| split.feed(part) { |e| seen << event_text(e) } }
+["data: a\r", "\ndata: b\r", "\n\r", "\n"].each { |part| split.feed(part) { |e| retain_text(event_text(e), seen, retained_text) } }
 assert_str "message|a\nb|", seen.join(";"), "a CRLF split between pieces is one line end"
 utf = "data: é\n\n"
 split_utf = EventParser.new
 seen = [] of String
-[utf[0, 7], utf[7, 3]].each { |part| split_utf.feed(part) { |e| seen << event_text(e) } }
+[utf[0, 7], utf[7, 3]].each { |part| split_utf.feed(part) { |e| retain_text(event_text(e), seen, retained_text) } }
 assert_str "message|é|", seen.join(";"), "a character split between pieces is whole"
 cases = [
   ": test stream\n\ndata: first event\nid: 1\n\ndata:second event\nid\n\ndata:  third event\n\n",
@@ -526,32 +553,33 @@ group do |g|
   assert_true own.header("Cache-Control") == "no-transform" && own.header("X-Accel-Buffering") == "no" && own.header("Content-Type") == "text/event-stream", "a caller's Cache-Control replaces no-cache: #{own.headers}"
   read = [] of String
   got = SSE.open(base + "/events") do |e|
-    read << event_text(e)
+    retain_text(event_text(e), read, retained_text)
     e.data != "last\n"
   end
   assert_str "nil", outcome_text(got), "the client stops when its block says so"
   assert_str FEED_PARSED, read.join("\n") + "\nlast= retry=1500", "SSE.open reads what SSE.stream wrote"
   resumed = [] of String
   got = SSE.open(base + "/resume", last_event_id: "41") do |e|
-    resumed << event_text(e)
+    retain_text(event_text(e), resumed, retained_text)
     resumed.size < 3
   end
   assert_str "message|after 41|42;message|after 41|43;message|after 41|44", resumed.join(";"), "last_event_id: goes out as Last-Event-ID"
   ticks = [] of String
   SSE.open(base + "/ticks") do |e|
-    ticks << e.id
+    retain_text(e.id, ticks, retained_text)
     ticks.size < 3
   end
   assert_str "0 1 2", ticks.join(" "), "three ticks"
-  status = "running"
+  status = String::Builder.new
+  status << "running"
   tries = 0
-  while status == "running" && tries < 400
+  while status.finish == "running" && tries < 400
     sleep(5)
-    status = HTTP.get(base + "/ticks-status").or_panic.body
+    read_status(status, base + "/ticks-status")
     tries = tries + 1
   end
-  assert_true status.starts_with?("ended true ") && status.split(" ")[2].to_i < 2000, "a client gone ends the stream's loop, and gone? says so: #{status}"
-  ticks_written = status.split(" ")[2].to_i
+  assert_true status.finish.starts_with?("ended true ") && status.finish.split(" ")[2].to_i < 2000, "a client gone ends the stream's loop, and gone? says so: #{status}"
+  ticks_written = status.finish.split(" ")[2].to_i
   HTTP.get(base + "/stop").or_panic
   0
 end
@@ -561,7 +589,7 @@ puts "\n== reconnection"
 # Five connections: cut mid-chunk inside an event, ended by the close,
 # then a 204. Each answer checks what the request before it left behind.
 received = [] of String
-outcome = "none"
+outcome = String::Builder.new
 heads, gaps = scripted([
   CHUNKED_HEAD + chunk("retry: 30\n\nid: 1\ndata: one\n\nid: 2\ndata: two\n\n") + chunk("id: 3\ndata: thr"),
   EVENT_HEAD + "data: three\n\nid: 4" + bytes([0]) + "x\ndata: four\n\n",
@@ -570,8 +598,8 @@ heads, gaps = scripted([
   "HTTP/1.1 204 No Content\r\n\r\n",
   EVENT_HEAD + "data: never\n\n",
 ]) do |url|
-  outcome = outcome_text(SSE.open(url, {"X-Probe" => "1"}, retry: 2000, reconnects: 5) do |e|
-    received << "#{e.data}/#{e.id}"
+  capture_outcome(outcome, SSE.open(url, {"X-Probe" => "1"}, retry: 2000, reconnects: 5) do |e|
+    retain_text("#{e.data}/#{e.id}", received, retained_text)
     true
   end)
 end
@@ -584,7 +612,7 @@ assert_true header_in(heads[2], "Last-Event-ID") == "2", "a resumed stream keeps
 assert_true header_in(heads[3], "Last-Event-ID").nil?, "an empty id resets it: #{heads[3].inspect}"
 assert_true header_in(heads[4], "Last-Event-ID").nil?, "an id with a control character is not sent: #{heads[4].inspect}"
 assert_str "one/1 two/2 three/2 four/2 five/ six/z\u0001", received.join(" "), "the events across five connections"
-assert_str "SSEError 204: SSE: the server answered 204, not 200", outcome, "a 204 fails the connection"
+assert_str "SSEError 204: SSE: the server answered 204, not 200", outcome.finish, "a 204 fails the connection"
 [1, 2, 3, 4].each do |k|
   assert_true gaps[k] >= 30_i64 && gaps[k] < 1500_i64, "the stream's retry sets the delay: #{gaps}"
 end
@@ -594,12 +622,12 @@ puts "  six events over five connections, Last-Event-ID 2, 2, none, none, each r
 
 stopped = [] of String
 heads, gaps = scripted([EVENT_HEAD + "data: 1\n\ndata: 2\n\ndata: 3\n\n", EVENT_HEAD]) do |url|
-  outcome = outcome_text(SSE.open(url) do |e|
-    stopped << e.data
+  capture_outcome(outcome, SSE.open(url) do |e|
+    retain_text(e.data, stopped, retained_text)
     stopped.size < 2
   end)
 end
-assert_true outcome == "nil" && stopped.join(" ") == "1 2" && heads.size == 1, "false stops at once: #{outcome} #{stopped} #{heads.size}"
+assert_true outcome.finish == "nil" && stopped.join(" ") == "1 2" && heads.size == 1, "false stops at once: #{outcome} #{stopped} #{heads.size}"
 
 counted = 0
 heads, gaps = scripted([
@@ -609,13 +637,13 @@ heads, gaps = scripted([
   EVENT_HEAD + ": nothing\n\n",
   EVENT_HEAD + "data: never\n\n",
 ]) do |url|
-  outcome = outcome_text(SSE.open(url, retry: 10, reconnects: 1) do |e|
+  capture_outcome(outcome, SSE.open(url, retry: 10, reconnects: 1) do |e|
     counted = counted + 1
     true
   end)
 end
 assert_true heads.size == 4 && counted == 2, "a connection that brings an event starts the count again: #{heads.size} connections"
-assert_str "SSEError 200: SSE: the stream ended with no event, 2 times in a row", outcome, "reconnects: 1 gives up on the second empty stream"
+assert_str "SSEError 200: SSE: the stream ended with no event, 2 times in a row", outcome.finish, "reconnects: 1 gives up on the second empty stream"
 
 closed = IyiSocket.listen("127.0.0.1", 0)
 closed_port = closed.local_port
@@ -633,12 +661,12 @@ puts "\n== failing the connection"
 ].each do |want|
   events = 0
   heads, gaps = scripted([want[0], want[0]]) do |url|
-    outcome = outcome_text(SSE.open(url, retry: 10, reconnects: 3) do |e|
+    capture_outcome(outcome, SSE.open(url, retry: 10, reconnects: 3) do |e|
       events = events + 1
       true
     end)
   end
-  assert_str want[1], outcome, want[2]
+  assert_str want[1], outcome.finish, want[2]
   assert_true heads.size == 1 && events == 0, "#{want[2]}, with no event and no reconnection: #{heads.size} #{events}"
 end
 puts "  404, text/plain, no type, a near type: an SSEError each, one request"

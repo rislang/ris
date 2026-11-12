@@ -87,7 +87,7 @@ fi
 
 echo
 echo "== every slice section reported"
-for phrase in "constructors" "unsafe accessors" "indexing and bounds" "subslicing" "copying and moving" "filling" "duplicates" "equality" "enumerable" "gc liveness"; do
+for phrase in "constructors" "unsafe accessors" "indexing and bounds" "subslicing" "copying and moving" "filling" "duplicates" "equality" "enumerable" "scope liveness"; do
   grep -qi "$phrase" "$WORK/slice-plain.out" 2>/dev/null || {
     echo "  MISSING: nothing reported for $phrase"
     status=1
@@ -165,7 +165,7 @@ prove_panic "bad_copy_length" \
   "destination slice size 2 too small for source size 5"
 
 prove_panic "bad_copy_count" \
-  'src = Slice(Int32).new(3, 1); ptr = Pointer(Int32).malloc(2_u64); src.copy_to(ptr, 5)' \
+  'src = Slice(Int32).new(3, 1); dst = Slice(Int32).new(5, 0); src.copy_to(dst.to_unsafe, 5)' \
   "copy count 5 exceeds source size 3"
 
 prove_panic "readonly_write" \

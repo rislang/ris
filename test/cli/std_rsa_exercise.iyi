@@ -97,18 +97,39 @@ end
 # The eight numbers of an RSAPrivateKey, n first, as BigInts.
 def numbers(der : Array(UInt8)) : Array(BigInt)
   fields = Der.parse(der).or_panic.sequence.or_panic
-  fields[1, 8].map { |f| BigInt.from_bytes(f.unsigned_integer.or_panic) }
+  columns = {[] of UInt64, [] of UInt64, [] of UInt64, [] of UInt64,
+             [] of UInt64, [] of UInt64, [] of UInt64, [] of UInt64}
+  values = [] of BigInt
+  fields[1, 8].each_with_index do |field, index|
+    number = BigInt.from_bytes(field.unsigned_integer.or_panic)
+    limbs = columns[index]
+    number.limbs.each { |limb| limbs << limb }
+    values << BigInt.new(number.sign, limbs)
+  end
+  values.copy_to(RisCurrentTape.new)
 end
 
 # RsaPrivateKey.new from eight numbers.
 def from_numbers(v : Array(BigInt)) : RsaPrivateKey | RsaError
-  bytes = v.map { |x| x.to_bytes((x.to_s(16).bytesize + 1) // 2) || [] of UInt8 }
-  RsaPrivateKey.new(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7])
+  bytes = Array(Array(UInt8)).new(v.size) do |i|
+    x = v[i]
+    x.to_bytes((x.to_s(16).bytesize + 1) // 2) || [] of UInt8
+  end
+  RsaPrivateKey.new(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]).copy_to(RisCurrentTape.new)
 end
 
 def read_file(path : String) : Array(UInt8)
   data = File.read(path)
   Array(UInt8).new(data.bytesize) { |i| data.byte_at(i) }
+end
+
+def pss_hash_id(field : DerValue) : Int32
+  case field.explicit(0).or_panic.sequence.or_panic[0].oid.or_panic
+  when "2.16.840.1.101.3.4.2.1" then 1
+  when "2.16.840.1.101.3.4.2.2" then 2
+  when "2.16.840.1.101.3.4.2.3" then 3
+  else                          0
+  end
 end
 
 # The hash a certificate's signature algorithm names, with its scheme and
@@ -120,21 +141,16 @@ def certificate_scheme(algorithm : Array(DerValue)) : {String, String, Int32}?
   when "1.2.840.113549.1.1.12" then {"v15", "SHA384", -1}
   when "1.2.840.113549.1.1.13" then {"v15", "SHA512", -1}
   when "1.2.840.113549.1.1.10"
-    hash = "SHA1"
+    hash_id = 0
     salt = 20
     algorithm[1].sequence.or_panic.each do |field|
       if field.context?(0)
-        hash = case field.explicit(0).or_panic.sequence.or_panic[0].oid.or_panic
-               when "2.16.840.1.101.3.4.2.1" then "SHA256"
-               when "2.16.840.1.101.3.4.2.2" then "SHA384"
-               when "2.16.840.1.101.3.4.2.3" then "SHA512"
-               else                               "SHA1"
-               end
+        hash_id = pss_hash_id(field)
       elsif field.context?(2)
         salt = field.explicit(2).or_panic.integer.or_panic.to_i32
       end
     end
-    {"pss", hash, salt}
+    {"pss", {"SHA1", "SHA256", "SHA384", "SHA512"}[hash_id], salt}
   else
     nil
   end

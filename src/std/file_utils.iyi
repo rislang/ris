@@ -276,32 +276,54 @@ pub struct FileUtils
     same
   end
 
-  # One entry of a tree, by what *info* says it is without following it.
+  # Paths retained by the traversal borrow one caller-owned backing.
+  private def self.child_path(parent : String, name : String,
+                              paths : String::Builder) : String
+    at = paths.length
+    paths << File.join(parent, name)
+    paths.finish[at, paths.length - at]
+  end
+
+  # Traverse without keeping growing scratch across a recursive call.
+  # A second visit restores a directory's mode after copying its children.
   private def self.copy_entry(from : String, to : String, info : File::Info) : Nil
-    if info.symlink?
-      File.symlink(File.readlink(from), to)
-    elsif info.directory?
-      Dir.mkdir(to) unless Dir.exists?(to)
-      Dir.children(from).each do |name|
-        child = File.join(from, name)
-        child_info = File.info?(child, follow_symlinks: false)
-        raise "Cannot copy #{child}: it was removed while the tree was copied" unless child_info
-        copy_entry(child, File.join(to, name), child_info)
+    paths = String::Builder.new(from.bytesize + to.bytesize)
+    pending = [] of {String, String, Int32}
+    pending << {from, to, -1}
+    first = true
+    while !pending.empty?
+      source, target, mode = pending.pop
+      if mode >= 0
+        File.chmod(target, mode)
+        next
       end
-      File.chmod(to, info.permissions.value)
-    elsif info.file?
-      copy_file(from, to, info.permissions.value)
-    else
-      kind = if info.type.pipe?
-               "FIFO"
-             elsif info.type.socket?
-               "socket"
-             elsif info.type.device?
-               "device"
-             else
-               "file of a kind this does not know"
-             end
-      raise "Cannot copy #{from}: it is a #{kind}, not a file, a directory or a link"
+      current = first ? info : File.info?(source, follow_symlinks: false)
+      first = false
+      raise "Cannot copy #{source}: it was removed while the tree was copied" unless current
+      if current.symlink?
+        File.symlink(File.readlink(source), target)
+      elsif current.directory?
+        Dir.mkdir(target) unless Dir.exists?(target)
+        pending << {source, target, current.permissions.value}
+        Dir.children(source).reverse_each do |name|
+          child = child_path(source, name, paths)
+          destination = child_path(target, name, paths)
+          pending << {child, destination, -1}
+        end
+      elsif current.file?
+        copy_file(source, target, current.permissions.value)
+      else
+        kind = if current.type.pipe?
+                 "FIFO"
+               elsif current.type.socket?
+                 "socket"
+               elsif current.type.device?
+                 "device"
+               else
+                 "file of a kind this does not know"
+               end
+        raise "Cannot copy #{source}: it is a #{kind}, not a file, a directory or a link"
+      end
     end
   end
 
