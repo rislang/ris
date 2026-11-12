@@ -1,0 +1,26 @@
+import std/io::{Reader}
+
+class BytesReader < Reader
+  def initialize
+    super()
+    @at = 0
+  end
+
+  def read_byte : UInt8?
+    return nil if @at == 3
+    byte = "abc"[@at]
+    @at += 1
+    byte
+  end
+end
+
+reader = BytesReader.new
+text = String::Builder.new
+text << ">"
+raise "first count" unless reader.read_str(2, text) == 2
+raise "first bytes" unless text.finish == ">ab"
+raise "short count" unless reader.read_str(2, text) == 1
+raise "short bytes" unless text.finish == ">abc"
+raise "eof" unless reader.read_str(2, text) == 0
+other = BytesReader.new
+raise "String result" unless other.read_str(5) == "abc"

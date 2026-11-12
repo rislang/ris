@@ -706,6 +706,14 @@ pub abstract class Reader < IyiIO
     writer.finish
   end
 
+  # Reader subclasses supply bytes rather than a descriptor. Preserve
+  # their read_bytes dispatch when a decoder lends its own storage.
+  def read_str(count : Int32, into : String::Builder) : Int32
+    bytes = read_bytes(count)
+    into << bytes
+    bytes.bytesize
+  end
+
   def read_all : String
     writer = String::Builder.new
     while byte = read_byte

@@ -186,89 +186,51 @@ Unknown must be refused (SPEC 3.6).
   struct) and `fix printed its edit` (split.iyi already clean).
 
 * Build each test/cli program, group refusals by message, fix per group.
-  2026-11-11, minitest: 91 of 139 pass --no-codegen, up from 87.
-  A later round stopped at a usage limit before its count: its ports
-  (acme, toml, yaml, http exercises; Enumerable and multipart results)
-  are in, 5 more of test/cli/*.iyi build, and the groups below are not
-  yet rewritten for them.
-  This round is incomplete: 48 programs still fail. The partly ported
-  programs and scratch-result and def-data groups still need work; no
-  new user decision is needed for their routine ports. The five deferred
-  programs remain wasm32, xml and the three private http2_tape comparisons.
+  2026-11-12, minitest with the rebuilt compiler: 101 of 133 programs
+  pass `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 32 fail.
+  The same compiler's baseline was 93 pass, 40 fail. The earlier
+  139-program count and groups were stale. This item remains open:
+  30 routine ports and two deferred fixtures still do not build.
+  Names omit std_ and _exercise where present; each failure appears once.
 
-  PNG, cookie, netip and process now pass --no-codegen. PNG and netip
-  also build with code generation and run to ALL CHECKS PASSED. Cookie
-  now runs to ALL CHECKS PASSED too: its fault was a typed group reading
-  task values after its join had freed their result regions
-  (test/ris/typed_group_results.ri). Process has not been run this round.
-  Final minitest `bash test/ris/check.sh`: PASS: all ris checks;
-  359 runs, 343 refusals, 13 heap cases, zero FAILED lines.
-  The checker, SPEC.md and CHANGELOG.md are unchanged.
-
-  Cookie parsing borrows the input directly, with caller-owned backing
-  for lowered domains and a caller-owned destination for header pairs.
-  CookieJar retains text in its own builder and removes entries in place.
-  HTTP.parse_response constructs backing before its interim-head loop;
-  test/ris/response_owner.ri covers repeated fields and chunked bodies.
-  YAML/TOML typed Hash readers construct their columns at the caller;
-  test/ris/decoded_maps.ri runs, but nested derived readers still refuse.
-  PNG's fixture and decode helpers keep their backing at the caller;
-  its independent round-trip fixtures have separate def locals. PrefixSet
-  is made first, then filled with add_all. Process's input loop drops its
-  block result and uses a distinct local for its descriptor test.
-  ACME and WebSocket have further partial ports, but neither builds.
-
-  Remaining groups (names omit std_ and _exercise where present):
-  - API drift, 6: fuzz has byte-View mismatches, owner factories and the
-    removed Server.parse_request/handle surface. http2_tape_frames,
-    http2_tape_request and http2_tape_response use private Conn/H2Connection
-    hooks; public benches or retirement is deferred. xml's removed XPath
-    API and wasm32's removed GC APIs are also deferred user decisions.
-  - Scratch results, SPEC 1.9, 3: std's tally and YAML/TOML's nested
-    derived readers. Hash results need caller-owned destinations; nested
-    derived results need backing that survives their construction block.
-    TOML's reads/corpus wrappers now forward their parsed input, but
-    TapeAny#dig? and generated nested tables still refuse.
-  - Def data stored past it, 2: http_server's multipart Part and acme's
-    retained challenge data. Keep backing on the receiving owner and
-    refill it. ACME's ALPN now refills trust's existing Array; it still
-    stops in the responder and HTTP HTTPS-endpoint backing.
-  - Block data stored past it, 10: big, bzip2, eiy, indexable, rsa,
-    slice, sse, user, xz and websocket. Use stable storage or explicit
-    copies to the destination owner. WebSocket now declares raw socket
-    pairs at each caller and grows its handshake text in place, but its
-    socket/proc owners and retained messages still refuse.
-  - Views stored past owners, 4: compress, secure_dns, tar and zstd.
-    Keep source/decoder storage with its consumer, or write output into
-    caller-owned backing. secure_dns stops at Resolver#txt.
   - TLS/HPKE/upgrade owners, 8: http2, tls, autocert, http_latency,
-    http_resume, hpke, http and http_stop. Declare identity, config,
-    client, HPKE context or Upgraded at its caller.
-  - An owner answered by a def, 1: benchmark's bm, then IPS Entry owners
-    kept in an Array. Caller-owned jobs need stable entry storage.
-  - Procs outliving their tape, 5: dns, file, file_utils, router and
-    http_https_records. Move socket/file creation inside tasks and send
-    copied text/config; keep callbacks inside their owners. DNS still
-    captures server; HTTPS records still captures dns (UdpSocket).
-  - Request data on the program tape, 3: log, ocsp and x509. Make retained
-    parents, zones and certificates in program-owned storage explicitly.
-  - Live views across reset/growth, 2: csv and zip. Consume each row or
-    chunk before refill, or copy retained views. Reduce suspected
-    summary errors before changing the checker.
-  - Opaque callback, 1: iterator's to_a over map/each_slice output. Use
-    a known consumer or provide a summary proof.
-  - Growing owner in a runtime Array, 1: p256's private keys. Give each
-    key stable storage; collect handles rather than growing owners.
-  - Raw String pointer, 1: tls_probe. Use String/byte APIs; only the OS
-    handoff belongs in a small annotated std def.
-  - Invalid constant, 1: number's FOLDED_SIZE. Reduce folding of the
-    compound modulo expression; keep the tested expression.
-  Known failures outside this round: format on main, text's chomp-CR
-  assertion, and std_regex's task stack overflow at deepest nesting.
-  RSA/ct_timing and time runtime failures belong to another worker.
-  Known checker hole: shuffled.map { |s| SemanticVersion.parse(s) },
-  where shuffled holds views of another Array's Strings, is refused as
-  a block result made in scratch (semantic_version maps over indices).
+    http_resume, hpke, http and http_stop. Declare identities, configs,
+    clients, HPKE contexts and Upgraded at their callers.
+  - Block/round storage, 3: big, user and websocket. Keep backing on the
+    receiving owner, append into caller-owned builders, and avoid
+    rebinding outer locals to scratch. Big also needs explicit results.
+  - Procs outliving their tape, 3: file, router and http_https_records.
+    Keep resources and callbacks inside their owners.
+  - Decoder/source backing, 3: compress, tar and zstd. Keep backing with
+    the consumer or write output into caller-owned destinations.
+  - Program-owned retained data, 3: log, ocsp and x509. Copy retained
+    parents, zones and certificates to their actual owner explicitly.
+  - Scratch results, 2: toml and yaml nested derived readers. Supply
+    backing that survives the construction block; TOML also hits dig?.
+  - Reset/growth views, 2: csv and zip. Consume before refill or copy
+    retained views; reduce suspected summary errors before checker edits.
+  - Retained def data, 1: acme challenge data and HTTPS endpoint backing.
+  - API drift, 1: fuzz's byte views, owner factories and removed
+    Server.parse_request/handle surface.
+  - Returned owner, 1: benchmark's jobs and IPS entry storage.
+  - Opaque callback, 1: iterator's mapped/sliced to_a consumer.
+  - Runtime Array of growing owners, 1: p256 private keys.
+  - Invalid constant, 1: number's compound modulo FOLDED_SIZE.
+  - Deferred decisions, 2 in this glob: wasm32 GC and xml XPath APIs.
+    Also skip the three private http2_tape_* comparisons (outside this
+    glob); the user will decide their public replacement or retirement.
+
+  The eight newly passing programs also build with code generation and
+  run: bzip2, eiy, file_utils, rsa, slice, sse, xz and tls_probe.
+  Reader.read_str now appends through custom readers; SSE drops a partial
+  ID on reconnect; RSA borrows String messages and compares its PSS hash
+  through the byte view. Each bug has a regression in test/ris/check.sh.
+  No checker, SPEC.md or CHANGELOG.md changes; no new design decision.
+  Final minitest `bash test/ris/check.sh`: PASS: all ris checks;
+  367 runs, 343 refusals, 13 heap cases, zero FAILED lines.
+
+  Known outside this round: format fails on main; text panics at
+  "string: chomp cr".
 * std_http_exercise's and std_fuzz's parse checks call
   `Server.parse_request`, gone with `Request`: read through
   `Server.parse_head` or a socket round trip. Most of

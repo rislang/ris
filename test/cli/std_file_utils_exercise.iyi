@@ -36,15 +36,22 @@ end
 
 # What *work* panicked with, or "done" when it did not: run as a task,
 # whose value catches the panic.
-def refusal_of(&work : -> Nil) : String
-  said = "done"
-  group do |g|
-    task = g.spawn { work.call; 0 }
-    outcome = task.value
-    said = outcome.message.to_s if outcome.is_a?(Panicked)
-    0
+macro refusal_of(&work)
+  String.build do |%said|
+    group do |g|
+      %task = g.spawn do
+        {{work.body}}
+        0
+      end
+      %outcome = %task.value
+      if %outcome.is_a?(Panicked)
+        %said << %outcome.message
+      else
+        %said << "done"
+      end
+      0
+    end
   end
-  said
 end
 
 def mode_of(path : String) : Int32

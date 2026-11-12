@@ -8,25 +8,15 @@ import std/slice::{Slice, SliceIterator}
 
 alias Bytes = Std::Slice::Bytes
 
-class BufferHolder
-  getter ptr : Pointer(UInt8)
-
-  def initialize(size : Int32)
-    @ptr = Pointer(UInt8).malloc(size.to_u64)
-  end
-end
-
-def make_interior_slice : Bytes
-  holder = BufferHolder.new(128)
+def fill_buffer(bytes : Bytes) : Nil
   i = 0
-  while i < 128
-    holder.ptr[i] = (i + 17).to_u8
+  while i < bytes.size
+    bytes[i] = (i + 17).to_u8
     i = i + 1
   end
-  # Return subslice of the buffer (interior pointer at offset 32)
-  Bytes.new(holder.ptr + 32_i64, 64)
 end
 
+@[PointerUnsafe("the exercise checks raw Slice APIs on retained slices")]
 def main : Nil
   puts "== slice constructors and basic properties"
   s_empty = Slice(Int32).empty
@@ -38,7 +28,8 @@ def main : Nil
   s_block = Slice(Int32).new(5) { |i| (i + 1) * 10 }
   puts "block new: #{s_block.to_s}"
 
-  raw_ptr = Pointer(Int32).malloc(3_u64)
+  raw_storage = Slice(Int32).new(3, 0)
+  raw_ptr = raw_storage.to_unsafe
   raw_ptr[0] = 100
   raw_ptr[1] = 200
   raw_ptr[2] = 300
@@ -68,7 +59,7 @@ def main : Nil
   raise "Bool value new: expected Slice[true, true, true], writable" unless bools.to_s == "Slice[true, true, true]" && !bools.read_only?
 
   puts "bytesize: #{s_block.bytesize} (expected #{5 * sizeof(Int32)})"
-  puts "to_unsafe: #{s_block.to_unsafe.address > 0_u64}"
+  puts "borrowed storage: #{s_raw.size == raw_storage.size}"
 
   puts "== unsafe accessors"
   puts "unsafe_fetch: #{s_block.unsafe_fetch(2)}"
@@ -132,7 +123,8 @@ def main : Nil
   dst2.copy_from(src)
   puts "copy_from slice: #{dst2.to_s}"
 
-  ptr_dst = Pointer(Int32).malloc(3_u64)
+  dst_storage = Slice(Int32).new(3, 0)
+  ptr_dst = dst_storage.to_unsafe
   src.copy_to(ptr_dst, 3)
   puts "copy_to ptr: #{ptr_dst[0]} #{ptr_dst[1]} #{ptr_dst[2]}"
 
@@ -238,11 +230,22 @@ def main : Nil
   raise "hash spread: a 150 by 150 grid of slices had #{grid_hashes.size} distinct hashes" unless grid_hashes.size == 22500
   started = __iyi_monotonic_ns
   slice_keys = {} of Slice(Int32) => Int32
-  150.times { |x| 150.times { |y| slice_keys[Slice(Int32).new(2) { |i| i == 0 ? x : y }] = x * y } }
+  key_backing = Slice(Int32).new(22500 * 2, 0)
+  150.times do |x|
+    150.times do |y|
+      offset = (x * 150 + y) * 2
+      key_backing[offset] = x
+      key_backing[offset + 1] = y
+      slice_keys[key_backing[offset, 2]] = x * y
+    end
+  end
   slice_ns = __iyi_monotonic_ns - started
   started = __iyi_monotonic_ns
   array_keys = {} of Array(Int32) => Int32
-  150.times { |x| 150.times { |y| array_keys[[x, y]] = x * y } }
+  array_backing = Array(Array(Int32)).new(22500) do |i|
+    [i // 150, i % 150]
+  end
+  array_backing.each { |key| array_keys[key] = key[0] * key[1] }
   array_ns = __iyi_monotonic_ns - started
   found = slice_keys[Slice(Int32).new(2) { |i| i == 0 ? 149 : 17 }]?
   puts "hash table: #{slice_keys.size} slice keys, [149, 17] => #{found.inspect}"
@@ -281,22 +284,17 @@ def main : Nil
   puts "iterator after first(2): #{taken} then #{rest}"
   raise "iterator after first(2): expected [3, 6] then [9, 12, 15]" unless taken == [3, 6] && rest == [9, 12, 15]
 
-  puts "== gc liveness verification"
-  sub = make_interior_slice
+  puts "== scope liveness verification"
+  backing = Bytes.new(128, 0_u8)
+  fill_buffer(backing)
+  sub = backing[32, 64]
   # Churn allocations
   churn = 0
   while churn < 5000
-    p = Pointer(UInt8).malloc(256_u64)
+    p = Array(UInt8).new(256, 0_u8)
     p[0] = 0xAA_u8
     churn = churn + 1
   end
-
-  {% if !flag?(:gc_none) && !flag?(:gc_boehm) && ((flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || flag?(:darwin) || flag?(:win32)) %}
-    IyiMark.collect
-    puts "gc collections: #{IyiMark.collections}"
-  {% else %}
-    puts "gc collections: skipped"
-  {% end %}
 
   survived = true
   k = 0
@@ -308,7 +306,8 @@ def main : Nil
     end
     k = k + 1
   end
-  puts "collector memory preserved through subslice: #{survived}"
+  raise "a subslice lost its caller-owned backing" unless survived
+  puts "tape memory preserved through subslice: #{survived}"
 
   puts "all slice checks passed"
 end

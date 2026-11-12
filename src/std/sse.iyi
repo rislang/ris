@@ -193,6 +193,8 @@ pub class EventParser
   # the reconnection time stay.
   def reconnect : Nil
     finish
+    @id.clear
+    @id << @last_id.finish
     @first = true
     @dispatched = 0_i64
   end

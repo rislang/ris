@@ -8,6 +8,13 @@ back.
 
 ## To take to iyi
 
+* std/sse: reconnect restores the ID buffer from the last dispatched
+  event ID. An unended event's ID must not survive into the next stream.
+  Gate: test/ris/sse_reconnect_id.ri.
+
+* tls_probe: read the Windows TEB slot only on Windows x86_64, rather
+  than every x86_64 target. Other platforms have no Windows TEB slot.
+
 * Refuse UInt8 == Char instead of silently answering false. Suggest a
   byte literal or each_char. Gate: refused/byte_char_equal.ri.
 

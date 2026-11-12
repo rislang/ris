@@ -130,21 +130,37 @@ def refused(stream : String, phrase : String, label : String) : Nil
   else
     raise "ASSERTION FAILED: #{label}: read #{got.bytesize} bytes instead of refusing"
   end
+  expected_message = got.message
   [[1, 2, 3, 4, 5, 6, 7], [4096]].each do |sizes|
-    feed = Feed.new(stream, sizes)
-    r = Bzip2Reader.new(feed)
-    again = drain(r, 65536)
-    case again
-    when Bzip2Error
-      assert_true again.message == got.message, "#{label}, streamed: refused with #{again.message.inspect}, whole with #{got.message.inspect}"
-      # and every read after it answers the same error.
-      later = r.read(10)
-      assert_true later.is_a?(Bzip2Error) && later.message == got.message, "#{label}: the read after the error answers it again"
-    else
-      raise "ASSERTION FAILED: #{label}, streamed: read #{again.bytesize} bytes instead of refusing"
-    end
+    refused_stream(stream, sizes, expected_message, label)
   end
-  puts "  #{label}: #{got.message}"
+  puts "  #{label}: #{expected_message}"
+end
+
+def refused_stream(stream : String, sizes : Array(Int32),
+                   expected_message : String, label : String) : Nil
+  feed = Feed.new(stream, sizes)
+  r = Bzip2Reader.new(feed)
+  again = drain(r, 65536)
+  case again
+  when Bzip2Error
+    assert_true again.message == expected_message, "#{label}, streamed: refused with #{again.message.inspect}, whole with #{expected_message.inspect}"
+    # and every read after it answers the same error.
+    later = r.read(10)
+    assert_true later.is_a?(Bzip2Error) && later.message == expected_message, "#{label}: the read after the error answers it again"
+  else
+    raise "ASSERTION FAILED: #{label}, streamed: read #{again.bytesize} bytes instead of refusing"
+  end
+end
+
+def crc_piece(reader : Bzip2Reader, crc : UInt32) : {Int32, UInt32}
+  piece = reader.read(65536)
+  case piece
+  when Bzip2Error
+    raise "ASSERTION FAILED: 64 MiB: #{piece.message}"
+  else
+    {piece.bytesize, CRC32.update(crc, piece, piece.bytesize)}
+  end
 end
 
 def bytes(values : Array(Int32)) : String
@@ -282,7 +298,9 @@ class Bits
         i = i - 1
       end
     end
-    @bits = @bits[0, from] + mid + @bits[to, @bits.size - to]
+    replacement = (@bits[0, from] + mid + @bits[to, @bits.size - to]).copy_to(RisCurrentTape.new)
+    @bits.clear
+    replacement.each { |bit| @bits << bit }
     self
   end
 
@@ -474,11 +492,11 @@ rest = drain(r, 65536)
 assert_true rest.is_a?(String) && first_read.is_a?(String) && first_read + rest == plain, "and the rest followed"
 assert_true r.leftover == "", "nothing is left over of a stream fed exactly"
 ["trailing junk", "BZ", "BZh", "BZh0 not a stream", "\0\0\0\0"].each do |junk|
-  feed = Feed.new(stream + junk, [3, 5])
-  r = Bzip2Reader.new(feed)
-  got = drain(r, 65536)
-  assert_true got.is_a?(String) && got == plain, "a stream with #{junk.inspect} after it reads"
-  assert_true r.leftover + feed.rest == junk, "what is left over is what was fed past the stream: #{r.leftover.inspect} and #{feed.rest.inspect} not given, not #{junk.inspect}"
+  junk_feed = Feed.new(stream + junk, [3, 5])
+  junk_r = Bzip2Reader.new(junk_feed)
+  junk_got = drain(junk_r, 65536)
+  assert_true junk_got.is_a?(String) && junk_got == plain, "a stream with #{junk.inspect} after it reads"
+  assert_true junk_r.leftover + junk_feed.rest == junk, "what is left over is what was fed past the stream: #{junk_r.leftover.inspect} and #{junk_feed.rest.inspect} not given, not #{junk.inspect}"
   assert_true whole(stream + junk, "with #{junk.inspect} after it") == plain, "and whole, the bytes after the stream are ignored"
 end
 # Tiny reads: a byte, three and seventeen at a time from pieces of other
@@ -509,12 +527,10 @@ puts "  pieces of 1 to 7 bytes, reads of 1 to 64 KiB, nothing asked past the end
 puts "\n== concatenated streams"
 # As `cat a.bz2 b.bz2` and pbzip2 make them: what they hold one after
 # another, each stream's combined CRC its own, empty ones among them.
-parts = [] of String
 joined = String::Builder.new
 together = String::Builder.new
 20.times do |i|
   part = i % 5 == 0 ? "" : text(i * 30) + run_of(i, i * 11)
-  parts << part
   joined << part
   together << Bzip2.compress(part, i % 9 + 1)
 end
@@ -610,7 +626,9 @@ refused("BZh1" + good[4, good.bytesize - 4], "holds more than its 100000 bytes",
 # 150,000: one RUNA/RUNB run already past the 100,000.
 abab = Bzip2.compress("ab" * 150000)
 refused("BZh1" + abab[4, abab.bytesize - 4], "holds more than its 100000 bytes", "a run past a 100k block")
-bits_17 = Bits.new(Bzip2.compress("third"))
+third = Bzip2.compress("third")
+bits_17 = Bits.new(third)
+bits_17.load(third)
 second = Bzip2.compress("second") + "BZh9" + bits_17.set(32, 1, 1).to_s[4, 30]
 refused(second, "block 2 starts with neither", "a second stream whose block is broken")
 puts "  every corrupt stream above refused whole, a piece at a time, and on every read after"
@@ -654,17 +672,17 @@ if args.size > 0
   puts "\n== against python"
   names = ["empty", "byte", "text", "repeat", "ab", "runs", "random", "every", "multi"]
   names.each do |name|
-    plain = File.read("#{dir}/#{name}.bin")
+    python_plain = File.read("#{dir}/#{name}.bin")
     ["1", "9"].each do |level|
       py = File.read("#{dir}/#{name}.#{level}.bz2")
-      every_feed(py, plain, "python's #{name} at level #{level}")
-      mine = Bzip2.compress(plain, level.to_i)
+      every_feed(py, python_plain, "python's #{name} at level #{level}")
+      mine = Bzip2.compress(python_plain, level.to_i)
       File.write("#{dir}/#{name}.iyi#{level}.bz2", mine)
       # As small as libbzip2's, give or take: the same tables chosen the
       # same way, a different sort.
       assert_true mine.bytesize <= py.bytesize + py.bytesize // 50 + 16, "#{name} at level #{level}: #{mine.bytesize} bytes against libbzip2's #{py.bytesize}"
     end
-    puts "  #{name}: #{plain.bytesize} bytes; python's two streams read every way, two written for python"
+    puts "  #{name}: #{python_plain.bytesize} bytes; python's two streams read every way, two written for python"
   end
   plain = File.read("#{dir}/many.bin")
   every_feed(File.read("#{dir}/many.bz2"), plain, "python's 40 concatenated streams")
@@ -685,18 +703,13 @@ if args.size > 0
   reads = 0
   started = __iyi_monotonic_ns
   while true
-    piece = r.read(65536)
-    case piece
-    when Bzip2Error then raise "ASSERTION FAILED: 64 MiB: #{piece.message}"
-    else
-      break if piece.bytesize == 0
-      crc = CRC32.update(crc, piece, piece.bytesize)
-      total = total + piece.bytesize
-      reads = reads + 1
-      if reads % 64 == 0
-        kept = RisRegion.tape_bytes(1_u64)
-        most = kept - base if kept > base && kept - base > most
-      end
+    count, crc = crc_piece(r, crc)
+    break if count == 0
+    total = total + count
+    reads = reads + 1
+    if reads % 64 == 0
+      kept = RisRegion.tape_bytes(1_u64)
+      most = kept - base if kept > base && kept - base > most
     end
   end
   big_ms = (__iyi_monotonic_ns - started) // 1000000
