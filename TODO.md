@@ -23,7 +23,7 @@ sections below and are listed here in order:
 * Benches build (section 7), including `HTTP.tls_config=` callers.
 * compiler_test passes (exception_test.cr is removed: ris has no
   `rescue`); rerun it whole on minitest.
-* Release: Linux tarball and its job, `install_ris.sh`, tag v0.1.0;
+* Release: Linux tarball and its job, `install_ris.sh`, tag ris-v0.1.0;
   `ris --version` prints 0.1.0.
 
 ## 1. Programs first
@@ -37,6 +37,10 @@ sections below and are listed here in order:
   back `form`, `multipart` and `cookies`, which `Request` had.
 
 * The user's own ris programs: each obstacle becomes an item here.
+
+* `Iterator#to_a` (iterator.ri:225) stores each round's item past its
+  round, so samples/ris/std_iterator.ri does not build and is left out
+  of the tarball with autocert.ri (Makefile, ris-tarball).
 
 Breakage between steps is fine; no transition stages.
 

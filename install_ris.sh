@@ -5,7 +5,7 @@
 #     https://raw.githubusercontent.com/rislang/ris/main/install_ris.sh | sh
 #
 # The release unpacks into its own directory, PREFIX/lib/ris, and PREFIX/bin/ris
-# is linked into it, so an installed iyi is left alone.
+# is linked into it, so nothing else under PREFIX is touched.
 #
 # RIS_PREFIX       default ~/.local
 # RIS_VERSION      a release to pin, e.g. 0.1.0; default is the latest release

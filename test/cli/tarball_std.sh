@@ -11,14 +11,14 @@
 # Two states this is written against, both real. 0.11.0 shipped
 # `share/ris/src/ris` and nothing beside it, so `import std/enumerable`
 # answered "can't find module" for everybody who downloaded it. And between
-# `src/std/` being made and `install_iyi` naming it, the directory rode into
+# `src/std/` being made and `install_ris` naming it, the directory rode into
 # the tarball as a passenger of the other language's library
 # (`share/ris/crystal/std/`) and resolved out of a library it is not part of.
 # A gate that runs `hello.ri` passes in both states, which is why this one
 # reads the package instead.
 #
-# Takes the root of an unpacked tarball, or an `install_iyi` DESTDIR;
-# defaults to `.build/iyi-package`. Exits non-zero if any check fails.
+# Takes the root of an unpacked tarball, or an `install_ris` DESTDIR;
+# defaults to `.build/ris-package`. Exits non-zero if any check fails.
 
 set -u
 
@@ -29,7 +29,9 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT) REPO="$(cygpath -m "$REPO")" ;;
 esac
-ROOT="${1:-$REPO/.build/iyi-package}"
+ROOT="${1:-$REPO/.build/ris-package}"
+# Absolute: the builds below run from a scratch directory.
+ROOT="$(cd "$ROOT" && pwd)"
 RIS="$ROOT/bin/ris"
 SHIPPED="$ROOT/share/ris/src/std"
 SAMPLES="$ROOT/share/ris/samples"
@@ -61,7 +63,7 @@ fail() {
 
 if [ ! -x "$RIS" ]; then
   echo "test/cli/tarball_std.sh: no compiler at $RIS"
-  echo "give it an unpacked tarball's root, or run make iyi-tarball first"
+  echo "give it an unpacked tarball's root, or run make ris-tarball first"
   exit 1
 fi
 
@@ -111,6 +113,14 @@ for source in "$REPO"/src/std/*.ri; do
   [ -f "$source" ] || continue
   name="$(basename "$source" .ri)"
   printf 'import std/%s\nputs "std/%s"\n' "$name" "$name" > "$WORK/probe_$name.ri"
+  # std/gc ships for iyi's programs; a ris build refuses it (std gc.1).
+  if [ "$name" = gc ]; then
+    if build probe_gc "$WORK/probe_gc.ri" ||
+      ! grep -q "no collector" "$WORK/probe_gc.log"; then
+      fail "import std/gc was not refused for having no collector"
+    fi
+    continue
+  fi
   if ! build "probe_$name" "$WORK/probe_$name.ri"; then
     fail "import std/$name does not build out of the package: $(first_error "probe_$name")"
     continue
@@ -144,7 +154,7 @@ if [ -d "$SAMPLES" ]; then
     echo "  $samples samples, built from where the tarball put them"
   fi
 else
-  echo "  (no samples in this root: an install_iyi DESTDIR ships none)"
+  echo "  (no samples in this root: an install_ris DESTDIR ships none)"
 fi
 
 echo

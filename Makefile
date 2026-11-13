@@ -450,6 +450,12 @@ ris-tarball: $(O)/ris$(EXE) $(O)/$(IYI_DAEMON_BIN) check_ris_is_release
 	     \( -name lib -o -name mods \) -type d -prune -exec rm -rf {} +
 	find "$(O)/ris-package/share/ris/samples" -type f -perm -u+x -delete
 	find "$(O)/ris-package/share/ris/samples" -type d -empty -delete
+# Samples the tape checker still refuses stay out of the package until
+# they build (TODO.md): autocert.ri waits for the HTTPS client, which
+# returns an owner; std_iterator.ri for Iterator#to_a, whose items are
+# loop-round scratch.
+	rm -f "$(O)/ris-package/share/ris/samples/autocert.ri" \
+	  "$(O)/ris-package/share/ris/samples/std_iterator.ri"
 # What the binaries need at runtime and a fresh machine has no reason to
 # own: see scripts/bundle-runtime-libs.sh, which takes what the loader
 # reports; CI's clean room (a bare image with nothing but a C toolchain)
