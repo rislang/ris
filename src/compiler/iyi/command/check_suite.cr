@@ -483,7 +483,9 @@ class Iyi::Command
         files << root
       else
         Dir.children(dir).sort!.each do |child|
-          abort! Lexer.iyi_miscased_sentence(File.join(dir, child)), :USAGE_ERROR if Lexer.iyi_named?(child)
+          # ris: only a file is refused; a `.iyi/` build cache is a directory.
+          path = File.join(dir, child)
+          abort! Lexer.iyi_miscased_sentence(path), :USAGE_ERROR if Lexer.iyi_named?(child) && File.file?(path)
           next unless child.ends_with?(".ri") && !child.ends_with?("_test.ri")
           files << (dir == "." ? child : File.join(dir, child))
         end

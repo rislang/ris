@@ -151,6 +151,7 @@ class Iyi::Command
     # than left out of the ripple in silence (`Lexer.iyi_miscased?`).
     # ris: and a `.iyi` file is refused by the same sentence (SPEC 6.10).
     Dir.glob("**/*.[iI][yY][iI]") do |candidate|
+      next unless File.file?(candidate)
       abort! Lexer.iyi_miscased_sentence(candidate), :USAGE_ERROR
     end
     Dir.glob("**/*.[rR][iI]") do |candidate|

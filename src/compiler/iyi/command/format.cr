@@ -197,7 +197,7 @@ class Iyi::Command
         # chops it first, and now nothing depends on that.
         directory = Iyi.glob_root(filename)
         # And `.ri` in any case, as above (`Lexer.iyi_miscased?`).
-        filenames = Dir[directory.join("**", "*.cr")] + Dir[directory.join("**", "*.[iI][yY][iI]")]
+        filenames = Dir[directory.join("**", "*.cr")] + Dir[directory.join("**", "*.[iI][yY][iI]")].select { |name| File.file?(name) }
         format_many filenames, walk_excludes(filename)
       else
         # iyi: and a failure, which it was not. `--check` printed this and
