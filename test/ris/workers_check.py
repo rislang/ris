@@ -7,7 +7,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 RIS = str((ROOT / os.environ.get("RIS", "./bin/ris")).resolve())
-SOURCE = ROOT / "samples/iyi/workers.iyi"
+SOURCE = ROOT / "samples/ris/workers.ri"
 EXPECTED = '91\n{"<one>", "<two>"}\nslow timed out\n'
 
 
@@ -46,7 +46,7 @@ raise "leftover Result" unless RisBoard.poll(Result) == {nil, false}
              "result queue full; result was not published"),
         ]
         for name, text, error in variants:
-            source = scratch / (name + ".iyi")
+            source = scratch / (name + ".ri")
             source.write_text(text)
             done = run_sample(source, scratch / name)
             output = done.stdout + done.stderr

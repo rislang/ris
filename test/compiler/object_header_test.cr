@@ -73,7 +73,7 @@ describe Iyi::Collector::ObjectHeader do
     buffer = Pointer(ObjectHeader).malloc(1)
     buffer.value = ObjectHeader.new(7_u32)
 
-    # Little-endian, like every target iyi compiles for and like `.iyimod`:
+    # Little-endian, like every target iyi compiles for and like `.rimod`:
     # the type id is the u32 at byte 4, which is where codegen stores it.
     buffer.as(UInt64*).value.should eq 7_u64 << 32
     (buffer.as(UInt8*) + 4).as(UInt32*).value.should eq 7_u32

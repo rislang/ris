@@ -6,7 +6,7 @@
 #     bash test/cli/std_fuzz_exercise.sh
 #     FUZZ_ITERATIONS=60000 bash test/cli/std_fuzz_exercise.sh
 #
-# test/cli/std_fuzz_exercise.iyi makes its inputs from seeds - certificates,
+# test/cli/std_fuzz_exercise.ri makes its inputs from seeds - certificates,
 # PEM, recorded TLS handshakes, HTTP/1.1 heads, HTTP/2 frames, HPACK
 # blocks - mutated by a seeded generator, so every run reads the same
 # ones; its header says what each target covers and what the long runs
@@ -22,9 +22,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -64,10 +64,10 @@ esac
 ORACLE="${FUZZ_ORACLE:-2000}"
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 echo "== the fuzz exercise, plain build, $ITERATIONS inputs a pure target"
-if ! "$IYI" build -o "$WORK/fuzz" "$REPO/test/cli/std_fuzz_exercise.iyi" >"$WORK/build.log" 2>&1; then
+if ! "$RIS" build -o "$WORK/fuzz" "$REPO/test/cli/std_fuzz_exercise.ri" >"$WORK/build.log" 2>&1; then
   echo "  build failed"
   tail -12 "$WORK/build.log"
   exit 1
@@ -243,7 +243,7 @@ fix_proof() {
     return
   fi
   mkdir -p "$WORK/$name/std"
-  if ! "$PY" - "$REPO/src/std/$module.iyi" "$WORK/$name/std/$module.iyi" "$old" "$new" <<'PY'; then
+  if ! "$PY" - "$REPO/src/std/$module.ri" "$WORK/$name/std/$module.ri" "$old" "$new" <<'PY'; then
 import sys
 from pathlib import Path
 src = Path(sys.argv[1]).read_text()
@@ -255,7 +255,7 @@ PY
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/$name.bin" "$REPO/test/cli/std_fuzz_exercise.iyi" >"$WORK/$name.out" 2>&1; then
+  if ! RIS_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/$name.bin" "$REPO/test/cli/std_fuzz_exercise.ri" >"$WORK/$name.out" 2>&1; then
     echo "  the copy with $label did not build"
     tail -3 "$WORK/$name.out" | sed 's/^/    /'
     status=1

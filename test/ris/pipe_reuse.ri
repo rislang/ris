@@ -40,12 +40,12 @@ refused = group do |g|
   g.spawn { old_in.read_str(16); 0 }.value
 end
 raise "stale read: #{refused.inspect}" unless refused.is_a?(Panicked) &&
-  refused.message.includes?("pipe end is closed")
+                                              refused.message.includes?("pipe end is closed")
 refused = group do |g|
   g.spawn { old_out.write("x"); 0 }.value
 end
 raise "stale write: #{refused.inspect}" unless refused.is_a?(Panicked) &&
-  refused.message.includes?("pipe end is closed")
+                                               refused.message.includes?("pipe end is closed")
 # The tape way: bytes appended to the caller's builder.
 text = String.build(16) { |w| new_in.read_str(16, w) }
 raise "fresh: #{text}" unless text == "fresh"

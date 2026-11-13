@@ -35,7 +35,7 @@
 #      a different error than the one on record. A recorded reason that has
 #      gone stale is worse than no reason, because it reads as understood.
 #
-# Needs `make` for bin/iyi, plus `otool` on darwin, `readelf` on Linux or the
+# Needs `make` for bin/ris, plus `otool` on darwin, `readelf` on Linux or the
 # MSVC toolchain's `dumpbin` on Windows.
 set -u
 
@@ -43,8 +43,8 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO" || exit 1
 
 # the compiler this gate measures: the wrapper in bin/ is a posix shell script
-# and cannot run a windows build, so an `IYI` from the environment wins.
-IYI="${IYI:-$REPO/bin/iyi}"
+# and cannot run a windows build, so an `RIS` from the environment wins.
+RIS="${RIS:-$REPO/bin/ris}"
 
 status=0
 mkdir -p "$REPO/test/cli/.work"
@@ -84,8 +84,8 @@ FLOOR_BUILT=52
 # rather than assumed: all 52 modules on this base build alone.
 #
 # It is kept because four modules not yet on master need it. `oauth`, `oauth2`
-# and `websocket` reach `src/std/dns.iyi`, which used a bare `rescue`, and
-# `src/std/spec.iyi` declared `pub class SpecError < Exception` while
+# and `websocket` reach `src/std/dns.ri`, which used a bare `rescue`, and
+# `src/std/spec.ri` declared `pub class SpecError < Exception` while
 # `Std::Exception` is a module. Under a compiler carrying the rule that
 # refuses `rescue` in an iyi file, those four did not build. Fixes exist and
 # land with the modules.
@@ -145,14 +145,14 @@ libs_of() {
   fi
 }
 
-if [ ! -x "$IYI" ]; then
-  echo "$IYI is missing; run make first."
+if [ ! -x "$RIS" ]; then
+  echo "$RIS is missing; run make first."
   exit 1
 fi
 
-echo "== iyi's standard library, one module at a time"
+echo "== ris's standard library, one module at a time"
 
-modules="$(ls src/std/*.iyi 2>/dev/null)"
+modules="$(ls src/std/*.ri 2>/dev/null)"
 module_count="$(printf '%s\n' "$modules" | grep -c . )"
 
 built=0
@@ -164,8 +164,8 @@ all_libs="$WORK/all_libs"
 : > "$all_libs"
 
 for m in $modules; do
-  name="$(basename "$m" .iyi)"
-  probe="$WORK/probe_$name.iyi"
+  name="$(basename "$m" .ri)"
+  probe="$WORK/probe_$name.ri"
   {
     printf 'module stdprobe_%s\n\n' "$name"
     printf 'import std/%s\n\n' "$name"
@@ -175,7 +175,7 @@ for m in $modules; do
   out="$WORK/bin_$name"
   err="$WORK/err_$name"
 
-  if IYI_PATH="$REPO/src" "$IYI" build -o "$out" "$probe" > "$err" 2>&1; then
+  if RIS_PATH="$REPO/src" "$RIS" build -o "$out" "$probe" > "$err" 2>&1; then
     if known_fail "$name"; then
       # Failure mode 3: recorded as broken, now builds.
       stale_known="$stale_known $name(now-builds)"

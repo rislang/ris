@@ -29,17 +29,17 @@ Branch `macos-arm64`, seven commits, 17 files, +253/-80. The code was
 written as a trial before this review, against AGENTS.md's order, so this
 review may send it back; nothing is on main yet.
 
-* `src/iyi/heap.iyi`, `src/compiler/iyi/program.cr`: the target gates.
-* `src/iyi/region_none.iyi`, `src/iyi/region.iyi`: mapping through
+* `src/ris/heap.ri`, `src/compiler/iyi/program.cr`: the target gates.
+* `src/ris/region_none.ri`, `src/ris/region.ri`: mapping through
   libSystem's `mmap`, `munmap`, `madvise`, `mprotect`, not raw syscalls
   (Darwin has no stable syscall ABI). 16 KiB page masks; `MADV_FREE` where
   Linux has `MADV_DONTNEED`. `MAP_NORESERVE` means nothing on Darwin.
-* `src/iyi/concurrency.iyi`: kqueue where Linux has epoll. A change record
+* `src/ris/concurrency.ri`: kqueue where Linux has epoll. A change record
   for `kevent` is written on the stack by `__iyi_kevent_change`.
-* `src/std/socket.iyi`: the connect race on kqueue.
-* `src/std/udp.iyi`: SO_SNDBUF 65535, Darwin's default caps a datagram at
+* `src/std/socket.ri`: the connect race on kqueue.
+* `src/std/udp.ri`: SO_SNDBUF 65535, Darwin's default caps a datagram at
   about 9 KiB.
-* `src/std/debug.iyi`: reads DWARF through a small marked `open_dwarf`.
+* `src/std/debug.ri`: reads DWARF through a small marked `open_dwarf`.
 * `test/ris/check.sh`: debug regexes accept mangled frame names, on Linux
   too. `test/ris/check_parallel.py`: `RIS_CHECK_SKIP`, a regex of checks.
 * `.github/workflows/ris-macos.yml`: macos-15, Homebrew LLVM 23.1.4 and
@@ -98,8 +98,8 @@ annotation. The compiler executable keeps its GC on macOS as on Linux.
 
 ## Risks
 
-* Shared runtime files changed (`concurrency.iyi`, `region.iyi`,
-  `prelude.iyi`, `socket.iyi`): a Linux regression. Mitigated by Linux
+* Shared runtime files changed (`concurrency.ri`, `region.ri`,
+  `prelude.ri`, `socket.ri`): a Linux regression. Mitigated by Linux
   check.sh on both arches before main.
 * Agents read `MADV_FREE` residue as a leak on macOS: read `RIS_TAPE_STATS`,
   tape use, rather than resident size there.

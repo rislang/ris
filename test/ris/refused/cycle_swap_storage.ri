@@ -16,5 +16,6 @@ class P
     fill(@nodes, @other, 0)
   end
 end
+
 p = P.new
 puts p.go

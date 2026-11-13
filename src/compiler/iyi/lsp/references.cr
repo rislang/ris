@@ -55,9 +55,9 @@ module Iyi::Lsp
     # *seeds* are the keys another compile adopted (`target_keys`): a def
     # carrying one is adopted here too, wherever the cursor is. The cursor
     # names a place in its own file, and an importer's compile holds that
-    # file only when it is the def's: asked from a call in `app.iyi`, a
-    # sibling `other.iyi` matched nothing, and rename edited `app.iyi` and
-    # the def and left `other.iyi` calling a name that was gone.
+    # file only when it is the def's: asked from a call in `app.ri`, a
+    # sibling `other.ri` matched nothing, and rename edited `app.ri` and
+    # the def and left `other.ri` calling a name that was gone.
     def initialize(@target_location : Location, @seeds = Set({String, Int32, Int32, String}).new)
     end
 
@@ -106,7 +106,7 @@ module Iyi::Lsp
     # to move with a rename, or the program the rename leaves behind does
     # not compile. Names are matched, then the path is checked against
     # the files the targets live in: `import greet::{shout}` counts only
-    # if some target def's file is `<something>/greet.iyi`.
+    # if some target def's file is `<something>/greet.ri`.
     def visit(node : UsingDecl)
       return true unless @collecting
       names = node.names
@@ -116,10 +116,10 @@ module Iyi::Lsp
       # Asked of the posix reading, the way `Compiler.header_root_of` asks
       # the same question: a module path is posix by grammar (R-1) and a
       # target's file is spelled the platform's way, so on Windows no file
-      # ever ended with `/greet.iyi` and a rename left every `import` line
+      # ever ended with `/greet.ri` and a rename left every `import` line
       # behind — step 13 of `test/cli/lsp_session.py`, the first time it ran
       # there.
-      suffix = "/#{node.path.join('/')}.iyi"
+      suffix = "/#{node.path.join('/')}.ri"
       return true unless @target_files.any? { |file| ::Path[file].to_posix.to_s.ends_with?(suffix) }
 
       names.each_with_index do |name, index|
@@ -270,11 +270,11 @@ module Iyi::Lsp
     end
 
     # The filename half of the key, in one spelling. An imported module's
-    # file is `File.join(root, "calc/lexer.iyi")`, and `File.join` spells
+    # file is `File.join(root, "calc/lexer.ri")`, and `File.join` spells
     # the joint the platform's way and leaves the module path's own `/`
     # alone — so on Windows the importer's compile names the def's file
-    # `...\gate\calc/lexer.iyi` while the cursor's names it
-    # `...\gate\calc\lexer.iyi`, and a reference from a file nobody opened
+    # `...\gate\calc/lexer.ri` while the cursor's names it
+    # `...\gate\calc\lexer.ri`, and a reference from a file nobody opened
     # never matched the def it calls (step 32 of `test/cli/lsp_session.py`,
     # the first time it ran there). Compared case-blind on Windows too,
     # which is what its filesystem does.

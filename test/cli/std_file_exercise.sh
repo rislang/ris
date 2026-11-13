@@ -35,7 +35,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -53,7 +53,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 export IYI_FILE_SANDBOX="$WORK/sandbox"
 # `File.tempfile` reads TMPDIR first, so the symlink the exercise plants is
 # in the directory the temporary file is made in.
@@ -63,7 +63,7 @@ mkdir -p "$WORK/sandbox"
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_file_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_file_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -145,7 +145,7 @@ tempfile_broken() { # tempfile_broken <label> <dir> <phrase> <exclusive: yes|no>
     return
   fi
   mkdir -p "$WORK/$dir/std"
-  if ! EXCLUSIVE="$exclusive" "$PY" - "$REPO/src/std/file.iyi" "$WORK/$dir/std/file.iyi" <<'PY'
+  if ! EXCLUSIVE="$exclusive" "$PY" - "$REPO/src/std/file.ri" "$WORK/$dir/std/file.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1]).read()
 old = '      path = tmpdir + File::SEPARATOR_STRING + prefix + "_" + temp_token + suffix'
@@ -166,8 +166,8 @@ PY
     echo "  $label: the patch did not apply"
     status=1
   elif mkdir -p "$WORK/$dir-sandbox" &&
-       TMPDIR="$WORK/$dir-sandbox" IYI_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" \
-       "$IYI" run "$REPO/test/cli/std_file_exercise.iyi" -- "$WORK/$dir-sandbox" >"$WORK/$dir.out" 2>&1; then
+       TMPDIR="$WORK/$dir-sandbox" RIS_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/ris" \
+       "$RIS" run "$REPO/test/cli/std_file_exercise.ri" -- "$WORK/$dir-sandbox" >"$WORK/$dir.out" 2>&1; then
     echo "  $label: the exercise PASSED on a broken module"
     status=1
   elif grep -q "$phrase" "$WORK/$dir.out"; then
@@ -186,7 +186,7 @@ seek_broken() {
     return
   fi
   mkdir -p "$WORK/stale/std" "$WORK/stale-sandbox"
-  if ! "$PY" - "$REPO/src/std/file.iyi" "$WORK/stale/std/file.iyi" <<'PY'
+  if ! "$PY" - "$REPO/src/std/file.ri" "$WORK/stale/std/file.ri" <<'PY'
 import sys
 src = open(sys.argv[1]).read()
 old = "    @read_pos = 0\n    @read_limit = 0\n    @eof = false\n    moved\n"
@@ -197,8 +197,8 @@ PY
   then
     echo "  a seek that keeps the read-ahead: the patch did not apply"
     status=1
-  elif TMPDIR="$WORK/stale-sandbox" IYI_PATH="$WORK/stale${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" \
-       "$IYI" run "$REPO/test/cli/std_file_exercise.iyi" -- "$WORK/stale-sandbox" >"$WORK/stale.out" 2>&1; then
+  elif TMPDIR="$WORK/stale-sandbox" RIS_PATH="$WORK/stale${PSEP}$REPO/src${PSEP}$REPO/samples/ris" \
+       "$RIS" run "$REPO/test/cli/std_file_exercise.ri" -- "$WORK/stale-sandbox" >"$WORK/stale.out" 2>&1; then
     echo "  a seek that keeps the read-ahead: the exercise PASSED on a broken module"
     status=1
   elif grep -q "seek: from the start, past the read-ahead" "$WORK/stale.out"; then
@@ -218,7 +218,7 @@ match_broken() { # match_broken <label> <dir> <old> <new> <phrase>
     return
   fi
   mkdir -p "$WORK/$2/std" "$WORK/$2-sandbox"
-  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/file.iyi" "$WORK/$2/std/file.iyi" <<'PY'
+  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/file.ri" "$WORK/$2/std/file.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1]).read()
 assert src.count(os.environ["OLD"]) == 1
@@ -227,8 +227,8 @@ PY
   then
     echo "  $1: the patch did not apply"
     status=1
-  elif TMPDIR="$WORK/$2-sandbox" IYI_PATH="$WORK/$2${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" \
-       "$IYI" run "$REPO/test/cli/std_file_exercise.iyi" -- "$WORK/$2-sandbox" >"$WORK/$2.out" 2>&1; then
+  elif TMPDIR="$WORK/$2-sandbox" RIS_PATH="$WORK/$2${PSEP}$REPO/src${PSEP}$REPO/samples/ris" \
+       "$RIS" run "$REPO/test/cli/std_file_exercise.ri" -- "$WORK/$2-sandbox" >"$WORK/$2.out" 2>&1; then
     echo "  $1: the exercise PASSED on a broken module"
     status=1
   elif grep -q "$5" "$WORK/$2.out"; then
@@ -271,16 +271,16 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the broken-module proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/file.iyi").read_text()
+src = Path("$REPO/src/std/file.ri").read_text()
 old = '    info(path).size\n  end'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/file.iyi").write_text(src.replace(old, '    info(path).size + 1_i64\n  end', 1))
+Path("$WORK/patched/std/file.ri").write_text(src.replace(old, '    info(path).size + 1_i64\n  end', 1))
 PY
 then
   echo "  the patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_file_exercise.iyi" -- "$WORK/sandbox" >"$WORK/mut.out" 2>&1; then
+elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_file_exercise.ri" -- "$WORK/sandbox" >"$WORK/mut.out" 2>&1; then
   echo "  the exercise PASSED on a broken module"
   status=1
 else
@@ -294,16 +294,16 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the broken-module proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/file.iyi").read_text()
+src = Path("$REPO/src/std/file.ri").read_text()
 old = '    File.write(p, "") if info?(p).nil?'
 if old not in src:
     raise SystemExit("touch patch site missing")
-Path("$WORK/patched_touch/std/file.iyi").write_text(src.replace(old, '    File.write(p, "")', 1))
+Path("$WORK/patched_touch/std/file.ri").write_text(src.replace(old, '    File.write(p, "")', 1))
 PY
 then
   echo "  the touch patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched_touch${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_file_exercise.iyi" -- "$WORK/sandbox" >"$WORK/mut_touch.out" 2>&1; then
+elif RIS_PATH="$WORK/patched_touch${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_file_exercise.ri" -- "$WORK/sandbox" >"$WORK/mut_touch.out" 2>&1; then
   echo "  the exercise PASSED on a truncating touch"
   status=1
 else
@@ -338,16 +338,16 @@ if [ -z "$PY" ]; then
 elif ! TOUCH_SITE="$touch_site" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/file.iyi").read_text()
+src = Path("$REPO/src/std/file.ri").read_text()
 old = os.environ["TOUCH_SITE"]
 if old not in src:
     raise SystemExit(f"touch time patch site missing: {old!r}")
-Path("$WORK/patched_time/std/file.iyi").write_text(src.replace(old, old.replace("time", "0_i64").replace("sec", "0_i64"), 1))
+Path("$WORK/patched_time/std/file.ri").write_text(src.replace(old, old.replace("time", "0_i64").replace("sec", "0_i64"), 1))
 PY
 then
   echo "  the touch time patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched_time${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_file_exercise.iyi" -- "$WORK/sandbox" >"$WORK/mut_time.out" 2>&1; then
+elif RIS_PATH="$WORK/patched_time${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_file_exercise.ri" -- "$WORK/sandbox" >"$WORK/mut_time.out" 2>&1; then
   echo "  the exercise PASSED on a touch that ignores its argument"
   status=1
 elif grep -q "touch sets the given unix time" "$WORK/mut_time.out"; then
@@ -365,7 +365,7 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the each_line proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-path = Path("$WORK/patched_lines/std/file.iyi")
+path = Path("$WORK/patched_lines/std/file.ri")
 src = path.read_text()
 old = "    while line = io.read_line(chomp: true)\n      yield line\n    end\n"
 if old not in src:
@@ -375,7 +375,7 @@ PY
 then
   echo "  the each_line patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched_lines${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_file_exercise.iyi" -- "$WORK/sandbox" >"$WORK/mut_lines.out" 2>&1; then
+elif RIS_PATH="$WORK/patched_lines${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_file_exercise.ri" -- "$WORK/sandbox" >"$WORK/mut_lines.out" 2>&1; then
   echo "  the exercise PASSED on an each_line that reads the whole file first"
   status=1
 elif grep -q "each_line streams" "$WORK/mut_lines.out"; then
@@ -392,19 +392,19 @@ fi
 broken_copy() {
   local dir="$1" which="$2" source target
   if [ "$which" = prelude ] || [ "$which" = intrinsic ]; then
-    mkdir -p "$WORK/$dir/iyi"
-    cp "$REPO"/src/iyi/*.iyi "$WORK/$dir/iyi/"
+    mkdir -p "$WORK/$dir/ris"
+    cp "$REPO"/src/ris/*.ri "$WORK/$dir/ris/"
     if [ "$which" = prelude ]; then
-      source="$REPO/src/iyi/file.iyi"
-      target="$WORK/$dir/iyi/file.iyi"
+      source="$REPO/src/ris/file.ri"
+      target="$WORK/$dir/ris/file.ri"
     else
-      source="$REPO/src/iyi/prelude.iyi"
-      target="$WORK/$dir/iyi/prelude.iyi"
+      source="$REPO/src/ris/prelude.ri"
+      target="$WORK/$dir/ris/prelude.ri"
     fi
   else
     mkdir -p "$WORK/$dir/std"
-    source="$REPO/src/std/file.iyi"
-    target="$WORK/$dir/std/file.iyi"
+    source="$REPO/src/std/file.ri"
+    target="$WORK/$dir/std/file.ri"
   fi
   OLD="$3" NEW="$4" "$PY" - "$source" "$target" <<'PY'
 import os, sys
@@ -425,8 +425,8 @@ exercise_broken() {
     echo "  $1: the patch did not apply"
     status=1
   elif mkdir -p "$WORK/$2-sandbox" &&
-       TMPDIR="$WORK/$2-sandbox" IYI_PATH="$WORK/$2${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" \
-       "$IYI" run "$REPO/test/cli/std_file_exercise.iyi" -- "$WORK/$2-sandbox" >"$WORK/$2.out" 2>&1; then
+       TMPDIR="$WORK/$2-sandbox" RIS_PATH="$WORK/$2${PSEP}$REPO/src${PSEP}$REPO/samples/ris" \
+       "$RIS" run "$REPO/test/cli/std_file_exercise.ri" -- "$WORK/$2-sandbox" >"$WORK/$2.out" 2>&1; then
     echo "  $1: the exercise PASSED on a broken module"
     status=1
   elif grep -q "$6" "$WORK/$2.out"; then
@@ -557,8 +557,8 @@ echo
 echo "== what file refuses"
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expr="$4"
-  printf 'module main\n\nimport std/file::{File}\n\n%s\n' "$expr" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/file::{File}\n\n%s\n' "$expr" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -577,7 +577,7 @@ refuses() { # refuses <label> <name> <phrase> <expression>
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 
 refuses "read of a path that does not exist" read_nonexistent "cannot read " \
@@ -626,8 +626,8 @@ refusal_broken() {
     status=1
     return
   fi
-  printf 'module main\n\nimport std/file::{File}\n\n%s\n' "$6" > "$WORK/$2-prog.iyi"
-  if ! IYI_PATH="$WORK/$2${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/$2-prog" "$WORK/$2-prog.iyi" > "$WORK/$2-prog.build" 2>&1; then
+  printf 'module main\n\nimport std/file::{File}\n\n%s\n' "$6" > "$WORK/$2-prog.ri"
+  if ! RIS_PATH="$WORK/$2${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/$2-prog" "$WORK/$2-prog.ri" > "$WORK/$2-prog.build" 2>&1; then
     echo "  $1: the broken copy did not build"
     sed -n '1,10p' "$WORK/$2-prog.build"
     status=1
@@ -649,8 +649,8 @@ if [ "$(uname -s)" = Linux ]; then
   # A FIFO nobody writes is there to `exists?` at once: opened to read,
   # the open waited for a writer, and `exists?` never answered.
   mkfifo "$WORK/fifo"
-  printf 'module main\n\nimport std/file::{File}\n\nputs File.exists?(Program.args[0])\n' > "$WORK/fifo_exists.iyi"
-  if ! "$IYI" build -o "$WORK/fifo_exists" "$WORK/fifo_exists.iyi" > "$WORK/fifo_exists.build" 2>&1; then
+  printf 'module main\n\nimport std/file::{File}\n\nputs File.exists?(Program.args[0])\n' > "$WORK/fifo_exists.ri"
+  if ! "$RIS" build -o "$WORK/fifo_exists" "$WORK/fifo_exists.ri" > "$WORK/fifo_exists.build" 2>&1; then
     echo "  exists? of a FIFO: the program did not build"
     sed -n '1,10p' "$WORK/fifo_exists.build"
     status=1
@@ -667,7 +667,7 @@ if [ "$(uname -s)" = Linux ]; then
          '      fd = __iyi_open_read(c_path(path))'; then
     echo "  an exists? that opens a FIFO to read: the patch did not apply"
     status=1
-  elif ! IYI_PATH="$WORK/fifo_wait${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/fifo_wait-prog" "$WORK/fifo_exists.iyi" > "$WORK/fifo_wait.build" 2>&1; then
+  elif ! RIS_PATH="$WORK/fifo_wait${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/fifo_wait-prog" "$WORK/fifo_exists.ri" > "$WORK/fifo_wait.build" 2>&1; then
     echo "  an exists? that opens a FIFO to read: the broken copy did not build"
     status=1
   else
@@ -710,10 +710,10 @@ case "$(uname -s)" in
       echo "  no python3 on this machine, so the locked-range reads are unmeasured"
     else
       locked="$WORK/locked.txt"
-      printf 'module main\n\nputs File.read(Program.args[0]).bytesize\n' > "$WORK/locked_read.iyi"
-      printf 'module main\n\nFile.write(Program.args[0], "replaced")\n' > "$WORK/locked_write.iyi"
-      if ! "$IYI" build -o "$WORK/locked_read" "$WORK/locked_read.iyi" > "$WORK/locked_read.build" 2>&1 ||
-         ! "$IYI" build -o "$WORK/locked_write" "$WORK/locked_write.iyi" > "$WORK/locked_write.build" 2>&1; then
+      printf 'module main\n\nputs File.read(Program.args[0]).bytesize\n' > "$WORK/locked_read.ri"
+      printf 'module main\n\nFile.write(Program.args[0], "replaced")\n' > "$WORK/locked_write.ri"
+      if ! "$RIS" build -o "$WORK/locked_read" "$WORK/locked_read.ri" > "$WORK/locked_read.build" 2>&1 ||
+         ! "$RIS" build -o "$WORK/locked_write" "$WORK/locked_write.ri" > "$WORK/locked_write.build" 2>&1; then
         echo "  the locked-range programs did not build"
         sed -n '1,10p' "$WORK/locked_read.build" "$WORK/locked_write.build"
         status=1
@@ -732,7 +732,7 @@ if read.returncode == 0 or "the read failed" not in read.stderr + read.stdout:
 else:
     print("  a read of a locked range refuses: the read failed")
 write = subprocess.run([writer, path], capture_output=True, text=True)
-panics = (write.stdout + write.stderr).count("iyi: panic:")
+panics = (write.stdout + write.stderr).count("ris: panic:")
 if write.returncode == 0 or panics != 1:
     print(f"  a write into a locked range exited {write.returncode} with {panics} panic(s)")
     bad += 1
@@ -756,8 +756,8 @@ PY
     # file: two sizes, two contents, `same? true`.
     printf 'one' > "$WORK/deny_a.txt"
     printf 'second' > "$WORK/deny_b.txt"
-    printf 'module main\n\nimport std/file::{File}\n\nputs File.same?(Program.args[0], Program.args[1])\n' > "$WORK/deny_same.iyi"
-    if ! "$IYI" build -o "$WORK/deny_same" "$WORK/deny_same.iyi" > "$WORK/deny_same.build" 2>&1; then
+    printf 'module main\n\nimport std/file::{File}\n\nputs File.same?(Program.args[0], Program.args[1])\n' > "$WORK/deny_same.ri"
+    if ! "$RIS" build -o "$WORK/deny_same" "$WORK/deny_same.ri" > "$WORK/deny_same.build" 2>&1; then
       echo "  the unopenable-files program did not build"; sed -n '1,10p' "$WORK/deny_same.build"; status=1
     else
       for f in deny_a deny_b; do MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" icacls "$(cygpath -w "$WORK/$f.txt")" /deny "$USERNAME:(S)" > /dev/null; done
@@ -777,10 +777,10 @@ PY
     mkdir -p "$WORK/junction_target"
     printf 'kept' > "$WORK/junction_target/inside.txt"
     MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" cmd /c mklink /J "$(cygpath -w "$WORK/junction")" "$(cygpath -w "$WORK/junction_target")" > /dev/null
-    printf 'module main\n\nimport std/file::{File}\n\nputs File.symlink?(Program.args[0])\nFile.delete(Program.args[0])\nputs File.exists?(Program.args[0])\n' > "$WORK/junction_delete.iyi"
+    printf 'module main\n\nimport std/file::{File}\n\nputs File.symlink?(Program.args[0])\nFile.delete(Program.args[0])\nputs File.exists?(Program.args[0])\n' > "$WORK/junction_delete.ri"
     if [ ! -d "$WORK/junction" ]; then
       echo "  mklink /J made no junction, so its delete is unmeasured"
-    elif ! "$IYI" build -o "$WORK/junction_delete" "$WORK/junction_delete.iyi" > "$WORK/junction_delete.build" 2>&1; then
+    elif ! "$RIS" build -o "$WORK/junction_delete" "$WORK/junction_delete.ri" > "$WORK/junction_delete.build" 2>&1; then
       echo "  the junction program did not build"; sed -n '1,10p' "$WORK/junction_delete.build"; status=1
     else
       answer="$("$WORK/junction_delete" "$WORK/junction" 2>&1 | tr '\n' ' ')"
@@ -795,8 +795,8 @@ PY
     # create that replaces refuses them on Windows unless it asks for the
     # same attributes, and `File.write` panicked "cannot write" about a
     # file it could read. The attribute stays.
-    printf 'module main\n\nFile.write(Program.args[0], "rewritten")\nputs File.read(Program.args[0])\n' > "$WORK/hidden_write.iyi"
-    if ! "$IYI" build -o "$WORK/hidden_write" "$WORK/hidden_write.iyi" > "$WORK/hidden_write.build" 2>&1; then
+    printf 'module main\n\nFile.write(Program.args[0], "rewritten")\nputs File.read(Program.args[0])\n' > "$WORK/hidden_write.ri"
+    if ! "$RIS" build -o "$WORK/hidden_write" "$WORK/hidden_write.ri" > "$WORK/hidden_write.build" 2>&1; then
       echo "  the hidden-file program did not build"; sed -n '1,10p' "$WORK/hidden_write.build"; status=1
     else
       for mark in h s; do
@@ -817,8 +817,8 @@ PY
     # denied reading is not readable, one denied writing is not writable,
     # and `cmd.exe` is executable. The made-up mode answered true, true
     # and false.
-    printf 'module main\n\nimport std/file::{File}\n\nputs "#{File.readable?(Program.args[0])} #{File.writable?(Program.args[0])} #{File.executable?(Program.args[0])}"\n' > "$WORK/access.iyi"
-    if ! "$IYI" build -o "$WORK/access" "$WORK/access.iyi" > "$WORK/access.build" 2>&1; then
+    printf 'module main\n\nimport std/file::{File}\n\nputs "#{File.readable?(Program.args[0])} #{File.writable?(Program.args[0])} #{File.executable?(Program.args[0])}"\n' > "$WORK/access.ri"
+    if ! "$RIS" build -o "$WORK/access" "$WORK/access.ri" > "$WORK/access.build" 2>&1; then
       echo "  the access program did not build"; sed -n '1,10p' "$WORK/access.build"; status=1
     else
       printf 'x' > "$WORK/no_read.txt"; printf 'x' > "$WORK/no_write.txt"
@@ -841,14 +841,14 @@ PY
     # - an ordinary exclusive open does not; the paging file does - and
     # `File.exists?` said false and `File.info` "File not found" about a
     # file `dir` lists. Asked of the paging file of whichever drive has one.
-    printf 'module main\n\nimport std/file::{File}\n\nputs "#{File.exists?(Program.args[0])} #{File.file?(Program.args[0])} #{File.size(Program.args[0]) > 0}"\n' > "$WORK/held.iyi"
+    printf 'module main\n\nimport std/file::{File}\n\nputs "#{File.exists?(Program.args[0])} #{File.file?(Program.args[0])} #{File.size(Program.args[0]) > 0}"\n' > "$WORK/held.ri"
     paging=""
     for drive in C D E; do
       [ -e "/$(echo $drive | tr 'A-Z' 'a-z')/pagefile.sys" ] && { paging="$drive:/pagefile.sys"; break; }
     done
     if [ -z "$paging" ]; then
       echo "  no paging file on C:, D: or E:, so a file the system holds is unmeasured"
-    elif ! "$IYI" build -o "$WORK/held" "$WORK/held.iyi" > "$WORK/held.build" 2>&1; then
+    elif ! "$RIS" build -o "$WORK/held" "$WORK/held.ri" > "$WORK/held.build" 2>&1; then
       echo "  the held-file program did not build"; sed -n '1,10p' "$WORK/held.build"; status=1
     else
       answer="$("$WORK/held" "$paging" 2>&1)"
@@ -864,10 +864,10 @@ PY
     # placeholder answered `file? false`; and a junction whose directory is
     # gone answered a followed `info?` with the link itself, where POSIX
     # `stat` of a dangling link is an error.
-    printf 'module main\n\nimport std/file::{File}\n\nputs "#{File.file?(Program.args[0])} #{File.symlink?(Program.args[0])} #{File.executable?(Program.args[0])} #{File.real_path(Program.args[0]).downcase.ends_with?(File.basename(Program.args[0]).downcase)}"\n' > "$WORK/reparse_kind.iyi"
-    printf 'module main\n\nimport std/file::{File}\nimport std/dir::{Dir}\n\nputs "#{File.symlink?(Program.args[0])} #{File.info?(Program.args[0]).nil?} #{File.exists?(Program.args[0])} #{Dir.exists?(Program.args[0])}"\n' > "$WORK/dangling.iyi"
-    if ! "$IYI" build -o "$WORK/reparse_kind" "$WORK/reparse_kind.iyi" > "$WORK/reparse_kind.build" 2>&1 ||
-       ! "$IYI" build -o "$WORK/dangling" "$WORK/dangling.iyi" > "$WORK/dangling.build" 2>&1; then
+    printf 'module main\n\nimport std/file::{File}\n\nputs "#{File.file?(Program.args[0])} #{File.symlink?(Program.args[0])} #{File.executable?(Program.args[0])} #{File.real_path(Program.args[0]).downcase.ends_with?(File.basename(Program.args[0]).downcase)}"\n' > "$WORK/reparse_kind.ri"
+    printf 'module main\n\nimport std/file::{File}\nimport std/dir::{Dir}\n\nputs "#{File.symlink?(Program.args[0])} #{File.info?(Program.args[0]).nil?} #{File.exists?(Program.args[0])} #{Dir.exists?(Program.args[0])}"\n' > "$WORK/dangling.ri"
+    if ! "$RIS" build -o "$WORK/reparse_kind" "$WORK/reparse_kind.ri" > "$WORK/reparse_kind.build" 2>&1 ||
+       ! "$RIS" build -o "$WORK/dangling" "$WORK/dangling.ri" > "$WORK/dangling.build" 2>&1; then
       echo "  the reparse programs did not build"; sed -n '1,10p' "$WORK/reparse_kind.build" "$WORK/dangling.build"; status=1
     else
       alias_exe=""
@@ -905,11 +905,11 @@ PY
       # A junction to a volume's GUID path reads back as one: the NT prefix
       # came off whatever followed it, and `Volume{...}\x` is a relative
       # path to nowhere.
-      printf 'module main\n\nimport std/file::{File}\n\nputs File.readlink(Program.args[0])\n' > "$WORK/readlink.iyi"
+      printf 'module main\n\nimport std/file::{File}\n\nputs File.readlink(Program.args[0])\n' > "$WORK/readlink.ri"
       volume="$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" mountvol "$(cygpath -w "$WORK" | cut -c1-3)" /L 2>/dev/null | tr -d ' \r' | head -1)"
       if [ -z "$volume" ]; then
         echo "  mountvol names no volume here, so a junction to one is unmeasured"
-      elif ! "$IYI" build -o "$WORK/readlink" "$WORK/readlink.iyi" > "$WORK/readlink.build" 2>&1; then
+      elif ! "$RIS" build -o "$WORK/readlink" "$WORK/readlink.ri" > "$WORK/readlink.build" 2>&1; then
         echo "  the readlink program did not build"; sed -n '1,5p' "$WORK/readlink.build"; status=1
       else
         mkdir -p "$WORK/by_volume"

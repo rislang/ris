@@ -176,7 +176,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
         # then listed `Reference.new()` as its one overload; the prelude's
         # `Exception` is the runtime's and has no hierarchy under it.
         if superclass.same?(@program.types["Exception"]?) && @program.iyi_prelude? && Lexer.iyi_source?(node.location.try(&.filename))
-          node_superclass.raise "iyi has no exception hierarchy: an error is a type of its own, `struct #{node.name}` " \
+          node_superclass.raise "ris has no exception hierarchy: an error is a type of its own, `struct #{node.name}` " \
                                 "with a `def message : String` and `impl Error for #{node.name}`, returned as a member " \
                                 "of the result's union, `Int32 | #{node.name}` (iyi SPEC III.1)"
         end
@@ -339,7 +339,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     # lexical lookup made `import calc/lexer::*` inside a module called
     # `samples/calc` resolve `Calc` to the module doing the import, and then
     # say the module was not imported — a true-looking sentence about the wrong
-    # thing. Found by `samples/iyi/calc`, which is called that.
+    # thing. Found by `samples/ris/calc`, which is called that.
     path = Path.new(iyi_using_segments(node.path), global: true).at(node)
 
     # iyi: the scope half reaches a module this file has imported, and the error for
@@ -361,7 +361,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
           header = line.try { |found| found.split[1]? }
           if header && header != written
             node.raise "`#{written}` is imported, but #{Iyi.relative_filename(file)} declares `module #{header}`: " \
-                       "change that line to `module #{written}`, or move the file to `#{header}.iyi` and import " \
+                       "change that line to `module #{written}`, or move the file to `#{header}.ri` and import " \
                        "that path (iyi SPEC R-1)"
           end
           node.raise "`#{written}` is imported, but #{Iyi.relative_filename(file)} " \
@@ -373,7 +373,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
                    "import that loads it, `import #{written}::{name}` (iyi SPEC R-1, R-2b)"
       else
         node.raise "can't find module '#{written}'. A module's path is its " \
-                   "file's path, so this one is `#{written}.iyi`"
+                   "file's path, so this one is `#{written}.ri`"
       end
     end
 
@@ -504,7 +504,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
       inner =
         if written == prefix
           # The package's own name, which a `/vN` suffix is not: the root
-          # module of `example.com/lib/v2` is `lib.iyi`, as Go names it.
+          # module of `example.com/lib/v2` is `lib.ri`, as Go names it.
           Mod::ModFile.split_major(prefix)[0].rpartition('/')[2]
         elsif written.starts_with?("#{prefix}/")
           written[(prefix.size + 1)..]
@@ -515,7 +515,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     end
     # A package's own file naming one of its modules by its in-package path
     # - one its checkout has, which a std module is not.
-    if (current = @iyi_package_stack.last?) && File.file?(File.join(current[1], "#{written}.iyi"))
+    if (current = @iyi_package_stack.last?) && File.file?(File.join(current[1], "#{written}.ri"))
       return iyi_package_segments(current[0], segments).map(&.camelcase)
     end
     # And a module of the program's own package: the import this names was
@@ -643,7 +643,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   # iyi: `pub` — record *name* on the enclosing module's public surface (R-2).
   #
   # Only an iyi compilation unit has one. What it marks is the whole of what
-  # another module may reach, because `.iyimod` carries the exports and nothing
+  # another module may reach, because `.rimod` carries the exports and nothing
   # else: a name left unmarked has to be unreachable, or the metadata would not
   # be enough to compile against (iyi SPEC IV.2).
   private def record_export(scope, name : String, exported : Bool)
@@ -738,7 +738,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     unless trait_type.trait?
       message = "can't implement #{trait_type}, it's a #{trait_type.type_desc}. Only a trait can be implemented"
       # iyi: `Enumerable` and `Indexable` are modules the compiler itself
-      # declares, so in an .iyi file without `import std/enumerable` the name
+      # declares, so in an .ri file without `import std/enumerable` the name
       # found that module and the refusal said "it's a generic module",
       # where `impl Comparable` gets the import line from the undefined
       # constant. The same std scan answers here.
@@ -763,7 +763,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
 
     # Checked before `is_a?(ModuleType)`, which a trait would satisfy.
     if target_type.trait?
-      node.target.raise "can't implement #{trait_type} for #{target_type}, it's a trait. A trait is implemented for a type, and a trait is not one — to give every implementer of #{target_type} a default #{trait_type}, iyi has no blanket impls (iyi SPEC II.7)"
+      node.target.raise "can't implement #{trait_type} for #{target_type}, it's a trait. A trait is implemented for a type, and a trait is not one — to give every implementer of #{target_type} a default #{trait_type}, ris has no blanket impls (iyi SPEC II.7)"
     end
 
     # And a module that is not a trait, for the same reason a written
@@ -1090,7 +1090,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
 
     # Everything resolved, so this asks to implement the trait for one
     # instantiation only. See iyi SPEC II.7 for why iyi has no specialisation.
-    node.target.raise "can't implement #{node.trait} for #{target} alone: iyi has no specialised impls, so a trait is implemented for #{target.name} once, for every instantiation. Write `#{iyi_generic_impl_spelling(node, target)}`"
+    node.target.raise "can't implement #{node.trait} for #{target} alone: ris has no specialised impls, so a trait is implemented for #{target.name} once, for every instantiation. Write `#{iyi_generic_impl_spelling(node, target)}`"
   end
 
   # iyi: the impl a refusal tells the author to write instead: one `forall`
@@ -1170,7 +1170,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
       end
 
       unless arg.is_a?(Path) && !arg.global? && arg.names.size == 1 && type_vars.includes?(arg.names.first)
-        arg.raise "expected one of the type parameters introduced by `forall` (#{type_vars.join(", ")}); iyi has no specialised impls, so a concrete type here is not a narrower impl but an error"
+        arg.raise "expected one of the type parameters introduced by `forall` (#{type_vars.join(", ")}); ris has no specialised impls, so a concrete type here is not a narrower impl but an error"
       end
 
       name = arg.names.first
@@ -1910,14 +1910,14 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
 
   private def iyi_refuse_override(node : Def | Macro, replaced : Def | Macro | Nil) : Nil
     return unless replaced
-    return unless iyi_written_in?(node, ".iyi")
+    return unless iyi_written_in?(node, ".ri")
 
     kind = node.is_a?(Macro) ? "macro" : "method"
     if @program.iyi_prelude?
       return if iyi_written_in_prelude?(node)
       if iyi_written_in_prelude?(replaced)
-        # The prelude extends itself: `number.iyi` writing a method
-        # `primitives.iyi` declared is one library deciding its own surface.
+        # The prelude extends itself: `number.ri` writing a method
+        # `primitives.ri` declared is one library deciding its own surface.
         whose = "the prelude's"
         instead = "Give it a name the prelude does not use, or add the #{kind} " \
                   "to the prelude itself, where one definition answers for " \
@@ -1929,7 +1929,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
         # its own had the first one's `via_x` run the second's. A module
         # replacing a def it wrote itself is its own business, as it is the
         # prelude's.
-        return unless iyi_written_in?(replaced, ".iyi")
+        return unless iyi_written_in?(replaced, ".ri")
         file = replaced.location.try(&.expanded_location).try(&.filename.as?(String))
         return if file.nil? || iyi_written_file(replaced) == iyi_written_file(node)
         writer = @program.iyi_module_paths[file]? || @program.iyi_artifact_modules[file]? || Iyi.relative_filename(file)
@@ -1955,7 +1955,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
       example = "`def blank?` on `::String` is an addition"
     end
     node.raise "#{site} is #{whose} #{kind}, and this replaces it#{where}. " \
-               "A `.iyi` file may add a #{kind} to a type it did not " \
+               "A `.ri` file may add a #{kind} to a type it did not " \
                "declare — #{example} — and may not redefine one it has: the " \
                "definition that goes is one other code calls, so every " \
                "program built with it gets this one instead. #{instead} " \
@@ -1970,7 +1970,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   # while `iyi_prelude_dir` comes from `File.dirname` of a resolved require
   # and the location's filename from `File.expand_path`, both of which use
   # `\` there. So `C:\...\prelude/` was tested against
-  # `C:\...\prelude\shout.iyi`, nothing was ever in the prelude, and R-3's
+  # `C:\...\prelude\shout.ri`, nothing was ever in the prelude, and R-3's
   # two refusals — a module replacing a prelude method, and one replacing a
   # prelude macro — said nothing at all. `to_posix` is the identity on a
   # posix path, so the rule fires for the same declarations it always did.
@@ -2337,7 +2337,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     # iyi: written with its return type, because R-2 asks an exported
     # signature for one and this def is the *compiler's* (R-2's macro rule,
     # one kind of synthesis over). A `pub enum` in a module that writes its
-    # `.iyimod` was refused on it — "`debug?` is exported and does not say
+    # `.rimod` was refused on it — "`debug?` is exported and does not say
     # what it returns" — about a method nobody wrote and whose answer is
     # never anything but a `Bool`.
     a_def = Def.new("#{member.name.underscore}?", body: body,
@@ -3014,7 +3014,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     # iyi: the first doc comment a type was given stays its doc. Crystal
     # let every reopening with a comment replace it, so a type the
     # prelude opens in three files was described by the last file's note
-    # (`Int32` by float.iyi's line on division), and `iyi doc` read that.
+    # (`Int32` by float.ri's line on division), and `iyi doc` read that.
     if type && node.doc
       type.doc ||= node.doc
     end
@@ -3056,7 +3056,7 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
   # has no way back to the rule they broke.
   #
   # So: if the path names a type that exists somewhere this file can see, the
-  # declaration is refused here instead. Only for `.iyi` files, because a
+  # declaration is refused here instead. Only for `.ri` files, because a
   # qualified declaration is exactly how a `.cr` file reopens a type, which is
   # a thing Crystal has and iyi does not.
   private def iyi_check_not_reopening(node : ASTNode, path : Path, prefix : Path) : Nil
@@ -3086,9 +3086,9 @@ class Iyi::TopLevelVisitor < Iyi::SemanticVisitor
     path.raise <<-MSG
       `#{path}` already exists#{where}, and this file cannot add to it
 
-      R-3: iyi has no open classes. A type's methods are the ones its own module
+      R-3: ris has no open classes. A type's methods are the ones its own module
       declares, which is what lets a consumer answer "does this type implement
-      that trait?" by reading one `.iyimod` instead of the whole program.
+      that trait?" by reading one `.rimod` instead of the whole program.
 
       Add the method where the type is declared, or write `impl Trait for #{path}`
       here, which R-3 allows when the trait is this module's.

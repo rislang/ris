@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes the Unicode tables of `src/std/unicode.iyi`.
+"""Writes the Unicode tables of `src/std/unicode.ri`.
 
     python3 scripts/generate_unicode_std.py
 
@@ -53,7 +53,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 DATA = REPO / "src" / "unicode" / "data.cr"
 UNICODE = REPO / "src" / "unicode" / "unicode.cr"
-MODULE = REPO / "src" / "std" / "unicode.iyi"
+MODULE = REPO / "src" / "std" / "unicode.ri"
 
 BEGIN = "  # tables-begin"
 END = "  # tables-end"

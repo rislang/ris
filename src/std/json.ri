@@ -1,0 +1,4191 @@
+# standard: RFC 8259
+# JSON, read and written in iyi: a byte lexer and a recursive parser into
+# `Any`, a streaming `PullParser`, a `Builder` that writes a document one
+# value at a time, and `JSON.parse` / `JSON.parse?` / `JSON.build` /
+# `JSON.to_json` / `JSON.from_json` on top of them.
+#
+# What a document becomes: `null` is `Nil`, `true`/`false` are `Bool`, an
+# integer literal that fits Int64 is `Int64` (`-0` is the integer 0), every
+# other number is `Float64` (a fraction, an exponent, or an integer past what
+# Int64 holds, read as the nearest double), a string is `String` with its
+# escapes decoded (`\uXXXX` pairs into one code point), an array is
+# `Array(Any)` and an object is a `RisJsonFields` in the order the keys
+# were written: a view read as a Hash is read.
+#
+# What the reader refuses, each with the line and column it stopped at:
+# anything that is not a JSON document (bare words, leading zeros, a trailing
+# comma, a raw control character, invalid UTF-8 or a lone surrogate inside a
+# string, an invalid escape, a byte order mark, text after the root value,
+# nesting past 256 levels, a number too large for a Float64) and an object
+# that names the same key twice, in `JSON.parse` and in the `PullParser`
+# alike. `JSON.parse` panics with that sentence; `JSON.parse?` answers `nil`.
+# Nor does `JSON.to_json` write such an object: two keys of a Hash written
+# as one text (`nil` and `"null"`, `1` and `"1"`) are refused, naming both.
+#
+# What the writer refuses: `NaN` and `Infinity`, which are not JSON numbers;
+# a value where an object key is due, a field outside an object, a second
+# value at the document root, a container closed that was never opened, and
+# `to_s` of a document with a container still open or no value written.
+# Every control byte under 0x20 and the byte 0x7f are written as `\u00XX`;
+# bytes in a string that are not a code point are written as U+FFFD, one
+# per ill-formed subpart, so what is written is UTF-8 the reader takes
+# back; `to_ascii_json` also writes every non-ASCII code point as `\uXXXX`,
+# with a surrogate pair past the basic plane, and U+FFFD as `\ufffd`.
+#
+# `ToJSON` is the trait a type implements to be written by `JSON.to_json`;
+# `Any` implements it, and so do the prelude's scalars, arrays and hashes
+# through `write_value`.
+
+module std/json
+
+# A growable byte buffer for the text a string or a document is assembled in.
+@[OnTape]
+class StringBuffer
+  @writer : String::Builder
+
+  def initialize(initial_capacity : Int32 = 64)
+    @writer = String::Builder.new(initial_capacity < 16 ? 16 : initial_capacity)
+  end
+
+  def size : Int32
+    @writer.length
+  end
+
+  def clear : Nil
+    @writer.clear
+  end
+
+  def append(byte : UInt8) : Nil
+    @writer.push(byte)
+  end
+
+  # What it holds, onto the end of *into*.
+  def write_to(into : String::Builder) : Nil
+    into << @writer.finish
+  end
+
+  def append(str : String) : Nil
+    @writer.append(str.as_tape)
+  end
+
+  def append(text : String) : Nil
+    @writer.append(text)
+  end
+
+  def append_codepoint(codepoint : Int32) : Nil
+    if codepoint <= 0x7F
+      append(codepoint.to_u8)
+    elsif codepoint <= 0x7FF
+      append((0xC0 | (codepoint >> 6)).to_u8)
+      append((0x80 | (codepoint & 0x3F)).to_u8)
+    elsif codepoint <= 0xFFFF
+      append((0xE0 | (codepoint >> 12)).to_u8)
+      append((0x80 | ((codepoint >> 6) & 0x3F)).to_u8)
+      append((0x80 | (codepoint & 0x3F)).to_u8)
+    else
+      append((0xF0 | (codepoint >> 18)).to_u8)
+      append((0x80 | ((codepoint >> 12) & 0x3F)).to_u8)
+      append((0x80 | ((codepoint >> 6) & 0x3F)).to_u8)
+      append((0x80 | (codepoint & 0x3F)).to_u8)
+    end
+  end
+
+  # The bytes so far, on the caller's tape: a copy, as the buffer is
+  # cleared and refilled.
+  def to_s : String
+    @writer.finish.dup
+  end
+
+  # A view of what it holds: valid until it is cleared.
+  def view(start : Int32, size : Int32) : String
+    @writer.finish[start, size]
+  end
+
+  def slice_from(start : Int32) : String
+    @writer.finish[start, size - start].dup
+  end
+end
+
+# The length of the well-formed UTF-8 sequence that starts at *at*, or,
+# negated, the length of the maximal ill-formed subpart there: the bytes that
+# could still have begun a well-formed sequence, at least the one byte. An
+# overlong form, a surrogate and anything past U+10FFFF are ill-formed.
+def utf8_sequence_at(bytes : String, at : Int32) : Int32
+  size = bytes.bytesize
+  lead = bytes[at]
+  return 1 if lead < 0x80_u8
+  need = 0
+  low = 0x80_u8
+  high = 0xBF_u8
+  if lead >= 0xC2_u8 && lead <= 0xDF_u8
+    need = 1
+  elsif lead == 0xE0_u8
+    need = 2
+    low = 0xA0_u8
+  elsif lead == 0xED_u8
+    need = 2
+    high = 0x9F_u8
+  elsif lead >= 0xE1_u8 && lead <= 0xEF_u8
+    need = 2
+  elsif lead == 0xF0_u8
+    need = 3
+    low = 0x90_u8
+  elsif lead == 0xF4_u8
+    need = 3
+    high = 0x8F_u8
+  elsif lead >= 0xF1_u8 && lead <= 0xF3_u8
+    need = 3
+  else
+    return -1
+  end
+  taken = 1
+  while taken <= need
+    return 0 - taken if at + taken >= size
+    byte = bytes[at + taken]
+    return 0 - taken if byte < low || byte > high
+    low = 0x80_u8
+    high = 0xBF_u8
+    taken = taken + 1
+  end
+  taken
+end
+
+# A type that can write itself into a `Builder`. `JSON.to_json` accepts any
+# value whose type implements it, as a `derive serializable` type does.
+pub trait ToJSON
+  abstract def to_json(json : Builder) : Nil
+end
+
+# `derive serializable`, in a struct or class whose fields are written with
+# their types: the type reads and writes itself as a JSON object, a key per
+# field, named as the field is.
+#
+#     pub struct Coord
+#       getter x : Float64
+#       @[JSON::Field(key: "label")]
+#       getter name : String
+#       derive serializable
+#     end
+#
+#     Coord.from_json(%({"x": 1.5, "label": "a"})).x   # => 1.5
+#     coord.to_json                                    # => {"x":1.5,"label":"a"}
+#
+# `from_json` is a macro: its value views a document made where it is called,
+# so keep it in that scope, or `copy_to(owner)` before the scope ends; never
+# return it from the def that called `from_json`. An `Array` of an `Array`, a
+# `Hash` or a type holding tape data is refused: read those with
+# `JSON.document(text)` and `doc.each`. The sentence that refuses a value of
+# the wrong kind names no line or column; one for bad JSON does.
+#
+# A field's value is read and written as `JSON.read_value` and
+# `JSON.write_value` read and write its type: the built-in values, an enum,
+# an `Array` or `Hash(String, V)` of them, an `Any`, another serializable
+# type, a union of those (`String | Int64`). A key the type has no field
+# for is passed over; a field with no key keeps its default when it is
+# written with one, as does a field with a default whose key holds `null`
+# where its type does not admit nil; a field with neither is refused by
+# name unless its type admits `nil`, which it then holds.
+# `@[JSON::Field(...)]` renames a field, leaves it out either way, leaves
+# a nil one out, or reads and writes it through a converter (see
+# `JSON::Field`). It is what the other library's `include
+# JSON::Serializable` writes, and the derive runs once, in the type's own
+# module (iyi SPEC II.4), so a consumer calls the methods without the macro.
+#
+# Each field's options are read off the type when its methods are compiled,
+# in one `begin` so what a field's annotation says is known to every line
+# after it; and refused there, with the field named, when they do not make
+# sense.
+pub macro serializable(declaration)
+  impl ::Std::Json::ToJSON for {{ declaration[:name].id }}
+    def to_json(json : ::Std::Json::Builder) : Nil
+      \{% begin %}
+        \{% json_seen = [] of StringLiteral %}
+        {% for field in declaration[:fields] %}
+          \{% json_ivar = @type.instance_vars.find { |ivar| ivar.name.stringify == {{ field[:name][1..] }} } %}
+          \{% json_ann = json_ivar ? json_ivar.annotation(::Std::Json::JSON::Field) : nil %}
+          \{% if json_ann %}
+            \{% unless json_ann.args.empty? %}
+              \{% raise "JSON::Field on #{@type}'s #{ {{ field[:name][1..] }}.id } takes named options alone" %}
+            \{% end %}
+            \{% for json_option in json_ann.named_args.keys %}
+              \{% unless ["key", "ignore", "ignore_serialize", "ignore_deserialize", "emit_null", "converter"].includes?(json_option.stringify) %}
+                \{% raise "JSON::Field on #{@type}'s #{ {{ field[:name][1..] }}.id }: #{json_option} is not an option (key, ignore, ignore_serialize, ignore_deserialize, emit_null, converter)" %}
+              \{% end %}
+            \{% end %}
+            \{% if json_ann[:key] && !json_ann[:key].is_a?(StringLiteral) %}
+              \{% raise "JSON::Field on #{@type}'s #{ {{ field[:name][1..] }}.id }: key: is a string, not #{json_ann[:key]}" %}
+            \{% end %}
+          \{% end %}
+          \{% json_key = json_ann && json_ann[:key] ? json_ann[:key] : {{ field[:name][1..] }} %}
+          \{% json_converter = json_ann ? json_ann[:converter] : nil %}
+          \{% unless json_ann && (json_ann[:ignore] || json_ann[:ignore_serialize]) %}
+            \{% if json_seen.includes?(json_key) %}
+              \{% raise "#{@type} writes two fields as the key #{json_key}" %}
+            \{% end %}
+            \{% json_seen << json_key %}
+          \{% end %}
+          \{% json_write_{{ field[:name][1..].id }} = !(json_ann && (json_ann[:ignore] || json_ann[:ignore_serialize])) %}
+          \{% json_key_{{ field[:name][1..].id }} = json_key %}
+          \{% json_converter_{{ field[:name][1..].id }} = json_converter %}
+          \{% json_omit_null_{{ field[:name][1..].id }} = json_ann && json_ann[:emit_null] == false %}
+        {% end %}
+        json.object do
+          {% for field in declaration[:fields] %}
+            \{% if json_write_{{ field[:name][1..].id }} %}
+              {% if field[:type].nilable? %}
+                json_written = {{ field[:name].id }}
+                if json_written.nil?
+                  \{% unless json_omit_null_{{ field[:name][1..].id }} %}
+                    json.field(\{{ json_key_{{ field[:name][1..].id }} }})
+                    json.null
+                  \{% end %}
+                else
+                  json.field(\{{ json_key_{{ field[:name][1..].id }} }})
+                  \{% if json_converter_{{ field[:name][1..].id }} %}
+                    \{{ json_converter_{{ field[:name][1..].id }} }}.to_json(json_written, json)
+                  \{% else %}
+                    ::Std::Json::JSON.write_value(json_written, json)
+                  \{% end %}
+                end
+              {% else %}
+                json.field(\{{ json_key_{{ field[:name][1..].id }} }})
+                \{% if json_converter_{{ field[:name][1..].id }} %}
+                  \{{ json_converter_{{ field[:name][1..].id }} }}.to_json({{ field[:name].id }}, json)
+                \{% else %}
+                  ::Std::Json::JSON.write_value({{ field[:name].id }}, json)
+                \{% end %}
+              {% end %}
+            \{% end %}
+          {% end %}
+        end
+      \{% end %}
+    end
+  end
+
+  def to_json : String
+    ::Std::Json::JSON.build { |json| to_json(json) }
+  end
+
+  # A macro: a constructor's value stays in the scope that makes it. It
+  # expands where it is called, so it names the type as the caller can: a
+  # type its module does not export by its own name, as only that module
+  # reaches it and a qualified name is refused there too (iyi SPEC R-2).
+  macro from_json(text)
+    %doc = ::Std::Json::JSON.document(\{{ text }})
+    {% if @type.private? %}
+      {{ @type.name.split("::").last.id }}.new(%doc, %doc.root)
+    {% else %}
+      ::{{ @type }}.new(%doc, %doc.root)
+    {% end %}
+  end
+
+  # Tells `JSON.read_value` and an outer derive that it reads itself.
+  JSON_DERIVED = true
+
+  def initialize(json_doc : ::Std::Json::Document, json_at : Int32)
+    # Each field's type is asked of the field itself (`typeof`): written
+    # out, a type from this module arrives fully qualified, and a qualified
+    # name reaches a type the way another module would. A field that may
+    # be nil reads `null` as the nil and anything else as the other type,
+    # which is the field's type with the nil taken out: `x || raise`.
+    \{% begin %}
+      \{% json_seen = [] of StringLiteral %}
+      \{% json_readable = 0 %}
+      {% for field in declaration[:fields] %}
+        \{% json_ivar = @type.instance_vars.find { |ivar| ivar.name.stringify == {{ field[:name][1..] }} } %}
+        \{% json_ann = json_ivar ? json_ivar.annotation(::Std::Json::JSON::Field) : nil %}
+        \{% if json_ann %}
+          \{% unless json_ann.args.empty? %}
+            \{% raise "JSON::Field on #{@type}'s #{ {{ field[:name][1..] }}.id } takes named options alone" %}
+          \{% end %}
+          \{% for json_option in json_ann.named_args.keys %}
+            \{% unless ["key", "ignore", "ignore_serialize", "ignore_deserialize", "emit_null", "converter"].includes?(json_option.stringify) %}
+              \{% raise "JSON::Field on #{@type}'s #{ {{ field[:name][1..] }}.id }: #{json_option} is not an option (key, ignore, ignore_serialize, ignore_deserialize, emit_null, converter)" %}
+            \{% end %}
+          \{% end %}
+          \{% if json_ann[:key] && !json_ann[:key].is_a?(StringLiteral) %}
+            \{% raise "JSON::Field on #{@type}'s #{ {{ field[:name][1..] }}.id }: key: is a string, not #{json_ann[:key]}" %}
+          \{% end %}
+        \{% end %}
+        \{% json_key = json_ann && json_ann[:key] ? json_ann[:key] : {{ field[:name][1..] }} %}
+        \{% json_read = !(json_ann && (json_ann[:ignore] || json_ann[:ignore_deserialize])) %}
+        \{% if json_read %}
+          \{% if json_seen.includes?(json_key) %}
+            \{% raise "#{@type} reads two fields from the key #{json_key}" %}
+          \{% end %}
+          \{% json_seen << json_key %}
+          \{% json_readable = json_readable + 1 %}
+        \{% end %}
+        \{% json_read_{{ field[:name][1..].id }} = json_read %}
+        \{% json_key_{{ field[:name][1..].id }} = json_key %}
+        \{% json_converter_{{ field[:name][1..].id }} = json_ann ? json_ann[:converter] : nil %}
+        \{% json_default_{{ field[:name][1..].id }} = json_ivar && json_ivar.has_default_value? %}
+        \{% json_type = json_ivar.type %}
+        \{% json_type = json_type.union_types.reject { |t| t == ::Nil }.first if json_type.union? && json_type.union_types.size == 2 && json_type.nilable? %}
+        \{% json_hash_{{ field[:name][1..].id }} = !json_ivar.type.union? && json_ivar.type < ::Hash %}
+        \{% json_nested_{{ field[:name][1..].id }} = !json_type.union? && json_type.type_vars.empty? && json_type.has_constant?("JSON_DERIVED") %}
+      {% end %}
+      # By key, with no block: what a field reads stays in this scope.
+      {% for field in declaration[:fields] %}
+        \{% if !json_read_{{ field[:name][1..].id }} %}
+          \{% if json_default_{{ field[:name][1..].id }} %}
+          \{% elsif {{ field[:type].nilable? }} %}
+            {{ field[:name].id }} = nil
+          \{% else %}
+            \{% raise "JSON::Field on #{@type}'s #{ {{ field[:name][1..] }}.id }: a field that is not read needs a default, or a type that admits nil" %}
+          \{% end %}
+        \{% else %}
+          json_at_{{ field[:name][1..].id }} = json_doc.at(json_at, \{{ json_key_{{ field[:name][1..].id }} }})
+          # A key that is missing keeps the default; so does a `null` its
+          # type does not admit. A field with neither is refused by name.
+          \{% if json_default_{{ field[:name][1..].id }} %}
+            {% if field[:type].nilable? %}
+              if json_at_{{ field[:name][1..].id }} >= 0
+            {% else %}
+              if json_at_{{ field[:name][1..].id }} >= 0 && !json_doc.null?(json_at_{{ field[:name][1..].id }})
+            {% end %}
+          \{% elsif {{ field[:type].nilable? }} %}
+            {{ field[:name].id }} = nil
+            if json_at_{{ field[:name][1..].id }} >= 0
+          \{% else %}
+            raise "JSON for #{ {{ declaration[:name] }} } has no key #{ \{{ json_key_{{ field[:name][1..].id }} }}.inspect }" if json_at_{{ field[:name][1..].id }} < 0
+          \{% end %}
+          \{% if json_converter_{{ field[:name][1..].id }} %}
+            {% if field[:type].nilable? %}
+              unless json_doc.null?(json_at_{{ field[:name][1..].id }})
+                {{ field[:name].id }} = \{{ json_converter_{{ field[:name][1..].id }} }}.from_json(::Std::Json::Any.new(json_doc, json_at_{{ field[:name][1..].id }}))
+              end
+            {% else %}
+              {{ field[:name].id }} = \{{ json_converter_{{ field[:name][1..].id }} }}.from_json(::Std::Json::Any.new(json_doc, json_at_{{ field[:name][1..].id }}))
+            {% end %}
+          \{% elsif json_nested_{{ field[:name][1..].id }} %}
+            {% if field[:type].nilable? %}
+              unless json_doc.null?(json_at_{{ field[:name][1..].id }})
+                {{ field[:name].id }} = typeof({{ field[:name].id }} || raise("")).new(json_doc, json_at_{{ field[:name][1..].id }})
+              end
+            {% else %}
+              {{ field[:name].id }} = typeof({{ field[:name].id }}).new(json_doc, json_at_{{ field[:name][1..].id }})
+            {% end %}
+          \{% else %}
+            \{% if json_hash_{{ field[:name][1..].id }} %}
+              # Filled before it is stored: a field is not grown while
+              # its object is made (SPEC 2.2).
+              json_hash_{{ field[:name][1..].id }} = typeof({{ field[:name].id }}).new
+              ::Std::Json::JSON.read_into(json_doc, json_at_{{ field[:name][1..].id }}, json_hash_{{ field[:name][1..].id }})
+              {{ field[:name].id }} = json_hash_{{ field[:name][1..].id }}
+            \{% else %}
+              {{ field[:name].id }} = ::Std::Json::JSON.read_value(json_doc, json_at_{{ field[:name][1..].id }}, typeof({{ field[:name].id }}))
+            \{% end %}
+          \{% end %}
+          \{% if json_default_{{ field[:name][1..].id }} || {{ field[:type].nilable? }} %}
+            end
+          \{% end %}
+        \{% end %}
+      {% end %}
+    \{% end %}
+  end
+end
+
+# An object of a `Document`, as `Any#as_h` answers it: a view, read as a Hash
+# is read, its keys and values the document's.
+@[OnTape]
+pub struct RisJsonFields
+  def initialize(@document : Document, @index : Int32)
+  end
+
+  def size : Int32
+    @document.size(@index)
+  end
+
+  def empty? : Bool
+    size == 0
+  end
+
+  def has_key?(key : String) : Bool
+    @document.at(@index, key) >= 0
+  end
+
+  def [](key : String) : Any
+    child = @document.at(@index, key)
+    raise "no such key #{key.inspect}" if child < 0
+    Any.new(@document, child)
+  end
+
+  def []?(key : String) : Any?
+    child = @document.at(@index, key)
+    child < 0 ? nil : Any.new(@document, child)
+  end
+
+  def each(& : String, Any -> _) : Nil
+    @document.each(@index) { |child| yield @document.key(child), Any.new(@document, child) }
+  end
+
+  def keys : Array(String)
+    result = Array(String).new(size)
+    @document.each(@index) { |child| result << @document.key(child) }
+    result
+  end
+end
+
+# One JSON value of any kind, the result of `JSON.parse`. The `as_x` methods
+# panic when the value is of another kind; the `as_x?` ones answer `nil`.
+@[OnTape]
+pub struct Any
+  alias Type = Nil | Bool | Int64 | Float64 | String | Array(Any) | Hash(String, Any)
+
+  getter document : Document
+  @index : Int32
+
+  def initialize(value : Type)
+    parser = DocumentParser.new(JSON.to_json(value))
+    parser.parse
+    failure = parser.error
+    raise failure unless failure.nil?
+    @document = parser.document
+    @index = 0
+  end
+
+  def initialize(@document : Document, @index : Int32 = 0)
+  end
+
+  def raw : Nil | Bool | Int64 | Float64 | String | Array(Any) | RisJsonFields
+    if array?
+      elements
+    elsif object?
+      fields
+    else
+      scalar
+    end
+  end
+
+  protected def array? : Bool
+    @document.kind(@index) == Document::Kind::Array
+  end
+
+  private def object? : Bool
+    @document.kind(@index) == Document::Kind::Object
+  end
+
+  protected def null? : Bool
+    @document.null?(@index)
+  end
+
+  protected def bool? : Bool
+    @document.kind(@index) == Document::Kind::Bool
+  end
+
+  # The value of a null, a bool, a number or a string; nil of a container.
+  private def scalar : Nil | Bool | Int64 | Float64 | String
+    case @document.kind(@index)
+    when Document::Kind::Null   then nil
+    when Document::Kind::Bool   then @document.bool(@index)
+    when Document::Kind::Int    then @document.int(@index)
+    when Document::Kind::Float  then @document.float(@index)
+    when Document::Kind::String then @document.string(@index)
+    else                             nil
+    end
+  end
+
+  # An array's values; the array is new, its elements view the document.
+  private def elements : Array(Any)
+    result = Array(Any).new(@document.size(@index))
+    @document.each(@index) { |child| result << Any.new(@document, child) }
+    result
+  end
+
+  # An object's fields: a view of the document, nothing is built.
+  private def fields : RisJsonFields
+    RisJsonFields.new(@document, @index)
+  end
+
+  def self.new(val : Int32) : Any
+    new(val.to_i64)
+  end
+
+  # The kind of value this is, in the word a refusal uses: `null`, `bool`,
+  # `integer`, `float`, `string`, `array` or `object`.
+  def kind : String
+    if null?
+      "null"
+    elsif bool?
+      "bool"
+    elsif as_s?
+      "string"
+    elsif as_i64?
+      "integer"
+    elsif float_value?
+      "float"
+    elsif as_a?
+      "array"
+    else
+      "object"
+    end
+  end
+
+  def as_nil : Nil
+    raise "as_nil of a JSON #{kind}" unless null?
+    nil
+  end
+
+  def as_bool : Bool
+    raise "as_bool of a JSON #{kind}" unless bool?
+    @document.bool(@index)
+  end
+
+  def as_bool? : Bool?
+    bool? ? @document.bool(@index) : nil
+  end
+
+  def as_i : Int32
+    r = as_i64? || raise "as_i of a JSON #{kind}"
+    if r < -2147483648_i64 || r > 2147483647_i64
+      raise "integer #{r} out of Int32 range"
+    end
+    r.to_i32
+  end
+
+  def as_i? : Int32?
+    r = as_i64?
+    return nil if r.nil?
+    r >= -2147483648_i64 && r <= 2147483647_i64 ? r.to_i32 : nil
+  end
+
+  def as_i64 : Int64
+    as_i64? || raise "as_i64 of a JSON #{kind}"
+  end
+
+  def as_i64? : Int64?
+    case r = scalar
+    when Int64 then r
+    else            nil
+    end
+  end
+
+  # A float, or an integer read as one.
+  def as_f : Float64
+    as_f? || raise "as_f of a JSON #{kind}"
+  end
+
+  def as_f? : Float64?
+    case r = scalar
+    when Float64 then r
+    when Int64   then r.to_f64
+    else              nil
+    end
+  end
+
+  protected def float_value? : Float64?
+    case r = scalar
+    when Float64 then r
+    else              nil
+    end
+  end
+
+  def as_s : String
+    as_s? || raise "as_s of a JSON #{kind}"
+  end
+
+  def as_s? : String?
+    @document.kind(@index) == Document::Kind::String ? @document.string(@index) : nil
+  end
+
+  def as_a : Array(Any)
+    array? ? elements : raise("as_a of a JSON #{kind}")
+  end
+
+  def as_a? : Array(Any)?
+    array? ? elements : nil
+  end
+
+  def as_h : RisJsonFields
+    object? ? fields : raise("as_h of a JSON #{kind}")
+  end
+
+  def as_h? : RisJsonFields?
+    object? ? fields : nil
+  end
+
+  # How many elements an array or an object holds. A scalar has no size.
+  def size : Int32
+    size? || raise "size of a JSON #{kind}"
+  end
+
+  def size? : Int32?
+    array? || object? ? @document.size(@index) : nil
+  end
+
+  def [](index : Int32) : Any
+    raise "index #{index} into a JSON #{kind}" unless array?
+    count = @document.size(@index)
+    child = @document.at(@index, index < 0 ? index + count : index)
+    raise "index #{index} out of range for #{count} elements" if child < 0
+    Any.new(@document, child)
+  end
+
+  def []?(index : Int32) : Any?
+    return nil unless array?
+    child = @document.at(@index, index < 0 ? index + @document.size(@index) : index)
+    child < 0 ? nil : Any.new(@document, child)
+  end
+
+  def [](key : String) : Any
+    raise "key #{key.inspect} into a JSON #{kind}" unless object?
+    child = @document.at(@index, key)
+    raise "no such key #{key.inspect}" if child < 0
+    Any.new(@document, child)
+  end
+
+  def []?(key : String) : Any?
+    return nil unless object?
+    child = @document.at(@index, key)
+    child < 0 ? nil : Any.new(@document, child)
+  end
+
+  def dig?(key : String) : Any?
+    self[key]?
+  end
+
+  def dig?(index : Int32) : Any?
+    self[index]?
+  end
+
+  def dig?(k : String, *subkeys : String | Int32) : Any?
+    at = step?(@index, k)
+    subkeys.size.times { |i| at = step?(at, subkeys[i]) }
+    at < 0 ? nil : Any.new(@document, at)
+  end
+
+  def dig?(idx : Int32, *subkeys : String | Int32) : Any?
+    at = step?(@index, idx)
+    subkeys.size.times { |i| at = step?(at, subkeys[i]) }
+    at < 0 ? nil : Any.new(@document, at)
+  end
+
+  # The child of *at* under *key*, or -1 when there is none.
+  private def step?(at : Int32, key : String | Int32) : Int32
+    return -1 if at < 0
+    kind = @document.kind(at)
+    if key.is_a?(String)
+      return -1 unless kind == Document::Kind::Object
+      @document.at(at, key)
+    else
+      return -1 unless kind == Document::Kind::Array
+      @document.at(at, key < 0 ? key + @document.size(at) : key)
+    end
+  end
+
+  def dig(key : String) : Any
+    self[key]
+  end
+
+  def dig(index : Int32) : Any
+    self[index]
+  end
+
+  def dig(k : String, *subkeys : String | Int32) : Any
+    self[k].dig(*subkeys)
+  end
+
+  def dig(idx : Int32, *subkeys : String | Int32) : Any
+    self[idx].dig(*subkeys)
+  end
+
+  # Equal when the values are: an integer equals the float with the same
+  # value, arrays element by element, objects key by key in any order.
+  # The containers recurse; a scalar is compared out of line, so a level
+  # of a deep document costs only the container's frame. Inline, every
+  # scalar's locals sat in each level's frame, and a 256-level document
+  # compared in a task ran Windows' 256 KB stack out.
+  def ==(other : Any) : Bool
+    # Indices, not values: both sides stay in their own documents, and a
+    # value built in one round is not kept past it.
+    mine = @document
+    theirs = other.document
+    pending = Array(Tuple(Int32, Int32)).new
+    rights = Array(Int32).new
+    pending << {@index, other.index}
+    until pending.empty?
+      at = pending.pop
+      left = Any.new(mine, at[0])
+      right = Any.new(theirs, at[1])
+      if left.array?
+        return false unless right.array? && mine.size(at[0]) == theirs.size(at[1])
+        rights.clear
+        theirs.each(at[1]) { |child| rights << child }
+        i = 0
+        mine.each(at[0]) do |child|
+          pending << {child, rights[i]}
+          i += 1
+        end
+      elsif a = left.as_h?
+        b = right.as_h?
+        return false unless b && a.size == b.size
+        a.each do |key, child|
+          value = b[key]?
+          return false unless value
+          pending << {child.index, value.index}
+        end
+      else
+        return false unless left.scalar_equals?(right)
+      end
+    end
+    true
+  end
+
+  protected def index : Int32
+    @index
+  end
+
+  @[NoInline]
+  protected def scalar_equals?(other : Any) : Bool
+    if null?
+      other.null?
+    elsif bool?
+      other.as_bool? == as_bool?
+    elsif s = as_s?
+      o = other.as_s?
+      o.nil? ? false : s == o
+    elsif i = as_i64?
+      if oi = other.as_i64?
+        i == oi
+      elsif of = other.float_value?
+        integer_equals_float?(i, of)
+      else
+        false
+      end
+    elsif f = float_value?
+      if oi = other.as_i64?
+        integer_equals_float?(oi, f)
+      elsif of = other.float_value?
+        f == of
+      else
+        false
+      end
+    else
+      false
+    end
+  end
+
+  # Only a whole float in Int64's range can equal an integer, and then the
+  # comparison is exact in the integer, not rounded through the float.
+  private def integer_equals_float?(i : Int64, f : Float64) : Bool
+    return false unless f >= -9223372036854775808.0 && f < 9223372036854775808.0
+    t = f.to_i64
+    t.to_f64 == f && t == i
+  end
+
+  # Consistent with `==`: a whole float hashes as the integer it equals, an
+  # object's hash does not depend on the order its keys were written in.
+  # The containers recurse; a scalar is hashed out of line, so a level of
+  # a deep document costs only the container's frame (as `==`).
+  def hash : Int32
+    stop = @document.tree.stop(@index)
+    hashes = Array(Int32).new(stop - @index, 0)
+    index = stop - 1
+    while index >= @index
+      kind = @document.kind(index)
+      if kind == Document::Kind::Array
+        value = 0x9E3779B97F4A7C15_u64 ^
+                @document.size(index).to_i64.unsafe_to_u64
+        @document.each(index) do |child|
+          value = (value ^ hashes[child - @index].to_i64.unsafe_to_u64) &*
+                  0x100000001B3_u64
+          value = value ^ value.unsafe_shr(29_u64)
+        end
+        hashes[index - @index] = value.hash
+      elsif kind == Document::Kind::Object
+        value = 0x9E3779B97F4A7C15_u64 ^
+                @document.size(index).to_i64.unsafe_to_u64
+        @document.each(index) do |child|
+          pair = @document.key(child).hash.to_i64.unsafe_to_u64
+            .unsafe_shl(32_u64) |
+                 (hashes[child - @index].to_i64.unsafe_to_u64 & 0xFFFFFFFF_u64)
+          pair = (pair ^ pair.unsafe_shr(30_u64)) &* 0xBF58476D1CE4E5B9_u64
+          pair = (pair ^ pair.unsafe_shr(27_u64)) &* 0x94D049BB133111EB_u64
+          value = value &+ (pair ^ pair.unsafe_shr(31_u64))
+        end
+        hashes[index - @index] = value.hash
+      else
+        hashes[index - @index] = Any.new(@document, index).scalar_hash
+      end
+      index -= 1
+    end
+    hashes[0]
+  end
+
+  @[NoInline]
+  protected def scalar_hash : Int32
+    if null?
+      0
+    elsif bool?
+      @document.bool(@index) ? 1 : 2
+    elsif s = as_s?
+      s.hash
+    elsif i = as_i64?
+      i.hash
+    elsif f = float_value?
+      if f >= -9223372036854775808.0 && f < 9223372036854775808.0
+        t = f.to_i64
+        return t.hash if t.to_f64 == f
+      end
+      bits = IyiFloatText.bits_of(f)
+      ((bits ^ bits.unsafe_shr(32_u64)) & 0x7FFFFFFF_u64).to_i32
+    else
+      0
+    end
+  end
+
+  def to_json : String
+    b = Builder.new
+    to_json(b)
+    b.to_s
+  end
+
+  def to_pretty_json(indent : String = "  ") : String
+    b = Builder.new
+    b.indent = indent
+    to_json(b)
+    b.to_s
+  end
+
+  def to_ascii_json : String
+    b = Builder.new
+    b.ascii_only = true
+    to_json(b)
+    b.to_s
+  end
+
+  # A string as itself and null as nothing, as `YAML::Any#to_s` and the
+  # other library answer them; a number, a boolean or a collection as its
+  # JSON text. A string was its JSON text too, so `"hello #{doc["name"]}"`
+  # printed `hello "Ada"`, and null printed `null`.
+  def to_s : String
+    if s = as_s?
+      s
+    elsif null?
+      ""
+    else
+      to_json
+    end
+  end
+
+  def inspect : String
+    to_json
+  end
+end
+
+impl ToJSON for Any
+  def to_json(json : Builder) : Nil
+    @document.to_json(json, @index)
+  end
+end
+
+enum TokenKind
+  Null
+  False
+  True
+  Int
+  Float
+  String
+  BeginArray
+  EndArray
+  BeginObject
+  EndObject
+  Colon
+  Comma
+  EOF
+  Error
+end
+
+@[OnTape]
+struct Token
+  property kind : TokenKind
+  # A number's text, as the span of the input it was read from: made into
+  # a string only when asked, which a reader of the number's value never
+  # does - a substring a number was an allocation for every number read.
+  property raw_input : String
+  property raw_start : Int32
+  property raw_size : Int32
+  property string_value : String
+  property int_value : Int64
+  property float_value : Float64
+  # A string's text read as a span (`raw_start`, `raw_size`) of the input
+  # by a lexer on the tape, and whether it holds an escape to decode.
+  property escaped : Bool
+  property line_number : Int32
+  property column_number : Int32
+
+  def initialize
+    @kind = TokenKind::EOF
+    @raw_input = ""
+    @raw_start = 0
+    @raw_size = 0
+    @string_value = ""
+    @int_value = 0_i64
+    @float_value = 0.0
+    @escaped = false
+    @line_number = 1
+    @column_number = 1
+  end
+
+  def raw_value : String
+    @raw_input[@raw_start, @raw_size]
+  end
+end
+
+# Reads tokens from the bytes of a document. A malformed token is not a
+# panic here: `next_token` answers a token of kind `Error` and `error` holds
+# the sentence, so `JSON.parse?` can answer `nil` and `JSON.parse` can panic.
+@[OnTape]
+struct Lexer
+  @input : String
+  @pos : Int32
+  @line_number : Int32
+  @column_number : Int32
+  @token : Token
+  @string_buffer : StringBuffer?
+  @error : String?
+  # Strings are spans of the input, not Strings: the tape reader's mode.
+  @spans : Bool
+
+  def initialize(@input : String)
+    @pos = 0
+    @line_number = 1
+    @column_number = 1
+    @token = Token.new
+    made_string_buffer = StringBuffer.new(input.bytesize)
+    @string_buffer = made_string_buffer
+    @error = nil
+    @spans = false
+  end
+
+  # A lexer over bytes on the tape (`JSON.parse(String)`): a string
+  # token is its span, with `escaped` set when it must be decoded, and
+  # nothing of it is copied. The input is handed to `next_token`.
+  def initialize(spans : Bool)
+    @input = ""
+    @pos = 0
+    @line_number = 1
+    @column_number = 1
+    @token = Token.new
+    @string_buffer = nil
+    @error = nil
+    @spans = true
+  end
+
+  # The input's bytes from *start* as a String, in either mode.
+  private def slice(input : String, start : Int32, size : Int32) : String
+    return @input[start, size] unless @spans
+    input[start, size]
+  end
+
+  # A token borrows the input instead of caching copies of short text.
+  private def text_at(input : String, start : Int32, size : Int32) : String
+    input[start, size]
+  end
+
+  def token : Token
+    @token
+  end
+
+  def error : String?
+    @error
+  end
+
+  private def fail(reason : String, line : Int32, col : Int32) : Nil
+    if @error.nil?
+      said = "#{reason} at line #{line}, column #{col}"
+      # Kept in the lexer's own text: a def's text is freed when it ends.
+      from = @error_text.bytesize
+      @error_text << said
+      @error = @error_text.finish[from, said.bytesize]
+    end
+    @token.kind = TokenKind::Error
+    nil
+  end
+
+  @error_text : String::Builder = String::Builder.new(128)
+
+  # Escaped strings read, which their tokens view.
+  @kept_text : String::Builder = String::Builder.new(256)
+
+  private def keep_text(buffer : StringBuffer) : String
+    from = @kept_text.bytesize
+    buffer.write_to(@kept_text)
+    @kept_text.finish[from, @kept_text.bytesize - from]
+  end
+
+  private def current_byte(input : String) : UInt8
+    @pos < input.bytesize ? input[@pos] : 0_u8
+  end
+
+  private def advance(input : String) : UInt8
+    b = current_byte(input)
+    if @pos < input.bytesize
+      if b == 10_u8 # '\n'
+        @line_number = @line_number + 1
+        @column_number = 1
+      elsif (b & 0xC0_u8) != 0x80_u8
+        # A column is a character: continuation bytes do not advance it.
+        @column_number = @column_number + 1
+      end
+      @pos = @pos + 1
+    end
+    current_byte(input)
+  end
+
+  private def skip_whitespace(input : String) : Nil
+    while @pos < input.bytesize
+      b = current_byte(input)
+      if b == 32_u8 || b == 9_u8 || b == 10_u8 || b == 13_u8
+        advance(input)
+      else
+        break
+      end
+    end
+  end
+
+  # The next token of the String the lexer was made with.
+  def next_token : Token
+    next_token(String.view(@input))
+  end
+
+  # The next token of *input*, the tape text a span lexer reads.
+  def next_token(input : String) : Token
+    return @token unless @error.nil?
+    skip_whitespace(input)
+
+    tok_line = @line_number
+    tok_col = @column_number
+
+    if @pos >= input.bytesize
+      set_token(TokenKind::EOF, tok_line, tok_col)
+      return @token
+    end
+
+    b = current_byte(input)
+    case b
+    when 123_u8 # '{'
+      advance(input)
+      set_token(TokenKind::BeginObject, tok_line, tok_col)
+    when 125_u8 # '}'
+      advance(input)
+      set_token(TokenKind::EndObject, tok_line, tok_col)
+    when 91_u8 # '['
+      advance(input)
+      set_token(TokenKind::BeginArray, tok_line, tok_col)
+    when 93_u8 # ']'
+      advance(input)
+      set_token(TokenKind::EndArray, tok_line, tok_col)
+    when 58_u8 # ':'
+      advance(input)
+      set_token(TokenKind::Colon, tok_line, tok_col)
+    when 44_u8 # ','
+      advance(input)
+      set_token(TokenKind::Comma, tok_line, tok_col)
+    when 34_u8 # '"'
+      consume_string(input, tok_line, tok_col)
+    when 116_u8 # 't'
+      consume_word(input, "true", TokenKind::True, tok_line, tok_col)
+    when 102_u8 # 'f'
+      consume_word(input, "false", TokenKind::False, tok_line, tok_col)
+    when 110_u8 # 'n'
+      consume_word(input, "null", TokenKind::Null, tok_line, tok_col)
+    when 45_u8, 48_u8, 49_u8, 50_u8, 51_u8, 52_u8, 53_u8, 54_u8, 55_u8, 56_u8, 57_u8 # '-', '0'..'9'
+      consume_number(input, tok_line, tok_col)
+    else
+      if identifier_byte?(b)
+        consume_bare_identifier(input, tok_line, tok_col)
+      elsif b >= 32_u8 && b < 127_u8
+        fail("unexpected character '#{b.unsafe_chr}'", tok_line, tok_col)
+      elsif b == 0xEF_u8 && @pos + 2 < input.bytesize && input[@pos + 1] == 0xBB_u8 && input[@pos + 2] == 0xBF_u8
+        fail("unexpected UTF-8 byte order mark", tok_line, tok_col)
+      else
+        fail("unexpected byte #{b}", tok_line, tok_col)
+      end
+    end
+
+    @token
+  end
+
+  private def set_token(kind : TokenKind, line : Int32, col : Int32) : Nil
+    @token.kind = kind
+    @token.line_number = line
+    @token.column_number = col
+  end
+
+  private def identifier_byte?(b : UInt8) : Bool
+    (b >= 97_u8 && b <= 122_u8) || (b >= 65_u8 && b <= 90_u8) || (b >= 48_u8 && b <= 57_u8) || b == 95_u8
+  end
+
+  private def consume_bare_identifier(input : String, line : Int32, col : Int32) : Nil
+    start = @pos
+    while @pos < input.bytesize && identifier_byte?(current_byte(input))
+      advance(input)
+    end
+    fail("bare identifier '#{slice(input, start, @pos - start)}'", line, col)
+  end
+
+  # `true`, `false`, `null`: the whole word, and nothing joined to it.
+  private def consume_word(input : String, word : String, kind : TokenKind, line : Int32, col : Int32) : Nil
+    start = @pos
+    expected = word
+    i = 0
+    while i < word.bytesize
+      if current_byte(input) != expected[i]
+        @pos = start
+        return consume_bare_identifier(input, line, col)
+      end
+      advance(input)
+      i = i + 1
+    end
+    if identifier_byte?(current_byte(input))
+      @pos = start
+      return consume_bare_identifier(input, line, col)
+    end
+    set_token(kind, line, col)
+  end
+
+  private def consume_string(input : String, line : Int32, col : Int32) : Nil
+    advance(input) # the opening quote
+    start_pos = @pos
+    has_escape = false
+
+    while @pos < input.bytesize
+      b = current_byte(input)
+      if b == 34_u8 # '"'
+        break
+      elsif b == 92_u8 # '\\'
+        has_escape = true
+        break
+      elsif b < 32_u8
+        return fail("unescaped control character (ASCII #{b}) in string", @line_number, @column_number)
+      elsif b >= 128_u8
+        return unless take_utf8_sequence(input)
+      else
+        step_ascii
+      end
+    end
+
+    if @spans && @pos < input.bytesize
+      return consume_span(input, start_pos, has_escape, line, col)
+    end
+
+    if !has_escape && @pos < input.bytesize && current_byte(input) == 34_u8
+      # No escape: the text is a substring of the input.
+      str_val = text_at(input, start_pos, @pos - start_pos)
+      advance(input)
+      set_token(TokenKind::String, line, col)
+      @token.string_value = str_val
+      return
+    end
+
+    if @pos >= input.bytesize
+      return fail("unterminated string", line, col)
+    end
+
+    buffer = @string_buffer || raise "span lexer has no string buffer"
+    buffer.clear
+    if @pos > start_pos
+      buffer.append(input[start_pos, @pos - start_pos])
+    end
+
+    while @pos < input.bytesize
+      b = current_byte(input)
+      if b == 34_u8 # '"'
+        advance(input)
+        set_token(TokenKind::String, line, col)
+        # Kept in the lexer's own text, which lives as long as it: the
+        # buffer is refilled for the next string.
+        @token.string_value = keep_text(buffer)
+        return
+      elsif b == 92_u8 # '\\'
+        esc_col = @column_number
+        advance(input)
+        if @pos >= input.bytesize
+          return fail("unterminated string after backslash", line, esc_col)
+        end
+        esc = current_byte(input)
+        case esc
+        when 34_u8 # '"'
+          buffer.append(34_u8)
+          advance(input)
+        when 92_u8 # '\\'
+          buffer.append(92_u8)
+          advance(input)
+        when 47_u8 # '/'
+          buffer.append(47_u8)
+          advance(input)
+        when 98_u8 # 'b'
+          buffer.append(8_u8)
+          advance(input)
+        when 102_u8 # 'f'
+          buffer.append(12_u8)
+          advance(input)
+        when 110_u8 # 'n'
+          buffer.append(10_u8)
+          advance(input)
+        when 114_u8 # 'r'
+          buffer.append(13_u8)
+          advance(input)
+        when 116_u8 # 't'
+          buffer.append(9_u8)
+          advance(input)
+        when 117_u8 # 'u'
+          u_line = @line_number
+          u_col = @column_number - 1
+          advance(input)
+          hex1 = read_hex4(input, u_line, u_col)
+          return if hex1 < 0
+
+          if hex1 >= 0xD800 && hex1 <= 0xDBFF
+            # A high surrogate must be followed at once by `\u` and a low one.
+            if current_byte(input) != 92_u8
+              return fail("lone high surrogate \\u#{hex1.to_s(16)} without low surrogate", u_line, u_col)
+            end
+            advance(input)
+            if current_byte(input) != 117_u8
+              return fail("lone high surrogate \\u#{hex1.to_s(16)} without following \\u escape", u_line, u_col)
+            end
+            u2_line = @line_number
+            u2_col = @column_number - 1
+            advance(input)
+            hex2 = read_hex4(input, u2_line, u2_col)
+            return if hex2 < 0
+            if hex2 < 0xDC00 || hex2 > 0xDFFF
+              return fail("invalid surrogate pair: expected low surrogate (0xDC00..0xDFFF), got \\u#{hex2.to_s(16)}", u2_line, u2_col)
+            end
+            buffer.append_codepoint(0x10000 + ((hex1 - 0xD800) << 10) + (hex2 - 0xDC00))
+          elsif hex1 >= 0xDC00 && hex1 <= 0xDFFF
+            return fail("lone low surrogate \\u#{hex1.to_s(16)} without preceding high surrogate", u_line, u_col)
+          else
+            buffer.append_codepoint(hex1)
+          end
+        else
+          if esc >= 32_u8 && esc < 127_u8
+            return fail("invalid escape sequence '\\#{esc.unsafe_chr}'", line, esc_col)
+          end
+          return fail("invalid escape sequence '\\' before byte #{esc}", line, esc_col)
+        end
+      elsif b < 32_u8
+        return fail("unescaped control character (ASCII #{b}) in string", @line_number, @column_number)
+      elsif b >= 128_u8
+        from = @pos
+        return unless take_utf8_sequence(input)
+        buffer.append(input[from, @pos - from])
+      else
+        buffer.append(b)
+        advance(input)
+      end
+    end
+
+    fail("unterminated string", line, col)
+  end
+
+  # The rest of a string from the current byte, checked as `consume_string`
+  # checks it, and taken as the span from *start* to the closing quote.
+  private def consume_span(input : String, start : Int32, has_escape : Bool, line : Int32, col : Int32) : Nil
+    while @pos < input.bytesize
+      b = current_byte(input)
+      if b == 34_u8 # '"'
+        @token.raw_start = start
+        @token.raw_size = @pos - start
+        @token.escaped = has_escape
+        advance(input)
+        set_token(TokenKind::String, line, col)
+        return
+      elsif b == 92_u8 # '\\'
+        has_escape = true
+        esc_col = @column_number
+        advance(input)
+        return fail("unterminated string after backslash", line, esc_col) if @pos >= input.bytesize
+        esc = current_byte(input)
+        if esc == 117_u8 # 'u'
+          u_line = @line_number
+          u_col = @column_number - 1
+          advance(input)
+          hex1 = read_hex4(input, u_line, u_col)
+          return if hex1 < 0
+          if hex1 >= 0xD800 && hex1 <= 0xDBFF
+            if current_byte(input) != 92_u8
+              return fail("lone high surrogate \\u#{hex1.to_s(16)} without low surrogate", u_line, u_col)
+            end
+            advance(input)
+            if current_byte(input) != 117_u8
+              return fail("lone high surrogate \\u#{hex1.to_s(16)} without following \\u escape", u_line, u_col)
+            end
+            u2_line = @line_number
+            u2_col = @column_number - 1
+            advance(input)
+            hex2 = read_hex4(input, u2_line, u2_col)
+            return if hex2 < 0
+            if hex2 < 0xDC00 || hex2 > 0xDFFF
+              return fail("invalid surrogate pair: expected low surrogate (0xDC00..0xDFFF), got \\u#{hex2.to_s(16)}", u2_line, u2_col)
+            end
+          elsif hex1 >= 0xDC00 && hex1 <= 0xDFFF
+            return fail("lone low surrogate \\u#{hex1.to_s(16)} without preceding high surrogate", u_line, u_col)
+          end
+        elsif esc == 34_u8 || esc == 92_u8 || esc == 47_u8 || esc == 98_u8 || esc == 102_u8 || esc == 110_u8 || esc == 114_u8 || esc == 116_u8
+          advance(input)
+        elsif esc >= 32_u8 && esc < 127_u8
+          return fail("invalid escape sequence '\\#{esc.unsafe_chr}'", line, esc_col)
+        else
+          return fail("invalid escape sequence '\\' before byte #{esc}", line, esc_col)
+        end
+      elsif b < 32_u8
+        return fail("unescaped control character (ASCII #{b}) in string", @line_number, @column_number)
+      elsif b >= 128_u8
+        return unless take_utf8_sequence(input)
+      else
+        step_ascii
+      end
+    end
+    fail("unterminated string", line, col)
+  end
+
+  # Passes over the UTF-8 sequence at the current byte and answers true, or
+  # records why the bytes there are not one (RFC 8259 §8.1: a document is
+  # UTF-8) and answers false.
+  private def take_utf8_sequence(input : String) : Bool
+    b = current_byte(input)
+    length = utf8_sequence_at(input, @pos)
+    if length < 0
+      if b >= 0xC2_u8 && b <= 0xF4_u8
+        fail("malformed UTF-8 sequence starting with byte #{b} in string", @line_number, @column_number)
+      else
+        fail("invalid UTF-8 byte #{b} in string", @line_number, @column_number)
+      end
+      return false
+    end
+    while length > 0
+      advance(input)
+      length = length - 1
+    end
+    true
+  end
+
+  # Four hex digits, or -1 after recording why not.
+  private def read_hex4(input : String, line : Int32, col : Int32) : Int32
+    val = 0
+    i = 0
+    while i < 4
+      if @pos >= input.bytesize
+        fail("unterminated \\u escape sequence: expected 4 hexadecimal digits", line, col)
+        return -1
+      end
+      b = current_byte(input)
+      d = hex_digit_value(b)
+      if d < 0
+        if b >= 32_u8 && b < 127_u8
+          fail("invalid hex digit '#{b.unsafe_chr}' in \\u escape sequence", @line_number, @column_number)
+        else
+          fail("invalid hex digit (byte #{b}) in \\u escape sequence", @line_number, @column_number)
+        end
+        return -1
+      end
+      val = (val << 4) | d
+      advance(input)
+      i = i + 1
+    end
+    val
+  end
+
+  private def hex_digit_value(b : UInt8) : Int32
+    if b >= 48_u8 && b <= 57_u8 # '0'..'9'
+      (b - 48_u8).to_i
+    elsif b >= 97_u8 && b <= 102_u8 # 'a'..'f'
+      (b - 97_u8).to_i + 10
+    elsif b >= 65_u8 && b <= 70_u8 # 'A'..'F'
+      (b - 65_u8).to_i + 10
+    else
+      -1
+    end
+  end
+
+  private def digit?(b : UInt8) : Bool
+    b >= 48_u8 && b <= 57_u8
+  end
+
+  private def consume_number(input : String, line : Int32, col : Int32) : Nil
+    start_pos = @pos
+    has_fraction = false
+    has_exponent = false
+    negative = false
+    # The significant digits as one integer while it fits nineteen of them,
+    # and the power of ten they are scaled by: what the fast conversion
+    # below reads instead of the number's text.
+    mantissa = 0_u64
+    digits = 0
+    scale = 0
+
+    if current_byte(input) == 45_u8 # '-'
+      negative = true
+      advance(input)
+      if @pos >= input.bytesize
+        return fail("expected digit after minus sign in number", line, col)
+      end
+      unless digit?(current_byte(input))
+        return fail("expected digit after minus sign in number", @line_number, @column_number)
+      end
+    end
+
+    if current_byte(input) == 48_u8 # '0'
+      step_ascii
+      if @pos < input.bytesize && digit?(current_byte(input))
+        return fail("leading zero not allowed in number", @line_number, @column_number)
+      end
+    else
+      while @pos < input.bytesize && digit?(current_byte(input))
+        if digits < 19
+          mantissa = mantissa &* 10_u64 &+ (current_byte(input) &- 48_u8).to_u64
+          digits = digits + 1
+        else
+          scale = scale + 1
+        end
+        step_ascii
+      end
+    end
+
+    if @pos < input.bytesize && current_byte(input) == 46_u8 # '.'
+      has_fraction = true
+      step_ascii
+      if @pos >= input.bytesize
+        return fail("expected at least one digit after decimal point", line, col)
+      end
+      unless digit?(current_byte(input))
+        return fail("expected at least one digit after decimal point", @line_number, @column_number)
+      end
+      while @pos < input.bytesize && digit?(current_byte(input))
+        if digits < 19
+          if digits > 0 || current_byte(input) != 48_u8
+            mantissa = mantissa &* 10_u64 &+ (current_byte(input) &- 48_u8).to_u64
+            digits = digits + 1
+          end
+          scale = scale - 1
+        end
+        step_ascii
+      end
+    end
+
+    exponent = 0
+    exponent_digits = 0
+    if @pos < input.bytesize && (current_byte(input) == 101_u8 || current_byte(input) == 69_u8) # 'e' or 'E'
+      has_exponent = true
+      step_ascii
+      exponent_negative = false
+      if @pos < input.bytesize && (current_byte(input) == 43_u8 || current_byte(input) == 45_u8) # '+' or '-'
+        exponent_negative = current_byte(input) == 45_u8
+        step_ascii
+      end
+      if @pos >= input.bytesize
+        return fail("expected at least one digit in exponent", line, col)
+      end
+      unless digit?(current_byte(input))
+        return fail("expected at least one digit in exponent", @line_number, @column_number)
+      end
+      while @pos < input.bytesize && digit?(current_byte(input))
+        exponent = exponent * 10 + (current_byte(input) - 48_u8).to_i32 if exponent < 100000
+        exponent_digits = exponent_digits + 1
+        step_ascii
+      end
+      exponent = 0 - exponent if exponent_negative
+    end
+
+    # `0x12`, `1a`, `1.2.3`: a number does not run into letters or a second point.
+    if @pos < input.bytesize
+      tail_b = current_byte(input)
+      if (tail_b >= 97_u8 && tail_b <= 122_u8) || (tail_b >= 65_u8 && tail_b <= 90_u8) || tail_b == 46_u8
+        return fail("unexpected character '#{tail_b.unsafe_chr}' in number", @line_number, @column_number)
+      end
+    end
+
+    set_token(TokenKind::Int, line, col)
+    @token.raw_input = @input
+    @token.raw_start = start_pos
+    @token.raw_size = @pos - start_pos
+
+    unless has_fraction || has_exponent
+      val = parse_int64?(input[start_pos, @pos - start_pos])
+      unless val.nil?
+        @token.int_value = val
+        return
+      end
+    end
+
+    # Clinger's fast path: an integer under 2^53 and a power of ten a
+    # double holds exactly are both exact, so their product or quotient is
+    # rounded once, which is the correctly rounded value `to_f` answers.
+    # Anything else - more digits, a larger exponent - is read from the
+    # text as before.
+    f = 0.0
+    fast = false
+    if digits <= 15 && exponent_digits <= 3
+      power = scale + exponent
+      if power >= 0 && power <= 22
+        f = mantissa.to_f64 * POW10[power]
+        fast = true
+      elsif power < 0 && power >= -22
+        f = mantissa.to_f64 / POW10[0 - power]
+        fast = true
+      end
+    end
+    if fast
+      # The sign flipped, not subtracted from zero: `0.0 - 0.0` is `0.0`,
+      # and `-0.0` is what the text says.
+      f = f * -1.0 if negative
+    else
+      f = slice(input, start_pos, @pos - start_pos).to_f
+      if f.abs > 1.7976931348623157e308
+        return fail("number #{slice(input, start_pos, @pos - start_pos)} out of range", line, col)
+      end
+    end
+    @token.kind = TokenKind::Float
+    @token.float_value = f
+  end
+
+  # A byte known to be ASCII and not a line break: one column on.
+  private def step_ascii : Nil
+    @pos = @pos + 1
+    @column_number = @column_number + 1
+  end
+
+  # The Int64 these digits spell, or nil when they do not fit. The negative
+  # magnitude is accumulated so the smallest Int64 needs no negation.
+  private def parse_int64?(bytes : String) : Int64?
+    len = bytes.bytesize
+    i = 0
+    negative = false
+    if bytes[0] == 45_u8
+      negative = true
+      i = 1
+    end
+    val = 0_i64
+    if negative
+      while i < len
+        d = (bytes[i] - 48_u8).to_i64
+        return nil if val < -922337203685477580_i64 || (val == -922337203685477580_i64 && d > 8_i64)
+        val = val * 10_i64 - d
+        i = i + 1
+      end
+    else
+      while i < len
+        d = (bytes[i] - 48_u8).to_i64
+        return nil if val > 922337203685477580_i64 || (val == 922337203685477580_i64 && d > 7_i64)
+        val = val * 10_i64 + d
+        i = i + 1
+      end
+    end
+    val
+  end
+end
+
+# The deepest document read: deep enough for any data a person wrote, and
+# shallow enough for a task's stack. It was 512, Crystal's, whose fibers
+# have megabytes; a task here has 256 KB (`IyiFiber::STACK_BYTES`), and a
+# task that parsed 480 nested arrays - a request body, in a server whose
+# handlers are tasks - died of a stack overflow that took the whole
+# process, and `==` on two such values died at 334. At 256 a plain build
+# parses, compares, prints and hashes the deepest document in a task with
+# a fifth of the stack to spare.
+MAX_NESTING = 256
+
+# The powers of ten a double holds exactly, for the lexer's fast path.
+POW10 = {1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
+         1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22}
+
+# Reads a whole document into an `Any`. Like the lexer it records the first
+# failure instead of panicking; `JSON.parse` and `JSON.parse?` decide what to
+# do with it.
+@[OnTape]
+pub class Parser
+  @parser : DocumentParser
+
+  def initialize(input : String)
+    @parser = DocumentParser.new(input)
+  end
+
+  def error : String?
+    @parser.error
+  end
+
+  def parse : Any
+    @parser.parse
+    Any.new(@parser.document)
+  end
+end
+
+# Reads a document one event at a time: `kind` names what the reader is on,
+# the `read_x` methods take it and move on. The grammar is checked as it is
+# read, so a missing comma or colon is refused where it is, with a panic.
+@[OnTape]
+pub class PullParser
+  enum Kind
+    Null
+    Bool
+    Int
+    Float
+    String
+    BeginArray
+    EndArray
+    BeginObject
+    EndObject
+    EOF
+
+    def null? : ::Bool
+      self == Kind::Null
+    end
+
+    def bool? : ::Bool
+      self == Kind::Bool
+    end
+
+    def int? : ::Bool
+      self == Kind::Int
+    end
+
+    def float? : ::Bool
+      self == Kind::Float
+    end
+
+    def string? : ::Bool
+      self == Kind::String
+    end
+
+    def begin_array? : ::Bool
+      self == Kind::BeginArray
+    end
+
+    def end_array? : ::Bool
+      self == Kind::EndArray
+    end
+
+    def begin_object? : ::Bool
+      self == Kind::BeginObject
+    end
+
+    def end_object? : ::Bool
+      self == Kind::EndObject
+    end
+
+    def eof? : ::Bool
+      self == Kind::EOF
+    end
+  end
+
+  # Where the reader is inside the grammar, one entry per open container plus
+  # the root: what may come next.
+  ARRAY_FIRST  = 0 # after '[': a value or ']'
+  ARRAY_VALUE  = 1 # after a value: ',' or ']'
+  ARRAY_COMMA  = 2 # after ',': a value
+  OBJECT_FIRST = 3 # after '{': a key or '}'
+  OBJECT_KEY   = 4 # after a key: ':'
+  OBJECT_COLON = 5 # after ':': a value
+  OBJECT_VALUE = 6 # after a value: ',' or '}'
+  OBJECT_COMMA = 7 # after ',': a key
+  ROOT         = 8 # the document's one value
+  ROOT_DONE    = 9 # after it: the end of the input
+
+  @lexer : Lexer
+  @kind : Kind
+  @started : Bool = false
+
+  def kind : Kind
+    read_next unless @started
+    @kind
+  end
+
+  @bool_value : Bool
+
+  def bool_value : Bool
+    kind
+    @bool_value
+  end
+
+  @int_value : Int64
+
+  def int_value : Int64
+    kind
+    @int_value
+  end
+
+  @float_value : Float64
+
+  def float_value : Float64
+    kind
+    @float_value
+  end
+
+  @string_value : String
+
+  def string_value : String
+    kind
+    @string_value
+  end
+
+  @raw_input : String
+  @raw_start : Int32
+  @raw_size : Int32
+  # The keys of the objects open on the way down (`read_object_key`).
+  @keys : Array(String)
+  property max_nesting : Int32
+  @states : Array(Int32)
+
+  def initialize(input : String)
+    @lexer = Lexer.new(input)
+    @kind = Kind::EOF
+    @bool_value = false
+    @int_value = 0_i64
+    @float_value = 0.0
+    @string_value = ""
+    @raw_input = ""
+    @raw_start = 0
+    @raw_size = 0
+    @keys = [] of String
+    @max_nesting = MAX_NESTING
+    @states = [ROOT]
+  end
+
+  # The number the reader is on, as it was written.
+  def raw_value : String
+    kind
+    @raw_input[@raw_start, @raw_size]
+  end
+
+  private def keep_raw(tok : Token) : Nil
+    @raw_input = tok.raw_input
+    @raw_start = tok.raw_start
+    @raw_size = tok.raw_size
+  end
+
+  def line_number : Int32
+    @lexer.token.line_number
+  end
+
+  def column_number : Int32
+    @lexer.token.column_number
+  end
+
+  private def parse_error(reason : String) : NoReturn
+    raise "#{reason} at line #{line_number}, column #{column_number}"
+  end
+
+  private def state : Int32
+    @states.last
+  end
+
+  private def set_state(s : Int32) : Nil
+    @states[@states.size - 1] = s
+  end
+
+  private def value_allowed : Nil
+    st = state
+    return if st == ARRAY_FIRST || st == ARRAY_COMMA || st == OBJECT_COLON || st == ROOT
+    parse_error("unexpected value") if st == ARRAY_VALUE || st == OBJECT_VALUE || st == ROOT_DONE
+    parse_error("expected string key in object") if st == OBJECT_FIRST || st == OBJECT_COMMA
+    parse_error("expected ':' after object key")
+  end
+
+  private def after_value : Nil
+    st = state
+    if st == ARRAY_FIRST || st == ARRAY_COMMA
+      set_state(ARRAY_VALUE)
+    elsif st == OBJECT_COLON
+      set_state(OBJECT_VALUE)
+    else
+      set_state(ROOT_DONE)
+    end
+  end
+
+  private def open(container_state : Int32) : Nil
+    value_allowed
+    after_value
+    if @states.size > @max_nesting
+      parse_error("nesting depth of #{@states.size} exceeds maximum depth #{@max_nesting}")
+    end
+    @states << container_state
+  end
+
+  def read_next : Kind
+    @started = true
+    while true
+      tok = @lexer.next_token
+      case tok.kind
+      when TokenKind::Error
+        lexer_error = @lexer.error
+        raise lexer_error unless lexer_error.nil?
+        parse_error("malformed input")
+      when TokenKind::Comma
+        st = state
+        if st == ARRAY_VALUE
+          set_state(ARRAY_COMMA)
+        elsif st == OBJECT_VALUE
+          set_state(OBJECT_COMMA)
+        else
+          parse_error("unexpected ','")
+        end
+      when TokenKind::Colon
+        parse_error("unexpected ':'") unless state == OBJECT_KEY
+        set_state(OBJECT_COLON)
+      when TokenKind::Null
+        value_allowed
+        after_value
+        @kind = Kind::Null
+        return @kind
+      when TokenKind::True, TokenKind::False
+        value_allowed
+        after_value
+        @kind = Kind::Bool
+        @bool_value = tok.kind == TokenKind::True
+        return @kind
+      when TokenKind::Int
+        value_allowed
+        after_value
+        @kind = Kind::Int
+        @int_value = tok.int_value
+        keep_raw(tok)
+        return @kind
+      when TokenKind::Float
+        value_allowed
+        after_value
+        @kind = Kind::Float
+        @float_value = tok.float_value
+        keep_raw(tok)
+        return @kind
+      when TokenKind::String
+        st = state
+        if st == OBJECT_FIRST || st == OBJECT_COMMA
+          set_state(OBJECT_KEY)
+        else
+          value_allowed
+          after_value
+        end
+        @kind = Kind::String
+        @string_value = tok.string_value
+        return @kind
+      when TokenKind::BeginArray
+        open(ARRAY_FIRST)
+        @kind = Kind::BeginArray
+        return @kind
+      when TokenKind::EndArray
+        st = state
+        parse_error("trailing comma in array") if st == ARRAY_COMMA
+        parse_error("unexpected ']'") unless st == ARRAY_FIRST || st == ARRAY_VALUE
+        @states.pop
+        @kind = Kind::EndArray
+        return @kind
+      when TokenKind::BeginObject
+        open(OBJECT_FIRST)
+        @kind = Kind::BeginObject
+        return @kind
+      when TokenKind::EndObject
+        st = state
+        parse_error("trailing comma in object") if st == OBJECT_COMMA
+        parse_error("expected ':' after object key") if st == OBJECT_KEY
+        parse_error("expected value after ':'") if st == OBJECT_COLON
+        parse_error("unexpected '}'") unless st == OBJECT_FIRST || st == OBJECT_VALUE
+        @states.pop
+        @kind = Kind::EndObject
+        return @kind
+      when TokenKind::EOF
+        parse_error("empty JSON input") if state == ROOT
+        parse_error("unexpected end of input") unless state == ROOT_DONE
+        @kind = Kind::EOF
+        return @kind
+      end
+    end
+  end
+
+  def read_begin_array : Nil
+    parse_error("expected begin of array, got #{kind}") unless kind == Kind::BeginArray
+    read_next
+  end
+
+  def read_end_array : Nil
+    parse_error("expected end of array, got #{kind}") unless kind == Kind::EndArray
+    read_next
+  end
+
+  def read_begin_object : Nil
+    parse_error("expected begin of object, got #{kind}") unless kind == Kind::BeginObject
+    read_next
+  end
+
+  def read_end_object : Nil
+    parse_error("expected end of object, got #{kind}") unless kind == Kind::EndObject
+    read_next
+  end
+
+  def read_object_key : String
+    parse_error("expected object key string, got #{kind}") unless kind == Kind::String
+    key = @string_value
+    read_next
+    key
+  end
+
+  def read_null : Nil
+    parse_error("expected null, got #{kind}") unless kind == Kind::Null
+    read_next
+    nil
+  end
+
+  def read_bool : Bool
+    parse_error("expected bool, got #{kind}") unless kind == Kind::Bool
+    val = @bool_value
+    read_next
+    val
+  end
+
+  def read_int : Int64
+    parse_error("expected int, got #{kind}") unless kind == Kind::Int
+    val = @int_value
+    read_next
+    val
+  end
+
+  # A float, or an integer read as one.
+  def read_float : Float64
+    if kind == Kind::Float
+      val = @float_value
+      read_next
+      val
+    elsif kind == Kind::Int
+      val = @int_value.to_f64
+      read_next
+      val
+    else
+      parse_error("expected float, got #{kind}")
+    end
+  end
+
+  # Refuses anything after the root value.
+  def expect_end : Nil
+    raise "unexpected value after JSON root value at line #{line_number}, column #{column_number}" unless kind.eof?
+  end
+
+  def read_string : String
+    parse_error("expected string, got #{kind}") unless kind == Kind::String
+    val = @string_value
+    read_next
+    val
+  end
+
+  def read_array(& : -> Nil) : Nil
+    read_begin_array
+    while kind != Kind::EndArray
+      yield
+    end
+    read_end_array
+  end
+
+  # Yields each key of the object the reader is on, with the reader at its
+  # value. A key named twice is refused, as `JSON.parse` refuses it.
+  def read_object(& : String -> Nil) : Nil
+    read_begin_object
+    mark = @keys.size
+    object = next_object
+    while kind != Kind::EndObject
+      yield read_object_key(mark, object)
+    end
+    drop_keys(mark)
+    read_end_object
+  end
+
+  # The key the reader is on, refused when this object already had it,
+  # where the key is rather than where its value is. The keys of every
+  # object open on the way down are one stack, each object's from its
+  # mark: a hash per object was an allocation for every object read, where
+  # an object has a few keys and a scan of them is cheaper than the hash.
+  #
+  # Past KEYS_SCANNED keys an object's are put in a hash, so an object
+  # with thousands of keys is not a scan of all of them per key.
+  KEYS_SCANNED = 32
+
+  private def read_object_key(mark : Int32, object : UInt64) : String
+    parse_error("expected object key string, got #{kind}") unless kind == Kind::String
+    key = @string_value
+    if @keys.size - mark < KEYS_SCANNED
+      repeated_key(key, mark)
+    else
+      hash = key_hash(key, object)
+      repeated_key(key, mark) if @key_hashes.has_key?(hash)
+      @key_hashes[hash] = true
+    end
+    @keys << key
+    if @keys.size - mark == KEYS_SCANNED
+      i = mark
+      while i < @keys.size
+        @key_hashes[key_hash(@keys[i], object)] = true
+        i = i + 1
+      end
+    end
+    read_next
+    key
+  end
+
+  # Refuses *key* if the object from *mark* has it.
+  private def repeated_key(key : String, mark : Int32) : Nil
+    i = mark
+    while i < @keys.size
+      parse_error("duplicate key '#{key}'") if @keys[i] == key
+      i = i + 1
+    end
+  end
+
+  # FNV-1a of *key* in the object numbered *object*: a plain number, as a
+  # hit is checked against the keys themselves.
+  private def key_hash(key : String, object : UInt64) : UInt64
+    h = 14695981039346656037_u64 ^ object
+    key.each_byte { |byte| h = (h ^ byte.to_u64) &* 1099511628211_u64 }
+    h
+  end
+
+  # A number for the object just opened.
+  private def next_object : UInt64
+    @objects = @objects &+ 1_u64
+    @objects
+  end
+
+  @objects : UInt64 = 0_u64
+  @key_hashes : Hash(UInt64, Bool) = {} of UInt64 => Bool
+
+  private def drop_keys(mark : Int32) : Nil
+    while @keys.size > mark
+      @keys.pop
+    end
+  end
+
+  # Passes over the value the reader is on, whole.
+  def skip : Nil
+    if kind == Kind::BeginArray
+      read_begin_array
+      while kind != Kind::EndArray
+        skip
+      end
+      read_end_array
+    elsif kind == Kind::BeginObject
+      read_object do |_key|
+        skip
+      end
+    else
+      read_next
+    end
+  end
+
+  def read_null? : Bool
+    if kind == Kind::Null
+      read_next
+      true
+    else
+      false
+    end
+  end
+
+  # Reads an object, yields once at the value of `key`, and skips the rest.
+  def on_key(key : String, & : -> Nil) : Nil
+    read_begin_object
+    found = false
+    mark = @keys.size
+    object = next_object
+    while kind != Kind::EndObject
+      current_key = read_object_key(mark, object)
+      if current_key == key
+        found = true
+        yield
+      else
+        skip
+      end
+    end
+    drop_keys(mark)
+    read_end_object
+    parse_error("missing key #{key.inspect}") unless found
+  end
+
+  # The value the reader is on, as an `Any`.
+  def read_any : Any
+    Any.new(JSON.document(read_raw))
+  end
+
+  # The value the reader is on, written into `json` as it is read. A number
+  # is written as its own text, the text it was read from: rebuilt from the
+  # Int64 or Float64 it parsed to, `12345678901234567890` came back as
+  # `1.2345678901234567e+19` and `1E+2` as `100.0`, and a UInt64 id passed
+  # through here did not read back as itself.
+  def read_raw(json : Builder) : Nil
+    if kind == Kind::Null
+      read_next
+      json.null
+    elsif kind == Kind::Bool
+      json.bool(read_bool)
+    elsif kind == Kind::Int || kind == Kind::Float
+      number_text = raw_value
+      read_next
+      json.raw(number_text)
+    elsif kind == Kind::String
+      json.string(read_string)
+    elsif kind == Kind::BeginArray
+      json.array do
+        read_array do
+          read_raw(json)
+        end
+      end
+    elsif kind == Kind::BeginObject
+      json.object do
+        read_object do |k|
+          json.field(k)
+          read_raw(json)
+        end
+      end
+    else
+      parse_error("expected a value, got #{kind}")
+    end
+  end
+
+  # The value the reader is on, as JSON text.
+  def read_raw : String
+    json = Builder.new
+    read_raw(json)
+    json.to_s
+  end
+end
+
+# Writes a document one value at a time. `indent=` makes it pretty;
+# `ascii_only=` escapes every non-ASCII code point.
+@[OnTape]
+pub class Builder
+  # Where the writer is: what may be written next.
+  ROOT         = 0
+  ARRAY_FIRST  = 1
+  ARRAY_NEXT   = 2
+  OBJECT_FIRST = 3 # a key is due
+  OBJECT_NEXT  = 4 # a key is due, after a value
+  OBJECT_VALUE = 5 # a value is due, after its key
+  ROOT_DONE    = 6
+
+  @buffer : StringBuffer
+  @indent_str : String?
+  @level : Int32
+  @states : Array(Int32)
+  # The key texts of every object still open, innermost last, each with the
+  # String it was written from.
+  # Each open object's keys, one stack: where the key's text is in the buffer
+  # and its size, where its name is in `@key_names` and its size.
+  @keys : Array(Int32)
+  # Where each open object's keys begin, and its number.
+  @key_scopes : Array(Int32)
+  @scope_ids : Array(Int32)
+  @key_names : String::Builder
+  # Past KEYS_SCANNED keys an object's are hashed too: plain numbers, a hit
+  # is checked against the keys.
+  @key_hashes : Hash(UInt64, Bool)
+  @next_scope : Int32
+
+  property max_nesting : Int32
+  property ascii_only : Bool
+
+  def initialize
+    made_buffer = StringBuffer.new(64)
+    @buffer = made_buffer
+    @indent_str = nil
+    @level = 0
+    @states = [ROOT]
+    @keys = Array(Int32).new(64)
+    @key_scopes = Array(Int32).new(MAX_NESTING)
+    @scope_ids = Array(Int32).new(MAX_NESTING)
+    @key_names = String::Builder.new(256)
+    @key_hashes = Hash(UInt64, Bool).new
+    @next_scope = 0
+    @max_nesting = MAX_NESTING
+    @ascii_only = false
+  end
+
+  def indent=(spaces : Int32) : Nil
+    if spaces > 0
+      from = @key_names.bytesize
+      spaces.times { @key_names.push(32_u8) }
+      @indent_str = @key_names.finish[from, spaces]
+    else
+      @indent_str = nil
+    end
+  end
+
+  def indent=(str : String) : Nil
+    @indent_str = str.empty? ? nil : str
+  end
+
+  private def state : Int32
+    @states.last
+  end
+
+  private def set_state(s : Int32) : Nil
+    @states[@states.size - 1] = s
+  end
+
+  private def write_indent : Nil
+    if indent_str = @indent_str
+      @buffer.append(10_u8) # '\n'
+      i = 0
+      while i < @level
+        @buffer.append(indent_str)
+        i = i + 1
+      end
+    end
+  end
+
+  private def before_value : Nil
+    st = state
+    if st == ROOT
+      set_state(ROOT_DONE)
+    elsif st == ARRAY_FIRST
+      set_state(ARRAY_NEXT)
+      write_indent
+    elsif st == ARRAY_NEXT
+      @buffer.append(44_u8) # ','
+      write_indent
+    elsif st == OBJECT_VALUE
+      set_state(OBJECT_NEXT)
+    elsif st == ROOT_DONE
+      raise "a second value at the document root"
+    else
+      raise "a value where an object key is expected"
+    end
+  end
+
+  def null : Nil
+    before_value
+    @buffer.append("null")
+  end
+
+  def bool(val : Bool) : Nil
+    before_value
+    @buffer.append(val ? "true" : "false")
+  end
+
+  def number(val : Int32) : Nil
+    before_value
+    @buffer.append(val.to_s)
+  end
+
+  def number(val : Int64) : Nil
+    before_value
+    @buffer.append(val.to_s)
+  end
+
+  def number(val : UInt8) : Nil
+    before_value
+    @buffer.append(val.to_s)
+  end
+
+  def number(val : UInt64) : Nil
+    before_value
+    @buffer.append(val.to_s)
+  end
+
+  def number(val : Float64) : Nil
+    raise "NaN is not a JSON number" if val != val
+    raise "#{val} is not a JSON number" if val.abs > 1.7976931348623157e308
+    before_value
+    @buffer.append(val.to_s)
+  end
+
+  # Text written as it is: the caller's own JSON.
+  def raw(str : String) : Nil
+    before_value
+    @buffer.append(str)
+  end
+
+  def string(val : String) : Nil
+    before_value
+    write_escaped_string(val)
+  end
+
+  private def write_escaped_string(val : String) : Nil
+    JSON.each_escaped_byte(val.as_tape, @ascii_only) { |b| @buffer.append(b) }
+  end
+
+  def start_array : Nil
+    before_value
+    @buffer.append(91_u8) # '['
+    @level = @level + 1
+    raise "nesting depth of #{@level} exceeds maximum depth #{@max_nesting}" if @level > @max_nesting
+    @states << ARRAY_FIRST
+  end
+
+  def end_array : Nil
+    st = state
+    raise "end_array without start_array" unless st == ARRAY_FIRST || st == ARRAY_NEXT
+    @states.pop
+    @level = @level - 1
+    write_indent if st == ARRAY_NEXT
+    @buffer.append(93_u8) # ']'
+  end
+
+  def array(& : -> Nil) : Nil
+    start_array
+    yield
+    end_array
+  end
+
+  def start_object : Nil
+    before_value
+    @buffer.append(123_u8) # '{'
+    @level = @level + 1
+    raise "nesting depth of #{@level} exceeds maximum depth #{@max_nesting}" if @level > @max_nesting
+    @states << OBJECT_FIRST
+    @key_scopes << @keys.size
+    @scope_ids << @next_scope
+    @next_scope += 1
+  end
+
+  def end_object : Nil
+    st = state
+    raise "end_object with a field's value still due" if st == OBJECT_VALUE
+    raise "end_object without start_object" unless st == OBJECT_FIRST || st == OBJECT_NEXT
+    @states.pop
+    mark = @key_scopes.pop
+    @scope_ids.pop
+    while @keys.size > mark
+      @keys.pop
+    end
+    @level = @level - 1
+    write_indent if st == OBJECT_NEXT
+    @buffer.append(125_u8) # '}'
+  end
+
+  def object(& : -> Nil) : Nil
+    start_object
+    yield
+    end_object
+  end
+
+  # A key; the value that follows it is written by the next call. A key
+  # whose text is one this object already holds is refused, naming both:
+  # the reader refuses a duplicate key, and the builder wrote one - a key
+  # given twice, or two Strings whose bytes are not UTF-8 and are both
+  # written as U+FFFD (`{"a\xFF" => 1, "a\xFE" => 2}` was written
+  # `{"a\uFFFD":1,"a\uFFFD":2}`, and `JSON.parse` refused it).
+  def field(name : String) : Nil
+    st = state
+    raise "a field outside an object" unless st == OBJECT_FIRST || st == OBJECT_NEXT
+    @buffer.append(44_u8) if st == OBJECT_NEXT # ','
+    set_state(OBJECT_VALUE)
+    write_indent
+    from = @buffer.size
+    write_escaped_string(name)
+    check_repeat(name, from, @buffer.size - from)
+    @keys << from
+    @keys << @buffer.size - from
+    @keys << @key_names.bytesize
+    @keys << name.bytesize
+    @key_names.append(name)
+    @buffer.append(58_u8)                         # ':'
+    @buffer.append(32_u8) unless @indent_str.nil? # ' '
+  end
+
+  # Refuses the key just written at *from* if this object has its text.
+  private def check_repeat(name : String, from : Int32, size : Int32) : Nil
+    mark = @key_scopes.last
+    count = (@keys.size - mark) // 4
+    if count >= KEY_SCAN
+      hash = key_hash(from, size)
+      if count == KEY_SCAN
+        i = mark
+        while i < @keys.size
+          @key_hashes[key_hash(@keys[i], @keys[i + 1])] = true
+          i = i + 4
+        end
+      end
+      had = @key_hashes.has_key?(hash)
+      @key_hashes[hash] = true
+      return unless had
+    end
+    written = @buffer.view(from, size)
+    i = mark
+    while i < @keys.size
+      if @keys[i + 1] == size && @buffer.view(@keys[i], size) == written
+        earlier = @key_names.finish[@keys[i + 2], @keys[i + 3]]
+        raise "the key #{name.inspect} is written twice in one object" if earlier == name
+        raise "the keys #{earlier.inspect} and #{name.inspect} are both written as #{written}"
+      end
+      i = i + 4
+    end
+  end
+
+  KEY_SCAN = 32
+
+  # FNV-1a of a key's text in the buffer, in this object.
+  private def key_hash(from : Int32, size : Int32) : UInt64
+    h = 14695981039346656037_u64 ^ @scope_ids.last.to_u64
+    @buffer.view(from, size).each_byte { |byte| h = (h ^ byte.to_u64) &* 1099511628211_u64 }
+    h
+  end
+
+  def field(name : String, & : -> Nil) : Nil
+    field(name)
+    yield
+  end
+
+  def field(name : String, val : Any) : Nil
+    field(name)
+    val.to_json(self)
+  end
+
+  def field(name : String, val : String) : Nil
+    field(name)
+    string(val)
+  end
+
+  def field(name : String, val : Int32) : Nil
+    field(name)
+    number(val)
+  end
+
+  def field(name : String, val : Int64) : Nil
+    field(name)
+    number(val)
+  end
+
+  def field(name : String, val : Float64) : Nil
+    field(name)
+    number(val)
+  end
+
+  def field(name : String, val : Bool) : Nil
+    field(name)
+    bool(val)
+  end
+
+  def field(name : String, val : Nil) : Nil
+    field(name)
+    null
+  end
+
+  # Whether no value has been written yet.
+  def empty? : Bool
+    state == ROOT
+  end
+
+  # The document's text. A container still open or no value written at all
+  # is not a document, and is refused.
+  def to_s : String
+    st = state
+    raise "to_s with an array still open" if st == ARRAY_FIRST || st == ARRAY_NEXT
+    raise "to_s with an object still open" if st == OBJECT_FIRST || st == OBJECT_NEXT || st == OBJECT_VALUE
+    raise "to_s with no value written" if st == ROOT
+    @buffer.to_s
+  end
+end
+
+# A document's state in a `Writer`, on the stack of `JSON.write`:
+# the level, the count of keys of the open objects, then per level a state,
+# the first key of each open object and its id in the hash table, and the
+# last id. Key spans and hash bins reserve stable room on the caller's
+# tape, starting with TAPE_KEYS spans.
+TAPE_STATES = MAX_NESTING + 2
+TAPE_KEYS   = 128
+# Past this many keys an object's are found through a hash table on the
+# tape, not compared one by one.
+TAPE_LINEAR = 32
+
+# Writes a document into the caller's `String::Builder`, as `Builder`
+# writes one into a String: the same values, checks and escapes, and nothing
+# on the heap. `JSON.write(writer) { |json| ... }` hands one.
+@[OnTape]
+pub struct Writer
+  @out : String::Builder
+  @slots : Pointer(Int32)
+  @keys : Array(Int32)
+  @table : Array(UInt64)
+  @indent : String?
+  @ascii_only : Bool
+
+  def initialize(@out : String::Builder, @slots : Pointer(Int32),
+                 @indent : String?, @ascii_only : Bool)
+    @keys = Array(Int32).new(2 * TAPE_KEYS)
+    @table = Array(UInt64).new
+    @slots[0] = 0
+    @slots[1] = 0
+    @slots[2] = Builder::ROOT
+    @slots[2 + 3 * TAPE_STATES] = 0
+  end
+
+  # The id of the open object at *depth* in the hash table, 0 while its
+  # keys are few enough to compare one by one.
+  private def table_id(depth : Int32) : Int32
+    @slots[2 + 2 * TAPE_STATES + depth]
+  end
+
+  private def level : Int32
+    @slots[0]
+  end
+
+  private def state : Int32
+    @slots[2 + level]
+  end
+
+  private def set_state(s : Int32) : Nil
+    @slots[2 + level] = s
+  end
+
+  private def write_indent : Nil
+    if indent = @indent
+      @out.push(10_u8)
+      i = 0
+      while i < level
+        @out << indent
+        i = i + 1
+      end
+    end
+  end
+
+  private def before_value : Nil
+    st = state
+    if st == Builder::ROOT
+      set_state(Builder::ROOT_DONE)
+    elsif st == Builder::ARRAY_FIRST
+      set_state(Builder::ARRAY_NEXT)
+      write_indent
+    elsif st == Builder::ARRAY_NEXT
+      @out.push(44_u8)
+      write_indent
+    elsif st == Builder::OBJECT_VALUE
+      set_state(Builder::OBJECT_NEXT)
+    elsif st == Builder::ROOT_DONE
+      raise "a second value at the document root"
+    else
+      raise "a value where an object key is expected"
+    end
+  end
+
+  def null : Nil
+    before_value
+    @out << "null"
+  end
+
+  def bool(val : Bool) : Nil
+    before_value
+    @out << (val ? "true" : "false")
+  end
+
+  def number(val : Int32) : Nil
+    before_value
+    @out.append_int(val)
+  end
+
+  def number(val : Int64) : Nil
+    before_value
+    @out.append_int(val)
+  end
+
+  def number(val : UInt8) : Nil
+    before_value
+    @out.append_int(val.to_i64)
+  end
+
+  def number(val : UInt64) : Nil
+    before_value
+    if val > 9223372036854775807_u64
+      @out << val.to_s
+    else
+      @out.append_int(val.to_i64)
+    end
+  end
+
+  def number(val : Float64) : Nil
+    raise "NaN is not a JSON number" if val != val
+    raise "#{val} is not a JSON number" if val.abs > 1.7976931348623157e308
+    before_value
+    @out.append_float(val)
+  end
+
+  # Text written as it is: the caller's own JSON.
+  def raw(str : String) : Nil
+    before_value
+    @out << str
+  end
+
+  def raw(str : String) : Nil
+    before_value
+    @out << str
+  end
+
+  def string(val : String) : Nil
+    string(String.view(val))
+  end
+
+  def string(val : String) : Nil
+    before_value
+    escaped(val)
+  end
+
+  private def escaped(text : String) : Nil
+    JSON.each_escaped_byte(text, @ascii_only) { |b| @out.push(b) }
+  end
+
+  private def open(byte : UInt8, first : Int32) : Nil
+    before_value
+    @out.push(byte)
+    depth = level + 1
+    raise "nesting depth of #{depth} exceeds maximum depth #{MAX_NESTING}" if depth > MAX_NESTING
+    @slots[0] = depth
+    set_state(first)
+    @slots[2 + TAPE_STATES + depth] = @slots[1]
+    @slots[2 + 2 * TAPE_STATES + depth] = 0
+  end
+
+  def start_array : Nil
+    open(91_u8, Builder::ARRAY_FIRST)
+  end
+
+  def end_array : Nil
+    st = state
+    raise "end_array without start_array" unless st == Builder::ARRAY_FIRST || st == Builder::ARRAY_NEXT
+    @slots[0] = level - 1
+    write_indent if st == Builder::ARRAY_NEXT
+    @out.push(93_u8)
+  end
+
+  def array(& : -> Nil) : Nil
+    start_array
+    yield
+    end_array
+  end
+
+  def start_object : Nil
+    open(123_u8, Builder::OBJECT_FIRST)
+  end
+
+  def end_object : Nil
+    st = state
+    raise "end_object with a field's value still due" if st == Builder::OBJECT_VALUE
+    raise "end_object without start_object" unless st == Builder::OBJECT_FIRST || st == Builder::OBJECT_NEXT
+    @slots[1] = @slots[2 + TAPE_STATES + level]
+    @slots[0] = level - 1
+    write_indent if st == Builder::OBJECT_NEXT
+    @out.push(125_u8)
+  end
+
+  def object(& : -> Nil) : Nil
+    start_object
+    yield
+    end_object
+  end
+
+  # A key, refused when this object already holds its text, as `Builder`
+  # refuses it.
+  def field(name : String) : Nil
+    field(String.view(name))
+  end
+
+  # Checks the key just written for a repeat against the writer's text so
+  # far, a view of it read before anything more is written.
+  def field(name : String) : Nil
+    st = state
+    raise "a field outside an object" unless st == Builder::OBJECT_FIRST || st == Builder::OBJECT_NEXT
+    @out.push(44_u8) if st == Builder::OBJECT_NEXT
+    set_state(Builder::OBJECT_VALUE)
+    write_indent
+    from = @out.length
+    escaped(name)
+    length = @out.length - from
+    text = @out.finish
+    written = text[from, length]
+    keys = @keys
+    first = @slots[2 + TAPE_STATES + level]
+    count = @slots[1]
+    id = table_id(level)
+    if id == 0 && count - first < TAPE_LINEAR
+      i = first
+      while i < count
+        repeated(name, written) if keys[2 * i + 1] == length && text[keys[2 * i], length] == written
+        i = i + 1
+      end
+    else
+      if id == 0
+        id = @slots[2 + 3 * TAPE_STATES] + 1
+        @slots[2 + 3 * TAPE_STATES] = id
+        @slots[2 + 2 * TAPE_STATES + level] = id
+        i = first
+        while i < count
+          index(id, text, keys, i)
+          i = i + 1
+        end
+      end
+      table = @table
+      mask = table[0] - 1
+      slot = id.to_u64.unsafe_shl(32_u64) | hash(written)
+      at = (slot & mask).to_i32
+      while (got = table[2 + 2 * at]) != 0
+        if got == slot
+          k = table[3 + 2 * at].to_i32
+          repeated(name, written) if keys[2 * k + 1] == length && text[keys[2 * k], length] == written
+        end
+        at = (at + 1) & mask.to_i32
+      end
+    end
+    if 2 * count == keys.size
+      keys << from << length
+    else
+      keys[2 * count] = from
+      keys[2 * count + 1] = length
+    end
+    @slots[1] = count + 1
+    index(id, text, keys, count) if id != 0
+    @out.push(58_u8)
+    @out.push(32_u8) unless @indent.nil?
+  end
+
+  private def repeated(name : String, written : String) : Nil
+    quoted = String.build(name.bytesize + 2) { |writer| name.inspect(writer) }
+    if JSON.utf8?(name)
+      raise String.interpolate("the key ", quoted,
+        " is written twice in one object")
+    end
+    raise String.interpolate("the key ", quoted, " is written as ", written,
+      ", as an earlier key was")
+  end
+
+  # FNV-1a of a key's written text, 32 bits and never 0.
+  private def hash(text : String) : UInt64
+    h = 2166136261_u64
+    text.each_byte { |b| h = (h ^ b.to_u64) &* 16777619_u64 }
+    h = h & 0xFFFFFFFF_u64
+    h == 0 ? 1_u64 : h
+  end
+
+  # Key *k* of the object *id* into the table: (id, hash) to *k*, open
+  # addressing, doubled past half full.
+  private def index(id : Int32, text : String, keys : Array(Int32), k : Int32) : Nil
+    table = @table
+    if table.empty? || table[1] * 2 >= table[0]
+      room = table.empty? ? 64 : table[0].to_i32 * 2
+      previous = Array(UInt64).new(table.size)
+      table.each { |word| previous << word }
+      table.clear
+      table << room.to_u64 << 0_u64
+      (2 * room).times { table << 0_u64 }
+      unless previous.empty?
+        j = 0
+        while j < previous[0].to_i32
+          if previous[2 + 2 * j] != 0
+            put(table, previous[2 + 2 * j], previous[3 + 2 * j])
+          end
+          j += 1
+        end
+      end
+    end
+    put(table, id.to_u64.unsafe_shl(32_u64) |
+               hash(text[keys[2 * k], keys[2 * k + 1]]), k.to_u64)
+  end
+
+  private def put(table : Array(UInt64), slot : UInt64, value : UInt64) : Nil
+    mask = table[0] - 1
+    at = (slot & mask).to_i32
+    while table[2 + 2 * at] != 0
+      at = (at + 1) & mask.to_i32
+    end
+    table[2 + 2 * at] = slot
+    table[3 + 2 * at] = value
+    table[1] = table[1] + 1
+  end
+
+  def field(name : String, & : -> Nil) : Nil
+    field(name)
+    yield
+  end
+
+  def field(name : String, val : String) : Nil
+    field(name)
+    string(val)
+  end
+
+  def field(name : String, val : String) : Nil
+    field(name)
+    string(val)
+  end
+
+  def field(name : String, val : Int32) : Nil
+    field(name)
+    number(val)
+  end
+
+  def field(name : String, val : Int64) : Nil
+    field(name)
+    number(val)
+  end
+
+  def field(name : String, val : Float64) : Nil
+    field(name)
+    number(val)
+  end
+
+  def field(name : String, val : Bool) : Nil
+    field(name)
+    bool(val)
+  end
+
+  def field(name : String, val : Nil) : Nil
+    field(name)
+    null
+  end
+
+  # The key the value at *index* of *doc* has, as `field` writes a key: a
+  # copy from one document into another puts nothing on the tape but what
+  # it writes. A key with an escape is decoded already, so the check for a
+  # repeat sees the key and not its spelling.
+  def field(doc : Document, index : Int32) : Nil
+    field(doc.key(index))
+  end
+
+  # The value at *index* of *doc*, and all it holds, as the calls that
+  # would write it: an object's fields through `field(doc, index)`.
+  def value(doc : Document, index : Int32) : Nil
+    node = doc.tree[index]
+    case node.kind
+    when Document::Kind::Null
+      null
+    when Document::Kind::Bool
+      bool(node.payload != 0)
+    when Document::Kind::Int
+      number(node.payload)
+    when Document::Kind::Float
+      number(doc.float(index))
+    when Document::Kind::String
+      string(doc.string(index))
+    when Document::Kind::Array
+      start_array
+      doc.each(index) { |child| value(doc, child) }
+      end_array
+    else
+      start_object
+      doc.each(index) do |child|
+        field(doc, child)
+        value(doc, child)
+      end
+      end_object
+    end
+  end
+
+  # Whether no value has been written yet.
+  def empty? : Bool
+    level == 0 && state == Builder::ROOT
+  end
+
+  # Refuses a document left unfinished, as `Builder#to_s` does.
+  def finish : Nil
+    st = state
+    raise "build with an array still open" if st == Builder::ARRAY_FIRST || st == Builder::ARRAY_NEXT
+    raise "build with an object still open" if st == Builder::OBJECT_FIRST || st == Builder::OBJECT_NEXT || st == Builder::OBJECT_VALUE
+    raise "build wrote no value" if st == Builder::ROOT
+  end
+end
+
+# One value of a `Document`, in 24 bytes: its kind and which of its
+# texts held an escape, the span of its key, and its payload: an integer's
+# or a bool's value, a float's bits, or a string's span (start in the high
+# half, size in the low). A span is of the input, or of the decoded text
+# when its flag says the text held an escape. Spans, not `String`s, halve the
+# stream: a parse writes it whole, past the tape's warm megabyte.
+@[OnTape]
+pub struct Node
+  ESCAPED_TEXT = 256
+  ESCAPED_KEY  = 512
+  # An integer past Int64 that UInt64 holds: its kind is Float, its payload
+  # the UInt64's bits.
+  UINT = 1024
+
+  @flags : Int32
+  @key_at : Int32
+  @key_size : Int32
+  @payload : Int64
+
+  def initialize(@flags : Int32, @key_at : Int32, @key_size : Int32, @payload : Int64)
+  end
+
+  def kind : Document::Kind
+    Document::Kind.new(@flags & 255)
+  end
+
+  def flags : Int32
+    @flags
+  end
+
+  def key_at : Int32
+    @key_at
+  end
+
+  def key_size : Int32
+    @key_size
+  end
+
+  def payload : Int64
+    @payload
+  end
+end
+
+# A document read by `JSON.parse(bytes : String)`: every value in one
+# `RisTree` in document order, its strings spans of the input, all of it
+# the caller's `tape`'s. A value is named by its index; the root's is
+# 0. A string with an escape is decoded as it is read, into the document's
+# own text.
+@[OnTape]
+pub struct Document
+  enum Kind
+    Null
+    Bool
+    Int
+    Float
+    String
+    Array
+    Object
+  end
+
+  getter tree : RisTree::View(Node)
+  getter input : String
+  # The strings and keys that held an escape, decoded when read.
+  getter decoded : String
+
+  def initialize(@tree : RisTree::View(Node), @input : String,
+                 @decoded : String)
+  end
+
+  def to_json : String
+    builder = Builder.new
+    to_json(builder)
+    builder.to_s
+  end
+
+  def to_pretty_json(indent : String = "  ") : String
+    builder = Builder.new
+    builder.indent = indent
+    to_json(builder)
+    builder.to_s
+  end
+
+  def to_ascii_json : String
+    builder = Builder.new
+    builder.ascii_only = true
+    to_json(builder)
+    builder.to_s
+  end
+
+  # Walk preorder nodes with a bounded stack of open container indices.
+  def to_json(builder : Builder, root : Int32 = 0) : Nil
+    parents = Array(Int32).new(MAX_NESTING)
+    index = root
+    stop = @tree.stop(root)
+    while index < stop
+      if parent = parents.last?
+        builder.field(key(index)) if kind(parent) == Kind::Object
+      end
+      case kind(index)
+      when Kind::Null   then builder.null
+      when Kind::Bool   then builder.bool(bool(index))
+      when Kind::Int    then builder.number(int(index))
+      when Kind::Float  then builder.number(float(index))
+      when Kind::String then builder.string(string(index))
+      when Kind::Array
+        builder.start_array
+        parents << index
+      when Kind::Object
+        builder.start_object
+        parents << index
+      end
+      index += 1
+      while parent = parents.last?
+        break unless @tree.stop(parent) == index
+        parents.pop
+        if kind(parent) == Kind::Object
+          builder.end_object
+        else
+          builder.end_array
+        end
+      end
+    end
+  end
+
+  def root : Int32
+    0
+  end
+
+  def kind(index : Int32) : Kind
+    @tree[index].kind
+  end
+
+  def bool(index : Int32) : Bool
+    expect(index, Kind::Bool).payload != 0
+  end
+
+  def int(index : Int32) : Int64
+    expect(index, Kind::Int).payload
+  end
+
+  # A float, or an integer as one.
+  def float(index : Int32) : Float64
+    node = @tree[index]
+    return node.payload.to_f64 if node.kind == Kind::Int
+    return node.payload.unsafe_to_u64.to_f64 if (node.flags & Node::UINT) != 0
+    bits = expect(index, Kind::Float).payload
+    pointerof(bits).as(Pointer(Float64)).value
+  end
+
+  def null?(index : Int32) : Bool
+    @tree[index].kind == Kind::Null
+  end
+
+  # Whether the value at *index* is an integer past Int64 that UInt64 holds:
+  # a float to every other reader.
+  def uint?(index : Int32) : Bool
+    (@tree[index].flags & Node::UINT) != 0
+  end
+
+  def uint(index : Int32) : UInt64
+    @tree[index].payload.unsafe_to_u64
+  end
+
+  # Refuses a value of another kind.
+  def expect_kind(index : Int32, kind : Kind) : Nil
+    expect(index, kind)
+    nil
+  end
+
+  # The string at *index*, unchecked and making nothing: for a caller that
+  # stores it from a block, after `expect_kind`.
+  def view(index : Int32) : String
+    node = @tree[index]
+    at = (node.payload >> 32).to_i32
+    size = (node.payload & 0xFFFFFFFF).to_i32
+    (node.flags & Node::ESCAPED_TEXT) != 0 ? @decoded[at, size] : @input[at, size]
+  end
+
+  # The string at *index*, decoded: a view of the input, or of the document's
+  # decoded text if it held an escape. It lives as long as the document.
+  def string(index : Int32) : String
+    expect(index, Kind::String)
+    view(index)
+  end
+
+  # The key *index* has in its object, decoded as `string` is.
+  def key(index : Int32) : String
+    node = @tree[index]
+    (node.flags & Node::ESCAPED_KEY) != 0 ? @decoded[node.key_at, node.key_size] : @input[node.key_at, node.key_size]
+  end
+
+  # The count of an array's values or an object's fields.
+  def size(index : Int32) : Int32
+    count = 0
+    each(index) { count = count + 1 }
+    count
+  end
+
+  # Each value of the array or object at *index*, by index.
+  def each(index : Int32, & : Int32 -> _) : Nil
+    kind = @tree[index].kind
+    raise "#{kind} is not an array or an object" unless kind == Kind::Array || kind == Kind::Object
+    @tree.each_child(index) { |child| yield child }
+  end
+
+  # The *nth* value of the array at *index*, or -1.
+  def at(index : Int32, nth : Int32) : Int32
+    expect(index, Kind::Array)
+    found = -1
+    seen = 0
+    @tree.each_child(index) do |child|
+      found = child if seen == nth
+      seen = seen + 1
+    end
+    found
+  end
+
+  # The value of the field *name* of the object at *index*, or -1.
+  def at(index : Int32, name : String) : Int32
+    expect(index, Kind::Object)
+    found = -1
+    @tree.each_child(index) do |child|
+      if found < 0
+        found = child if key(child) == name
+      end
+    end
+    found
+  end
+
+  private def expect(index : Int32, kind : Kind) : Node
+    node = @tree[index]
+    raise "expected #{kind}, not #{node.kind}" unless node.kind == kind
+    node
+  end
+end
+
+# Reads a document onto the tape for `JSON.parse(bytes : String)`: the
+# same grammar, limits and sentences as `Parser`, through the same lexer in
+# its span mode, so that only the stream of values goes on the tape.
+@[OnTape]
+pub struct DocumentParser
+  @lexer : Lexer
+  @input : String
+  @tree : RisTree(Node)
+  @nesting : Int32
+  @error : String?
+  # Escaped strings and keys, decoded: never longer than the input.
+  @decoded : String::Builder
+
+  def initialize(@input : String)
+    decoded = String::Builder.new(@input.bytesize + 1)
+    @decoded = decoded
+    lexer = Lexer.new(true)
+    lexer.next_token(@input)
+    @lexer = lexer
+    @tree = RisTree(Node).new(@input.bytesize // 16 + 8)
+    @nesting = 0
+    @error = nil
+  end
+
+  def error : String?
+    @error
+  end
+
+  def document : Document
+    Document.new(@tree.view, @input, @decoded.finish)
+  end
+
+  private def token : Token
+    @lexer.token
+  end
+
+  private def fail(reason : String, line : Int32, col : Int32) : Nil
+    if @error.nil?
+      lexer_error = @lexer.error
+      said = lexer_error.nil? ? "#{reason} at line #{line}, column #{col}" : lexer_error
+      # Kept in the parser's own text: a def's text is freed when it ends.
+      from = @error_text.bytesize
+      @error_text << said
+      @error = @error_text.finish[from, said.bytesize]
+    end
+    nil
+  end
+
+  @error_text : String::Builder = String::Builder.new(128)
+
+  private def fail(reason : String) : Nil
+    fail(reason, token.line_number, token.column_number)
+  end
+
+  private def text(at : Int32, size : Int32) : String
+    @input[at, size]
+  end
+
+  def parse : Nil
+    return fail("empty JSON input", 1, 1) if token.kind == TokenKind::EOF
+    parse_values
+    return unless @error.nil?
+    fail("unexpected #{token_text} after JSON root value") unless token.kind == TokenKind::EOF
+  end
+
+  private def token_text : String
+    case token.kind
+    when TokenKind::BeginArray  then "'['"
+    when TokenKind::BeginObject then "'{'"
+    when TokenKind::EndArray    then "']'"
+    when TokenKind::EndObject   then "'}'"
+    when TokenKind::Colon       then "':'"
+    when TokenKind::Comma       then "','"
+    when TokenKind::True        then "'true'"
+    when TokenKind::False       then "'false'"
+    when TokenKind::Null        then "'null'"
+    when TokenKind::EOF         then "end of input"
+    when TokenKind::String      then "string"
+    when TokenKind::Int, TokenKind::Float
+      "number #{text(token.raw_start, token.raw_size)}"
+    else "value"
+    end
+  end
+
+  private def leaf(kind : Document::Kind, flags : Int32, key_at : Int32, key_size : Int32, payload : Int64) : Nil
+    @tree.leaf(Node.new(kind.value | flags, key_at, key_size, payload))
+    @lexer.next_token(@input)
+  end
+
+  # The document, read without recursion: a container opened goes on
+  # `@open`, its tree node, and `@counts`, an object's keys so far or -1
+  # for an array. A recursive reader took 3.5 KB of a plain build's stack
+  # a level, and a task (256 KB) died of a stack overflow at 128 levels.
+  private def parse_values : Nil
+    @open.clear
+    @counts.clear
+    flags = 0
+    key_at = 0
+    key_size = 0
+    while true
+      kind = token.kind
+      if kind == TokenKind::BeginArray || kind == TokenKind::BeginObject
+        return unless nest
+        array = kind == TokenKind::BeginArray
+        kind_value = array ? Document::Kind::Array.value : Document::Kind::Object.value
+        @open << @tree.open(Node.new(kind_value | flags, key_at, key_size, 0_i64))
+        @counts << (array ? -1 : 0)
+        @lexer.next_token(@input) # '[' or '{'
+        if token.kind == (array ? TokenKind::EndArray : TokenKind::EndObject)
+          @lexer.next_token(@input)
+          close_container
+        else
+          flags = 0
+          key_at = 0
+          key_size = 0
+          unless array
+            return unless object_key
+            flags = @key_flags
+            key_at = @key_at
+            key_size = @key_size
+          end
+          next
+        end
+      else
+        parse_scalar(flags, key_at, key_size)
+        return unless @error.nil?
+      end
+      # A value is complete: go on in the containers it closes.
+      while true
+        return if @open.empty?
+        array = @counts[@counts.size - 1] < 0
+        if token.kind == TokenKind::Comma
+          comma_line = token.line_number
+          comma_col = token.column_number
+          @lexer.next_token(@input)
+          if array
+            return fail("trailing comma in array", comma_line, comma_col) if token.kind == TokenKind::EndArray
+            flags = 0
+            key_at = 0
+            key_size = 0
+          else
+            return fail("trailing comma in object", comma_line, comma_col) if token.kind == TokenKind::EndObject
+            return unless object_key
+            flags = @key_flags
+            key_at = @key_at
+            key_size = @key_size
+          end
+          break
+        elsif token.kind == (array ? TokenKind::EndArray : TokenKind::EndObject)
+          @lexer.next_token(@input)
+          close_container
+        else
+          return fail(array ? "expected ',' or ']' in array" : "expected ',' or '}' in object")
+        end
+      end
+    end
+  end
+
+  # The containers being read, innermost last; refilled by each parse.
+  @open : Array(Int32) = Array(Int32).new(MAX_NESTING + 1)
+  @counts : Array(Int32) = Array(Int32).new(MAX_NESTING + 1)
+  # The key `object_key` read, for the value after it.
+  @key_flags : Int32 = 0
+  @key_at : Int32 = 0
+  @key_size : Int32 = 0
+
+  private def close_container : Nil
+    @tree.close(@open.pop)
+    @counts.pop
+    @nesting = @nesting - 1
+  end
+
+  # The key at the current token in the innermost object, refused if the
+  # object has it already, and the ':' after it; false when refused.
+  private def object_key : Bool
+    fail("expected string key in object") unless token.kind == TokenKind::String
+    return false unless @error.nil?
+    at = @open[@open.size - 1]
+    count = @counts[@counts.size - 1]
+    name_at = token.raw_start
+    name_size = token.raw_size
+    name_flags = 0
+    if token.escaped
+      name_flags = Node::ESCAPED_KEY
+      name_at = @decoded.bytesize
+      name_size = decode(token.raw_start, name_size)
+    end
+    # Past this many keys, the object's are looked up by a hash of their
+    # text in the parser's own table rather than compared one by one; a
+    # hash seen before is checked by comparing.
+    if count >= 32
+      h = key_hash(at, name_at, name_size, name_flags)
+      if @key_hashes.has_key?(h) && duplicate?(at, name_at, name_size, name_flags)
+        fail("duplicate key '#{key_s(name_at, name_size, name_flags)}'")
+        return false
+      end
+      @key_hashes[h] = true
+    else
+      if duplicate?(at, name_at, name_size, name_flags)
+        fail("duplicate key '#{key_s(name_at, name_size, name_flags)}'")
+        return false
+      end
+      if count == 31
+        child = at + 1
+        while child < @tree.size
+          node = @tree[child]
+          @key_hashes[key_hash(at, node.key_at, node.key_size, node.flags)] = true
+          child = @tree.stop(child)
+        end
+        @key_hashes[key_hash(at, name_at, name_size, name_flags)] = true
+      end
+    end
+    @counts[@counts.size - 1] = count + 1
+    @lexer.next_token(@input) # the key
+    fail("expected ':' after object key") unless token.kind == TokenKind::Colon
+    return false unless @error.nil?
+    @lexer.next_token(@input) # ':'
+    @key_flags = name_flags
+    @key_at = name_at
+    @key_size = name_size
+    true
+  end
+
+  # The scalar at the current token, in its object under the key at
+  # *key_at* (*flags* saying whether it holds an escape).
+  private def parse_scalar(flags : Int32, key_at : Int32, key_size : Int32) : Nil
+    case token.kind
+    when TokenKind::Null
+      leaf(Document::Kind::Null, flags, key_at, key_size, 0_i64)
+    when TokenKind::True
+      leaf(Document::Kind::Bool, flags, key_at, key_size, 1_i64)
+    when TokenKind::False
+      leaf(Document::Kind::Bool, flags, key_at, key_size, 0_i64)
+    when TokenKind::Int
+      leaf(Document::Kind::Int, flags, key_at, key_size, token.int_value)
+    when TokenKind::Float
+      real = token.float_value
+      big = token.raw_size > 0 ? JSON.big_integer?(text(token.raw_start, token.raw_size)) : nil
+      return leaf(Document::Kind::Float, flags | Node::UINT, key_at, key_size, big.unsafe_to_i64) if big
+      leaf(Document::Kind::Float, flags, key_at, key_size, pointerof(real).as(Pointer(Int64)).value)
+    when TokenKind::String
+      at = token.raw_start
+      size = token.raw_size
+      if token.escaped
+        flags = flags | Node::ESCAPED_TEXT
+        at = @decoded.bytesize
+        size = decode(token.raw_start, size)
+      end
+      leaf(Document::Kind::String, flags, key_at, key_size, (at.to_i64 << 32) | size.to_i64)
+    else
+      fail("unexpected #{token_text}")
+    end
+  end
+
+  # The escaped text at *at* onto the decoded text; its decoded size.
+  private def decode(at : Int32, size : Int32) : Int32
+    from = @decoded.bytesize
+    JSON.each_decoded_byte(@input[at, size]) { |byte| @decoded.push(byte) }
+    @decoded.bytesize - from
+  end
+
+  private def nest : Bool
+    @nesting = @nesting + 1
+    return true if @nesting <= MAX_NESTING
+    fail("nesting depth of #{@nesting} exceeds maximum depth #{MAX_NESTING}")
+    false
+  end
+
+  # The key at *at*, in the decoded text if it held an escape.
+  private def key_s(at : Int32, size : Int32, flags : Int32) : String
+    (flags & Node::ESCAPED_KEY) != 0 ? @decoded.finish[at, size] : text(at, size)
+  end
+
+  # The keys of large objects, by `key_hash`: plain numbers, so a round
+  # may add to it.
+  @key_hashes : Hash(UInt64, Bool) = {} of UInt64 => Bool
+
+  # FNV-1a of the decoded key at *key_at* in the object at *object*.
+  private def key_hash(object : Int32, key_at : Int32, key_size : Int32, flags : Int32) : UInt64
+    h = 14695981039346656037_u64 ^ object.to_u64
+    key_s(key_at, key_size, flags).each_byte do |byte|
+      h = (h ^ byte.to_u64) &* 1099511628211_u64
+    end
+    h
+  end
+
+  # Whether the object opened at *at* already has a field with this key.
+  private def duplicate?(at : Int32, key_at : Int32, key_size : Int32, flags : Int32) : Bool
+    child = at + 1
+    count = @tree.size
+    while child < count
+      node = @tree[child]
+      if ((flags | node.flags) & Node::ESCAPED_KEY) == 0
+        return true if node.key_size == key_size && @input[node.key_at, key_size] == @input[key_at, key_size]
+      elsif key_s(node.key_at, node.key_size, node.flags) == key_s(key_at, key_size, flags)
+        return true
+      end
+      child = @tree.stop(child)
+    end
+    false
+  end
+end
+
+pub struct JSON
+  # How `derive serializable` writes and reads one field, the other
+  # library's `JSON::Field`:
+  #
+  #     @[JSON::Field(key: "userName")]
+  #     getter user_name : String
+  #
+  # * `key:` the object key, where it is not the field's own name;
+  # * `ignore: true` neither written nor read, `ignore_serialize: true` not
+  #   written, `ignore_deserialize: true` not read - a field that is not
+  #   read keeps its default, or is nil, and needs one or the other;
+  # * `emit_null: false` a nil field left out of the object. A nil field is
+  #   written as `null` otherwise, where the other library leaves it out
+  #   unless asked;
+  # * `converter:` a type whose `self.to_json(value, json : Builder)` writes
+  #   the field and `self.from_json(value : Any)` reads it.
+  #
+  # An option it does not know, a key that is not a string, and two fields
+  # written under one key are refused when the type is compiled.
+  annotation Field
+  end
+
+  # The document as an `Any`; panics with the line and column of the first
+  # thing it refuses.
+  def self.parse(input : String) : Any
+    Any.new(JSON.document(input))
+  end
+
+  # The document in *bytes* read onto the caller's tape, its strings views
+  # into *bytes*; panics with the line and column of the first thing it
+  # refuses, as `parse(String)` does.
+  # One call: the parser is made in the caller's scope, which the
+  # document lives in.
+  def self.document(bytes : String) : Document
+    JSON.parsed(DocumentParser.new(bytes))
+  end
+
+  # *parser*'s document; panics with what it refuses.
+  def self.parsed(parser : DocumentParser) : Document
+    parser.parse
+    failure = parser.error
+    raise failure unless failure.nil?
+    parser.document
+  end
+
+  # The document in *bytes* on the tape, or `nil` when it is not one.
+  def self.document?(bytes : String) : Document?
+    JSON.parsed?(DocumentParser.new(bytes))
+  end
+
+  # *parser*'s document, or nil when it refuses the bytes.
+  def self.parsed?(parser : DocumentParser) : Document?
+    parser.parse
+    return nil unless parser.error.nil?
+    parser.document
+  end
+
+  # A document written into the caller's *writer*, after what it holds,
+  # through a `Writer` the block is handed: `build` makes a String,
+  # `write` adds to one. Per-level state is on this method's stack;
+  # key spans and hash bins grow on the caller's tape.
+  def self.write(writer : String::Builder, indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Writer -> Nil) : Nil
+    slots = uninitialized Int32[784]
+    text = case indent
+           when Int32
+             indent > 0 ? String.view(" ") * indent : nil
+           when String
+             String.view(indent)
+           else
+             indent
+           end
+    text = nil if text && text.empty?
+    json = Writer.new(writer, pointerof(slots).as(Pointer(Int32)), text, ascii_only)
+    yield json
+    json.finish
+  end
+
+  # The bytes of a string as the lexer found them, decoded: themselves
+  # when they hold no escape, else a new string on the tape.
+  def self.decoded(text : String, escaped : Bool) : String
+    return text unless escaped
+    String.build(text.bytesize) do |w|
+      each_decoded_byte(text) { |b| w.push(b) }
+    end
+  end
+
+  # Each byte of a string's text whose escapes the lexer has checked,
+  # decoded: `\uXXXX` (a surrogate pair into one code point) as UTF-8.
+  def self.each_decoded_byte(bytes : String, & : UInt8 -> Nil) : Nil
+    size = bytes.bytesize
+    i = 0
+    while i < size
+      b = bytes[i]
+      if b != 92_u8
+        yield b
+        i = i + 1
+        next
+      end
+      esc = bytes[i + 1]
+      i = i + 2
+      if esc == 117_u8
+        cp = hex4(bytes, i)
+        i = i + 4
+        if cp >= 0xD800 && cp <= 0xDBFF
+          cp = 0x10000 + ((cp - 0xD800) << 10) + (hex4(bytes, i + 2) - 0xDC00)
+          i = i + 6
+        end
+        if cp <= 0x7F
+          yield cp.to_u8
+        elsif cp <= 0x7FF
+          yield (0xC0 | (cp >> 6)).to_u8
+          yield (0x80 | (cp & 0x3F)).to_u8
+        elsif cp <= 0xFFFF
+          yield (0xE0 | (cp >> 12)).to_u8
+          yield (0x80 | ((cp >> 6) & 0x3F)).to_u8
+          yield (0x80 | (cp & 0x3F)).to_u8
+        else
+          yield (0xF0 | (cp >> 18)).to_u8
+          yield (0x80 | ((cp >> 12) & 0x3F)).to_u8
+          yield (0x80 | ((cp >> 6) & 0x3F)).to_u8
+          yield (0x80 | (cp & 0x3F)).to_u8
+        end
+      elsif esc == 98_u8
+        yield 8_u8
+      elsif esc == 102_u8
+        yield 12_u8
+      elsif esc == 110_u8
+        yield 10_u8
+      elsif esc == 114_u8
+        yield 13_u8
+      elsif esc == 116_u8
+        yield 9_u8
+      else
+        yield esc
+      end
+    end
+  end
+
+  # Whether *bytes* are well-formed UTF-8.
+  def self.utf8?(bytes : String) : Bool
+    size = bytes.bytesize
+    i = 0
+    while i < size
+      length = utf8_sequence_at(bytes, i)
+      return false if length < 0
+      i = i + length
+    end
+    true
+  end
+
+  private def self.hex4(text : String, at : Int32) : Int32
+    val = 0
+    i = 0
+    while i < 4
+      c = text[at + i]
+      d = c <= 57_u8 ? c.to_i - 48 : (c | 0x20_u8).to_i - 87
+      val = (val << 4) | d
+      i = i + 1
+    end
+    val
+  end
+
+  # Each byte of *bytes* written as a JSON string, quotes and all: the
+  # escapes, control bytes as `\u00XX`, and bytes that are not a code
+  # point as U+FFFD, one per ill-formed subpart, so what is written is
+  # UTF-8 the reader takes back (RFC 8259 §8.1: a String holds any bytes,
+  # a file name or a log line). Under *ascii_only* every code point past
+  # ASCII is a `\uXXXX`, a surrogate pair past the basic plane.
+  def self.each_escaped_byte(bytes : String, ascii_only : Bool, & : UInt8 -> Nil) : Nil
+    len = bytes.bytesize
+    yield 34_u8
+    i = 0
+    while i < len
+      b = bytes[i]
+      if b == 34_u8 || b == 92_u8
+        yield 92_u8
+        yield b
+        i = i + 1
+      elsif b >= 32_u8 && b < 127_u8
+        yield b
+        i = i + 1
+      elsif b == 8_u8 || b == 12_u8 || b == 10_u8 || b == 13_u8 || b == 9_u8
+        yield 92_u8
+        yield (b == 8_u8 ? 98_u8 : b == 12_u8 ? 102_u8 : b == 10_u8 ? 110_u8 : b == 13_u8 ? 114_u8 : 116_u8)
+        i = i + 1
+      elsif b < 128_u8
+        hex_u4(b.to_i) { |h| yield h }
+        i = i + 1
+      else
+        length = utf8_sequence_at(bytes, i)
+        if length < 0
+          if ascii_only
+            hex_u4(0xFFFD) { |h| yield h }
+          else
+            yield 0xEF_u8
+            yield 0xBF_u8
+            yield 0xBD_u8
+          end
+          i = i - length
+        elsif !ascii_only
+          while length > 0
+            yield bytes[i]
+            i = i + 1
+            length = length - 1
+          end
+        elsif length == 2
+          hex_u4(((b.to_i & 0x1F) << 6) | (bytes[i + 1].to_i & 0x3F)) { |h| yield h }
+          i = i + 2
+        elsif length == 3
+          hex_u4(((b.to_i & 0x0F) << 12) | ((bytes[i + 1].to_i & 0x3F) << 6) | (bytes[i + 2].to_i & 0x3F)) { |h| yield h }
+          i = i + 3
+        else
+          cp = ((b.to_i & 0x07) << 18) | ((bytes[i + 1].to_i & 0x3F) << 12) | ((bytes[i + 2].to_i & 0x3F) << 6) | (bytes[i + 3].to_i & 0x3F)
+          sub = cp - 0x10000
+          hex_u4(0xD800 + (sub >> 10)) { |h| yield h }
+          hex_u4(0xDC00 + (sub & 0x3FF)) { |h| yield h }
+          i = i + 4
+        end
+      end
+    end
+    yield 34_u8
+  end
+
+  private def self.hex_u4(val : Int32, & : UInt8 -> Nil) : Nil
+    hex = "0123456789abcdef"
+    yield 92_u8
+    yield 117_u8
+    yield hex[(val >> 12) & 0x0F]
+    yield hex[(val >> 8) & 0x0F]
+    yield hex[(val >> 4) & 0x0F]
+    yield hex[val & 0x0F]
+  end
+
+  # The document as an `Any`, or `nil` when it is not one.
+  def self.parse?(input : String) : Any?
+    JSON.parsed_any?(DocumentParser.new(input))
+  end
+
+  # *parser*'s document as an `Any`, or nil when it refuses the bytes.
+  def self.parsed_any?(parser : DocumentParser) : Any?
+    parser.parse
+    return nil unless parser.error.nil?
+    Any.new(parser.document)
+  end
+
+  # Text written through a `Builder` the block is handed. `indent` is a
+  # count of spaces or the string one level is indented by. A block that
+  # writes no value, or leaves a container open, is refused.
+  def self.build(indent : String | Int32 | Nil = nil, & : Builder -> Nil) : String
+    builder = Builder.new
+    if indent.is_a?(Int32)
+      builder.indent = indent.as(Int32)
+    elsif indent.is_a?(String)
+      builder.indent = indent.as(String)
+    end
+    yield builder
+    raise "build wrote no value" if builder.empty?
+    builder.to_s
+  end
+
+  # Any value `write_value` knows: `nil`, a `Bool`, a prelude integer, a
+  # `Float64`, a `String`, an `Any`, an enum, an `Array` or `Hash` of those,
+  # or a type that implements `ToJSON`; a union of them, written as the
+  # member it holds is.
+  def self.to_json(obj : T) : String forall T
+    build do |b|
+      write_or_null(obj, b)
+    end
+  end
+
+  # A value that may be nil, written as `null` or as what it holds. Handed
+  # to `write_value` whole, `Int32 | Nil` was matched against the `ToJSON`
+  # overload as one type and refused at compile time, so
+  # `JSON.to_json([1, nil] of Int32?)` and a `Hash(String, String?)` did not
+  # build; with the nil taken out here the rest dispatches as it would alone.
+  private def self.write_or_null(val, b : Builder) : Nil
+    if val.nil?
+      b.null
+    else
+      write_value(val, b)
+    end
+  end
+
+  def self.write_value(val : Nil, b : Builder) : Nil
+    b.null
+  end
+
+  def self.write_value(val : Bool, b : Builder) : Nil
+    b.bool(val)
+  end
+
+  def self.write_value(val : Int32, b : Builder) : Nil
+    b.number(val)
+  end
+
+  def self.write_value(val : Int64, b : Builder) : Nil
+    b.number(val)
+  end
+
+  def self.write_value(val : UInt8, b : Builder) : Nil
+    b.number(val)
+  end
+
+  def self.write_value(val : UInt64, b : Builder) : Nil
+    b.number(val)
+  end
+
+  def self.write_value(val : Float64, b : Builder) : Nil
+    b.number(val)
+  end
+
+  def self.write_value(val : String, b : Builder) : Nil
+    b.string(val)
+  end
+
+  def self.write_value(val : Any, b : Builder) : Nil
+    val.to_json(b)
+  end
+
+  def self.write_value(val : Array(T), b : Builder) : Nil forall T
+    b.array do
+      val.each { |e| write_or_null(e, b) }
+    end
+  end
+
+  # A String key is written as it is, and two of them are never one text.
+  def self.write_value(val : Hash(String, V), b : Builder) : Nil forall V
+    b.object do
+      val.each do |k, v|
+        b.field(k)
+        write_or_null(v, b)
+      end
+    end
+  end
+
+  # Any other key is written by its `to_s`, `nil` as `"null"`, the word a
+  # JSON null is, so two keys can be one text: `{nil => 1, "null" => 2}`
+  # was written `{"null":1,"null":2}`, which `JSON.parse` refuses
+  # ("duplicate key 'null' at line 1, column 11"). The builder refuses a
+  # text written twice, naming both Strings. Keys of a union or `Nil` are
+  # checked here first, to name the keys rather than their one text: each
+  # against the keys before it, its text made again, as a round's text
+  # cannot outlive the round (SPEC 1.1). Keys of one other type have
+  # distinct texts.
+  def self.write_value(val : Hash(K, V), b : Builder) : Nil forall K, V
+    b.object do
+      {% if K.union? || K == ::Nil %}
+        seen = 0
+      {% end %}
+      val.each do |k, v|
+        text = key_text(k)
+        {% if K.union? || K == ::Nil %}
+          before = 0
+          val.each_key do |earlier|
+            next if before >= seen
+            before += 1
+            raise "the keys #{earlier.inspect} and #{k.inspect} are both written as #{text.inspect}" if key_text(earlier) == text
+          end
+          seen += 1
+        {% end %}
+        b.field(text)
+        write_or_null(v, b)
+      end
+    end
+  end
+
+  private def self.key_text(key : Nil) : String
+    "null"
+  end
+
+  private def self.key_text(key : String) : String
+    key
+  end
+
+  private def self.key_text(key) : String
+    key.to_s
+  end
+
+  # A `ToJSON` value writes itself. An enum member is written as the other
+  # library writes one: its name underscored (`Color::DarkRed` is
+  # `"dark_red"`), and a `@[Flags]` enum as the array of its members'
+  # names; a value no member has is written as its number. Told apart here
+  # and not by an overload restricted to `Enum`, which a program built
+  # from this module's artifact read as a class and could not pass an enum
+  # to.
+  #
+  # A union is matched here whole, `T` the union itself, so
+  # `JSON.to_json(1.as(Int32 | String))` called `to_json` on an `Int32`
+  # and did not build (issue #135). A member with an overload of its own,
+  # an `Int32` or an `Array`, is sent there when the program runs, yet this
+  # is still compiled for the whole union, and reached for the rest: an
+  # enum, a `ToJSON` type. Each is written as it is alone, by
+  # `Object#__json_write` below.
+  def self.write_value(val : T, b : Builder) : Nil forall T
+    {% if T.union? %}
+      val.__json_write(b)
+    {% elsif T < ::Enum %}
+      write_enum(val, T, b)
+    {% else %}
+      val.to_json(b)
+    {% end %}
+  end
+
+  # The enum's own type as a free variable, which a bound cannot give: an
+  # `Enum` is a struct, and a bound is a trait (iyi SPEC II.7).
+  private def self.write_enum(val, type : T.class, b : Builder) : Nil forall T
+    {% if T.annotation(Flags) %}
+      b.array do
+        T.values.each { |member| b.string(underscore(member.to_s)) if val.includes?(member) }
+      end
+    {% else %}
+      if member = T.from_value?(val.value)
+        b.string(underscore(member.to_s))
+      else
+        b.number(val.value.to_i64)
+      end
+    {% end %}
+  end
+
+  # `DarkRed` as `dark_red`, and `HTTPCode` as `http_code`: a capital starts
+  # a word after a small letter or a digit, or before one.
+  private def self.underscore(name : String) : String
+    bytes = name
+    text = ""
+    index = 0
+    while index < name.bytesize
+      byte = bytes[index]
+      if byte >= 65_u8 && byte <= 90_u8
+        if index > 0
+          before = bytes[index - 1]
+          after_small = index + 1 < name.bytesize && bytes[index + 1] >= 97_u8 && bytes[index + 1] <= 122_u8
+          small_before = (before >= 97_u8 && before <= 122_u8) || (before >= 48_u8 && before <= 57_u8)
+          capital_before = before >= 65_u8 && before <= 90_u8
+          text << '_' if small_before || (capital_before && after_small)
+        end
+        text << (byte + 32_u8).unsafe_chr
+      else
+        text << byte.unsafe_chr
+      end
+      index = index + 1
+    end
+    text
+  end
+
+  # A member's name as it is matched: small letters, no underscores, so
+  # `"dark_red"`, `"DarkRed"` and `"DARK_RED"` are one name.
+  private def self.enum_key(name : String) : String
+    bytes = name
+    text = ""
+    index = 0
+    while index < name.bytesize
+      byte = bytes[index]
+      if byte >= 65_u8 && byte <= 90_u8
+        text << (byte + 32_u8).unsafe_chr
+      elsif byte != 95_u8
+        text << byte.unsafe_chr
+      end
+      index = index + 1
+    end
+    text
+  end
+
+  # A member by its name, or by its number; a `@[Flags]` enum from the
+  # array of its members' names. Anything else is refused, naming the
+  # members there are.
+  private def self.read_enum(doc : Document, at : Int32, type : T.class) : T forall T
+    {% if T.annotation(Flags) %}
+      found = T.from_value?(0) || raise "#{T} has no member for no flags"
+      doc.each(at) { |child| found = found | enum_member(doc.string(child), T) }
+      found
+    {% else %}
+      if doc.kind(at) == Document::Kind::Int
+        number = doc.int(at)
+        return T.from_value?(number) || raise "#{number} is no #{T} member's value (#{T.names.map { |name| underscore(name) }.join(", ")})"
+      end
+      enum_member(doc.string(at), T)
+    {% end %}
+  end
+
+  private def self.enum_member(text : String, type : T.class) : T forall T
+    wanted = enum_key(text)
+    T.values.each { |member| return member if enum_key(member.to_s) == wanted }
+    raise "#{text.inspect} is no #{T} member (#{T.names.map { |name| underscore(name) }.join(", ")})"
+  end
+
+  # The document read into `type`: `Nil`, `Bool`, `Int32`, `Int64`, `UInt8`,
+  # `UInt64`, `Float64`, `String`, `Any`, an enum, a type with `derive
+  # serializable`, a union of them as `read_union` reads one, or an `Array`
+  # or `Hash(String, V)` of those. An integer outside the type is refused,
+  # as is anything after the root value.
+  # One call: the document is made in the caller's scope, which the value
+  # and its strings live in. A type with `derive serializable` has its own
+  # `Type.from_json(text)`: use that one, as no def answers what its
+  # constructor made (SPEC 1.9).
+  def self.from_json(str : String, type : T.class) : T forall T
+    read_value(JSON.document(str), 0, type)
+  end
+
+  def self.read_value(doc : Document, at : Int32, type : Nil.class) : Nil
+    raise "expected Null, not #{doc.kind(at)}" unless doc.null?(at)
+    nil
+  end
+
+  def self.read_value(doc : Document, at : Int32, type : Bool.class) : Bool
+    doc.bool(at)
+  end
+
+  def self.read_value(doc : Document, at : Int32, type : Int32.class) : Int32
+    v = doc.int(at)
+    raise "integer #{v} out of Int32 range" if v < -2147483648_i64 || v > 2147483647_i64
+    v.to_i32
+  end
+
+  def self.read_value(doc : Document, at : Int32, type : Int64.class) : Int64
+    doc.int(at)
+  end
+
+  def self.read_value(doc : Document, at : Int32, type : UInt8.class) : UInt8
+    v = doc.int(at)
+    raise "integer #{v} out of UInt8 range" if v < 0_i64 || v > 255_i64
+    v.to_u8
+  end
+
+  # An integer past Int64 is a float that still holds its UInt64 value.
+  def self.read_value(doc : Document, at : Int32, type : UInt64.class) : UInt64
+    if doc.uint?(at)
+      return doc.uint(at)
+    end
+    v = doc.int(at)
+    raise "integer #{v} out of UInt64 range" if v < 0_i64
+    v.to_u64
+  end
+
+  # The UInt64 a number's text spells, if it is an integer literal.
+  def self.big_integer?(raw : String) : UInt64?
+    return nil if raw[0] == 45_u8
+    val = 0_u64
+    i = 0
+    while i < raw.bytesize
+      c = raw[i]
+      return nil unless c >= 48_u8 && c <= 57_u8
+      d = (c - 48_u8).to_u64
+      return nil if val > 1844674407370955161_u64 || (val == 1844674407370955161_u64 && d > 5_u64)
+      val = val * 10_u64 + d
+      i = i + 1
+    end
+    val
+  end
+
+  def self.read_value(doc : Document, at : Int32, type : Float64.class) : Float64
+    doc.float(at)
+  end
+
+  def self.read_value(doc : Document, at : Int32, type : String.class) : String
+    doc.string(at)
+  end
+
+  def self.read_value(doc : Document, at : Int32, type : Any.class) : Any
+    Any.new(doc, at)
+  end
+
+  # Elements are stored from a block, so what is read must make nothing:
+  # a String is the document's view, a scalar has no storage. A derived
+  # type's or a nested collection's element is refused (SPEC 1.9); walk
+  # the document with `doc.each` into arrays the caller declares.
+  def self.read_value(doc : Document, at : Int32, type : Array(T).class) : Array(T) forall T
+    {% if !T.union? && (T < ::Array || T < ::Hash) %}
+      {% raise "JSON cannot read " + T.stringify + " inside an Array: a round's collection is freed with the round (SPEC 1.9). Read JSON.parse(text) and walk it with as_a, or declare the outer arrays and copy_to(owner)" %}
+    {% end %}
+    doc.expect_kind(at, Document::Kind::Array)
+    ary = Array(T).new(doc.size(at))
+    {% if T == ::String %}
+      doc.each(at) do |child|
+        doc.expect_kind(child, Document::Kind::String)
+        ary << doc.view(child)
+      end
+    {% else %}
+      doc.each(at) { |child| ary << read_value(doc, child, T) }
+    {% end %}
+    ary
+  end
+
+  # A Hash is a class instance, made where it is declared: no def answers
+  # one it made (SPEC 1.9).
+  def self.read_value(doc : Document, at : Int32, type : Hash(String, V).class) : Hash(String, V) forall V
+    {% raise "JSON cannot answer a Hash: read JSON.parse(text).as_h, or declare h = Hash(String, V).new and call JSON.read_into(doc, at, h)" %}
+  end
+
+  # The object at *at* into *h*, which the caller declared.
+  def self.read_into(doc : Document, at : Int32, h : Hash(String, V)) : Nil forall V
+    doc.expect_kind(at, Document::Kind::Object)
+    {% if V == ::String %}
+      doc.each(at) do |child|
+        doc.expect_kind(child, Document::Kind::String)
+        h[doc.key(child)] = doc.view(child)
+      end
+    {% else %}
+      doc.each(at) { |child| h[doc.key(child)] = read_value(doc, child, V) }
+    {% end %}
+  end
+
+  # A type that reads itself: the `initialize(doc, at)` a `derive
+  # serializable` wrote. A type that admits nil reads `null` as the nil and
+  # anything else as the other type. A union's Array or Hash member is read
+  # here, by a tail call, so its strings stay views of the document; the
+  # rest of a union is `read_union`'s.
+  def self.read_value(doc : Document, at : Int32, type : T.class) : T forall T
+    {% if T.nilable? && T.union_types.reject { |m| m == ::Nil }.size == 1 %}
+      return nil if doc.null?(at)
+      read_value(doc, at, typeof(nil.as(T) || raise("")))
+    {% elsif T.union? %}
+      {% if T.nilable? %}
+        return nil if doc.null?(at)
+      {% end %}
+      {% if T.union_types.any? { |m| m < ::Array } %}
+        if doc.kind(at) == Document::Kind::Array
+          return read_value(doc, at, typeof(begin
+            member = uninitialized T
+            member.is_a?(::Array) ? member : raise("")
+          end))
+        end
+      {% end %}
+      {% if T.union_types.any? { |m| m < ::Hash } %}
+        if doc.kind(at) == Document::Kind::Object
+          return read_value(doc, at, typeof(begin
+            member = uninitialized T
+            member.is_a?(::Hash) ? member : raise("")
+          end))
+        end
+      {% end %}
+      {% if T.nilable? %}
+        read_union(doc, at, typeof(nil.as(T) || raise("")))
+      {% else %}
+        read_union(doc, at, T)
+      {% end %}
+    {% elsif T < ::Enum %}
+      read_enum(doc, at, T)
+    {% else %}
+      T.new(doc, at)
+    {% end %}
+  end
+
+  # A union read by the kind of value the reader is on, as the other
+  # library reads one: a boolean into `Bool`; an integer into the first of
+  # `Int64`, `UInt64`, `Int32`, `UInt8` that holds it, then `Float64`; a
+  # float into `UInt64` when its text is an integer that type holds (the
+  # reader hands one past Int64 over as a float), then `Float64`; a string
+  # into `String`; an array into the `Array` member and an object into the
+  # `Hash` member. What none of those takes is read by the one other
+  # member - an enum, an `Any`, a derived type - which refuses it in its
+  # own words when it is not its kind.
+  #
+  # The other library tries each member in turn and takes the first that
+  # reads without raising. There is no rescue to go back with here, so a
+  # union where that would choose - two other members, two arrays, two
+  # hashes - is refused when it is compiled instead of guessed at. Its nil
+  # was taken out by `read_value` first.
+  #
+  # A member is reached by narrowing the union, not by writing its name
+  # out: a name is looked up from here, where a type of a module this one
+  # does not import is refused (iyi SPEC R-1) and a program's private type
+  # is not found.
+  private def self.read_union(doc : Document, at : Int32, type : T.class) : T forall T
+    {% begin %}
+      {% members = T.union_types %}
+      {% has_bool = members.any? { |m| m == ::Bool } %}
+      {% has_i64 = members.any? { |m| m == ::Int64 } %}
+      {% has_u64 = members.any? { |m| m == ::UInt64 } %}
+      {% has_i32 = members.any? { |m| m == ::Int32 } %}
+      {% has_u8 = members.any? { |m| m == ::UInt8 } %}
+      {% has_f64 = members.any? { |m| m == ::Float64 } %}
+      {% has_string = members.any? { |m| m == ::String } %}
+      {% rest = members.reject { |m| m == ::Bool || m == ::Int64 || m == ::UInt64 || m == ::Int32 || m == ::UInt8 || m == ::Float64 || m == ::String } %}
+      {% arrays = rest.select { |m| m < ::Array } %}
+      {% hashes = rest.select { |m| m < ::Hash } %}
+      {% others = rest.reject { |m| m < ::Array || m < ::Hash } %}
+      {% clash = nil %}
+      {% if others.size > 1 %}
+        {% clash = others %}
+      {% elsif arrays.size > 1 %}
+        {% clash = arrays %}
+      {% elsif hashes.size > 1 %}
+        {% clash = hashes %}
+      {% end %}
+      {% if clash %}
+        {% raise "JSON cannot read #{T}: which of #{clash.join(" and ").id} a value is read into would be a guess, as there is no rescue to try one and go back. A union read from JSON has one Array, one Hash and one other member at most besides Bool, Int64, UInt64, Int32, UInt8, Float64 and String." %}
+      {% end %}
+      kind = doc.kind(at)
+      {% if has_bool %}
+        return doc.bool(at) if kind == Document::Kind::Bool
+      {% end %}
+      {% if has_i64 %}
+        return doc.int(at) if kind == Document::Kind::Int
+      {% elsif has_u64 || has_i32 || has_u8 %}
+        if kind == Document::Kind::Int
+          int = doc.int(at)
+          {% if has_u64 %}
+            return int.to_u64 if int >= 0_i64
+          {% end %}
+          {% if has_i32 %}
+            return int.to_i32 if int >= -2147483648_i64 && int <= 2147483647_i64
+          {% end %}
+          {% if has_u8 %}
+            return int.to_u8 if int >= 0_i64 && int <= 255_i64
+          {% end %}
+          {% if !has_f64 && others.empty? %}
+            raise "integer #{int} out of #{T} range"
+          {% end %}
+        end
+      {% end %}
+      {% if has_u64 %}
+        return doc.uint(at) if doc.uint?(at)
+      {% end %}
+      {% if has_f64 %}
+        return doc.float(at) if kind == Document::Kind::Int || kind == Document::Kind::Float
+      {% end %}
+      {% if has_string %}
+        return doc.string(at) if kind == Document::Kind::String
+      {% end %}
+      {% if others.size == 1 %}
+        read_value(doc, at, typeof(begin
+          member = uninitialized T
+          member.is_a?(::Bool | ::Int64 | ::UInt64 | ::Int32 | ::UInt8 | ::Float64 | ::String) || member.is_a?(::Array) || member.is_a?(::Hash) ? raise("") : member
+        end))
+      {% else %}
+        raise "expected #{T}, not #{kind}"
+      {% end %}
+    {% end %}
+  end
+end
+
+# A union's value written by the member it holds: called on a union, a
+# method runs as the member's own type, so `self` here is that member and
+# `JSON.write_value` picks its overload as it would for the member alone.
+# `JSON.write_value` hands a union here.
+#
+# The members are not told apart by name. `Union`'s `T` named in a macro
+# was tried first, and a name is looked up from where it is written: from
+# this module, `Std::Time::Time` was refused as not imported here
+# (iyi SPEC R-1), and a program's private type was an undefined constant.
+class ::Object
+  def __json_write(json : ::Std::Json::Builder) : Nil
+    ::Std::Json::JSON.write_value(self, json)
+  end
+end
+
+# A writer on the tape writes a JSON document after what it holds:
+# `w.json { |json| ... }` is `JSON.write(w) { |json| ... }`, with the
+# writer, and so the tape, first on the line.
+pub trait WritesJSON
+  abstract def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Writer -> Nil) : Nil
+end
+
+impl WritesJSON for String::Builder
+  def json(indent : String | Int32 | Nil = nil, ascii_only : Bool = false, & : Std::Json::Writer -> Nil) : Nil
+    Std::Json::JSON.write(self, indent, ascii_only) { |j| yield j }
+  end
+end
+
+spec 8.1  # A std module follows the standard its header names (an RFC, a file…
+  text = "{\"id\":1,\"name\":\"café\",\"tags\":[true,null]}"
+  value = JSON.parse(text)
+  value["id"].as_i == 1
+  value["name"].as_s == "café"
+  JSON.parse(value.to_json) == value
+  doc = JSON.document(text)
+  doc.size(doc.root) == 3
+  JSON.parse?("[bad").nil?
+  JSON.parse("1e3").as_f == 1000.0
+  JSON.parse("0.125").as_f == 0.125
+end

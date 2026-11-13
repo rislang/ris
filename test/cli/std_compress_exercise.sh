@@ -26,7 +26,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -44,7 +44,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 # What zlib writes, at every level and in every envelope, for iyi to read;
 # and a gzip header with every optional field set.
@@ -63,7 +63,7 @@ if [ -z "$PY" ]; then
   echo "no python3 on this machine: the zlib oracle cannot be written, so std/compress goes unmeasured"
   exit 0
 fi
-if ! "$PY" - "$WORK/fixtures" "$REPO/src/std/compress.iyi" <<'PY'
+if ! "$PY" - "$WORK/fixtures" "$REPO/src/std/compress.ri" <<'PY'
 import gzip, os, random, struct, sys, zlib
 out, source = sys.argv[1], sys.argv[2]
 
@@ -123,13 +123,13 @@ lrng = random.Random(20261017)
 records = [{"id": i, "name": "user%d" % i, "email": "user%d@example.com" % i, "score": lrng.randint(0, 999),
             "tags": lrng.sample(["alpha", "beta", "gamma", "delta", "epsilon", "zeta"], 2), "active": lrng.random() < 0.5}
            for i in range(4000)]
-tree = sorted(glob.glob(os.path.join(repo, "src/std/*.iyi"))) + sorted(glob.glob(os.path.join(repo, "src/compiler/**/*.cr"), recursive=True)) \
+tree = sorted(glob.glob(os.path.join(repo, "src/std/*.ri"))) + sorted(glob.glob(os.path.join(repo, "src/compiler/**/*.cr"), recursive=True)) \
     + sorted(glob.glob(os.path.join(repo, "*.md")))
 big = b"".join(open(p, "rb").read() for p in tree)
 big = (big * (10_000_000 // len(big) + 1))[:10_000_000]
 levels = {
     "l_text": read("iyi SPEC"),
-    "l_source": read("src/std/json.iyi") + read("src/std/http.iyi"),
+    "l_source": read("src/std/json.ri") + read("src/std/http.ri"),
     "l_json": json.dumps(records, indent=1).encode(),
     "l_random": bytes(lrng.getrandbits(8) for _ in range(200000)),
     "l_repeat": b"".join(b"%d: the same few words again and again\n" % (i % 50) for i in range(8000)),
@@ -157,7 +157,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_compress_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_compress_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -210,7 +210,7 @@ NG = "zlib-ng" in zlib.ZLIB_RUNTIME_VERSION
 for name in ("text", "zeros", "bytes", "random", "far", "source"):
     plain = open(os.path.join(d, name + ".bin"), "rb").read()
     for env, wbits in (("raw", -15), ("zlib", 15), ("gzip", 31)):
-        path = os.path.join(d, f"{name}.iyi.{env}")
+        path = os.path.join(d, f"{name}.ri.{env}")
         if not os.path.exists(path):
             print(f"  {name}.{env}: iyi wrote nothing"); bad += 1; continue
         stream = open(path, "rb").read()
@@ -220,7 +220,7 @@ for name in ("text", "zeros", "bytes", "random", "far", "source"):
             print(f"  {name}.{env}: zlib refused it: {e}"); bad += 1; continue
         if back != plain:
             print(f"  {name}.{env}: zlib read {len(back)} bytes, not the {len(plain)} written"); bad += 1; continue
-    raw = os.path.getsize(os.path.join(d, name + ".iyi.raw"))
+    raw = os.path.getsize(os.path.join(d, name + ".ri.raw"))
     ref = os.path.getsize(os.path.join(d, name + ".6.raw"))
     print(f"  {name}: {len(plain)} bytes, iyi {raw} against zlib level 6's {ref}")
     if raw > ref * 1.02 + 8 and not NG:
@@ -277,7 +277,7 @@ for name in ("l_text", "l_source", "l_json", "l_random", "l_repeat", "l_empty", 
         for env, wbits in (("raw", -15), ("zlib", 15), ("gzip", 31)):
             if env != "raw" and name == "l_big" and level != 6:
                 continue
-            path = os.path.join(d, f"{name}.{level}.iyi.{env}")
+            path = os.path.join(d, f"{name}.{level}.ri.{env}")
             if not os.path.exists(path):
                 print(f"  {name} at level {level}, {env}: iyi wrote nothing"); bad += 1; continue
             stream = open(path, "rb").read()
@@ -288,7 +288,7 @@ for name in ("l_text", "l_source", "l_json", "l_random", "l_repeat", "l_empty", 
                 print(f"  {name} at level {level}, {env}: refused: {e}"); bad += 1; continue
             if back != plain or module != plain:
                 print(f"  {name} at level {level}, {env}: read {len(back)} bytes, not the {len(plain)} written"); bad += 1
-        raw = os.path.getsize(os.path.join(d, f"{name}.{level}.iyi.raw"))
+        raw = os.path.getsize(os.path.join(d, f"{name}.{level}.ri.raw"))
         c = zlib.compressobj(level, zlib.DEFLATED, -15)
         t0 = time.perf_counter()
         ref = len(c.compress(plain) + c.flush())
@@ -368,8 +368,8 @@ echo "== what a stream refuses, by name"
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
   printf 'module main\n\nimport std/compress::{Deflate, Zlib, Gzip, Deflater, Inflater, Envelope}\n\n\ndef bytes(values : Array(Int32)) : String\n  String.new(values.size) do |dst|\n    i = 0\n    while i < values.size\n      dst[i] = values[i].to_u8\n      i = i + 1\n    end\n  end\nend\n\nputs (%s).bytesize\n' \
-    "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -453,7 +453,7 @@ echo "== the gigabyte paths, at 70 KB"
 # pinned sizes included.
 rm -rf "$WORK/small"
 mkdir -p "$WORK/small/std"
-if "$PY" - "$REPO/src/std/compress.iyi" "$WORK/small/std/compress.iyi" <<'PY'
+if "$PY" - "$REPO/src/std/compress.ri" "$WORK/small/std/compress.ri" <<'PY'
 import sys
 src = open(sys.argv[1]).read()
 for old, new in (("SEGMENT       = 1 << 30", "SEGMENT       = 70001"), ("REBASE        = 1 << 30", "REBASE        = 100000")):
@@ -463,7 +463,7 @@ for old, new in (("SEGMENT       = 1 << 30", "SEGMENT       = 70001"), ("REBASE 
 open(sys.argv[2], "w").write(src)
 PY
 then
-  if IYI_PATH="$WORK/small${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build --release -o "$WORK/small.bin" "$REPO/test/cli/std_compress_exercise.iyi" >"$WORK/small.log" 2>&1 \
+  if RIS_PATH="$WORK/small${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build --release -o "$WORK/small.bin" "$REPO/test/cli/std_compress_exercise.ri" >"$WORK/small.log" 2>&1 \
      && "$WORK/small.bin" >"$WORK/small.out" 2>&1 && grep -q "ALL CHECKS PASSED" "$WORK/small.out"; then
     echo "  segments of 70,001 bytes and a rebase past 100,000: every check passes, every size as pinned"
   else
@@ -483,8 +483,8 @@ echo "== the exercise's artifacts and other platforms"
 # is printed); and it typechecks for the four other platforms std is
 # held to.
 mkdir -p "$WORK/r1/mods"
-if (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_compress_exercise.iyi" \
-      && "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_compress_exercise.iyi") > "$WORK/r1/build.log" 2>&1 \
+if (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_compress_exercise.ri" \
+      && "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_compress_exercise.ri") > "$WORK/r1/build.log" 2>&1 \
    && "$WORK/r1/from-source" > "$WORK/r1/source.out" 2>&1 \
    && "$WORK/r1/from-artifact" > "$WORK/r1/artifact.out" 2>&1 \
    && cmp -s "$WORK/r1/source.out" "$WORK/r1/artifact.out" \
@@ -496,19 +496,19 @@ else
   status=1
 fi
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross-$target" "$REPO/test/cli/std_compress_exercise.iyi" > "$WORK/cross-$target.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" -o "$WORK/cross-$target" "$REPO/test/cli/std_compress_exercise.ri" > "$WORK/cross-$target.log" 2>&1; then
     echo "  FAIL: $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross-$target.log" | cut -c1-140)"
     status=1
   fi
 done
 echo "  typechecks for x86_64-linux-gnu, aarch64-darwin, x86_64-windows-msvc, aarch64-linux-gnu, x86_64-linux-musl"
-if "$IYI" doc "$REPO/src/std/compress.iyi" > "$WORK/doc.out" 2>&1 && grep -q "def self.compress(data : String, level : Int32 = 6)" "$WORK/doc.out"; then
+if "$RIS" doc "$REPO/src/std/compress.ri" > "$WORK/doc.out" 2>&1 && grep -q "def self.compress(data : String, level : Int32 = 6)" "$WORK/doc.out"; then
   echo "  iyi doc reads the module, levels and all"
 else
-  echo "  FAIL: iyi doc src/std/compress.iyi"
+  echo "  FAIL: iyi doc src/std/compress.ri"
   status=1
 fi
-if "$IYI" check format "$REPO/src/std/compress.iyi" "$REPO/test/cli/std_compress_exercise.iyi" > "$WORK/format.log" 2>&1; then
+if "$RIS" check format "$REPO/src/std/compress.ri" "$REPO/test/cli/std_compress_exercise.ri" > "$WORK/format.log" 2>&1; then
   echo "  the module and its exercise are formatted"
 else
   echo "  not formatted: $(grep -m1 produced "$WORK/format.log")"
@@ -529,7 +529,7 @@ mutate() { # mutate <label> <old> <new> [<phrase>] [small]
   if ! OLD="$old" NEW="$new" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/compress.iyi").read_text()
+src = Path("$REPO/src/std/compress.ri").read_text()
 old = os.environ["OLD"]
 if old not in src:
     raise SystemExit("patch site missing: " + old)
@@ -538,14 +538,14 @@ src = src.replace(old, os.environ["NEW"], 1)
 # constants the run above uses.
 if "$small":
     src = src.replace("SEGMENT       = 1 << 30", "SEGMENT       = 70001", 1).replace("REBASE        = 1 << 30", "REBASE        = 100000", 1)
-Path("$WORK/patched/std/compress.iyi").write_text(src)
+Path("$WORK/patched/std/compress.ri").write_text(src)
 PY
   then
     echo "  $label: the patch did not apply"
     status=1
   # Build first, then run: a patch that does not compile would also "fail",
   # and that proves nothing about whether the exercise catches the break.
-  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_compress_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_compress_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the broken copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1

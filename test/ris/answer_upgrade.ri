@@ -15,7 +15,7 @@ import std/acme::{AcmeHttp01}
 struct Ready
 end
 
-# A test PKI (test/cli/std_http_resume.iyi's): Ed25519, valid to 9999. The
+# A test PKI (test/cli/std_http_resume.ri's): Ed25519, valid to 9999. The
 # leaf's key guards nothing but this test.
 LEAF_PEM = "-----BEGIN CERTIFICATE-----\n" \
            "MIIBQzCB9qADAgECAgEDMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
@@ -121,7 +121,7 @@ def echo(port : Int32) : String
   socket = IyiSocket.connect("127.0.0.1", port).or_panic
   socket.read_timeout_ms = 5000
   socket.write("GET /echo HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\n" +
-    "Connection: Upgrade\r\n\r\nearly").or_panic
+               "Connection: Upgrade\r\n\r\nearly").or_panic
   got = ""
   until got.includes?("echo:early")
     piece = socket.read(1024).or_panic
@@ -145,8 +145,8 @@ def wss(port : Int32, config : TlsConfig) : String
     return problem.message
   end
   tls.write("GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n" +
-    "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
-    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+            "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
   got = ""
   until got.includes?("\r\n\r\n")
     piece = tls.read

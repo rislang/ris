@@ -142,7 +142,7 @@ module Iyi
             # iyi: a lowering can leave several expressions where one was
             # written: `#{half(x).or(-1)}` is a temporary and an `if` once
             # normalized, and that is the text a body travelling in a
-            # `.iyimod` is (IV.1g). An interpolation reads one expression, so
+            # `.rimod` is (IV.1g). An interpolation reads one expression, so
             # unwrapped the consumer stopped on "Unterminated string
             # interpolation" in a module that had compiled; parenthesized
             # it is one again.
@@ -806,7 +806,7 @@ module Iyi
     # iyi: a node printed where the parser reads an expression — an argument,
     # a literal's element, a condition, an assigned value — rather than a
     # statement. The text is source a later build parses again: a travelling
-    # body crosses an `.iyimod` as `Def#body.to_s` (iyi SPEC IV.1g), printed
+    # body crosses an `.rimod` as `Def#body.to_s` (iyi SPEC IV.1g), printed
     # after the normalizer has expanded it. `twice(parse(text).or_panic, t)`
     # crossed as `twice(__temp_6 = parse(text)` and an `if` on the next line,
     # because `.or_panic` expands to an assignment and an `if` held in one

@@ -1,10 +1,12 @@
 class Kept
   getter name : String
+
   def initialize
     name = "alice"
     @name = name
   end
 end
+
 # The object and its text share the caller's tape. Callee and loop
 # scratch may reset without invalidating the field.
 kept = Kept.new

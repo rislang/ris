@@ -19,7 +19,7 @@ case "$(uname -s)" in
   *) PSEP=':' ;;
 esac
 
-IYI="${IYI:-$REPO/bin/ris}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -48,7 +48,7 @@ status=0
 run_case() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/socket_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/socket_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     sed -n '1,12p' "$WORK/$name.build.log"
@@ -65,7 +65,7 @@ run_case() {
   fi
   # A fiber that panics after its group has joined prints and is not
   # propagated: the exit status alone does not see it.
-  if grep -q "iyi: panic" "$WORK/$name.out"; then
+  if grep -q "ris: panic" "$WORK/$name.out"; then
     echo "$label: a panic the program outlived"
     status=1
     return 1
@@ -116,26 +116,26 @@ elif ! grep -q "cannot connect to 127.0.0.1:" "$WORK/refused.out"; then
   status=1
 else
   printf '  refused connection: exits %s at "%s"\n' "$exit_code" \
-    "$(grep -m1 "cannot connect to 127.0.0.1:" "$WORK/refused.out" | sed 's/^iyi: panic: //')"
+    "$(grep -m1 "cannot connect to 127.0.0.1:" "$WORK/refused.out" | sed 's/^ris: panic: //')"
 fi
 
 echo "== a negative count is refused by name"
 # `recv(-1)` died of "arithmetic overflow" on a `to_u64`, a sentence about
 # neither the count nor the call.
-printf 'module main\n\nimport std/socket::{IyiSocket}\n\nl = IyiSocket.listen(0)\nc = IyiSocket.connect("127.0.0.1", l.local_port).or_panic\nputs l.accept.or_panic.recv(-1).inspect\n' > "$WORK/negative.iyi"
-if "$IYI" run "$WORK/negative.iyi" > "$WORK/negative.out" 2>&1; then
+printf 'module main\n\nimport std/socket::{IyiSocket}\n\nl = IyiSocket.listen(0)\nc = IyiSocket.connect("127.0.0.1", l.local_port).or_panic\nputs l.accept.or_panic.recv(-1).inspect\n' > "$WORK/negative.ri"
+if "$RIS" run "$WORK/negative.ri" > "$WORK/negative.out" 2>&1; then
   echo "  a negative count was taken"; status=1
 elif ! grep -q "negative count: -1" "$WORK/negative.out"; then
   echo "  a negative count was refused, but not by name:"; sed 's/^/    /' "$WORK/negative.out"; status=1
 else
-  echo "  recv(-1): exits 1 at \"$(grep -m1 'negative count' "$WORK/negative.out" | sed 's/^iyi: panic: //')\""
+  echo "  recv(-1): exits 1 at \"$(grep -m1 'negative count' "$WORK/negative.out" | sed 's/^ris: panic: //')\""
 fi
 
 echo "== two tasks borrowing one socket are refused"
 # On every platform: the readiness one of them is woken for is not the
 # other's. Windows posted both reads and let them take the bytes in turns,
 # so a program written there panicked everywhere else.
-cat > "$WORK/readers.iyi" <<'IYI'
+cat > "$WORK/readers.ri" <<'RIS'
 module main
 
 import std/socket::{IyiSocket}
@@ -149,8 +149,8 @@ group do |g|
   0
 end
 puts "two readers were let in"
-IYI
-if timeout -k 5 60 "$IYI" build --no-codegen "$WORK/readers.iyi" > "$WORK/readers.out" 2>&1; then
+RIS
+if timeout -k 5 60 "$RIS" build --no-codegen "$WORK/readers.ri" > "$WORK/readers.out" 2>&1; then
   echo "  two readers were let in"; status=1
 elif ! grep -q "the task owns it now" "$WORK/readers.out"; then
   echo "  two readers were refused, but not by name:"; sed 's/^/    /' "$WORK/readers.out"; status=1
@@ -165,18 +165,18 @@ prove_fails() {
   # inlines has to be built with `--release`.
   local label="$1" dir="$2" phrase="$3" script="$4" flag="${5:-}"
   # The library the program imports, not the prelude: `std/socket` is a
-  # module now, so the patched copy is `std/` beside an untouched `iyi/`
-  # and `IYI_PATH` finds this one first.
+  # module now, so the patched copy is `std/` beside an untouched `ris/`
+  # and `RIS_PATH` finds this one first.
   mkdir -p "$WORK/$dir/std"
   cp -R "$REPO/src/std/." "$WORK/$dir/std/"
-  awk "$script" "$REPO/src/std/socket.iyi" > "$WORK/$dir/std/socket.iyi"
-  if cmp -s "$REPO/src/std/socket.iyi" "$WORK/$dir/std/socket.iyi"; then
+  awk "$script" "$REPO/src/std/socket.ri" > "$WORK/$dir/std/socket.ri"
+  if cmp -s "$REPO/src/std/socket.ri" "$WORK/$dir/std/socket.ri"; then
     echo "  $label: the patch changed nothing"
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build $flag \
-       -o "$WORK/$dir/program" "$REPO/test/cli/socket_exercise.iyi" \
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build $flag \
+       -o "$WORK/$dir/program" "$REPO/test/cli/socket_exercise.ri" \
        >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched library did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
@@ -197,7 +197,7 @@ prove_fails() {
     return
   fi
   printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" \
-    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
 }
 
 # 1. Broken payload reception
@@ -272,12 +272,12 @@ case "$(uname -s)" in
     mkdir -p "$WORK/sigpipe/std"
     cp -R "$REPO/src/std/." "$WORK/sigpipe/std/"
     awk '{ sub(/len.to_i64, 0x4000_i64, 0_i64, 0_i64\)/, "len.to_i64, 0_i64, 0_i64, 0_i64)"); print }' \
-      "$REPO/src/std/socket.iyi" > "$WORK/sigpipe/std/socket.iyi"
-    if cmp -s "$REPO/src/std/socket.iyi" "$WORK/sigpipe/std/socket.iyi"; then
+      "$REPO/src/std/socket.ri" > "$WORK/sigpipe/std/socket.ri"
+    if cmp -s "$REPO/src/std/socket.ri" "$WORK/sigpipe/std/socket.ri"; then
       echo "  SIGPIPE on a gone peer: the patch changed nothing"
       status=1
-    elif ! IYI_PATH="$WORK/sigpipe${PSEP}$REPO/src" "$IYI" build -o "$WORK/sigpipe/program" \
-         "$REPO/test/cli/socket_exercise.iyi" >"$WORK/sigpipe/build.log" 2>&1; then
+    elif ! RIS_PATH="$WORK/sigpipe${PSEP}$REPO/src" "$RIS" build -o "$WORK/sigpipe/program" \
+         "$REPO/test/cli/socket_exercise.ri" >"$WORK/sigpipe/build.log" 2>&1; then
       echo "  SIGPIPE on a gone peer: the patched library did not build"
       status=1
     else
@@ -307,21 +307,21 @@ echo "  one waiter per fd: shared socket refused at compile time"
 #     showing it - a sleep writes its own deadline over the old one, and a
 #     fiber already woken is not queued twice - and on Linux this proof
 #     reported the exercise passing with the deadline left behind.
-mkdir -p "$WORK/stale/iyi"
-cp -R "$REPO/src/iyi/." "$WORK/stale/iyi/"
+mkdir -p "$WORK/stale/ris"
+cp -R "$REPO/src/ris/." "$WORK/stale/ris/"
 awk '{ sub(/return unless fiber\.io_timed$/, "return"); print }' \
-  "$REPO/src/iyi/concurrency.iyi" > "$WORK/stale/iyi/concurrency.iyi"
-if cmp -s "$REPO/src/iyi/concurrency.iyi" "$WORK/stale/iyi/concurrency.iyi"; then
+  "$REPO/src/ris/concurrency.ri" > "$WORK/stale/ris/concurrency.ri"
+if cmp -s "$REPO/src/ris/concurrency.ri" "$WORK/stale/ris/concurrency.ri"; then
   echo "  a deadline left behind: the patch changed nothing"
   status=1
-elif ! IYI_PATH="$WORK/stale${PSEP}$REPO/src" "$IYI" build -o "$WORK/stale/program" \
-     "$REPO/test/cli/socket_exercise.iyi" >"$WORK/stale/build.log" 2>&1; then
+elif ! RIS_PATH="$WORK/stale${PSEP}$REPO/src" "$RIS" build -o "$WORK/stale/program" \
+     "$REPO/test/cli/socket_exercise.ri" >"$WORK/stale/build.log" 2>&1; then
   echo "  a deadline left behind: the patched prelude did not build"
   status=1
 else
   timeout 60 "$WORK/stale/program" >"$WORK/stale/out" 2>&1
   code=$?
-  if [ "$code" -eq 0 ] && ! grep -q "iyi: panic" "$WORK/stale/out"; then
+  if [ "$code" -eq 0 ] && ! grep -q "ris: panic" "$WORK/stale/out"; then
     echo "  a deadline left behind: the exercise still passed, so it does not test this"
     status=1
   elif ! grep -q -E "timeout: (a read with no deadline|the read's old deadline)" "$WORK/stale/out"; then
@@ -329,7 +329,7 @@ else
     tail -2 "$WORK/stale/out" | sed 's/^/    /'
     status=1
   else
-    echo "  a deadline left behind: caught (exit $code: $(grep -m1 -E "timeout: (a read with no deadline|the read's old deadline)" "$WORK/stale/out" | sed 's/^iyi: panic: //'))"
+    echo "  a deadline left behind: caught (exit $code: $(grep -m1 -E "timeout: (a read with no deadline|the read's old deadline)" "$WORK/stale/out" | sed 's/^ris: panic: //'))"
   fi
 fi
 
@@ -395,8 +395,8 @@ echo "== what is not a port, and what is not an address"
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
   printf 'module main\n\nimport std/socket::{IyiSocket}\n\n\nputs (%s).to_s\n' \
-    "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -493,8 +493,8 @@ echo "== a closed socket says so"
 refuses_after_close() { # refuses_after_close <label> <name> <statements on a closed connection c and listener l>
   local label="$1" name="$2" body="$3"
   printf 'module main\n\nimport std/socket::{IyiSocket}\n\n\nl = IyiSocket.listen(0)\nc = IyiSocket.connect("127.0.0.1", l.local_port).or_panic\nc.close\nl.close\n%s\n' \
-    "$body" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$body" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1

@@ -23,14 +23,13 @@ Log.with_context(id: 0, request: "ok") do
 end
 last = memory.entries[1]
 raise "metadata precedence" unless last.data.any? { |f| f.key == "id" && f.value == "2" } &&
-  last.data.any? { |f| f.key == "base" && f.value == "a b" } &&
-  last.data.any? { |f| f.key == "request" && f.value == "ok" }
+                                   last.data.any? { |f| f.key == "base" && f.value == "a b" } &&
+                                   last.data.any? { |f| f.key == "request" && f.value == "ok" }
 parent = log.bind(parent: "p")
 child = Logger.new("direct", Severity::Info, memory, parent,
   Metadata.new("child", "c", nil))
 child.info("direct")
 last = memory.entries[2]
-raise "constructor metadata" unless
-  last.data.any? { |f| f.key == "parent" && f.value == "p" } &&
-  last.data.any? { |f| f.key == "child" && f.value == "c" }
+raise "constructor metadata" unless last.data.any? { |f| f.key == "parent" && f.value == "p" } &&
+                                    last.data.any? { |f| f.key == "child" && f.value == "c" }
 puts "logging: tape IO and retaining backend"

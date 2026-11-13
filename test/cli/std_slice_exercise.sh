@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Slice and Bytes, exercised and driven. Runs the slice exercise plain and
 # optimised, checks every section reported, and proves the checks can fail
-# by patching copies of the slice library via IYI_PATH and executing
+# by patching copies of the slice library via RIS_PATH and executing
 # dedicated boundary-failure probes.
 #
 #     bash test/cli/std_slice_exercise.sh
@@ -15,9 +15,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -44,23 +44,23 @@ esac
 status=0
 
 # Ensure include directory has std modules resolved. One home, `src/std`: the
-# fallback to `samples/iyi/std` that used to sit here was a transition shim,
+# fallback to `samples/ris/std` that used to sit here was a transition shim,
 # and that directory no longer exists.
 SETUP_INCLUDE() {
   local target_dir="$1"
   mkdir -p "$target_dir/std"
-  ln -sf "$REPO/src/std/enumerable.iyi" "$target_dir/std/enumerable.iyi"
-  ln -sf "$REPO/src/std/traits.iyi" "$target_dir/std/traits.iyi"
+  ln -sf "$REPO/src/std/enumerable.ri" "$target_dir/std/enumerable.ri"
+  ln -sf "$REPO/src/std/traits.ri" "$target_dir/std/traits.ri"
 }
 
 DEFAULT_INCLUDE="$WORK/default_include"
 SETUP_INCLUDE "$DEFAULT_INCLUDE"
-ln -sf "$REPO/src/std/slice.iyi" "$DEFAULT_INCLUDE/std/slice.iyi"
+ln -sf "$REPO/src/std/slice.ri" "$DEFAULT_INCLUDE/std/slice.ri"
 
 run_case() {
   local label="$1" name="$2"
   shift 2
-  if ! IYI_PATH="$DEFAULT_INCLUDE${PSEP}$REPO/src" "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_slice_exercise.iyi" \
+  if ! RIS_PATH="$DEFAULT_INCLUDE${PSEP}$REPO/src" "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_slice_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     sed -n '1,12p' "$WORK/$name.build.log"
@@ -108,7 +108,7 @@ echo "== dedicated boundary failure probes (panics on contract violations)"
 
 prove_panic() {
   local label="$1" code="$2" expected_phrase="$3"
-  local probe_file="$WORK/probe_${label}.iyi"
+  local probe_file="$WORK/probe_${label}.ri"
   local bin_file="$WORK/probe_${label}"
 
   cat <<EOF > "$probe_file"
@@ -125,7 +125,7 @@ end
 main
 EOF
 
-  if ! IYI_PATH="$DEFAULT_INCLUDE${PSEP}$REPO/src" "$IYI" build -o "$bin_file" "$probe_file" > "$WORK/${label}.build.log" 2>&1; then
+  if ! RIS_PATH="$DEFAULT_INCLUDE${PSEP}$REPO/src" "$RIS" build -o "$bin_file" "$probe_file" > "$WORK/${label}.build.log" 2>&1; then
     echo "  probe $label: build failed unexpectedly"
     sed -n '1,12p' "$WORK/${label}.build.log"
     status=1
@@ -183,10 +183,10 @@ prove_fails() {
   local label="$1" dir="$2" bad_pattern="$3" sed_script="$4"
   local patch_dir="$WORK/$dir"
   SETUP_INCLUDE "$patch_dir"
-  sed -e "$sed_script" "$REPO/src/std/slice.iyi" > "$patch_dir/std/slice.iyi"
+  sed -e "$sed_script" "$REPO/src/std/slice.ri" > "$patch_dir/std/slice.ri"
 
-  if ! IYI_PATH="$patch_dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$patch_dir/program" "$REPO/test/cli/std_slice_exercise.iyi" \
+  if ! RIS_PATH="$patch_dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$patch_dir/program" "$REPO/test/cli/std_slice_exercise.ri" \
        >"$patch_dir/build.log" 2>&1; then
     echo "  $label: the patched slice library did not build"
     sed -n '1,12p' "$patch_dir/build.log"

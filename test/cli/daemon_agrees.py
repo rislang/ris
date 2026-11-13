@@ -23,7 +23,7 @@ So: three programs, each built both ways and *run*, with the two outputs
 compared byte for byte.
 
   * a sample with imports, which is the ordinary shape;
-  * a workspace whose dependency is only a `.iyimod` and whose source is
+  * a workspace whose dependency is only a `.rimod` and whose source is
     gone, which is what a library ships as (III.7);
   * the mixed shape a project has: its own module source, its dependency an
     artifact;
@@ -42,7 +42,7 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-IYI = os.path.join(ROOT, "bin", "iyi")
+RIS = os.path.join(ROOT, "bin", "iyi")
 
 BASE = """module app/base
 
@@ -83,23 +83,23 @@ def artifact_workspace(where, keep_mid_source, switches=()):
     *keep_mid_source* there is a source module in between, which is the
     shape a project has."""
     os.makedirs(where, exist_ok=True)
-    write(where, os.path.join("app", "base.iyi"), BASE)
+    write(where, os.path.join("app", "base.ri"), BASE)
     if keep_mid_source:
-        write(where, os.path.join("app", "mid.iyi"), MID)
-        entry = write(where, "main.iyi",
+        write(where, os.path.join("app", "mid.ri"), MID)
+        entry = write(where, "main.ri",
                       "module main\n\nimport app/mid::{doubled}\n\n"
                       "puts doubled\n")
     else:
-        entry = write(where, "main.iyi",
+        entry = write(where, "main.ri",
                       "module main\n\nimport app/base::{value}\n\n"
                       "puts value\n")
-    env = dict(os.environ, IYI_PATH=os.path.join(ROOT, "src") + os.pathsep + where)
-    emit = subprocess.run([IYI, "build"] + list(switches) +
-                          ["--emit-iyimod", "mods", "-o", "seed", entry],
+    env = dict(os.environ, RIS_PATH=os.path.join(ROOT, "src") + os.pathsep + where)
+    emit = subprocess.run([RIS, "build"] + list(switches) +
+                          ["--emit-rimod", "mods", "-o", "seed", entry],
                           cwd=where, env=env, capture_output=True, text=True)
     if emit.returncode != 0:
         return None, None, (emit.stdout + emit.stderr).splitlines()[:1]
-    os.remove(os.path.join(where, "app", "base.iyi"))
+    os.remove(os.path.join(where, "app", "base.ri"))
     return entry, env, None
 
 
@@ -120,7 +120,7 @@ def answer(argv, cwd, env, out):
 
 def compare(label, entry, cwd, env, socket, work, switches=()):
     tag = label.replace(" ", "-")
-    plain, failure = answer([IYI, "build"] + list(switches) + [entry], cwd, env,
+    plain, failure = answer([RIS, "build"] + list(switches) + [entry], cwd, env,
                             os.path.join(work, "plain-" + tag))
     if plain is None:
         say(f"{label}: a plain build answers", False, failure)
@@ -129,7 +129,7 @@ def compare(label, entry, cwd, env, socket, work, switches=()):
     # an adopted program is the one a switch can go missing from.
     for round in (1, 2):
         served, failure = answer(
-            [IYI, "daemon", "build", "--socket", socket] + list(switches) + [entry],
+            [RIS, "daemon", "build", "--socket", socket] + list(switches) + [entry],
             cwd, env, os.path.join(work, f"served-{round}-{tag}"))
         if served is None:
             say(f"{label}: the daemon builds it (request {round})", False, failure)
@@ -140,10 +140,10 @@ def compare(label, entry, cwd, env, socket, work, switches=()):
 
 def package_workspace(where):
     """A workspace whose dependency is a package: a bare mirror, a cache, a
-    requirement in `iyi.mod` and a sum beside it.
+    requirement in `ris.mod` and a sum beside it.
 
     The daemon forks a child from a program this build did not configure, and
-    where a package's module comes from is decided by `iyi.mod`, `iyi.sum`,
+    where a package's module comes from is decided by `ris.mod`, `ris.sum`,
     the cache and the project root — `iyi_project_root` and `iyi_mod_table`
     are on `APPLIED_ON_ADOPT` for exactly that reason. This is the shape that
     reads them.
@@ -153,17 +153,17 @@ def package_workspace(where):
     lib = os.path.join(where, "work", "liba")
     os.makedirs(lib, exist_ok=True)
     env = dict(os.environ,
-               IYI_CACHE_DIR=os.path.join(where, "cache"),
-               IYI_MOD_MIRROR=os.path.join(where, "mirror"))
+               RIS_CACHE_DIR=os.path.join(where, "cache"),
+               RIS_MOD_MIRROR=os.path.join(where, "mirror"))
     def git(*args):
         return subprocess.run(["git", *args], capture_output=True, text=True)
     if git("init", "-q", lib).returncode != 0:
         return None, ["git is not here to make a package with"]
     git("-C", lib, "config", "user.email", "t@t")
     git("-C", lib, "config", "user.name", "t")
-    with open(os.path.join(lib, "iyi.mod"), "w") as f:
+    with open(os.path.join(lib, "ris.mod"), "w") as f:
         f.write("module example.test/user/liba\n")
-    with open(os.path.join(lib, "liba.iyi"), "w") as f:
+    with open(os.path.join(lib, "liba.ri"), "w") as f:
         f.write('module liba\n\npub def greeting : String\n'
                 '  "hello from liba"\nend\n')
     for args in (("-C", lib, "add", "-A"), ("-C", lib, "commit", "-qm", "one"),
@@ -177,10 +177,10 @@ def package_workspace(where):
 
     app = os.path.join(where, "app")
     os.makedirs(app, exist_ok=True)
-    with open(os.path.join(app, "iyi.mod"), "w") as f:
+    with open(os.path.join(app, "ris.mod"), "w") as f:
         f.write("module example.test/user/app\n"
                 "require example.test/user/liba v1.0.0\n")
-    entry = os.path.join(app, "main.iyi")
+    entry = os.path.join(app, "main.ri")
     with open(entry, "w") as f:
         f.write("import example.test/user/liba\n"
                 "import example.test/user/liba::{greeting}\n\nputs greeting\n")
@@ -190,7 +190,7 @@ def package_workspace(where):
 def main():
     work = tempfile.mkdtemp(prefix="iyi-daemon-agrees")
     socket = os.path.join(work, "daemon.sock")
-    daemon = subprocess.Popen([IYI, "daemon", "start", "--socket", socket],
+    daemon = subprocess.Popen([RIS, "daemon", "start", "--socket", socket],
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         # The daemon prints its readiness on stderr; waiting for the socket
@@ -208,8 +208,8 @@ def main():
 
         # The ordinary shape, from the corpus every other gate uses.
         samples = os.path.join(ROOT, "samples", "iyi")
-        compare("a sample with imports", os.path.join(samples, "modules.iyi"),
-                samples, dict(os.environ, IYI_PATH=os.path.join(ROOT, "src")),
+        compare("a sample with imports", os.path.join(samples, "modules.ri"),
+                samples, dict(os.environ, RIS_PATH=os.path.join(ROOT, "src")),
                 socket, work)
 
         for label, mid, switches in (
@@ -223,7 +223,7 @@ def main():
             compare(label, entry, where, env, socket, work, switches)
 
         # And a dependency that is a package rather than a file beside the
-        # entry: where its module comes from is `iyi.mod`, `iyi.sum`, the
+        # entry: where its module comes from is `ris.mod`, `ris.sum`, the
         # cache and the project root, and the child is forked from a program
         # that set none of them for itself.
         where = os.path.join(work, "a-package-dependency")
@@ -235,38 +235,38 @@ def main():
                     env, socket, work)
 
         # And the one thing a daemon cannot take from a request: the library.
-        # The prelude it holds came from its own `IYI_PATH`, so a build that
+        # The prelude it holds came from its own `RIS_PATH`, so a build that
         # asks for another one has to be refused rather than served from the
         # wrong library — the environment travels, and this is the variable
         # that cannot.
         # A second library, named by two files and nothing else. The
         # refusal is decided before anything is compiled — it is a
-        # comparison of which prelude an `IYI_PATH` finds — so the library
+        # comparison of which prelude an `RIS_PATH` finds — so the library
         # only has to *be* somewhere else. Copying this tree's `src` would
         # buy a real compile and cost two cold prelude builds, which is
         # minutes in a job that has thirty-five of them.
         elsewhere = os.path.join(work, "other-library")
         other_library = os.path.join(elsewhere, "src")
         os.makedirs(os.path.join(other_library, "iyi"), exist_ok=True)
-        for name in (os.path.join("iyi", "prelude.iyi"), "prelude.cr"):
+        for name in (os.path.join("iyi", "prelude.ri"), "prelude.cr"):
             with open(os.path.join(other_library, name), "w") as f:
                 f.write("# not this tree's prelude\n")
-        entry = os.path.join(elsewhere, "x.iyi")
+        entry = os.path.join(elsewhere, "x.ri")
         with open(entry, "w") as f:
             f.write("puts 1\n")
         proc = subprocess.run(
-            [IYI, "daemon", "build", "--socket", socket, "-o",
+            [RIS, "daemon", "build", "--socket", socket, "-o",
              os.path.join(work, "no-library-out"), entry],
-            cwd=elsewhere, env=dict(os.environ, IYI_PATH=other_library),
+            cwd=elsewhere, env=dict(os.environ, RIS_PATH=other_library),
             capture_output=True, text=True, timeout=600)
         spoken = proc.stdout + proc.stderr
         say("a build asking for another library is refused",
             proc.returncode != 0 and "analysed a different library" in spoken
-            and "IYI_PATH" in spoken,
+            and "RIS_PATH" in spoken,
             spoken.strip().splitlines()[:1])
 
         # And the same refusal reaching a build that never asked for a
-        # daemon: `IYI_DAEMON_SOCKET` is an optimisation somebody set once,
+        # daemon: `RIS_DAEMON_SOCKET` is an optimisation somebody set once,
         # so a daemon that cannot serve this build is the same as no daemon
         # — the reason is printed and the build goes on without it. What
         # proves "goes on" here is the compiler's own answer about that
@@ -274,9 +274,9 @@ def main():
         # did not exit on the refusal.
         out = os.path.join(work, "fallback-out")
         proc = subprocess.run(
-            [IYI, "build", "-o", out, entry],
+            [RIS, "build", "-o", out, entry],
             cwd=elsewhere,
-            env=dict(os.environ, IYI_PATH=other_library, IYI_DAEMON_SOCKET=socket),
+            env=dict(os.environ, RIS_PATH=other_library, RIS_DAEMON_SOCKET=socket),
             capture_output=True, text=True, timeout=600)
         spoken = proc.stdout + proc.stderr
         say("a build that only found a socket goes on without it",
@@ -285,7 +285,7 @@ def main():
 
         # And a served build that is not sent looking for a daemon. The
         # environment travels whole, and a client that got here by
-        # `IYI_DAEMON_SOCKET` sends that variable along with it: the forked
+        # `RIS_DAEMON_SOCKET` sends that variable along with it: the forked
         # child read it, connected to this same server, and was served by a
         # fork that read it again. No build in that recursion ever finishes,
         # so it ended as the machine out of memory — and as CI spending a
@@ -295,15 +295,15 @@ def main():
         # child's environment without paying for the recursion it is about:
         # what the child saw is what the built program prints, and a child
         # that still saw it would have said "no daemon at" on the way past.
-        probe = os.path.join(work, "daemon-env-probe.iyi")
+        probe = os.path.join(work, "daemon-env-probe.ri")
         with open(probe, "w") as f:
-            f.write('puts {{ env("IYI_DAEMON_SOCKET") || "none" }}\n')
+            f.write('puts {{ env("RIS_DAEMON_SOCKET") || "none" }}\n')
         out = os.path.join(work, "probe-out")
         absent = os.path.join(work, "not-a-socket.sock")
         proc = subprocess.run(
-            [IYI, "daemon", "build", "--socket", socket, "-o", out, probe],
+            [RIS, "daemon", "build", "--socket", socket, "-o", out, probe],
             cwd=work,
-            env=dict(os.environ, IYI_DAEMON_SOCKET=absent),
+            env=dict(os.environ, RIS_DAEMON_SOCKET=absent),
             capture_output=True, text=True, timeout=600)
         spoken = proc.stdout + proc.stderr
         saw = (subprocess.run([out], capture_output=True, text=True).stdout.strip()

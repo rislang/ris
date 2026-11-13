@@ -7,9 +7,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -45,12 +45,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_math_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_math_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -540,9 +540,9 @@ if [ -n "$FMA" ] && [ -n "$PY" ]; then
   echo
   echo "== fma's software arm, the processor's instruction refused"
   rm -rf "$WORK/software"
-  mkdir -p "$WORK/software/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/software/iyi/"
-  "$PY" - "$REPO/src/iyi/float.iyi" "$WORK/software/iyi/float.iyi" <<'PY'
+  mkdir -p "$WORK/software/ris"
+  cp -R "$REPO/src/ris/." "$WORK/software/ris/"
+  "$PY" - "$REPO/src/ris/float.ri" "$WORK/software/ris/float.ri" <<'PY'
 import sys
 src = open(sys.argv[1]).read()
 old = "      fuses == 1\n"
@@ -553,8 +553,8 @@ PY
   if [ $? -ne 0 ]; then
     echo "  software: the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/software${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build --release -o "$WORK/software/program" \
-         "$REPO/test/cli/std_math_exercise.iyi" > "$WORK/software/build" 2>&1 &&
+  elif RIS_PATH="$WORK/software${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build --release -o "$WORK/software/program" \
+         "$REPO/test/cli/std_math_exercise.ri" > "$WORK/software/build" 2>&1 &&
        "$WORK/software/program" > "$WORK/software/out" 2>&1 &&
        grep -q "ALL CHECKS PASSED" "$WORK/software/out"; then
     grep -A1 "== fma against" "$WORK/software/out" | sed -n '2p'
@@ -567,20 +567,20 @@ fi
 
 echo
 echo "== proving the checks can fail when the module is broken"
-mutate() { # mutate <label> <old> <new> [<old2> <new2>]: math.iyi's, then the prelude's float.iyi's
+mutate() { # mutate <label> <old> <new> [<old2> <new2>]: math.ri's, then the prelude's float.ri's
   local label="$1" old="$2" new="$3" old2="${4:-}" new2="${5:-}"
   if [ -z "$PY" ]; then
     echo "  $label: skipped, no working python3 to make the broken copy with"
     return 0
   fi
   rm -rf "$WORK/patched"
-  mkdir -p "$WORK/patched/std" "$WORK/patched/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/patched/iyi/"
+  mkdir -p "$WORK/patched/std" "$WORK/patched/ris"
+  cp -R "$REPO/src/ris/." "$WORK/patched/ris/"
   OLD="$old" NEW="$new" OLD2="$old2" NEW2="$new2" "$PY" - <<PY
 import os
 from pathlib import Path
-for name, o, n in (("std/math.iyi", os.environ["OLD"], os.environ["NEW"]),
-                   ("iyi/float.iyi", os.environ["OLD2"], os.environ["NEW2"])):
+for name, o, n in (("std/math.ri", os.environ["OLD"], os.environ["NEW"]),
+                   ("ris/float.ri", os.environ["OLD2"], os.environ["NEW2"])):
     src = Path("$REPO/src/" + name).read_text()
     if o:
         if o not in src:
@@ -596,10 +596,10 @@ PY
   # read "caught" without a check having seen the break - as did four
   # whose patch did not compile. So the failure has to be the program's:
   # a check's, or a panic the broken module ran into.
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_math_exercise.iyi" -- $ORACLE >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_math_exercise.ri" -- $ORACLE >"$WORK/mut.out" 2>&1; then
     echo "  $label: the exercise PASSED on a broken module"
     status=1
-  elif grep -q "ASSERTION FAILED\|iyi: panic:" "$WORK/mut.out"; then
+  elif grep -q "ASSERTION FAILED\|ris: panic:" "$WORK/mut.out"; then
     echo "  $label: caught"
   else
     echo "  $label: failed, but at no check:"

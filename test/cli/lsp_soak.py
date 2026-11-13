@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Abuses `iyi lsp`'s transport and asks for a hover after every blow.
+"""Abuses `ris lsp`'s transport and asks for a hover after every blow.
 "The server's whole value is being there on the next keystroke" is a
 sentence this file makes literal: stray blank lines, garbage headers,
 bodies that are not JSON, bodies that are not UTF-8, requests with
@@ -40,7 +40,7 @@ def hover_alive(c, uri):
 
 def main():
     work = tempfile.mkdtemp(prefix="iyi-lsp-soak")
-    path = os.path.join(work, "alive.iyi")
+    path = os.path.join(work, "alive.ri")
     text = ("module alive\n\npub def ping : String\n  \"pong\"\nend\n\n"
             "puts ping\n")
     with open(path, "w") as f:
@@ -85,16 +85,16 @@ def main():
          "error" not in reply and hover_alive(c, uri))
 
     c.send("textDocument/didChange",
-           {"textDocument": {"uri": "file://" + work + "/ghost.iyi",
+           {"textDocument": {"uri": "file://" + work + "/ghost.ri",
                              "version": 1},
             "contentChanges": [{"text": "module ghost\n"}]}, wait=False)
-    c.diagnostics("file://" + work + "/ghost.iyi")
+    c.diagnostics("file://" + work + "/ghost.ri")
     step("didChange for a document never opened", hover_alive(c, uri))
 
     big = "module big\n\n" + "".join(
         f"pub def f{n} : Int32\n  {n}\nend\n\n" for n in range(1500))
-    big_uri = "file://" + os.path.join(work, "big.iyi")
-    with open(os.path.join(work, "big.iyi"), "w") as f:
+    big_uri = "file://" + os.path.join(work, "big.ri")
+    with open(os.path.join(work, "big.ri"), "w") as f:
         f.write(big)
     c.send("textDocument/didOpen",
            {"textDocument": {"uri": big_uri, "languageId": "iyi",
@@ -112,8 +112,8 @@ def main():
             "  {% if flag?(:win32) %}\n    w = s.bytesize\n  {% else %}\n    w = 0\n  {% end %}\n"
             "  if s.empty? && !s.empty?\n    s_len = s.bytesize\n  end\n"
             "  w\nend\n\nputs whole(\"x\")\n")
-    dead_uri = "file://" + os.path.join(work, "dead.iyi")
-    with open(os.path.join(work, "dead.iyi"), "w") as f:
+    dead_uri = "file://" + os.path.join(work, "dead.ri")
+    with open(os.path.join(work, "dead.ri"), "w") as f:
         f.write(dead)
     c.send("textDocument/didOpen",
            {"textDocument": {"uri": dead_uri, "languageId": "iyi",

@@ -3,4 +3,5 @@ def descend(n : Int32) : Array(Int32)
   a = descend(n - 1)
   a
 end
+
 tape { descend(2).size }

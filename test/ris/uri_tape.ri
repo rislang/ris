@@ -69,6 +69,5 @@ tape do
   end
   raise "IPv6 hostname" unless URI.parse("http://[::1]:80/").hostname == "::1"
   raise "absent hostname" unless URI.parse("../g").hostname.nil?
-
 end
 puts "URI: zero heap"

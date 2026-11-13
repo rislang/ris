@@ -27,6 +27,7 @@ def put(holder : Holder, text : String, pick : Bool) : Nil
   made << "made"
   holder.view = pick ? text : made
 end
+
 holder = Holder.new("h")
 tape do
   put(holder, "abc", true)

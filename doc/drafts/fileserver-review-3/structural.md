@@ -26,5 +26,5 @@ Verdict: no Blockers, one Major, seven Nits.
 * Line 741: "Nits ... throughout" is untraceable; name the places.
 * P8 (706-708) is cited nowhere; header rules 1 and 5 (205-217) and
   the nested-header gate (577-578) should cite it.
-* Lines 226-227: "region.iyi:523-525" is split across a line break.
+* Lines 226-227: "region.ri:523-525" is split across a line break.
 * Fenced blocks carry no language tag (consistent; mention only).

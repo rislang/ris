@@ -13,7 +13,7 @@ Nothing replaces it. The header sentence has no rule number.
 
 SPEC 7.1 says "No heap, no collector, no fallback allocator, no heap
 type", and the opening paragraph says "no GC or general heap". `to_heap`
-is no heap path: `src/iyi/tape.iyi` copies on the current tape, and
+is no heap path: `src/ris/tape.ri` copies on the current tape, and
 AGENTS.md calls the name historical, to remove. So the sentence is false
 as well as contradicting 7.1.
 

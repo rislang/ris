@@ -135,7 +135,7 @@ end
 
 tape do
   puts hex(DnsTapeMessage.query(0x1234_u16, "example.com", DnsTapeRecord::A)) ==
-    "123401000001000000000000076578616d706c6503636f6d0000010001"
+       "123401000001000000000000076578616d706c6503636f6d0000010001"
   padded = DnsTapeMessage.query(0xBEEF_u16, "www.example.com.", DnsTapeRecord::HTTPS, DnsTapeMessage::PADDING_BLOCK)
   puts "#{padded.bytesize} #{hex(padded[0, 48])}"
   puts DnsTapeMessage.id_of(padded)

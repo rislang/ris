@@ -24,7 +24,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -42,12 +42,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_colorize_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_colorize_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -98,19 +98,19 @@ echo "== a name that is no colour or mode is refused"
 mkdir -p "$WORK/names"
 refused() {
   local path="$1" name="$2" call="$3" message="$4"
-  printf 'import std/colorize::{Colorize}\nColorize.enabled = true\nputs "x".colorize%s.to_s\n' "$call" >"$WORK/names/$name.iyi"
-  if IYI_PATH="$path" "$IYI" run "$WORK/names/$name.iyi" >"$WORK/names/$name.out" 2>&1; then
+  printf 'import std/colorize::{Colorize}\nColorize.enabled = true\nputs "x".colorize%s.to_s\n' "$call" >"$WORK/names/$name.ri"
+  if RIS_PATH="$path" "$RIS" run "$WORK/names/$name.ri" >"$WORK/names/$name.out" 2>&1; then
     return 1
   fi
   grep -q "$message" "$WORK/names/$name.out"
 }
-if refused "$IYI_PATH" color '(:purple)' "Unknown color: purple"; then
+if refused "$RIS_PATH" color '(:purple)' "Unknown color: purple"; then
   echo "  fore(:purple) is refused"
 else
   echo "  fore(:purple) was not refused with \"Unknown color: purple\""
   status=1
 fi
-if refused "$IYI_PATH" mode '.bold.mode(:italic)' "Unknown mode: italic"; then
+if refused "$RIS_PATH" mode '.bold.mode(:italic)' "Unknown mode: italic"; then
   echo "  mode(:italic) is refused"
 else
   echo "  mode(:italic) was not refused with \"Unknown mode: italic\""
@@ -124,16 +124,16 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the broken-module proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/colorize.iyi").read_text()
+src = Path("$REPO/src/std/colorize.ri").read_text()
 old = 'Red          = 31'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/colorize.iyi").write_text(src.replace(old, 'Red          = 32', 1))
+Path("$WORK/patched/std/colorize.ri").write_text(src.replace(old, 'Red          = 32', 1))
 PY
 then
   echo "  the patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_colorize_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_colorize_exercise.ri" >"$WORK/mut.out" 2>&1; then
   echo "  the exercise PASSED on a broken module"
   status=1
 else
@@ -150,10 +150,10 @@ case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     echo
     echo "== a console on standard output, a file on standard error"
-    printf 'module main\n\nimport std/colorize::{Colorize}\n\nputs "out".colorize.red.to_s\nSTDERR.puts "err".colorize.red.to_s\n' > "$WORK/split.iyi"
+    printf 'module main\n\nimport std/colorize::{Colorize}\n\nputs "out".colorize.red.to_s\nSTDERR.puts "err".colorize.red.to_s\n' > "$WORK/split.ri"
     if [ -z "$PY" ]; then
       echo "  no python3 on this machine, so the split is unmeasured"
-    elif ! "$IYI" build -o "$WORK/split" "$WORK/split.iyi" > "$WORK/split.build" 2>&1; then
+    elif ! "$RIS" build -o "$WORK/split" "$WORK/split.ri" > "$WORK/split.build" 2>&1; then
       echo "  the split program did not build"; sed -n '1,10p' "$WORK/split.build"; status=1
     else
       cat > "$WORK/split.py" <<'PY'
@@ -185,10 +185,10 @@ broken_copy() {
   local dir="$1"
   shift
   mkdir -p "$WORK/$dir/std"
-  "$PY" - "$WORK/$dir/std/colorize.iyi" "$@" <<PY
+  "$PY" - "$WORK/$dir/std/colorize.ri" "$@" <<PY
 import sys
 from pathlib import Path
-src = Path("$REPO/src/std/colorize.iyi").read_text()
+src = Path("$REPO/src/std/colorize.ri").read_text()
 args = sys.argv[2:]
 for old, new in zip(args[0::2], args[1::2]):
     if old not in src:
@@ -201,7 +201,7 @@ PY
 # The exercise, run on a broken copy, must stop at the check named.
 caught_at() {
   local dir="$1" label="$2" message="$3"
-  if IYI_PATH="$WORK/$dir${PSEP}$IYI_PATH" "$IYI" run "$REPO/test/cli/std_colorize_exercise.iyi" >"$WORK/$dir.out" 2>&1; then
+  if RIS_PATH="$WORK/$dir${PSEP}$RIS_PATH" "$RIS" run "$REPO/test/cli/std_colorize_exercise.ri" >"$WORK/$dir.out" 2>&1; then
     echo "  the exercise PASSED with $label"
     status=1
   elif grep -q "ASSERTION FAILED: $message" "$WORK/$dir.out"; then
@@ -230,7 +230,7 @@ if [ -n "$PY" ]; then
   if ! broken_copy nocolor 'else                     raise "Unknown color: #{symbol}"' 'else                     ColorANSI::Default'; then
     echo "  the unknown-colour patch did not apply"
     status=1
-  elif refused "$WORK/nocolor${PSEP}$IYI_PATH" nocolor '(:purple)' "Unknown color: purple"; then
+  elif refused "$WORK/nocolor${PSEP}$RIS_PATH" nocolor '(:purple)' "Unknown color: purple"; then
     echo "  an unknown colour answered Default was not caught"
     status=1
   elif grep -q "^x$" "$WORK/names/nocolor.out"; then
@@ -243,7 +243,7 @@ if [ -n "$PY" ]; then
   if ! broken_copy nomode 'else                     raise "Unknown mode: #{sym}"' 'else                     Mode::Default'; then
     echo "  the unknown-mode patch did not apply"
     status=1
-  elif refused "$WORK/nomode${PSEP}$IYI_PATH" nomode '.bold.mode(:italic)' "Unknown mode: italic"; then
+  elif refused "$WORK/nomode${PSEP}$RIS_PATH" nomode '.bold.mode(:italic)' "Unknown mode: italic"; then
     echo "  an unknown mode answered Default was not caught"
     status=1
   elif grep -q "^x$" "$WORK/names/nomode.out"; then

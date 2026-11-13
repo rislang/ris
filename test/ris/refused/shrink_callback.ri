@@ -1,4 +1,4 @@
-def invoke
+def invoke(&)
   yield
 end
 

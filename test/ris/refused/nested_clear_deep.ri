@@ -3,6 +3,7 @@
 def step(x : Int32, &block : Int32 -> Nil) : Nil
   yield x + 1
 end
+
 def run(acc : Array(Int32)) : Nil
   b = String::Builder.new
   v = ""
@@ -42,5 +43,6 @@ def run(acc : Array(Int32)) : Nil
     end
   end
 end
+
 acc = [] of Int32
 tape { run(acc) }

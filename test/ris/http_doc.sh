@@ -6,7 +6,7 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 ris=${RIS:-$root/bin/ris}
-export IYI_CACHE_DIR="$work/cache"
+export RIS_CACHE_DIR="$work/cache"
 "$ris" doc std/http > "$work/doc"
 grep -F 'pub struct HTTP' "$work/doc" > /dev/null
 grep -F 'pub struct Server' "$work/doc" > /dev/null

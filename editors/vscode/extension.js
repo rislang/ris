@@ -1,4 +1,4 @@
-// The whole client: spawn `iyi lsp`, hand it `.iyi` documents. The
+// The whole client: spawn `iyi lsp`, hand it `.ri` documents. The
 // protocol negotiates everything else — highlighting arrives as
 // semantic tokens, quickfixes as code actions, the import pair as
 // completion edits — which is why this file has nothing to say.

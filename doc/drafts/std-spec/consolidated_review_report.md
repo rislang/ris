@@ -226,7 +226,7 @@ compound assertions, repeated cases and shell checks. Record a mapping
 from each baseline check to its destination proof. Apply the same
 measure before and after each module; retain external coverage per M5.
 
-Checked: test/cli/std_json_exercise.iyi:38–45 mixes direct failures and
+Checked: test/cli/std_json_exercise.ri:38–45 mixes direct failures and
 an assertion helper; :76 has several conditions in one assertion.
 These concrete forms require a consistent counting definition.
 
@@ -289,8 +289,8 @@ No draft mitigation closed an earlier risk during Stage 8.
 ## Evidence coverage and limits
 
 Reviewers read relevant parts of spec_clauses.cr, parser.cr,
-project_walk.cr, check_suite.cr, SPEC.md, src/std/SPEC.md, json.iyi,
-std_json_exercise.iyi/.sh and the referenced spec CLI gates. Stage 5
+project_walk.cr, check_suite.cr, SPEC.md, src/std/SPEC.md, json.ri,
+std_json_exercise.ri/.sh and the referenced spec CLI gates. Stage 5
 also inspected README.md, .spec.lock, CHANGELOG.md and AGENTS.md.
 Stage 8 read the three earlier reports as required. Stage 9 readiness
 also inspected test/ris/check.sh:1–45. Search used FFF first.

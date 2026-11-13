@@ -32,7 +32,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -50,13 +50,13 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
-EXERCISE="$REPO/test/cli/std_number_format_exercise.iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
+EXERCISE="$REPO/test/cli/std_number_format_exercise.ri"
 
 build_and_run() { # build_and_run <label> <name> [flags...]
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -278,11 +278,11 @@ fi
 
 echo
 echo "== proving the checks can fail when the module is broken"
-# patch <name> <old> <new>: a copy of std/number_format.iyi with <old>
+# patch <name> <old> <new>: a copy of std/number_format.ri with <old>
 # replaced, under $WORK/<name>/std.
 patch() {
   mkdir -p "$WORK/$1/std"
-  SRC="$REPO/src/std/number_format.iyi" DST="$WORK/$1/std/number_format.iyi" OLD="$2" NEW="$3" "$PY" - <<'PY'
+  SRC="$REPO/src/std/number_format.ri" DST="$WORK/$1/std/number_format.ri" OLD="$2" NEW="$3" "$PY" - <<'PY'
 import os
 from pathlib import Path
 src = Path(os.environ["SRC"]).read_text(encoding="utf-8")
@@ -303,7 +303,7 @@ breaks() {
     status=1
     return
   fi
-  IYI_PATH="$WORK/$name${PSEP}$IYI_PATH" "$IYI" run "$EXERCISE" >"$WORK/$name.out" 2>&1
+  RIS_PATH="$WORK/$name${PSEP}$RIS_PATH" "$RIS" run "$EXERCISE" >"$WORK/$name.out" 2>&1
   if grep -q "ALL CHECKS PASSED" "$WORK/$name.out"; then
     echo "  $label: the exercise PASSED on a broken module"
     status=1
@@ -325,7 +325,7 @@ misleads() {
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$name${PSEP}$IYI_PATH" "$IYI" build -o "$WORK/$name.bin" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$name${PSEP}$RIS_PATH" "$RIS" build -o "$WORK/$name.bin" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
     echo "  $label: the broken copy did not build"
     tail -5 "$WORK/$name.build.log" | sed 's/^/    /'
     status=1

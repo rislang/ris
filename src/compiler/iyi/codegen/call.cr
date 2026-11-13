@@ -109,7 +109,7 @@ class Iyi::CodeGenVisitor
       else
         call_arg = @last
         call_arg = llvm_nil if arg.type.nil_type?
-        # iyi: a `.iyimod` declaration is one symbol, so the semantic pass keys
+        # iyi: a `.rimod` declaration is one symbol, so the semantic pass keys
         # its call on the parameter as *declared* rather than on what this call
         # site passes (iyi SPEC III.6). That makes the parameter the wider of the
         # two, and widening is `upcast` — `downcast` is for the other direction
@@ -547,7 +547,7 @@ class Iyi::CodeGenVisitor
   def try_inline_call(target_def, body, self_type, call_args)
     return false if target_def.is_a?(External)
 
-    # iyi: a def from a `.iyimod` has no body, and an absent body reads here as
+    # iyi: a def from a `.rimod` has no body, and an absent body reads here as
     # the simplest possible one — `Nop` is the first case below. Inlining it
     # would replace a call to the module's code with nothing at all, which is
     # the one way this design can be wrong quietly rather than loudly: the

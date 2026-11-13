@@ -1,4 +1,3 @@
-
 @[OnTape]
 class GrowingTextEvent
   getter data : String
@@ -167,6 +166,7 @@ struct TextGrowBits
     @bits << 1
   end
 end
+
 raise "integer shift" unless TextGrowBits.new.shift == 2
 
 before = copies

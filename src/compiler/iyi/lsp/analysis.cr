@@ -71,7 +71,7 @@ module Iyi::Lsp
     # renamed, deleted or written back on disk - `git checkout`, an
     # agent's write - left the importer's verdict as it was, pull after
     # pull, until its own buffer was edited: `name` renamed to `title` in
-    # `geo/b.iyi` answered `[]`, and with `geo/b.iyi` written back, "can't
+    # `geo/b.ri` answered `[]`, and with `geo/b.ri` written back, "can't
     # find module 'geo/b'".
     @memo_key : {String, UInt64, UInt64}?
     @memo : {Compiler::Result?, Array(Diag)}?
@@ -138,9 +138,9 @@ module Iyi::Lsp
     end
 
     private def compile(path : String, text : String, overrides : Hash(String, String)) : {Compiler::Result?, Array(Diag)}
-      # IV.6 read backwards, as a build reads it: `<root>/calc/parser.iyi`
+      # IV.6 read backwards, as a build reads it: `<root>/calc/parser.ri`
       # resolves its `import calc/lexer` from `<root>`, and its packages
-      # through `<root>/iyi.mod` (`Compiler.entry_root_of`).
+      # through `<root>/ris.mod` (`Compiler.entry_root_of`).
       root = Compiler.entry_root_of(path, text)
       table =
         begin
@@ -150,7 +150,7 @@ module Iyi::Lsp
         end
 
       compiler = Compiler.new
-      compiler.prelude = "iyi/prelude"
+      compiler.prelude = "ris/prelude"
       compiler.no_codegen = true
       compiler.no_cleanup = true # the visitors read the typed AST after
       compiler.iyi_mod_table = table
@@ -160,12 +160,12 @@ module Iyi::Lsp
       compiler.stderr = IO::Memory.new
 
       # iyi: the artifacts, where a workspace has them. A library arrives as
-      # `.iyimod` files and no source (III.7), and the server compiled
+      # `.rimod` files and no source (III.7), and the server compiled
       # imports from source alone — so a workspace that *builds* with
-      # `--use-iyimod mods` opened in an editor with `can't find module
+      # `--use-rimod mods` opened in an editor with `can't find module
       # 'app/base'` on the import line, hover and definition empty, about a
       # module the build compiles against. R-1's own reading of the server
-      # is that its inner loop is what `--use-iyimod` already does: one
+      # is that its inner loop is what `--use-rimod` already does: one
       # module, type-checked against declarations, with the rest of the
       # program absent (iyi SPEC IV).
       #
@@ -298,12 +298,12 @@ module Iyi::Lsp
     # iyi: the file each module path in this buffer's program was read from.
     #
     # A module path is not a file path, and the server's document links were
-    # guessing one: `<root>/<path>.iyi`, with the path taken as the run of
+    # guessing one: `<root>/<path>.ri`, with the path taken as the run of
     # `[A-Za-z0-9_/]` after the keyword. That finds a sibling and nothing
     # else. A package's path is dotted — `example.test/user/liba` — so the
     # run stopped at the first `.`, and the file it names is not under the
-    # workspace at all: it is a checkout in the cache, which `iyi.mod`,
-    # `iyi.sum` and the fetcher decide between them (iyi SPEC III.7). So
+    # workspace at all: it is a checkout in the cache, which `ris.mod`,
+    # `ris.sum` and the fetcher decide between them (iyi SPEC III.7). So
     # every import of a dependency was a link that went nowhere, in an
     # editor where the same click works on a sibling module.
     #

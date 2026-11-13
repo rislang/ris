@@ -5,9 +5,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -43,12 +43,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_html_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_html_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -98,16 +98,16 @@ if [ -z "$PY" ]; then
 else
   mkdir -p "$WORK/patched_amp/std"
   "$PY" - <<PY
-src = open("$REPO/src/std/html.iyi").read()
+src = open("$REPO/src/std/html.ri").read()
 old = 'writer.append_html_escaped(string)'
 if old not in src:
     raise SystemExit("patch site missing")
-open("$WORK/patched_amp/std/html.iyi", "w").write(src.replace(old, 'writer.append(string)', 1))
+open("$WORK/patched_amp/std/html.ri", "w").write(src.replace(old, 'writer.append(string)', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched_amp${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_html_exercise.iyi" -- "$WORK" >"$WORK/amp.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched_amp${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_html_exercise.ri" -- "$WORK" >"$WORK/amp.out" 2>&1; then
     echo "  the exercise PASSED with & left raw"
     status=1
   else
@@ -118,7 +118,7 @@ fi
 echo
 echo "== proving the checks can fail when the module is broken"
 mutate() { # mutate <label> <old> <new> <phrase> [file under src/]
-  local label="$1" old="$2" new="$3" phrase="$4" file="${5:-std/html.iyi}"
+  local label="$1" old="$2" new="$3" phrase="$4" file="${5:-std/html.ri}"
   if [ -z "$PY" ]; then
     echo "  $label: skipped, no working python3 to make the broken copy with"
     return 0
@@ -127,7 +127,7 @@ mutate() { # mutate <label> <old> <new> <phrase> [file under src/]
   mkdir -p "$WORK/patched/std"
   # A prelude file is patched in a copy of the whole prelude, which the
   # search path then finds before the checkout's.
-  case "$file" in iyi/*) cp -R "$REPO/src/iyi" "$WORK/patched/iyi" ;; esac
+  case "$file" in ris/*) cp -R "$REPO/src/ris" "$WORK/patched/ris" ;; esac
   OLD="$old" NEW="$new" "$PY" - <<PY
 import os
 from pathlib import Path
@@ -140,7 +140,7 @@ PY
   if [ $? -ne 0 ]; then
     echo "  $label: the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_html_exercise.iyi" -- "$WORK" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_html_exercise.ri" -- "$WORK" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the exercise PASSED on a broken module"
     status=1
   elif ! grep -q "$phrase" "$WORK/mut.out"; then
@@ -154,7 +154,7 @@ PY
 mutate "only the whole alphanumeric run looked up" \
   '              n = n - 1 if cp < 0' '              n = 1 if cp < 0' 'the longest name that is an entity'
 mutate "escape to an IO drops the bytes after the last reference" \
-  '    append(bytes + start, size - start) if size > start' '    nil' 'nothing to escape' iyi/tape.iyi
+  '    append(bytes + start, size - start) if size > start' '    nil' 'nothing to escape' ris/tape.ri
 mutate "every name read without its ;" \
   'if cp >= 0 && !legacy_name?(cp) &&' 'if cp >= 0 && false &&' 'only a legacy name goes without its'
 

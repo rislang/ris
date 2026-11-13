@@ -12,7 +12,6 @@ struct Resp
   end
 end
 
-
 def make : Resp
   Resp.new(1_i64, String.build { |s| s.push(97_u8) })
 end
@@ -69,11 +68,13 @@ end
 @[OnTape]
 struct OwnerHolder
   getter owner : Workspace
+
   def initialize(@owner); end
 end
 
 class OwnerClassHolder
   getter owner : Workspace
+
   def initialize(@owner); end
 end
 
@@ -137,6 +138,7 @@ raise "retained owner copy" unless retained_owner.items[0] == 42
 # Borrowed growing handles and fixed-size views do not make an owner.
 class BorrowedArrayHolder
   getter items : Array(Int32)
+
   def initialize(@items); end
 end
 
@@ -145,6 +147,7 @@ end
 
 class FixedArrayHolder
   getter items : Array::View(Int32)
+
   def initialize
     @items = Array(Int32).new(2, 3).view
   end

@@ -34,7 +34,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 case "$(uname -s)" in
@@ -47,7 +47,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 # Without Python and Pillow there is no oracle at all, and every comparison
 # below would be against an empty directory: that is the gate's failure,
@@ -495,7 +495,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_png_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_png_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -705,8 +705,8 @@ echo "== the exercise's artifacts and other platforms"
 # printed from source (without a work directory, so that no timing is
 # printed); and it typechecks for the four other platforms std is held to.
 mkdir -p "$WORK/r1/mods"
-if (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_png_exercise.iyi" \
-      && "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_png_exercise.iyi") > "$WORK/r1/build.log" 2>&1 \
+if (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_png_exercise.ri" \
+      && "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_png_exercise.ri") > "$WORK/r1/build.log" 2>&1 \
    && "$WORK/r1/from-source" > "$WORK/r1/source.out" 2>&1 \
    && "$WORK/r1/from-artifact" > "$WORK/r1/artifact.out" 2>&1 \
    && cmp -s "$WORK/r1/source.out" "$WORK/r1/artifact.out" \
@@ -718,20 +718,20 @@ else
   status=1
 fi
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross-$target" "$REPO/test/cli/std_png_exercise.iyi" > "$WORK/cross-$target.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" -o "$WORK/cross-$target" "$REPO/test/cli/std_png_exercise.ri" > "$WORK/cross-$target.log" 2>&1; then
     echo "  FAIL: $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross-$target.log" | cut -c1-140)"
     status=1
   fi
 done
 echo "  typechecks for x86_64-linux-gnu, aarch64-darwin, x86_64-windows-msvc, aarch64-linux-gnu, x86_64-linux-musl"
-if "$IYI" doc "$REPO/src/std/png.iyi" > "$WORK/doc.out" 2>&1 && grep -q "def self.decode" "$WORK/doc.out"; then
+if "$RIS" doc "$REPO/src/std/png.ri" > "$WORK/doc.out" 2>&1 && grep -q "def self.decode" "$WORK/doc.out"; then
   echo "  iyi doc reads the module"
 else
-  echo "  FAIL: iyi doc src/std/png.iyi"
+  echo "  FAIL: iyi doc src/std/png.ri"
   status=1
 fi
 # Pure computation: no platform module, no binding.
-if grep -nE '^import std/(random|time|file|dir|env|socket|process|udp|signal|system|user|errno)\b|^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)' "$REPO/src/std/png.iyi"; then
+if grep -nE '^import std/(random|time|file|dir|env|socket|process|udp|signal|system|user|errno)\b|^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)' "$REPO/src/std/png.ri"; then
   echo "  FAIL: std/png reaches the platform"
   status=1
 else
@@ -746,8 +746,8 @@ echo "== what the module refuses, by name"
 refuses() { # refuses <label> <name> <phrase> <statements>
   local label="$1" name="$2" phrase="$3" statements="$4"
   printf 'module main\n\nimport std/png::{Png, Image, Layout, PngError}\n\n%s\nputs "ANSWERED"\n' \
-    "$statements" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$statements" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -760,7 +760,7 @@ refuses() { # refuses <label> <name> <phrase> <statements>
     status=1
     return
   fi
-  if ! grep -qxF "iyi: panic: $phrase" "$WORK/$name.out"; then
+  if ! grep -qxF "ris: panic: $phrase" "$WORK/$name.out"; then
     echo "  $label: refused, but not with '$phrase' (exit $code)"
     tail -2 "$WORK/$name.out"
     status=1
@@ -801,17 +801,17 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/png.iyi").read_text()
+src = Path("$REPO/src/std/png.ri").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing: " + os.environ["OLD"])
-Path("$WORK/patched/std/png.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/png.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
   # Build first, then run: a patch that does not compile would also "fail",
   # and that proves nothing about whether the exercise catches the break.
-  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_png_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_png_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the $1 copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1

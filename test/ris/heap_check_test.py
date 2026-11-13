@@ -2,10 +2,15 @@
 """The ratchet rejects stale budgets in either direction."""
 import unittest
 
-from heap_check import compare
+from heap_check import TABLE, compare, sample_files
 
 
 class HeapBudgetTest(unittest.TestCase):
+    def test_sample_coverage(self):
+        budgets = {line.split()[0] for line in TABLE.read_text().splitlines()
+                   if line and not line.startswith("#")}
+        self.assertEqual(set(sample_files()), budgets)
+
     def test_exact(self):
         for label in ("static sites", "allocations"):
             compare("sample", label, 3, 3)

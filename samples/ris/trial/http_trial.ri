@@ -6,6 +6,7 @@ import std/http::{Server, Incoming, Outgoing}
 
 struct Settings
   getter port : Int32
+
   def initialize(@port)
   end
 end
@@ -40,7 +41,7 @@ end
 def show(port : Int32, path : String) : Nil
   client = IyiSocket.connect("127.0.0.1", port).or_panic
   client.write("GET #{path} HTTP/1.1\r\nHost: x\r\n" \
-    "Connection: close\r\n\r\n").or_panic
+               "Connection: close\r\n\r\n").or_panic
   answer = String::Builder.new
   while client.read(answer, 4096).or_panic > 0
   end

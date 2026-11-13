@@ -21,10 +21,10 @@ module Iyi
       else
         begin
           relative_to = @location.try &.original_filename
-          # A macro that travelled in a `.iyimod` names its program the way
+          # A macro that travelled in a `.rimod` names its program the way
           # the file that wrote it could, and that file is not the artifact:
           # `std/eiy` writes `run("./eiy/process", …)`, which is beside
-          # `src/std/eiy.iyi`. See `Program#iyi_artifact_source_paths`.
+          # `src/std/eiy.ri`. See `Program#iyi_artifact_source_paths`.
           if relative_to
             relative_to = @program.iyi_artifact_source_paths[relative_to]? || relative_to
           end

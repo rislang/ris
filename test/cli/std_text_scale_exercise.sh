@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The library's text building is linear. Runs
-# test/cli/std_text_scale_exercise.iyi - eight megabytes through join, reverse,
+# test/cli/std_text_scale_exercise.ri - eight megabytes through join, reverse,
 # tr, gsub, delete, squeeze, Regex#replace, each_line, String.build,
 # Enumerable#join, String.join, CSV.build, HTTP.decode_chunked, center and a
 # near-miss search, each checked - plain and optimised, under a clock sixty
@@ -17,7 +17,7 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 PSEP=":"
@@ -36,7 +36,7 @@ DONE="each checked"
 run_case() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_text_scale_exercise.iyi" >"$WORK/$name.build" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_text_scale_exercise.ri" >"$WORK/$name.build" 2>&1; then
     echo "  FAIL: $label: build failed"
     sed -n '1,12p' "$WORK/$name.build"
     status=1
@@ -59,15 +59,15 @@ run_case "release" optimised --release
 
 echo
 echo "== the clock catches a builder that does not double"
-mkdir -p "$WORK/stepped/iyi"
-cp -R "$REPO/src/iyi/." "$WORK/stepped/iyi/"
+mkdir -p "$WORK/stepped/ris"
+cp -R "$REPO/src/ris/." "$WORK/stepped/ris/"
 sed -e 's/^      capacity = capacity \* 2$/      capacity = capacity + 16/' \
-  "$REPO/src/iyi/string.iyi" > "$WORK/stepped/iyi/string.iyi"
-if cmp -s "$REPO/src/iyi/string.iyi" "$WORK/stepped/iyi/string.iyi"; then
+  "$REPO/src/ris/string.ri" > "$WORK/stepped/ris/string.ri"
+if cmp -s "$REPO/src/ris/string.ri" "$WORK/stepped/ris/string.ri"; then
   echo "  FAIL: the patch changed nothing; the doubling line is not where it was"
   status=1
-elif ! IYI_PATH="$WORK/stepped${PSEP}$REPO/src" "$IYI" build --release \
-       -o "$WORK/stepped/program" "$REPO/test/cli/std_text_scale_exercise.iyi" >"$WORK/stepped/build" 2>&1; then
+elif ! RIS_PATH="$WORK/stepped${PSEP}$REPO/src" "$RIS" build --release \
+       -o "$WORK/stepped/program" "$REPO/test/cli/std_text_scale_exercise.ri" >"$WORK/stepped/build" 2>&1; then
   echo "  FAIL: the patched prelude did not build"
   sed -n '1,12p' "$WORK/stepped/build"
   status=1
@@ -88,7 +88,7 @@ echo "== the clock catches a library builder that copies what it has"
 # far on each piece copies that text anyway: `Enumerable#join` taking
 # `io.to_s` per element is the `result = result + piece` it had, on the
 # builder's own terms.
-proves_slow() { # proves_slow <label> <dir> <std|iyi> <file under src/std or src/iyi> <sed script>
+proves_slow() { # proves_slow <label> <dir> <std|iyi> <file under src/std or src/ris> <sed script>
   local label="$1" dir="$2" tree="$3" file="$4" script="$5"
   mkdir -p "$WORK/$dir/$tree"
   cp -R "$REPO/src/$tree/." "$WORK/$dir/$tree/"
@@ -96,8 +96,8 @@ proves_slow() { # proves_slow <label> <dir> <std|iyi> <file under src/std or src
   if cmp -s "$REPO/src/$tree/$file" "$WORK/$dir/$tree/$file"; then
     echo "  FAIL: $label: the patch changed nothing"
     status=1
-  elif ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build --release \
-         -o "$WORK/$dir/program" "$REPO/test/cli/std_text_scale_exercise.iyi" >"$WORK/$dir/build" 2>&1; then
+  elif ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build --release \
+         -o "$WORK/$dir/program" "$REPO/test/cli/std_text_scale_exercise.ri" >"$WORK/$dir/build" 2>&1; then
     echo "  FAIL: $label: the patched library did not build"
     sed -n '1,12p' "$WORK/$dir/build"
     status=1
@@ -112,16 +112,16 @@ proves_slow() { # proves_slow <label> <dir> <std|iyi> <file under src/std or src
     fi
   fi
 }
-proves_slow "Enumerable#join copying per element" copying_join std "enumerable.iyi" \
+proves_slow "Enumerable#join copying per element" copying_join std "enumerable.ri" \
   's/^        io << e.to_s$/        io << io.to_s[0, 0] + e.to_s/'
-proves_slow "CSV.build copying per field" copying_csv std "csv.iyi" \
+proves_slow "CSV.build copying per field" copying_csv std "csv.ri" \
   's/^        escape(fields\[c\], io)$/        io.length.times { io.push(32_u8); io.truncate(io.length - 1) }; escape(fields[c], io)/'
 # And a search that never leaves the naive loop, however much it compares.
-proves_slow "a search that stays naive" naive_search iyi "string.iyi" \
+proves_slow "a search that stays naive" naive_search iyi "string.ri" \
   's/^      break if spent > 4 \* (i - offset) + 64$/      spent = 0/'
-proves_slow "an rindex that stays naive" naive_rindex std "text.iyi" \
+proves_slow "an rindex that stays naive" naive_rindex std "text.ri" \
   's/^      break if spent > 4 \* (start - i) + 64$/      spent = 0/'
-proves_slow "a literal pattern compared from each position" naive_literal std "regex.iyi" \
+proves_slow "a literal pattern compared from each position" naive_literal std "regex.ri" \
   's/^    text.byte_index(literal, from)$/    i = from\n    while i + literal.bytesize <= text.bytesize\n      return i if text[i, literal.bytesize] == literal\n      i = i + 1\n    end\n    nil/'
 
 echo

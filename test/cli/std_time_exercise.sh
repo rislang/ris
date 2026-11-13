@@ -34,15 +34,15 @@
 #   * Dependency floor: audits symbols and libraries to prove zero new
 #     dependencies.
 #
-# Needs `make` for bin/iyi, plus `nm`, and `otool` on Darwin or `readelf` on
+# Needs `make` for bin/ris, plus `nm`, and `otool` on Darwin or `readelf` on
 # Linux. Exits non-zero if any check fails.
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 . "$REPO/test/cli/floor_base.sh"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -79,8 +79,8 @@ done
 
 status=0
 
-# Ensure IYI_PATH can find std modules in src/ and samples/iyi/
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+# Ensure RIS_PATH can find std modules in src/ and samples/ris/
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 symbols() {
   nm -u "$1" 2>/dev/null |
@@ -120,7 +120,7 @@ unexpected() {
 build_and_run() {
   local label="$1" name="$2" source="$3"
   shift 3
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -138,11 +138,11 @@ build_and_run() {
 }
 
 echo "== the std/time exercise"
-build_and_run "std_time" exercise-time "$REPO/test/cli/std_time_exercise.iyi"
+build_and_run "std_time" exercise-time "$REPO/test/cli/std_time_exercise.ri"
 
 echo
 echo "== the same program with optimisation on (--release)"
-build_and_run "release" exercise-time-release "$REPO/test/cli/std_time_exercise.iyi" --release >/dev/null
+build_and_run "release" exercise-time-release "$REPO/test/cli/std_time_exercise.ri" --release >/dev/null
 if ! grep -q "ALL CHECKS PASSED" "$WORK/exercise-time-release.out" 2>/dev/null; then
   echo "  release: missing pass sentinel"
   sed -n '1,15p' "$WORK/exercise-time-release.out" 2>/dev/null | sed 's/^/    /'
@@ -171,15 +171,15 @@ if [ -z "$PY" ]; then
   echo "  skipped: no working python3, so the broken copy could not be made"
 else
   mkdir -p "$WORK/patched_leap/std"
-  cp "$REPO/src/std/time.iyi" "$WORK/patched_leap/std/time.iyi"
+  cp "$REPO/src/std/time.ri" "$WORK/patched_leap/std/time.ri"
   "$PY" -c "
-with open('$WORK/patched_leap/std/time.iyi') as f:
+with open('$WORK/patched_leap/std/time.ri') as f:
     content = f.read()
 broken = content.replace('|| (year % 400 == 0)', '&& false')
-with open('$WORK/patched_leap/std/time.iyi', 'w') as f:
+with open('$WORK/patched_leap/std/time.ri', 'w') as f:
     f.write(broken)
 "
-  if (IYI_PATH="$WORK/patched_leap${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_time_exercise.iyi" >"$WORK/leap-fail.out" 2>&1); then
+  if (RIS_PATH="$WORK/patched_leap${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_time_exercise.ri" >"$WORK/leap-fail.out" 2>&1); then
     echo "  the exercise PASSED with a broken leap-year rule (it should have failed):"
     head -15 "$WORK/leap-fail.out" | sed 's/^/    /'
     status=1
@@ -195,15 +195,15 @@ if [ -z "$PY" ]; then
   echo "  skipped: no working python3, so the broken copy could not be made"
 else
   mkdir -p "$WORK/patched_rt/std"
-  cp "$REPO/src/std/time.iyi" "$WORK/patched_rt/std/time.iyi"
+  cp "$REPO/src/std/time.ri" "$WORK/patched_rt/std/time.ri"
   "$PY" -c "
-with open('$WORK/patched_rt/std/time.iyi') as f:
+with open('$WORK/patched_rt/std/time.ri') as f:
     content = f.read()
 broken = content.replace('def to_unix : Int64\n    @seconds', 'def to_unix : Int64\n    @seconds + 1_i64')
-with open('$WORK/patched_rt/std/time.iyi', 'w') as f:
+with open('$WORK/patched_rt/std/time.ri', 'w') as f:
     f.write(broken)
 "
-  if (IYI_PATH="$WORK/patched_rt${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_time_exercise.iyi" >"$WORK/rt-fail.out" 2>&1); then
+  if (RIS_PATH="$WORK/patched_rt${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_time_exercise.ri" >"$WORK/rt-fail.out" 2>&1); then
     echo "  the exercise PASSED with broken roundtrip (it should have failed):"
     head -15 "$WORK/rt-fail.out" | sed 's/^/    /'
     status=1
@@ -219,15 +219,15 @@ if [ -z "$PY" ]; then
   echo "  skipped: no working python3, so the broken copy could not be made"
 else
   mkdir -p "$WORK/patched_tz/std"
-  cp "$REPO/src/std/time.iyi" "$WORK/patched_tz/std/time.iyi"
+  cp "$REPO/src/std/time.ri" "$WORK/patched_tz/std/time.ri"
   "$PY" -c "
-with open('$WORK/patched_tz/std/time.iyi') as f:
+with open('$WORK/patched_tz/std/time.ri') as f:
     content = f.read()
 broken = content.replace('utc_sec = local_sec - offset_sec', 'utc_sec = local_sec')
-with open('$WORK/patched_tz/std/time.iyi', 'w') as f:
+with open('$WORK/patched_tz/std/time.ri', 'w') as f:
     f.write(broken)
 "
-  if (IYI_PATH="$WORK/patched_tz${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_time_exercise.iyi" >"$WORK/tz-fail.out" 2>&1); then
+  if (RIS_PATH="$WORK/patched_tz${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_time_exercise.ri" >"$WORK/tz-fail.out" 2>&1); then
     echo "  the exercise PASSED with broken timezone offset handling (it should have failed):"
     head -15 "$WORK/tz-fail.out" | sed 's/^/    /'
     status=1
@@ -248,7 +248,7 @@ format_break_caught() { # format_break_caught <label> <name> <old> <new>
     return
   fi
   mkdir -p "$WORK/patched_$name/std"
-  OLD="$3" NEW="$4" SRC="$REPO/src/std/time.iyi" DST="$WORK/patched_$name/std/time.iyi" "$PY" -c "
+  OLD="$3" NEW="$4" SRC="$REPO/src/std/time.ri" DST="$WORK/patched_$name/std/time.ri" "$PY" -c "
 import os
 content = open(os.environ['SRC']).read()
 old = os.environ['OLD']
@@ -256,7 +256,7 @@ if content.count(old) != 1:
     raise SystemExit('the text to break is in std/time %d times, not once: %r' % (content.count(old), old))
 open(os.environ['DST'], 'w').write(content.replace(old, os.environ['NEW']))
 " || { echo "  $label: the broken copy could not be made"; status=1; return; }
-  if (IYI_PATH="$WORK/patched_$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_time_exercise.iyi" >"$WORK/$name-fail.out" 2>&1); then
+  if (RIS_PATH="$WORK/patched_$name${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_time_exercise.ri" >"$WORK/$name-fail.out" 2>&1); then
     echo "  $label: the exercise PASSED against the broken copy (it should have failed)"
     status=1
   else
@@ -327,7 +327,7 @@ zones="Europe/Berlin America/New_York Australia/Sydney Australia/Lord_Howe Asia/
 if [ -z "$PY" ] || ! "$PY" -c 'import zoneinfo; zoneinfo.ZoneInfo("Europe/Berlin")' >/dev/null 2>&1 || [ ! -f /usr/share/zoneinfo/Europe/Berlin ]; then
   echo "  skipped: this machine has no zone database, or no Python zoneinfo to read it with"
 else
-  cat >"$WORK/zones.iyi" <<'IYI'
+  cat >"$WORK/zones.ri" <<'RIS'
 module zones
 import std/time::{Time, Location}
 
@@ -354,7 +354,7 @@ Program.args.each do |name|
     end
   end
 end
-IYI
+RIS
   cat >"$WORK/zones.py" <<'PY'
 import sys
 from datetime import datetime, timezone, timedelta
@@ -379,17 +379,17 @@ for name in sys.argv[1:]:
             back = (epoch + timedelta(seconds=inst)).astimezone(z)
             print(f"{name} wall {w.year}-{w.month}-{w.day} {w.hour}:{w.minute} {inst} {back.hour}:{back.minute}")
 PY
-  if ! "$IYI" build --release -o "$WORK/zones" "$WORK/zones.iyi" >"$WORK/zones.build.log" 2>&1; then
+  if ! "$RIS" build --release -o "$WORK/zones" "$WORK/zones.ri" >"$WORK/zones.build.log" 2>&1; then
     echo "  the zone reader did not build:"; tail -5 "$WORK/zones.build.log" | sed 's/^/    /'
     status=1
   else
-    "$WORK/zones" $zones >"$WORK/zones.iyi.out" 2>&1
+    "$WORK/zones" $zones >"$WORK/zones.ri.out" 2>&1
     "$PY" "$WORK/zones.py" $zones >"$WORK/zones.py.out" 2>&1
-    if cmp -s "$WORK/zones.iyi.out" "$WORK/zones.py.out"; then
-      echo "  $(wc -l <"$WORK/zones.iyi.out" | tr -d ' ') offsets, abbreviations, summer flags and wall clocks over $(echo $zones | wc -w | tr -d ' ') zones agree with Python's zoneinfo"
+    if cmp -s "$WORK/zones.ri.out" "$WORK/zones.py.out"; then
+      echo "  $(wc -l <"$WORK/zones.ri.out" | tr -d ' ') offsets, abbreviations, summer flags and wall clocks over $(echo $zones | wc -w | tr -d ' ') zones agree with Python's zoneinfo"
     else
       echo "  std/time and Python's zoneinfo read the database differently:"
-      diff "$WORK/zones.py.out" "$WORK/zones.iyi.out" | sed -n '1,8p' | sed 's/^/    /'
+      diff "$WORK/zones.py.out" "$WORK/zones.ri.out" | sed -n '1,8p' | sed 's/^/    /'
       status=1
     fi
   fi
@@ -408,7 +408,7 @@ echo "== the local zone, and the TZ variable, against the C library"
 if [ "$(uname -s)" != Linux ] || [ -z "$PY" ]; then
   echo "  skipped: the oracle is glibc's localtime, read through Python, on Linux"
 else
-  cat >"$WORK/tzvar.iyi" <<'IYI'
+  cat >"$WORK/tzvar.ri" <<'RIS'
 module tzvar
 import std/time::{Time, Location}
 
@@ -421,7 +421,7 @@ while h < 17568_i64
   puts "#{unix} #{z.offset} #{z.name} #{z.dst?}"
   h = h + 1_i64
 end
-IYI
+RIS
   cat >"$WORK/tzvar.py" <<'PY'
 import time
 start = 1704067200
@@ -429,7 +429,7 @@ for h in range(17568):
     l = time.localtime(start + h * 3600)
     print(f"{start + h * 3600} {l.tm_gmtoff} {l.tm_zone} {'true' if l.tm_isdst > 0 else 'false'}")
 PY
-  if ! "$IYI" build -o "$WORK/tzvar" "$WORK/tzvar.iyi" >"$WORK/tzvar.build.log" 2>&1; then
+  if ! "$RIS" build -o "$WORK/tzvar" "$WORK/tzvar.ri" >"$WORK/tzvar.build.log" 2>&1; then
     echo "  the TZ reader did not build:"; tail -5 "$WORK/tzvar.build.log" | sed 's/^/    /'
     status=1
   else
@@ -437,17 +437,17 @@ PY
     for tz in "EST5EDT,M3.2.0,M11.1.0" "<+0330>-3:30" "CET-1CEST,M3.5.0,M10.5.0/3" "AEST-10AEDT,M10.1.0,M4.1.0/3" "XXX3YYY,J60/2,J300/2" "XXX3YYY,59/2,299/2" "IST-1GMT0,M10.5.0,M3.5.0/1" "<-03>3<-02>,M3.5.0/-2,M10.5.0/-1" ":Europe/Berlin" "Asia/Tokyo" "UTC0" "unset"; do
       if [ "$tz" = unset ]; then
         [ -f /etc/localtime ] || continue
-        env -u TZ "$WORK/tzvar" >"$WORK/tzvar.iyi.out" 2>&1
+        env -u TZ "$WORK/tzvar" >"$WORK/tzvar.ri.out" 2>&1
         env -u TZ "$PY" "$WORK/tzvar.py" >"$WORK/tzvar.py.out" 2>&1
       else
-        TZ="$tz" "$WORK/tzvar" >"$WORK/tzvar.iyi.out" 2>&1
+        TZ="$tz" "$WORK/tzvar" >"$WORK/tzvar.ri.out" 2>&1
         TZ="$tz" "$PY" "$WORK/tzvar.py" >"$WORK/tzvar.py.out" 2>&1
       fi
-      if cmp -s "$WORK/tzvar.iyi.out" "$WORK/tzvar.py.out"; then
+      if cmp -s "$WORK/tzvar.ri.out" "$WORK/tzvar.py.out"; then
         agreed=$((agreed + 1))
       else
         echo "  TZ=$tz is read differently from glibc:"
-        diff "$WORK/tzvar.py.out" "$WORK/tzvar.iyi.out" | sed -n '1,6p' | sed 's/^/    /'
+        diff "$WORK/tzvar.py.out" "$WORK/tzvar.ri.out" | sed -n '1,6p' | sed 's/^/    /'
         status=1
       fi
     done
@@ -464,8 +464,8 @@ echo "== what the parser and the formatter refuse"
 # Sunday.
 time_panics_with() { # time_panics_with <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
-  printf 'module main\n\nimport std/time::{Time, Span, DayOfWeek}\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/time::{Time, Span, DayOfWeek}\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -484,7 +484,7 @@ time_panics_with() { # time_panics_with <label> <name> <phrase> <expression>
     status=1
     return
   fi
-  printf '  %s: exits 1 at "%s"\n' "$label" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits 1 at "%s"\n' "$label" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 time_panics_with "a day the month does not have, parsed" parse_feb30 "invalid day in RFC 3339 string: 30" \
   'Time.parse_rfc3339("2024-02-30T00:00:00Z").to_rfc3339'
@@ -558,11 +558,11 @@ time_panics_with "a month past the last year" shift_far "year out of range: 2147
   'Time.utc(2147483647, 12, 1).shift(months: 1)'
 # And the one RFC 3339 allows that the constructor does not: a leap second
 # is read as the second after 59, not refused.
-printf 'module main\n\nimport std/time::{Time}\n\nputs Time.parse_rfc3339("2016-12-31T23:59:60Z").to_rfc3339\n' > "$WORK/leap.iyi"
-if [ "$("$IYI" run "$WORK/leap.iyi" 2>&1)" = "2017-01-01T00:00:00Z" ]; then
+printf 'module main\n\nimport std/time::{Time}\n\nputs Time.parse_rfc3339("2016-12-31T23:59:60Z").to_rfc3339\n' > "$WORK/leap.ri"
+if [ "$("$RIS" run "$WORK/leap.ri" 2>&1)" = "2017-01-01T00:00:00Z" ]; then
   echo "  a leap second is read as the instant it names"
 else
-  echo "  a leap second was not read as the next second:"; "$IYI" run "$WORK/leap.iyi" 2>&1 | sed -n '1,2p'
+  echo "  a leap second was not read as the next second:"; "$RIS" run "$WORK/leap.ri" 2>&1 | sed -n '1,2p'
   status=1
 fi
 

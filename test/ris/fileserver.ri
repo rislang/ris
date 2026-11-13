@@ -147,7 +147,7 @@ ask(q, "GET", "/sub?q=1")
 answer(w, "301 Moved Permanently", "Location: /sub/?q=1\r\n", "")
 ask(q, "GET", "/sub/")
 answer(w, "200 OK", validators("/sub/index.html") +
-  "Content-Type: text/html; charset=utf-8\r\n", "<p>i</p>")
+                    "Content-Type: text/html; charset=utf-8\r\n", "<p>i</p>")
 ask(q, "GET", "/nodir/")
 answer(w, "404 Not Found", plain, not_found)
 # 15: paths that would leave the root.
@@ -173,8 +173,8 @@ ask(q, "GET", "/big.bin", "If-None-Match: *\r\n")
 answer(w, "304 Not Modified", big, "")
 ask(q, "GET", "/big.bin", "Range: bytes=0-9\r\n")
 answer(w, "206 Partial Content", big +
-  "Content-Type: application/octet-stream\r\n" +
-  "Content-Range: bytes 0-9/2000\r\n", "xxxxxxxxxx")
+                                 "Content-Type: application/octet-stream\r\n" +
+                                 "Content-Range: bytes 0-9/2000\r\n", "xxxxxxxxxx")
 # The last closes the connection.
 ask(q, "GET", "/a.txt", "Connection: close\r\n")
 answer(w, "200 OK", a_full, "hello world", -1, true)

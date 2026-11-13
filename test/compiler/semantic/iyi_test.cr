@@ -3,7 +3,7 @@ require "../../test_helper"
 # Semantics of the iyi declarations: `module` headers, an import's names, and `impl`.
 #
 # `import` is not covered here — it resolves against files on disk, so it is
-# exercised by `samples/iyi/modules.iyi` rather than by this file. Everything
+# exercised by `samples/ris/modules.ri` rather than by this file. Everything
 # else needs only that the used module exist, so these specs declare it
 # directly instead of importing it.
 describe "Semantic: iyi" do
@@ -329,7 +329,7 @@ describe "Semantic: iyi" do
     # HuntDiag3: the receiver's own text, not the words `the receiver` in
     # a code span, and why `if make(true)` narrows nothing.
     it "says the narrowing for a call receiver in its own text" do
-      assert_error <<-CODE, "`make(true)` can be nil here, and a call is made again each time it is written, so `if make(true)` narrows nothing: bind it and narrow the variable (`if value = make(true)`", filename: "x.iyi"
+      assert_error <<-CODE, "`make(true)` can be nil here, and a call is made again each time it is written, so `if make(true)` narrows nothing: bind it and narrow the variable (`if value = make(true)`", filename: "x.ri"
         class B
           def size
             1
@@ -348,7 +348,7 @@ describe "Semantic: iyi" do
 
     it "names the error members and their three idioms" do
       exception = expect_raises(Iyi::TypeException) do
-        semantic <<-CODE, filename: "x.iyi"
+        semantic <<-CODE, filename: "x.ri"
           class A
             def size
               1
@@ -378,25 +378,25 @@ describe "Semantic: iyi" do
     end
 
     it "says what a C-family comment after code is" do
-      assert_error "x = 1 // the answer", "`//` at 1:7 is integer division, so the words after it are read as code: a comment starts with `#`", filename: "x.iyi"
+      assert_error "x = 1 // the answer", "`//` at 1:7 is integer division, so the words after it are read as code: a comment starts with `#`", filename: "x.ri"
     end
 
     it "names the spelling of another language's method" do
-      assert_error "class A\nend\nA.new.trim", "`strip` is the spelling here", filename: "x.iyi"
-      assert_error "class A\nend\nA.new.lenght", "`size` is the spelling here", filename: "x.iyi"
-      assert_error "class A\nend\nA.new.to_string", "`to_s` is the spelling here", filename: "x.iyi"
+      assert_error "class A\nend\nA.new.trim", "`strip` is the spelling here", filename: "x.ri"
+      assert_error "class A\nend\nA.new.lenght", "`size` is the spelling here", filename: "x.ri"
+      assert_error "class A\nend\nA.new.to_string", "`to_s` is the spelling here", filename: "x.ri"
     end
 
     it "names the in-place spelling of a method whose plain name is here" do
-      assert_error "class A\n  def uniq\n    self\n  end\nend\na = A.new\na.uniq!", "`uniq!` is the other library's in-place spelling, and `!` cannot end a name here (iyi SPEC III.1.7a): reassign the copy, `a = a.uniq`", filename: "x.iyi"
+      assert_error "class A\n  def uniq\n    self\n  end\nend\na = A.new\na.uniq!", "`uniq!` is the other library's in-place spelling, and `!` cannot end a name here (iyi SPEC III.1.7a): reassign the copy, `a = a.uniq`", filename: "x.ri"
     end
 
     it "says a setter in initialize is not the field" do
-      assert_error "class P\n  @x : Int32\n\n  def initialize(x : Int32)\n    self.x = x\n  end\nend\nP.new(1)", "`self.x = x` calls a setter, and does not assign the field", filename: "x.iyi"
+      assert_error "class P\n  @x : Int32\n\n  def initialize(x : Int32)\n    self.x = x\n  end\nend\nP.new(1)", "`self.x = x` calls a setter, and does not assign the field", filename: "x.ri"
     end
 
     it "suggests an ancestor's method one case away over the type's own" do
-      assert_error "class P\n  def to_s\n    \"\"\n  end\nend\nclass C < P\n  def to_i\n    1\n  end\nend\nC.new.to_S", "Did you mean 'to_s'?", filename: "x.iyi"
+      assert_error "class P\n  def to_s\n    \"\"\n  end\nend\nclass C < P\n  def to_i\n    1\n  end\nend\nC.new.to_S", "Did you mean 'to_s'?", filename: "x.ri"
     end
   end
 
@@ -459,7 +459,7 @@ describe "Semantic: iyi" do
 
     it "names the shadowed type, a trait superclass and an Exception subclass" do
       assert_error "struct Box\n  def size : Int32\n    1\n  end\nend\nmodule Inner\n  struct Box\n    def twice : Int32\n      size * 2\n    end\n  end\nend\nInner::Box.new.twice",
-        "`Inner::Box` is a new type, declared at x.iyi:7, that shadows `::Box`, and `size` is on `::Box`", filename: "x.iyi"
+        "`Inner::Box` is a new type, declared at x.ri:7, that shadows `::Box`, and `size` is on `::Box`", filename: "x.ri"
       assert_error "trait Greet\n  abstract def greet : String\nend\nstruct U < Greet\nend", "it's a trait. A type implements a trait after its declaration: `impl Greet for U`"
     end
 
@@ -505,7 +505,7 @@ describe "Semantic: iyi" do
     end
 
     it "still says the size rule when no std module has the method" do
-      assert_error <<-CODE, "iyi's prelude has no `frobnicate` on String"
+      assert_error <<-CODE, "ris's prelude has no `frobnicate` on String"
         "a".frobnicate
         CODE
     end
@@ -590,8 +590,8 @@ describe "Semantic: iyi" do
   # them, and so does the handler `defer` lowers to (test/cli/panics.sh
   # runs it).
   describe "rescue and ensure" do
-    it "refuses a rescue in an iyi file" do
-      assert_error <<-CODE, "iyi has no exceptions to rescue", filename: "prog.iyi"
+    it "refuses a rescue in a ris file" do
+      assert_error <<-CODE, "ris has no exceptions to rescue", filename: "prog.ri"
         begin
           1
         rescue
@@ -600,8 +600,8 @@ describe "Semantic: iyi" do
         CODE
     end
 
-    it "refuses an ensure in an iyi file, naming defer" do
-      assert_error <<-CODE, "iyi has no `ensure`", filename: "prog.iyi"
+    it "refuses an ensure in a ris file, naming defer" do
+      assert_error <<-CODE, "ris has no `ensure`", filename: "prog.ri"
         begin
           1
         ensure
@@ -613,9 +613,9 @@ describe "Semantic: iyi" do
     # A def's or a block's handler starts where its body does, and the
     # refusal pointed at the body's first statement, not at the keyword.
     it "points at the `rescue` and the `ensure` of a def" do
-      {"rescue" => "iyi has no exceptions to rescue", "ensure" => "iyi has no `ensure`"}.each do |keyword, message|
+      {"rescue" => "ris has no exceptions to rescue", "ensure" => "ris has no `ensure`"}.each do |keyword, message|
         ex = expect_raises(TypeException) do
-          semantic "def foo\n  1\n#{keyword}\n  2\nend\nfoo", filename: "prog.iyi"
+          semantic "def foo\n  1\n#{keyword}\n  2\nend\nfoo", filename: "prog.ri"
         end
         while (inner = ex.inner).is_a?(TypeException)
           ex = inner
@@ -1016,7 +1016,7 @@ describe "Semantic: iyi" do
     # the name found it and the refusal said "it's a generic module", where
     # `impl Comparable` is told the import.
     it "names std/enumerable for `impl Enumerable` without the import" do
-      assert_error <<-CODE, "`Enumerable` comes with `import std/enumerable::{Enumerable}`", filename: "nums.iyi"
+      assert_error <<-CODE, "`Enumerable` comes with `import std/enumerable::{Enumerable}`", filename: "nums.ri"
         struct Nums
         end
 
@@ -1367,7 +1367,7 @@ describe "Semantic: iyi" do
       # The top level is not a module. Treating it as one is what used to make
       # the rule vacuous for `Error`, which the compiler owns, and for a
       # prelude type: every module was trivially "inside" it.
-      assert_error <<-CODE, "neither belongs to a module, so there is no module this impl could be at home in", filename: "x.iyi"
+      assert_error <<-CODE, "neither belongs to a module, so there is no module this impl could be at home in", filename: "x.ri"
         module App
           module Orphan
             impl Error for String
@@ -1383,7 +1383,7 @@ describe "Semantic: iyi" do
     it "refuses an impl of a module-less trait outside the type's module" do
       # With no module on the trait's side, only the type's side is left to
       # satisfy — and this impl is in neither.
-      assert_error <<-CODE, "an impl must live in the module that defines the type (App::Data)", filename: "x.iyi"
+      assert_error <<-CODE, "an impl must live in the module that defines the type (App::Data)", filename: "x.ri"
         module App
           module Data
             struct Foo
@@ -1402,7 +1402,7 @@ describe "Semantic: iyi" do
     end
 
     it "allows an impl of a module-less trait in the type's own module" do
-      assert_type(<<-CODE, filename: "x.iyi") { types["App"].types["Data"].types["Foo"] }
+      assert_type(<<-CODE, filename: "x.ri") { types["App"].types["Data"].types["Foo"] }
         module App
           module Data
             struct Foo
@@ -1423,7 +1423,7 @@ describe "Semantic: iyi" do
     it "allows an impl for a module-less type from the trait's own module" do
       # Implementing a trait you own for a type you do not is the other side of
       # the rule, and it stays open — this is how `std/traits` reaches `Int32`.
-      assert_type(<<-CODE, filename: "x.iyi") { int32 }
+      assert_type(<<-CODE, filename: "x.ri") { int32 }
         module App
           module Show
             trait Showable
@@ -1764,7 +1764,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a specialised impl" do
-      assert_error <<-CODE, "iyi has no specialised impls"
+      assert_error <<-CODE, "ris has no specialised impls"
         trait Showable
           abstract def show
         end
@@ -1781,7 +1781,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a concrete argument alongside a binder" do
-      assert_error <<-CODE, "iyi has no specialised impls"
+      assert_error <<-CODE, "ris has no specialised impls"
         trait Showable
           abstract def show
         end
@@ -2944,9 +2944,9 @@ describe "Semantic: iyi" do
     it "types a call from its declared error union, not from its body" do
       # iyi SPEC III.1.8, IV.2: the signature is the contract. Typed from the
       # body, `never` was `Int32` and `never!` was refused as having "no error
-      # to propagate", while a build reading `never` from its `.iyimod` typed
+      # to propagate", while a build reading `never` from its `.rimod` typed
       # it `Int32 | IOError`.
-      assert_type(<<-CODE, filename: "x.iyi") { union_of(int32, types["App"].types["Fails"].types["IOError"]) }
+      assert_type(<<-CODE, filename: "x.ri") { union_of(int32, types["App"].types["Fails"].types["IOError"]) }
         module App
           module Fails
             struct IOError
@@ -2977,8 +2977,8 @@ describe "Semantic: iyi" do
     it "propagates an error member out of the enclosing method" do
       # III.1.2. `read` can fail; `load` says so in its own return type, and
       # `!` is what carries the failure across without a `case`. The filename
-      # matters: `!` is the operator only in a `.iyi` file.
-      assert_type(<<-CODE, filename: "x.iyi") { union_of(int32, types["App"].types["Fails"].types["IOError"]) }
+      # matters: `!` is the operator only in a `.ri` file.
+      assert_type(<<-CODE, filename: "x.ri") { union_of(int32, types["App"].types["Fails"].types["IOError"]) }
         module App
           module Fails
             struct IOError
@@ -3018,7 +3018,7 @@ describe "Semantic: iyi" do
     it "refuses to propagate where there is no error member" do
       # III.1.1's degenerate cases are rejected rather than given a surprising
       # meaning: without this, `!` here compiles and silently does nothing.
-      assert_error <<-CODE, "`!` has no error to propagate: no member of (Int32 | Nil) implements `Error`", filename: "x.iyi"
+      assert_error <<-CODE, "`!` has no error to propagate: no member of (Int32 | Nil) implements `Error`", filename: "x.ri"
         module App
           module Fails
             def self.maybe(missing : Bool) : Int32?
@@ -3037,7 +3037,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses to propagate where every member is an error" do
-      assert_error <<-CODE, "`!` can never produce a value: every member of App::Fails::IOError implements `Error`", filename: "x.iyi"
+      assert_error <<-CODE, "`!` can never produce a value: every member of App::Fails::IOError implements `Error`", filename: "x.ri"
         module App
           module Fails
             struct IOError
@@ -3070,7 +3070,7 @@ describe "Semantic: iyi" do
       # expansion wrote: "must return String but it is returning IOError",
       # which is true and mentions neither the operator that put it there nor
       # the two ways out. The operator asks the enclosing signature itself now.
-      assert_error <<-CODE, "`!` propagates App::Fails::IOError out of `go`", filename: "x.iyi"
+      assert_error <<-CODE, "`!` propagates App::Fails::IOError out of `go`", filename: "x.ri"
         module App
           module Fails
             struct IOError
@@ -3102,7 +3102,7 @@ describe "Semantic: iyi" do
     it "reports an error member the enclosing signature does not list at the `!`" do
       # It was the other library's "must return (Int32 | ParseError) but it
       # is returning IOError", reported at the signature.
-      assert_error <<-CODE, "`!` propagates App::Fails::IOError out of `go`, and `go` returns (App::Fails::ParseError | Int32), which does not include it", filename: "x.iyi"
+      assert_error <<-CODE, "`!` propagates App::Fails::IOError out of `go`, and `go` returns (App::Fails::ParseError | Int32), which does not include it", filename: "x.ri"
         module App
           module Fails
             struct IOError
@@ -3160,7 +3160,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses `!` in initialize, where `new` would drop the error" do
-      assert_error <<-CODE, "`!` can't propagate out of `initialize`", filename: "x.iyi"
+      assert_error <<-CODE, "`!` can't propagate out of `initialize`", filename: "x.ri"
         module App
           module Fails
             struct ParseError
@@ -3194,7 +3194,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a `return` in initialize that leaves a field unassigned" do
-      assert_error <<-CODE, "`return` can't leave `initialize` before @name is assigned", filename: "x.iyi"
+      assert_error <<-CODE, "`return` can't leave `initialize` before @name is assigned", filename: "x.ri"
         class Box
           @value : Int32
           @name : String
@@ -3212,7 +3212,7 @@ describe "Semantic: iyi" do
 
     it "keeps a `return` in initialize once every field is assigned" do
       # `std/regex`'s `RxRuns` stops there when the automaton does not apply.
-      assert_no_errors <<-CODE, filename: "x.iyi"
+      assert_no_errors <<-CODE, filename: "x.ri"
         class Box
           @value : Int32
           @name : String
@@ -3233,7 +3233,7 @@ describe "Semantic: iyi" do
     # rejected before this, but through Crystal's rule about `return` — which
     # is what the expansion happens to be made of, and explains nothing.
     it "refuses to propagate out of a module's initialisation" do
-      assert_error <<-CODE, "`!` can't propagate out of a module's initialisation", filename: "x.iyi"
+      assert_error <<-CODE, "`!` can't propagate out of a module's initialisation", filename: "x.ri"
         module App
           module Fails
             struct IOError
@@ -3259,7 +3259,7 @@ describe "Semantic: iyi" do
     end
 
     it "still reports a plain top-level `return` as itself" do
-      assert_error "return", "can't return from top level", filename: "x.iyi"
+      assert_error "return", "can't return from top level", filename: "x.ri"
     end
 
     # iyi: `defer` (iyi SPEC III.1.4). The shape of the expansion is specced in
@@ -3268,7 +3268,7 @@ describe "Semantic: iyi" do
     # an `ensure`, and neither contributes to a value. The harness has no
     # prelude, so each fixture carries the runtime pair as typed no-ops.
     it "leaves the value of the scope alone" do
-      assert_type(<<-CODE, filename: "x.iyi") { int32 }
+      assert_type(<<-CODE, filename: "x.ri") { int32 }
         def __iyi_defer_push(cleanup : -> Nil) : Nil
         end
 
@@ -3293,7 +3293,7 @@ describe "Semantic: iyi" do
     end
 
     it "keeps a defer in a method that propagates" do
-      assert_type(<<-CODE, filename: "x.iyi") { union_of(int32, types["App"].types["Res"].types["IOError"]) }
+      assert_type(<<-CODE, filename: "x.ri") { union_of(int32, types["App"].types["Res"].types["IOError"]) }
         def __iyi_defer_push(cleanup : -> Nil) : Nil
         end
 
@@ -3338,7 +3338,7 @@ describe "Semantic: iyi" do
     it "binds `it` to the value a case is matching, narrowed per branch" do
       # `length` takes a `String`, so this only compiles if `it` is the narrowed
       # value and not the whole union.
-      assert_type(<<-CODE, filename: "x.iyi") { int32 }
+      assert_type(<<-CODE, filename: "x.ri") { int32 }
         module App
           module Fails
             struct IOError
@@ -3375,7 +3375,7 @@ describe "Semantic: iyi" do
     end
 
     it "binds `it` in a `when` branch and in the else" do
-      assert_type(<<-CODE, filename: "x.iyi") { int32 }
+      assert_type(<<-CODE, filename: "x.ri") { int32 }
         module App
           module Fails
             def self.go(n : Int32) : Int32
@@ -3394,7 +3394,7 @@ describe "Semantic: iyi" do
     it "leaves `it` undefined where a case has a tuple subject" do
       # There is no single value to name, so `it` is left a call rather than
       # bound to one of the elements.
-      assert_error <<-CODE, "undefined local variable or method 'it'", filename: "x.iyi"
+      assert_error <<-CODE, "undefined local variable or method 'it'", filename: "x.ri"
         module App
           module Fails
             def self.go(a : Int32, b : Int32) : Int32
@@ -3431,7 +3431,7 @@ describe "Semantic: iyi" do
     # by II.1 an ordinary call on `Int32 | IOError` would need *both* members
     # to implement it, which is the thing this design avoids.
     it "recovers from an error with a default" do
-      assert_type(<<-CODE, filename: "x.iyi") { int32 }
+      assert_type(<<-CODE, filename: "x.ri") { int32 }
         module App
           module Fails
             struct IOError
@@ -3463,7 +3463,7 @@ describe "Semantic: iyi" do
     it "widens the result when the default is of another type" do
       # Nothing computes this: the expansion is an `if`, so the result is the
       # union of the default and what `is_a?(::Error)` left on the other side.
-      assert_type(<<-CODE, filename: "x.iyi") { union_of(int32, char) }
+      assert_type(<<-CODE, filename: "x.ri") { union_of(int32, char) }
         module App
           module Fails
             struct IOError
@@ -3495,7 +3495,7 @@ describe "Semantic: iyi" do
     it "recovers by panicking, leaving only the non-error members" do
       # `raise` is `NoReturn`, so the error branch contributes nothing to the
       # type. Defined here because the semantic harness runs without a prelude.
-      assert_type(<<-CODE, filename: "x.iyi") { int32 }
+      assert_type(<<-CODE, filename: "x.ri") { int32 }
         def raise(message : String) : NoReturn
           while true
           end
@@ -3533,7 +3533,7 @@ describe "Semantic: iyi" do
       # `.or_panic` calls `message` on the narrowed value, which here holds two
       # unrelated error types. That resolves by II.1: both implement `Error`,
       # so their union does, and the marker trait carries the call.
-      assert_type(<<-CODE, filename: "x.iyi") { int32 }
+      assert_type(<<-CODE, filename: "x.ri") { int32 }
         def raise(message : String) : NoReturn
           while true
           end
@@ -3580,7 +3580,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses to recover where there is no error member" do
-      assert_error <<-CODE, "`.or` has no error to recover: no member of (Int32 | Nil) implements `Error`", filename: "x.iyi"
+      assert_error <<-CODE, "`.or` has no error to recover: no member of (Int32 | Nil) implements `Error`", filename: "x.ri"
         module App
           module Fails
             def self.maybe(missing : Bool) : Int32?
@@ -3601,7 +3601,7 @@ describe "Semantic: iyi" do
     it "refuses to recover where every member is an error" do
       # The default would be the only outcome, which is dead code dressed up as
       # a fallback — rejected for the same reason `!` rejects this operand.
-      assert_error <<-CODE, "`.or` can only ever return its default: every member of App::Fails::IOError implements `Error`", filename: "x.iyi"
+      assert_error <<-CODE, "`.or` can only ever return its default: every member of App::Fails::IOError implements `Error`", filename: "x.ri"
         module App
           module Fails
             struct IOError
@@ -3630,7 +3630,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses to panic-recover where every member is an error" do
-      assert_error <<-CODE, "`.or_panic` can never produce a value: every member of App::Fails::IOError implements `Error`", filename: "x.iyi"
+      assert_error <<-CODE, "`.or_panic` can never produce a value: every member of App::Fails::IOError implements `Error`", filename: "x.ri"
         def raise(message : String) : NoReturn
           while true
           end
@@ -3696,7 +3696,7 @@ describe "Semantic: iyi" do
     # a partial union, so the members outside the declared type are named
     # on their own.
     it "names the members outside the declared type" do
-      assert_error <<-CODE, "Nil is not in the declared type", filename: "x.iyi"
+      assert_error <<-CODE, "Nil is not in the declared type", filename: "x.ri"
         def f(x : Bool) : Int32 | String
           x ? 1 : (x ? "a" : nil)
         end
@@ -3729,7 +3729,7 @@ describe "Semantic: iyi" do
     # `a.sort!` is the other library's in-place sort; offered the copy
     # `sorted`, the call became `a.sorted` and left `a` unsorted.
     it "names the in-place form when the verb was written with `!`" do
-      assert_error <<-CRYSTAL, "'sort_in_place' is what this library calls it", filename: "x.iyi"
+      assert_error <<-CRYSTAL, "'sort_in_place' is what this library calls it", filename: "x.ri"
         module app/thing
 
         struct Numbers
@@ -3989,7 +3989,7 @@ describe "Semantic: iyi" do
     # written here for the same reason: the header scopes the rest of the
     # source into the module, so any consumer declared after it is *inside*
     # the module and sees its names lexically — which is right, R-2 is about
-    # what another module reaches. `samples/iyi/modules.iyi` is a separate
+    # what another module reaches. `samples/ris/modules.ri` is a separate
     # file and is where that half is exercised.
 
     # `Consumer` is inside app/greeter (see above), so the reason given is
@@ -4285,7 +4285,7 @@ describe "Semantic: iyi" do
     # parameter. Both halves were built long before they were ever written
     # together, and the meeting failed on `undefined constant T`.
     it "answers an associated type with the impl's own type parameter" do
-      assert_type(<<-CODE, filename: "x.iyi") { int32 }
+      assert_type(<<-CODE, filename: "x.ri") { int32 }
         module App
           module Coll
             trait Holder
@@ -4321,7 +4321,7 @@ describe "Semantic: iyi" do
     it "keeps the trait's own name resolvable from the impl's module" do
       # The fix must not reach for the target's scope: `Cmp` lives where the
       # impl was written, and `Int32` has never heard of it.
-      assert_type(<<-CODE, filename: "x.iyi") { int32 }
+      assert_type(<<-CODE, filename: "x.ri") { int32 }
         module App
           module Traits
             trait Sized
@@ -4395,7 +4395,7 @@ describe "Semantic: iyi" do
   # was refused.
   describe "typed group" do
     it "types a group whose task opens a group of the same parameter name" do
-      typed = Program.new.normalize(parse(<<-CODE, filename: "x.iyi")).to_s
+      typed = Program.new.normalize(parse(<<-CODE, filename: "x.ri")).to_s
         group do |g|
           a = g.spawn { 1 }
           b = g.spawn do
@@ -4437,7 +4437,7 @@ describe "Semantic: iyi" do
       STUB
 
     it "lets a block capture integers, strings and immutable structs" do
-      assert_type(stub + <<-CODE, filename: "x.iyi") { nil_type }
+      assert_type(stub + <<-CODE, filename: "x.ri") { nil_type }
         struct Point
           def initialize(@x : Int32, @y : Int32)
           end
@@ -4460,7 +4460,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a constant the block names whose type is not shareable" do
-      assert_error(stub + <<-CODE, "names the constant `TALLY : Tally`, which is not Share: Tally's field @total is assigned in `bump` (iyi SPEC III.4.5)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "names the constant `TALLY : Tally`, which is not Share: Tally's field @total is assigned in `bump` (iyi SPEC III.4.5)", filename: "x.ri")
         class Tally
           def initialize
             @total = 0
@@ -4482,7 +4482,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a class variable the block names that a method writes after its initializer" do
-      assert_error(stub + <<-CODE, "names the class variable `@@total`, which is written after its initializer (in `bump`), so every thread that reaches it shares one mutable cell: a data race (iyi SPEC III.4.5)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "names the class variable `@@total`, which is written after its initializer (in `bump`), so every thread that reaches it shares one mutable cell: a data race (iyi SPEC III.4.5)", filename: "x.ri")
         class Tally
           @@total = 0
           @@limit = 3
@@ -4506,7 +4506,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a captured value whose type has a setter" do
-      assert_error(stub + <<-CODE, "the block IyiThread.start runs on another thread captures `counter : Counter`, which is not Share: Counter's field @count is given a setter `count=` (iyi SPEC III.4.4)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "the block IyiThread.start runs on another thread captures `counter : Counter`, which is not Share: Counter's field @count is given a setter `count=` (iyi SPEC III.4.4)", filename: "x.ri")
         class Counter
           def initialize
             @count = 0
@@ -4526,7 +4526,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a captured value whose type assigns a field outside initialize" do
-      assert_error(stub + <<-CODE, "which is not Share: Tally's field @total is assigned in `bump` (iyi SPEC III.4.4)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "which is not Share: Tally's field @total is assigned in `bump` (iyi SPEC III.4.4)", filename: "x.ri")
         class Tally
           def initialize
             @total = 0
@@ -4550,7 +4550,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a captured value whose field a method takes the address of" do
-      assert_error(stub + <<-CODE, "captures `counter : Counter`, which is not Share: Counter's field @n is given out by `pointerof` in `slot` (iyi SPEC III.4.4)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "captures `counter : Counter`, which is not Share: Counter's field @n is given out by `pointerof` in `slot` (iyi SPEC III.4.4)", filename: "x.ri")
         class Counter
           def initialize(@n : Int32)
           end
@@ -4569,7 +4569,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a captured value through a field that is not shareable" do
-      assert_error(stub + <<-CODE, "captures `bag : Bag`, which is not Share: Bag's field @items : Pointer(Int32) is not shareable: Pointer(Int32) is raw memory", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "captures `bag : Bag`, which is not Share: Bag's field @items : Pointer(Int32) is not shareable: Pointer(Int32) is raw memory", filename: "x.ri")
         class Bag
           def initialize(@items : Pointer(Int32))
           end
@@ -4589,7 +4589,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a captured value through a field two levels down" do
-      assert_error(stub + <<-CODE, "captures `shelf : Shelf`, which is not Share: Shelf's field @bag : Bag is not shareable: Bag's field @items : Pointer(Int32) is not shareable", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "captures `shelf : Shelf`, which is not Share: Shelf's field @bag : Bag is not shareable: Bag's field @items : Pointer(Int32) is not shareable", filename: "x.ri")
         class Bag
           def initialize(@items : Pointer(Int32))
           end
@@ -4666,7 +4666,7 @@ describe "Semantic: iyi" do
       OWNING
 
     it "lets a thread capture an owning type of a value that is not Share" do
-      assert_type(stub + owning + <<-CODE, filename: "x.iyi") { int32 }
+      assert_type(stub + owning + <<-CODE, filename: "x.ri") { int32 }
         guard = Guard.new { Bag.new }
         step = 2
         IyiThread.start do
@@ -4678,7 +4678,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a block behind the lock that captures a value that is not Share" do
-      assert_error(stub + owning + <<-CODE, "the block Guard#lock runs behind the Guard's lock captures `other : Bag`, which is not Share: Bag's field @n is assigned in `add`; whatever the block can reach, the value behind the lock can reach", filename: "x.iyi")
+      assert_error(stub + owning + <<-CODE, "the block Guard#lock runs behind the Guard's lock captures `other : Bag`, which is not Share: Bag's field @n is assigned in `add`; whatever the block can reach, the value behind the lock can reach", filename: "x.ri")
         guard = Guard.new { Bag.new }
         other = Bag.new
         guard.lock { |bag| other.add(bag.n) }
@@ -4686,21 +4686,21 @@ describe "Semantic: iyi" do
     end
 
     it "refuses an answer that is not Share leaving the lock" do
-      assert_error(stub + owning + <<-CODE, "Guard(T)#get answers `Bag`, which is not Share: Bag's field @n is assigned in `add`", filename: "x.iyi")
+      assert_error(stub + owning + <<-CODE, "Guard(T)#get answers `Bag`, which is not Share: Bag's field @n is assigned in `add`", filename: "x.ri")
         guard = Guard.new { Bag.new }
         guard.get { |bag| bag }
         CODE
     end
 
     it "refuses a constructor's block that hands in a value something else holds" do
-      assert_error(stub + owning + <<-CODE, "the block Guard.new makes the Guard's value in captures `other : Bag`, which is not Share", filename: "x.iyi")
+      assert_error(stub + owning + <<-CODE, "the block Guard.new makes the Guard's value in captures `other : Bag`, which is not Share", filename: "x.ri")
         other = Bag.new
         Guard.new { other }
         CODE
     end
 
     it "refuses a constant that is not Share named behind the lock" do
-      assert_error(stub + owning + <<-CODE, "the block Guard#lock runs behind the Guard's lock names the constant `KEPT : Bag`, which is not Share", filename: "x.iyi")
+      assert_error(stub + owning + <<-CODE, "the block Guard#lock runs behind the Guard's lock names the constant `KEPT : Bag`, which is not Share", filename: "x.ri")
         KEPT = Bag.new
         guard = Guard.new { 1 }
         guard.lock { |n| KEPT.add(n) }
@@ -4708,7 +4708,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a Share argument it does not know" do
-      assert_error(<<-CODE, "unknown Share named argument, valid arguments are: 'owns'", filename: "x.iyi")
+      assert_error(<<-CODE, "unknown Share named argument, valid arguments are: 'owns'", filename: "x.ri")
         @[Share(own: true)]
         class Box
         end
@@ -4716,7 +4716,7 @@ describe "Semantic: iyi" do
     end
 
     it "trusts a type marked @[Share] whatever its fields do" do
-      assert_type(stub + <<-CODE, filename: "x.iyi") { nil_type }
+      assert_type(stub + <<-CODE, filename: "x.ri") { nil_type }
         @[Share]
         class Box
           def initialize
@@ -4737,7 +4737,7 @@ describe "Semantic: iyi" do
     end
 
     it "trusts a generic marked @[Share] only when its arguments are" do
-      assert_error(stub + <<-CODE, "captures `cell : Cell(Pointer(Int32))`, which is not Share: Cell(Pointer(Int32))'s T is Pointer(Int32): Pointer(Int32) is raw memory", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "captures `cell : Cell(Pointer(Int32))`, which is not Share: Cell(Pointer(Int32))'s T is Pointer(Int32): Pointer(Int32) is raw memory", filename: "x.ri")
         @[Share]
         class Cell(T)
           def initialize(@value : T)
@@ -4762,7 +4762,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a captured self whose type is not shareable" do
-      assert_error(stub + <<-CODE, "captures `self : Worker`, which is not Share: Worker's field @done is assigned in `finish` (iyi SPEC III.4.4)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "captures `self : Worker`, which is not Share: Worker's field @done is assigned in `finish` (iyi SPEC III.4.4)", filename: "x.ri")
         class Worker
           def initialize
             @done = false
@@ -4785,7 +4785,7 @@ describe "Semantic: iyi" do
     end
 
     it "refuses a self reached by a receiverless call whose type is not shareable" do
-      assert_error(stub + <<-CODE, "captures `self : Worker`, which is not Share: Worker's field @done is assigned in `finish` (iyi SPEC III.4.4)", filename: "x.iyi")
+      assert_error(stub + <<-CODE, "captures `self : Worker`, which is not Share: Worker's field @done is assigned in `finish` (iyi SPEC III.4.4)", filename: "x.ri")
         class Worker
           def initialize
             @done = false
@@ -4821,7 +4821,7 @@ describe "Semantic: iyi" do
         v = 1
 
         KEPT
-      assert_error(stub + kept + <<-CODE, "`v` is assigned here, in a block or a proc that may run after the thread has started", filename: "x.iyi")
+      assert_error(stub + kept + <<-CODE, "`v` is assigned here, in a block or a proc that may run after the thread has started", filename: "x.ri")
         flip = keep do
           v = 2
           nil
@@ -4831,7 +4831,7 @@ describe "Semantic: iyi" do
           nil
         end
         CODE
-      assert_error(stub + kept + <<-CODE, "`v` is assigned here, in a block or a proc that may run after the thread has started", filename: "x.iyi")
+      assert_error(stub + kept + <<-CODE, "`v` is assigned here, in a block or a proc that may run after the thread has started", filename: "x.ri")
         IyiThread.start do
           v
           nil
@@ -4871,7 +4871,7 @@ describe "Semantic: iyi" do
         STUB
 
       it "lets it capture integers, strings and a value whose fields nothing assigns" do
-        assert_type(group_stub + <<-CODE, filename: "x.iyi") { nil_type }
+        assert_type(group_stub + <<-CODE, filename: "x.ri") { nil_type }
           class Totals
             def initialize(@limit : Int32)
             end
@@ -4894,7 +4894,7 @@ describe "Semantic: iyi" do
       end
 
       it "refuses a captured value that is not shareable, by name" do
-        assert_error(group_stub + <<-CODE, "the block spawn_parallel runs on another thread captures `counter : Counter`, which is not Share: Counter's field @count is given a setter `count=` (iyi SPEC III.4.4)", filename: "x.iyi")
+        assert_error(group_stub + <<-CODE, "the block spawn_parallel runs on another thread captures `counter : Counter`, which is not Share: Counter's field @count is given a setter `count=` (iyi SPEC III.4.4)", filename: "x.ri")
           class Counter
             def initialize
               @count = 0
@@ -4915,7 +4915,7 @@ describe "Semantic: iyi" do
       end
 
       it "refuses a captured local assigned after the spawn" do
-        assert_error(group_stub + <<-CODE, "`count` is assigned here, after the task was spawned, and the block spawn_parallel runs on another thread", filename: "x.iyi")
+        assert_error(group_stub + <<-CODE, "`count` is assigned here, after the task was spawned, and the block spawn_parallel runs on another thread", filename: "x.ri")
           count = 1
           g = G
           g.spawn_parallel { count }
@@ -4924,7 +4924,7 @@ describe "Semantic: iyi" do
       end
 
       it "refuses a local of a loop that spawns again" do
-        assert_error(group_stub + <<-CODE, "in a loop or a block that spawns the task again", filename: "x.iyi")
+        assert_error(group_stub + <<-CODE, "in a loop or a block that spawns the task again", filename: "x.ri")
           g = G
           going = true
           while going
@@ -4936,7 +4936,7 @@ describe "Semantic: iyi" do
       end
 
       it "refuses a constant the block names whose type is not shareable" do
-        assert_error(group_stub + <<-CODE, "the block spawn_parallel runs on another thread names the constant `TALLY : Tally`, which is not Share: Tally's field @total is assigned in `bump` (iyi SPEC III.4.5)", filename: "x.iyi")
+        assert_error(group_stub + <<-CODE, "the block spawn_parallel runs on another thread names the constant `TALLY : Tally`, which is not Share: Tally's field @total is assigned in `bump` (iyi SPEC III.4.5)", filename: "x.ri")
           class Tally
             def initialize
               @total = 0

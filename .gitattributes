@@ -2,16 +2,16 @@
 
 *.cr text eol=lf
 
-# iyi: `.iyi` is Crystal's grammar with a different compilation model, so GitHub
+# iyi: `.ri` is Crystal's grammar with a different compilation model, so GitHub
 # should read it the way the compiler does. Without this the samples, which are
 # the documentation, render as plain text.
-*.iyi text eol=lf linguist-language=Crystal
+*.ri text eol=lf linguist-language=Crystal
 
 # iyi: a template's bytes are what `Eiy.embed` renders, and an exercise
 # compares the render against a string written in its source. Checked out
 # with CRLF — which is what a Windows clone does to a file nothing pins —
 # every line of the render gained a byte and
-# `test/cli/std_eiy_exercise.iyi` failed on Windows alone.
+# `test/cli/std_eiy_exercise.ri` failed on Windows alone.
 *.eiy text eol=lf
 
 # iyi: and Crystal's templates for the same reason, one step removed: an
@@ -36,7 +36,7 @@
 
 # A module artifact is binary. Without this GitHub tries to render one and git
 # tries to diff it.
-*.iyimod binary
+*.rimod binary
 
 ## Sourced-in dependencies
 

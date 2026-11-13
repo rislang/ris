@@ -10,5 +10,6 @@ def mixed_spares
     RisRegion.release(large)
   end
 end
+
 mixed_spares
 puts "PASS: mixed side spares reused"

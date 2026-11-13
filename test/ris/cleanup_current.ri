@@ -7,6 +7,7 @@ def returned : Nil
   value = 2
   return
 end
+
 returned
 2.times do |i|
   value = 3

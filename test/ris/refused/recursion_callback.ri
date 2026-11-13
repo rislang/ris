@@ -1,10 +1,12 @@
 def invoke(&block : -> Int32) : Int32
   yield
 end
+
 def descend(n : Int32) : Int32
   return 0 if n == 0
   a = Array(Int32).new
   child = invoke { descend(n - 1) }
   child + a.size
 end
+
 tape { descend(2) }

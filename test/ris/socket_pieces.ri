@@ -16,6 +16,7 @@ def read_all(socket : IyiSocket, count : Int32) : String
 end
 
 big = ("b" * 1048576)
+
 def expected_text : String
   text = ""
   text << "head:"
@@ -26,6 +27,7 @@ def expected_text : String
   text << ("b" * 1048576) << "end"
   text
 end
+
 expected_size = expected_text.bytesize
 server = IyiSocket.listen(0)
 client = IyiSocket.connect("127.0.0.1", server.local_port).or_panic

@@ -1,8 +1,8 @@
 module Iyi
-  # Fine-grained profiling, gated behind IYI_PROF=1.
+  # Fine-grained profiling, gated behind RIS_PROF=1.
   # Temporary instrumentation for the compile-speed investigation.
   module Prof
-    @@enabled = !ENV["IYI_PROF"]?.nil?
+    @@enabled = !ENV["RIS_PROF"]?.nil?
     @@spans = {} of String => Time::Span
     @@order = [] of String
 
@@ -125,7 +125,7 @@ module Iyi
       return unless @@enabled
       return if @@order.empty? && @@counts.empty? && @@inst_exact.empty?
       io.puts
-      io.puts "=== IYI_PROF ==="
+      io.puts "=== RIS_PROF ==="
       @@order.each do |name|
         io.puts "#{name.ljust(38)} #{@@spans[name]}"
       end

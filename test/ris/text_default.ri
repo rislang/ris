@@ -8,7 +8,7 @@ end
 literal_cursor = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 literal = "static"
 raise "literal used tape storage" unless literal_cursor ==
-  IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
+                                           IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 # A literal is a String on the current tape already.
 heap_literal = "static"
 raise "static retention type" unless heap_literal.is_a?(String)
@@ -17,10 +17,10 @@ raise "literal allocated" unless "static".is_a?(String)
 before = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 format_size(42)
 raise "def kept interpolation" unless before ==
-  IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
+                                        IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 case "key"
 when "key" then nil
-else raise "case comparison failed"
+else            raise "case comparison failed"
 end
 # The loop starts here.
 before = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)

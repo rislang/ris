@@ -4,10 +4,12 @@ class A
     "A as String"
   end
 end
+
 class B
   def to_s(io : String::Builder) : Nil
     io << "B into a builder"
   end
 end
+
 puts A.new
 puts B.new

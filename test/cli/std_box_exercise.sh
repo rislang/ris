@@ -25,7 +25,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/ris}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -43,12 +43,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build --spec "$@" -o "$WORK/$name" "$REPO/src/std/box.iyi" \
+  if ! "$RIS" build --spec "$@" -o "$WORK/$name" "$REPO/src/std/box.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -104,16 +104,16 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the broken-module proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/box.iyi").read_text()
+src = Path("$REPO/src/std/box.ri").read_text()
 old = 'pointer.as(self).object'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/box.iyi").write_text(src.replace(old, 'raise "unbox discarded"', 1))
+Path("$WORK/patched/std/box.ri").write_text(src.replace(old, 'raise "unbox discarded"', 1))
 PY
 then
   echo "  the patch did not apply"
   status=1
-elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build --spec -o "$WORK/mut.bin" "$WORK/patched/std/box.iyi" >"$WORK/mut.out" 2>&1; then
+elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build --spec -o "$WORK/mut.bin" "$WORK/patched/std/box.ri" >"$WORK/mut.out" 2>&1; then
   echo "  the broken copy did not compile"
   sed -n '1,6p' "$WORK/mut.out"
   status=1

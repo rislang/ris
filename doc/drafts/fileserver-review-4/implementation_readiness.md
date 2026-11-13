@@ -3,7 +3,7 @@
 Verdict: ready once two Majors are fixed. MB1-MB6 resolved.
 
 Checked: check.sh:64, check.sh:1187-1188, seven `parse` defs in
-time.iyi (2457, 2463, 3635, 3656, 3671, 3689, 3704).
+time.ri (2457, 2463, 3635, 3656, 3671, 3689, 3704).
 
 ## Major
 

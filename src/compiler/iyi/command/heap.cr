@@ -28,7 +28,8 @@ class Iyi::Command
     groups = Hash(String, Int32).new(0)
     census.sites.to_a.sort_by { |key, _| key }.each do |key, detail|
       file, line, col, kind = key
-      is_user = file.ends_with?(".ri") && !file.includes?("/std/")
+      is_user = file.ends_with?(".ri") && !file.includes?("/std/") &&
+                !file.includes?("/src/ris/")
       next if user && !is_user
       counts[kind] += 1
       if is_user

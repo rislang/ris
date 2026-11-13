@@ -114,16 +114,15 @@ module Iyi
       node
     end
 
-    # ris: as a constant's (Normalizer#tape_text?): a program's .ri or
-    # .iyi file, not std, the runtime or an artifact, initializes its
+    # ris: as a constant's (Normalizer#tape_text?): a program's .ri
+    # file, not std, the runtime or an artifact, initializes its
     # class variables on the program tape.
     private def ris_program_file?(location : Location?) : Bool
       file = location.try(&.original_filename).try(&.gsub('\\', '/'))
       return false unless file && location
-      return true if file.ends_with?(".ri")
-      file.ends_with?(".iyi") && iyi_prelude? &&
+      file.ends_with?(".ri") && iyi_prelude? &&
         !TapeScopeRuntime.runtime?(location) &&
-        !file.includes?("/src/std/")
+        !TapeScopeRuntime.library_file?(file)
     end
   end
 

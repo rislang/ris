@@ -40,7 +40,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -58,12 +58,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_rsa_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_rsa_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -375,15 +375,15 @@ fi
 
 echo
 echo "== an error value's sentence, through .or_panic"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/rsa::{RsaPublicKey}
 
 RsaPublicKey.from_spki([2_u8, 1_u8, 1_u8]).or_panic
 puts "accepted"
-IYI
-if "$IYI" run "$WORK/refuse.iyi" >"$WORK/refuse.out" 2>&1; then
+RIS
+if "$RIS" run "$WORK/refuse.ri" >"$WORK/refuse.out" 2>&1; then
   echo "  an INTEGER was accepted as a key"
   status=1
 elif ! grep -qF "rsa: asn1: expected a SEQUENCE, found INTEGER at offset 0" "$WORK/refuse.out"; then
@@ -394,7 +394,7 @@ else
 fi
 # Signing over SHA-1 is the program's mistake, not the key's: a panic
 # that names it.
-cat >"$WORK/sha1.iyi" <<'IYI'
+cat >"$WORK/sha1.ri" <<'RIS'
 module sha1
 
 import std/rsa::{RsaPrivateKey, RsaHash}
@@ -403,10 +403,10 @@ import std/env::{ENV}
 
 RsaPrivateKey.from_pem(File.read(ENV["RSA_KEY"])).or_panic.sign_pss(RsaHash::SHA1, "abc")
 puts "signed"
-IYI
+RIS
 if [ ! -s "$WORK/keys/k0.pem" ]; then
   echo "  no key drawn here, so a signature over SHA-1 goes unasked"
-elif RSA_KEY="$WORK/keys/k0.pem" "$IYI" run "$WORK/sha1.iyi" >"$WORK/sha1.out" 2>&1; then
+elif RSA_KEY="$WORK/keys/k0.pem" "$RIS" run "$WORK/sha1.ri" >"$WORK/sha1.out" 2>&1; then
   echo "  a signature over SHA-1 was made"
   status=1
 elif ! grep -qF "rsa: a signature over SHA-1, which this checks and does not make" "$WORK/sha1.out"; then
@@ -418,13 +418,13 @@ fi
 
 echo
 echo "== doc, format, other platforms and artifacts"
-if "$IYI" doc "$REPO/src/std/rsa.iyi" >"$WORK/doc.txt" 2>&1 && grep -q "sign_pss" "$WORK/doc.txt"; then
+if "$RIS" doc "$REPO/src/std/rsa.ri" >"$WORK/doc.txt" 2>&1 && grep -q "sign_pss" "$WORK/doc.txt"; then
   echo "  iyi doc reads std/rsa, RsaPrivateKey's signing included"
 else
   echo "  FAIL: iyi doc: $(grep -m1 -E 'Error|BUG' "$WORK/doc.txt")"
   status=1
 fi
-if "$IYI" check format "$REPO/src/std/rsa.iyi" "$REPO/test/cli/std_rsa_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$RIS" check format "$REPO/src/std/rsa.ri" "$REPO/test/cli/std_rsa_exercise.ri" >"$WORK/format.log" 2>&1; then
   echo "  the module and its exercise are formatted"
 else
   echo "  FAIL: not formatted: $(grep -m1 produced "$WORK/format.log")"
@@ -432,7 +432,7 @@ else
 fi
 apart=""
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_rsa_exercise.iyi" >"$WORK/cross.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_rsa_exercise.ri" >"$WORK/cross.log" 2>&1; then
     echo "  $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross.log")"
     apart="$apart $target"
   fi
@@ -444,8 +444,8 @@ else
   echo "  the exercise typechecks for x86_64-linux-gnu, aarch64-darwin, x86_64-windows-msvc, aarch64-linux-gnu, x86_64-linux-musl"
 fi
 mkdir -p "$WORK/r1"
-if (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_rsa_exercise.iyi" &&
-  "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_rsa_exercise.iyi") >"$WORK/r1/build.log" 2>&1; then
+if (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_rsa_exercise.ri" &&
+  "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_rsa_exercise.ri") >"$WORK/r1/build.log" 2>&1; then
   "$WORK/r1/from-source" >"$WORK/r1/source.out" 2>&1
   "$WORK/r1/from-artifact" >"$WORK/r1/artifact.out" 2>&1
   if cmp -s "$WORK/r1/source.out" "$WORK/r1/artifact.out" && grep -q "ALL CHECKS PASSED" "$WORK/r1/artifact.out"; then
@@ -476,15 +476,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/rsa.iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/rsa.ri").read_text(encoding="utf-8")
 if src.count(os.environ["OLD"]) != 1:
     raise SystemExit("patch site missing or not one")
-Path("$WORK/patched/std/rsa.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
+Path("$WORK/patched/std/rsa.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_rsa_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_rsa_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF -e "$2" "$WORK/mut.out"; then

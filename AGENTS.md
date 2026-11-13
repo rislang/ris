@@ -70,7 +70,7 @@ It returns tape data on the caller's tape; the owning scope frees it all:
   `[start, count]`, `each_byte`. Only the FFI or socket call takes a pointer.
   In an `@[Ffi]` module `text.to_unsafe` may only be a `lib` fun's argument.
 * In `std/` a def handing a pointer to the OS is a small `@[TapeUnsafe]`
-  with a reason. `src/iyi/` is exempt.
+  with a reason. `src/ris/` is exempt.
 
 Example: `HeadParser.parse_head(bytes : String, from : Int32, complete :
 Bool, fields : Array(Field)) : ParsedHead | HeadError | Nil`: its answer and
@@ -95,6 +95,8 @@ temporaries and response on one tape.
   removed, not kept beside its replacement (Channel, select and Mutex
   gave way to RisBoard and Atomic). The rest keep their Iyi* names for
   merges.
+* A ris file ends in `.ri` (SPEC 6.10): a file from iyi is renamed to
+  `.ri` when it is merged; src/iyi/ maps to src/ris/, `IYI_X` to `RIS_X`.
 * Keep inherited documents in doc/archive/iyi/ and doc/archive/crystal/;
   iyi's draft spec is doc/archive/iyi/SPEC.md, cited as "iyi SPEC".
   SPEC.md is ris's specification; ris's own docs include CONTRIBUTING.md.

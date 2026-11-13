@@ -1,6 +1,5 @@
 # The public config and orders carry finite copied data, with no heap.
-import std/autocert::{Autocert, AutocertConfig, AutocertOrder,
-  AutocertControl}
+import std/autocert::{Autocert, AutocertConfig, AutocertOrder, AutocertControl}
 
 hosts = Array(String).new(2)
 hosts << "localhost" << "other.example"

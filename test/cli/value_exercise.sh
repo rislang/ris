@@ -4,10 +4,10 @@
 #
 #     bash test/cli/value_exercise.sh
 #
-# `test/cli/value_exercise.iyi` is the program. It runs plain and optimised, and
+# `test/cli/value_exercise.ri` is the program. It runs plain and optimised, and
 # then each check is proved capable of failing by patching a *copy of the
-# prelude* - `src/iyi/object.iyi` with one method broken - and building
-# against it through `IYI_PATH`. A check that cannot fail is not a check.
+# prelude* - `src/ris/object.ri` with one method broken - and building
+# against it through `RIS_PATH`. A check that cannot fail is not a check.
 #
 # What is being protected is the agreement, not the two methods. `==` and
 # `hash` were the ones the prelude never wrote for either type, so `Object`'s
@@ -23,9 +23,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The compiler, overridable: `bin/iyi` is a POSIX shell wrapper, and on
+# The compiler, overridable: `bin/ris` is a POSIX shell wrapper, and on
 # Windows the caller is the only one who knows where the real binary is.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 # The search path is a list, and the byte between its entries is the
 # platform's: `;` where a drive letter already owns the colon.
 case "$(uname -s)" in
@@ -52,7 +52,7 @@ status=0
 run_case() { # run_case <label> <name> [build flags...]
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/value_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/value_exercise.ri" \
        > "$WORK/$name.build" 2>&1; then
     echo "  $label: the exercise did not build"
     sed -n '1,12p' "$WORK/$name.build"
@@ -83,16 +83,16 @@ run_case "release" release --release
 
 echo
 echo "== the sample that reaches it, because zip answers tuples"
-if "$IYI" run "$REPO/samples/iyi/collections.iyi" > "$WORK/sample.out" 2>&1; then
+if "$RIS" run "$REPO/samples/ris/collections.ri" > "$WORK/sample.out" 2>&1; then
   if grep -qE "^zip +[0-9][a-z]+ [0-9][a-z]+ [0-9][a-z]+ [0-9][a-z]+$" "$WORK/sample.out"; then
-    echo "  samples/iyi/collections.iyi: zip still answers its pairs"
+    echo "  samples/ris/collections.ri: zip still answers its pairs"
   else
-    echo "  samples/iyi/collections.iyi: ran, but not printing its zip"
+    echo "  samples/ris/collections.ri: ran, but not printing its zip"
     grep -n "zip" "$WORK/sample.out" | sed -n '1,3p'
     status=1
   fi
 else
-  echo "  samples/iyi/collections.iyi: did not run"
+  echo "  samples/ris/collections.ri: did not run"
   tail -3 "$WORK/sample.out"
   status=1
 fi
@@ -100,23 +100,23 @@ fi
 echo
 echo "== proving the checks can fail, one broken method at a time"
 
-# A copy of the whole prelude with one method patched, on `IYI_PATH` ahead of
+# A copy of the whole prelude with one method patched, on `RIS_PATH` ahead of
 # the real one. The patch has to change the file - a sed that matched nothing
 # would otherwise read as a pass - and the exercise then has to exit non-zero
 # at the check that names the method.
 prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
   local label="$1" dir="$2" phrase="$3" script="$4"
-  mkdir -p "$WORK/$dir/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
-  sed -e "$script" "$REPO/src/iyi/object.iyi" > "$WORK/$dir/iyi/object.iyi"
-  if cmp -s "$REPO/src/iyi/object.iyi" "$WORK/$dir/iyi/object.iyi"; then
+  mkdir -p "$WORK/$dir/ris"
+  cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
+  sed -e "$script" "$REPO/src/ris/object.ri" > "$WORK/$dir/ris/object.ri"
+  if cmp -s "$REPO/src/ris/object.ri" "$WORK/$dir/ris/object.ri"; then
     echo "  $label: the patch changed nothing, so this proves nothing"
     status=1
     return
   fi
 
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/value_exercise.iyi" \
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/value_exercise.ri" \
        > "$WORK/$dir/build" 2>&1; then
     if grep -q "$phrase" "$WORK/$dir/build"; then
       printf '  %s: refused at compile time\n' "$label"
@@ -148,16 +148,16 @@ prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
 # The same, for the file the other value type lives in.
 prove_fails_primitives() { # prove_fails_primitives <label> <dir> <phrase> <sed script>
   local label="$1" dir="$2" phrase="$3" script="$4"
-  mkdir -p "$WORK/$dir/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
-  sed -e "$script" "$REPO/src/iyi/primitives.iyi" > "$WORK/$dir/iyi/primitives.iyi"
-  if cmp -s "$REPO/src/iyi/primitives.iyi" "$WORK/$dir/iyi/primitives.iyi"; then
+  mkdir -p "$WORK/$dir/ris"
+  cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
+  sed -e "$script" "$REPO/src/ris/primitives.ri" > "$WORK/$dir/ris/primitives.ri"
+  if cmp -s "$REPO/src/ris/primitives.ri" "$WORK/$dir/ris/primitives.ri"; then
     echo "  $label: the patch changed nothing, so this proves nothing"
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/value_exercise.iyi" \
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/value_exercise.ri" \
        > "$WORK/$dir/build" 2>&1; then
     echo "  $label: the patched prelude did not build"
     sed -n '1,10p' "$WORK/$dir/build"
@@ -183,16 +183,16 @@ prove_fails_primitives() { # prove_fails_primitives <label> <dir> <phrase> <sed 
 
 prove_fails_range() { # prove_fails_range <label> <dir> <phrase> <sed script>
   local label="$1" dir="$2" phrase="$3" script="$4"
-  mkdir -p "$WORK/$dir/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
-  sed -e "$script" "$REPO/src/iyi/range.iyi" > "$WORK/$dir/iyi/range.iyi"
-  if cmp -s "$REPO/src/iyi/range.iyi" "$WORK/$dir/iyi/range.iyi"; then
+  mkdir -p "$WORK/$dir/ris"
+  cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
+  sed -e "$script" "$REPO/src/ris/range.ri" > "$WORK/$dir/ris/range.ri"
+  if cmp -s "$REPO/src/ris/range.ri" "$WORK/$dir/ris/range.ri"; then
     echo "  $label: the patch changed nothing, so this proves nothing"
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/value_exercise.iyi" \
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/value_exercise.ri" \
        > "$WORK/$dir/build" 2>&1; then
     echo "  $label: the patched prelude did not build"
     sed -n '1,10p' "$WORK/$dir/build"
@@ -219,15 +219,15 @@ prove_fails_range() { # prove_fails_range <label> <dir> <phrase> <sed script>
 # 1. Equality by identity again, which is what `Object#==` gave it.
 # The once-guard a constant read before its line is initialised through,
 # taken out of the prelude: the program does not compile.
-mkdir -p "$WORK/no_once/iyi"
-cp -R "$REPO/src/iyi/." "$WORK/no_once/iyi/"
+mkdir -p "$WORK/no_once/ris"
+cp -R "$REPO/src/ris/." "$WORK/no_once/ris/"
 sed -e 's/^fun __iyi_once(flag : Bool\*, initializer : Void\*) : Nil$/fun __iyi_once_gone(flag : Bool*, initializer : Void*) : Nil/' \
-  "$REPO/src/iyi/prelude.iyi" > "$WORK/no_once/iyi/prelude.iyi"
-if cmp -s "$REPO/src/iyi/prelude.iyi" "$WORK/no_once/iyi/prelude.iyi"; then
+  "$REPO/src/ris/prelude.ri" > "$WORK/no_once/ris/prelude.ri"
+if cmp -s "$REPO/src/ris/prelude.ri" "$WORK/no_once/ris/prelude.ri"; then
   echo "  the once-guard removed: the patch changed nothing, so this proves nothing"
   status=1
-elif IYI_PATH="$WORK/no_once${PSEP}$REPO/src" "$IYI" build -o "$WORK/no_once/program" \
-     "$REPO/test/cli/value_exercise.iyi" > "$WORK/no_once/build" 2>&1; then
+elif RIS_PATH="$WORK/no_once${PSEP}$REPO/src" "$RIS" build -o "$WORK/no_once/program" \
+     "$REPO/test/cli/value_exercise.ri" > "$WORK/no_once/build" 2>&1; then
   echo "  the once-guard removed: the exercise still built, so it does not test this"
   status=1
 elif grep -q "__iyi_once is not defined" "$WORK/no_once/build"; then
@@ -284,16 +284,16 @@ prove_fails "to_s without the padding" bad_to_s_pad "tuple: a tuple first is pad
 # names and the compiler cannot find, so this one is refused at compile time.
 prove_fails_macro() { # prove_fails_macro <label> <dir> <phrase> <sed script>
   local label="$1" dir="$2" phrase="$3" script="$4"
-  mkdir -p "$WORK/$dir/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
-  sed -e "$script" "$REPO/src/iyi/macros.iyi" > "$WORK/$dir/iyi/macros.iyi"
-  if cmp -s "$REPO/src/iyi/macros.iyi" "$WORK/$dir/iyi/macros.iyi"; then
+  mkdir -p "$WORK/$dir/ris"
+  cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
+  sed -e "$script" "$REPO/src/ris/macros.ri" > "$WORK/$dir/ris/macros.ri"
+  if cmp -s "$REPO/src/ris/macros.ri" "$WORK/$dir/ris/macros.ri"; then
     echo "  $label: the patch changed nothing, so this proves nothing"
     status=1
     return
   fi
-  if IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/value_exercise.iyi" \
+  if RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/value_exercise.ri" \
        > "$WORK/$dir/build" 2>&1; then
     echo "  $label: the patched prelude still built, so this proves nothing"
     status=1

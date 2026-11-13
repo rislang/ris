@@ -11,7 +11,7 @@
 # defer is nanoseconds, not a syscall.
 set -euo pipefail
 
-IYI=${IYI:-./bin/iyi}
+RIS=${RIS:-./bin/ris}
 work=$(mktemp -d /tmp/iyi-defer-cost.XXXXXX)
 # A native compiler cannot resolve this shell's own path mapping: a
 # scratch directory named `/tmp/tmp.X` is silently ignored on the search
@@ -25,7 +25,7 @@ trap 'rm -rf "$work"' EXIT
 N=20000000
 BUDGET_NS=2000
 
-cat > "$work/bare.iyi" <<'EOF'
+cat > "$work/bare.ri" <<'EOF'
 module bare
 
 def nothing : Nil
@@ -49,7 +49,7 @@ end
 puts total(20000000)
 EOF
 
-cat > "$work/deferred.iyi" <<'EOF'
+cat > "$work/deferred.ri" <<'EOF'
 module deferred
 
 def nothing : Nil
@@ -73,8 +73,8 @@ end
 puts total(20000000)
 EOF
 
-"$IYI" build --release -o "$work/bare" "$work/bare.iyi"
-"$IYI" build --release -o "$work/deferred" "$work/deferred.iyi"
+"$RIS" build --release -o "$work/bare" "$work/bare.ri"
+"$RIS" build --release -o "$work/deferred" "$work/deferred.ri"
 
 time_ns() {
   local start end
@@ -129,15 +129,15 @@ defers() { # defers <n> <file>: one def, n `defer x += 1` in its scope
 check_ns() {
   local start end
   start=$(date +%s%N)
-  "$IYI" check types "$1" > /dev/null
+  "$RIS" check types "$1" > /dev/null
   end=$(date +%s%N)
   echo $((end - start))
 }
-defers 500 "$work/defers500.iyi"
-defers 2000 "$work/defers2000.iyi"
-check_ns "$work/defers500.iyi" > /dev/null
-small=$(check_ns "$work/defers500.iyi")
-large=$(check_ns "$work/defers2000.iyi")
+defers 500 "$work/defers500.ri"
+defers 2000 "$work/defers2000.ri"
+check_ns "$work/defers500.ri" > /dev/null
+small=$(check_ns "$work/defers500.ri")
+large=$(check_ns "$work/defers2000.ri")
 echo "defer compile cost: 500 defers in one scope checked in $((small / 1000000)) ms, 2000 in $((large / 1000000)) ms (budget 4x)"
 if [ "$large" -gt $((small * 4)) ]; then
   echo "OVER BUDGET: 2000 defers in one scope took more than four times what 500 took to check"

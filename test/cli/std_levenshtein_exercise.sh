@@ -8,9 +8,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -46,12 +46,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_levenshtein_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_levenshtein_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -114,16 +114,16 @@ else
   mkdir -p "$WORK/patched1/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/levenshtein.iyi").read_text()
+src = Path("$REPO/src/std/levenshtein.ri").read_text()
 old = 'return 0 if string1 == string2'
 if old not in src:
     raise SystemExit("patch site missing: return 0")
-Path("$WORK/patched1/std/levenshtein.iyi").write_text(src.replace(old, 'return 1 if string1 == string2', 1))
+Path("$WORK/patched1/std/levenshtein.ri").write_text(src.replace(old, 'return 1 if string1 == string2', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the identity patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched1${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_levenshtein_exercise.iyi" >"$WORK/mut1.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched1${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_levenshtein_exercise.ri" >"$WORK/mut1.out" 2>&1; then
     echo "  the exercise PASSED on broken identity"
     status=1
   else
@@ -138,16 +138,16 @@ else
   mkdir -p "$WORK/patched2/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/levenshtein.iyi").read_text()
+src = Path("$REPO/src/std/levenshtein.ri").read_text()
 old = 'sub_cost = s[i] == t[j] ? 0 : 1'
 if old not in src:
     raise SystemExit("patch site missing: sub_cost")
-Path("$WORK/patched2/std/levenshtein.iyi").write_text(src.replace(old, 'sub_cost = 0', 1))
+Path("$WORK/patched2/std/levenshtein.ri").write_text(src.replace(old, 'sub_cost = 0', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the sub_cost patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched2${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_levenshtein_exercise.iyi" >"$WORK/mut2.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched2${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_levenshtein_exercise.ri" >"$WORK/mut2.out" 2>&1; then
     echo "  the exercise PASSED on zero substitution cost"
     status=1
   else
@@ -162,16 +162,16 @@ else
   mkdir -p "$WORK/patched3/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/levenshtein.iyi").read_text()
+src = Path("$REPO/src/std/levenshtein.ri").read_text()
 old = 'dist = Levenshtein.osa_distance(@target, name)'
 if old not in src:
     raise SystemExit("patch site missing: osa_distance in Finder")
-Path("$WORK/patched3/std/levenshtein.iyi").write_text(src.replace(old, 'dist = Levenshtein.distance(@target, name)', 1))
+Path("$WORK/patched3/std/levenshtein.ri").write_text(src.replace(old, 'dist = Levenshtein.distance(@target, name)', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the finder-distance patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched3${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_levenshtein_exercise.iyi" >"$WORK/mut3.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched3${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_levenshtein_exercise.ri" >"$WORK/mut3.out" 2>&1; then
     echo "  the exercise PASSED on finder using classic distance"
     status=1
   else
@@ -186,16 +186,16 @@ else
   mkdir -p "$WORK/patched4/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/levenshtein.iyi").read_text()
+src = Path("$REPO/src/std/levenshtein.ri").read_text()
 old = 'if ascii?(string1) && ascii?(string2)'
 if old not in src:
     raise SystemExit("patch site missing: ascii?")
-Path("$WORK/patched4/std/levenshtein.iyi").write_text(src.replace(old, 'if string1.single_byte_optimizable? && string2.single_byte_optimizable?', 1))
+Path("$WORK/patched4/std/levenshtein.ri").write_text(src.replace(old, 'if string1.single_byte_optimizable? && string2.single_byte_optimizable?', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the single-byte-optimizable patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched4${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_levenshtein_exercise.iyi" >"$WORK/mut4.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched4${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_levenshtein_exercise.ri" >"$WORK/mut4.out" 2>&1; then
     echo "  the exercise PASSED with single_byte_optimizable?"
     status=1
   else

@@ -248,7 +248,7 @@ module Iyi
     #
     # Equivalent to a hash-like literal using `::Hash`.
     def expand(node : HashLiteral)
-      # ris: a program's hash literal is a tape Hsh (src/iyi/hsh.iyi).
+      # ris: a program's hash literal is a tape Hsh (src/ris/hsh.ri).
       return expand_named(node, Path.global("Hash")) if ris_program_literal?(node)
       expand_named(node, Path.global("Hash"))
     end
@@ -333,7 +333,7 @@ module Iyi
 
     def expand(node : RegexLiteral)
       # Both halves of the question, because either alone is wrong. A `.cr`
-      # program is Crystal's and always had the literal; a `.iyi` one has it
+      # program is Crystal's and always had the literal; a `.ri` one has it
       # where the library it compiles against does - and a Program built
       # without a driver (Crystal's own compiler specs do that) carries the
       # default prelude flag while compiling snippets that are not iyi's.
@@ -349,7 +349,7 @@ module Iyi
         # iyi: named after the literal rather than after the order it was met
         # in (iyi SPEC IV.1g). The name reaches a linker — a unit that reads this
         # constant refers to `~$Regex:<name>:const_read` — and encounter order
-        # is not an identity a second program shares. A `.iyimod` whose object
+        # is not an identity a second program shares. A `.rimod` whose object
         # code said `$Regex:0` linked against a consumer's own first regex
         # literal, which is a different pattern, silently.
         #
@@ -401,7 +401,7 @@ module Iyi
 
     private def iyi_regex_literal(node : RegexLiteral) : ASTNode
       unless Program.iyi_std_regex_type(@program)
-        node.raise "a regex literal is `Regex.compile` from `std/regex`, iyi's own engine, and nothing in this program imports it: `import std/regex::{Regex}`"
+        node.raise "a regex literal is `Regex.compile` from `std/regex`, ris's own engine, and nothing in this program imports it: `import std/regex::{Regex}`"
       end
       unless node.options.value & ~IYI_REGEX_FLAGS.value == 0
         node.raise "`std/regex` has no flag for #{RegexOptions.new(node.options.value & ~IYI_REGEX_FLAGS.value)}: a regex literal takes `i`, `m` and `x`, and `(?s)`, `(?U)` and the rest are written in the pattern"

@@ -1,0 +1,3041 @@
+# standard: YAML 1.2.2
+# YAML, read and written in iyi alone: a parser and an emitter for the
+# YAML 1.2 core schema over the bytes of a `String`, with no library under
+# them.
+#
+# What it reads:
+#   * Block mappings and block sequences, nested by indentation; a sequence
+#     may sit at the same indentation as the key it belongs to; `- key: v`
+#     opens a mapping inside a sequence entry.
+#   * Flow collections `[a, b]` and `{a: b}`, nested, across lines, with a
+#     trailing comma allowed and `[k: v]` as a one-pair mapping.
+#   * Plain scalars, folded across lines; single-quoted scalars with `''`;
+#     double-quoted scalars with every escape the format names (`\n`, `\t`,
+#     `\"`, `\\`, `\/`, `\0`, `\a`, `\b`, `\e`, `\f`, `\r`, `\v`, `\ `,
+#     `\N`, `\_`, `\L`, `\P`, `\xXX`, `\uXXXX`, `\UXXXXXXXX`, an escaped line
+#     break), both quoted styles folded across lines.
+#   * Block scalars `|` and `>` with `-`, `+` and an explicit indentation
+#     digit, chomped as the header says.
+#   * Anchors `&a`, aliases `*a`, merge keys `<<: *a` and `<<: [*a, *b]`.
+#     A key the mapping spells itself wins over a merged one, wherever it is
+#     spelled; among merged mappings the first wins.
+#   * The core-schema tags `!!str`, `!!int`, `!!float`, `!!bool`, `!!null`,
+#     `!!seq` and `!!map`, on a value or a key; any other tag is refused.
+#   * Streams: `%YAML` and `%TAG` directives are skipped, `---` opens a
+#     document and `...` ends one. `parse_all` answers every document;
+#     `parse` answers the first (nil for an empty stream) after checking the
+#     whole stream.
+#   * Plain scalars resolve as the 1.2 core schema says: `null`, `Null`,
+#     `NULL`, `~` and the empty scalar are nil; `true`/`false` in the three
+#     spellings are booleans; decimal, `0o` octal and `0x` hexadecimal are
+#     `Int64`; `1.5`, `.5`, `7.`, `1e3`, `1.0e+20`, `.inf`, `-.inf`, `.nan`
+#     are `Float64`; a decimal integer past the `Int64` range is read as a
+#     `Float64`; everything else is a `String`. So `yes`, `no`, `on`,
+#     `off`, `1_000`, `1.2.3`, `22:30` and `2001-12-14` are strings here,
+#     and `0777` is the decimal 777, where a 1.1 reader would make some of
+#     them booleans, octal numbers, or a timestamp. Keys resolve the same
+#     way: `1: one` has the `Int64` key 1, `true: x` the `Bool` key true.
+#
+# What it refuses, each with a sentence that says where:
+#   a UTF-16 stream (named by its byte order mark), a tab in indentation,
+#   a control character (C0, DEL or C1, but tab and U+0085) or the
+#   noncharacter U+FFFE or U+FFFF, anywhere, a quoted string that does
+#   not close, a flow collection that does not close, an unknown escape or
+#   an escape that names a surrogate, a mapping entry or sequence entry at
+#   an indentation that belongs to nothing, text after a value on its
+#   line, a value whose text is not a node, a duplicate key, a second `<<`
+#   among them (the second spelling of a key is a mistake, not an
+#   override; `<<: [*a, *b]` merges two), an alias to an anchor that is
+#   not defined or is still being built (a cycle), aliases that together
+#   expand to more than ALIAS_NODE_LIMIT nodes (the "billion laughs"
+#   stream), a merge whose value is not a mapping or a sequence of
+#   mappings, an explicit `?` key, an anchor or an alias on a block
+#   mapping's key (a flow mapping's key may carry either), a collection
+#   as a key, a second tag or a second anchor on one node, a tag it
+#   does not know (the verbatim `!<tag:yaml.org,2002:str>` spellings of
+#   the core tags are known), a directive not followed by `---`, and
+#   nesting past DEPTH_LIMIT levels.
+#
+# `YAML.parse?` answers nil for any of these; `YAML.parse` panics with the
+# sentence. `YAML.dump` writes a value back as block YAML that this parser
+# reads to an equal value: numbers, booleans and nil stay what they are as
+# values and as keys, a string that would read as something else is
+# quoted, and a character a reader would not take raw (a control, a byte
+# order mark, a 1.1 line break) is escaped. "Something else" includes what
+# a YAML 1.1 reader makes of it, since PyYAML is what reads most of these
+# files on the other end: `yes`, `off`, `=` and anything starting with a
+# digit are quoted too. A collection cannot be written as a key.
+#
+# `derive yaml_serializable` makes a type read and write itself as a
+# mapping, a key per field, as std/json's `derive serializable` does for
+# JSON; `YAML.to_yaml`, `YAML.from_yaml`, `YAML.to_any` and
+# `YAML.read_value` are what it writes with.
+#
+# `TapeValue` holds a document: `raw` is the union, `as_x`/`as_x?` are the
+# pairs, `[]`/`[]?`/`dig`/`dig?` walk it, `==` is structural and `hash`
+# agrees with it.
+#
+# The type tests on `TapeValue#raw` are ordered with the reference types first.
+# A chain that tests `Nil` and `Bool` before `Array`/`Hash` over this union
+# sends an array down the hash arm today (a compiler defect being fixed);
+# every dispatch here goes through `TapeValue#kind`, which is written in the
+# order that works, and nothing else in the file tests the union.
+
+module std/yaml
+
+import std/text
+
+@[OnTape]
+pub struct TapeMap(K, V)
+  @keys : SlicePool::List(K)
+  @values : SlicePool::List(V)
+  # Entries before `@base` are forgotten: a parser's anchors end with
+  # their document, while the values of nodes read may still view them.
+  @base : Int32
+
+  def initialize
+    @keys = SlicePool::List(K).new(SlicePool(K?).new)
+    @values = SlicePool::List(V).new(SlicePool(V?).new)
+    @base = 0
+  end
+
+  def size : Int32
+    @keys.size - @base
+  end
+
+  # Forgets every entry and keeps the storage, which views may share.
+  def forget : Nil
+    @base = @keys.size
+  end
+
+  private def index(key : K) : Int32
+    i = @base
+    while i < @keys.size
+      return i if @keys[i] == key
+      i += 1
+    end
+    -1
+  end
+
+  def []?(key : K) : V?
+    i = index(key)
+    i < 0 ? nil : @values[i]
+  end
+
+  def [](key : K) : V
+    self[key]? || raise "missing YAML key"
+  end
+
+  def has_key?(key : K) : Bool
+    index(key) >= 0
+  end
+
+  def []=(key : K, value : V) : Nil
+    i = index(key)
+    if i >= 0
+      @values[i] = value
+      return
+    end
+    @keys << key
+    @values << value
+  end
+
+  def freeze(pool : SlicePool(TapeValue)) : TapeMapping
+    keys = pool.alloc_slice(size)
+    values = pool.alloc_slice(size)
+    i = @base
+    while i < @keys.size
+      keys[i - @base] = @keys[i]
+      values[i - @base] = @values[i]
+      i += 1
+    end
+    TapeMapping.new(keys, values)
+  end
+
+  def each(& : K, V -> _) : Nil
+    i = @base
+    while i < @keys.size
+      yield @keys[i], @values[i]
+      i += 1
+    end
+  end
+end
+
+@[OnTape]
+pub struct TapeMapping
+  @keys : SlicePool::Run(TapeValue)
+  @values : SlicePool::Run(TapeValue)
+
+  def initialize(@keys : SlicePool::Run(TapeValue),
+                 @values : SlicePool::Run(TapeValue))
+  end
+
+  def size : Int32
+    @keys.size
+  end
+
+  def []?(key : TapeValue) : TapeValue?
+    @keys.each_with_index do |item, i|
+      return @values[i] if item == key
+    end
+    nil
+  end
+
+  def [](key : TapeValue) : TapeValue
+    self[key]? || raise "missing YAML key"
+  end
+
+  def has_key?(key : TapeValue) : Bool
+    !self[key]?.nil?
+  end
+
+  def each(& : TapeValue, TapeValue -> _) : Nil
+    @keys.each_with_index { |key, i| yield key, @values[i] }
+  end
+end
+
+@[OnTape]
+pub struct TapeValue
+  alias Type = Nil | Bool | Int64 | Float64 | String | SlicePool::Run(TapeValue) | TapeMapping
+
+  KIND_NIL    = 0
+  KIND_BOOL   = 1
+  KIND_INT    = 2
+  KIND_FLOAT  = 3
+  KIND_STRING = 4
+  KIND_ARRAY  = 5
+  KIND_HASH   = 6
+
+  getter raw : Type
+
+  def initialize(@raw : Type = nil)
+  end
+
+  def initialize(value : Int32)
+    @raw = value.to_i64
+  end
+
+  # Which member of the union `raw` is, as one of the KIND_ constants.
+  # Reference types are tested first on purpose (see the header).
+  def kind : Int32
+    r = @raw
+    if r.is_a?(SlicePool::Run(TapeValue))
+      KIND_ARRAY
+    elsif r.is_a?(TapeMapping)
+      KIND_HASH
+    elsif r.is_a?(String)
+      KIND_STRING
+    elsif r.is_a?(Int64)
+      KIND_INT
+    elsif r.is_a?(Float64)
+      KIND_FLOAT
+    elsif r.is_a?(Bool)
+      KIND_BOOL
+    else
+      KIND_NIL
+    end
+  end
+
+  # The name of the kind, for the sentences below.
+  def kind_name : String
+    k = kind
+    if k == KIND_ARRAY
+      "a sequence"
+    elsif k == KIND_HASH
+      "a mapping"
+    elsif k == KIND_STRING
+      "a string"
+    elsif k == KIND_INT
+      "an integer"
+    elsif k == KIND_FLOAT
+      "a float"
+    elsif k == KIND_BOOL
+      "a boolean"
+    else
+      "null"
+    end
+  end
+
+  def null? : Bool
+    kind == KIND_NIL
+  end
+
+  def as_nil : Nil
+    raise "expected null, not #{kind_name}" unless null?
+    nil
+  end
+
+  def as_nil? : Nil
+    nil
+  end
+
+  def as_bool : Bool
+    raise "expected a boolean, not #{kind_name}" unless kind == KIND_BOOL
+    @raw.as(Bool)
+  end
+
+  def as_bool? : Bool?
+    kind == KIND_BOOL ? @raw.as(Bool) : nil
+  end
+
+  def as_i : Int64
+    raise "expected an integer, not #{kind_name}" unless kind == KIND_INT
+    @raw.as(Int64)
+  end
+
+  def as_i? : Int64?
+    kind == KIND_INT ? @raw.as(Int64) : nil
+  end
+
+  # A float, or an integer widened to one.
+  def as_f : Float64
+    k = kind
+    return @raw.as(Float64) if k == KIND_FLOAT
+    return @raw.as(Int64).to_f64 if k == KIND_INT
+    raise "expected a float, not #{kind_name}"
+  end
+
+  def as_f? : Float64?
+    k = kind
+    return @raw.as(Float64) if k == KIND_FLOAT
+    return @raw.as(Int64).to_f64 if k == KIND_INT
+    nil
+  end
+
+  def as_s : String
+    raise "expected a string, not #{kind_name}" unless kind == KIND_STRING
+    @raw.as(String)
+  end
+
+  def as_s? : String?
+    kind == KIND_STRING ? @raw.as(String) : nil
+  end
+
+  def as_a : SlicePool::Run(TapeValue)
+    raise "expected a sequence, not #{kind_name}" unless kind == KIND_ARRAY
+    @raw.as(SlicePool::Run(TapeValue))
+  end
+
+  def as_a? : SlicePool::Run(TapeValue)?
+    kind == KIND_ARRAY ? @raw.as(SlicePool::Run(TapeValue)) : nil
+  end
+
+  def as_h : TapeMapping
+    raise "expected a mapping, not #{kind_name}" unless kind == KIND_HASH
+    @raw.as(TapeMapping)
+  end
+
+  def as_h? : TapeMapping?
+    kind == KIND_HASH ? @raw.as(TapeMapping) : nil
+  end
+
+  # Elements of a sequence, pairs of a mapping, characters of a string.
+  def size : Int32
+    k = kind
+    return @raw.as(SlicePool::Run(TapeValue)).size if k == KIND_ARRAY
+    return @raw.as(TapeMapping).size if k == KIND_HASH
+    return @raw.as(String).bytesize if k == KIND_STRING
+    raise "size of #{kind_name}"
+  end
+
+  def [](key : TapeValue) : TapeValue
+    h = as_h
+    raise "no such key #{key.inspect}" unless h.has_key?(key)
+    h[key]
+  end
+
+  def []?(key : TapeValue) : TapeValue?
+    h = as_h?
+    return nil if h.nil?
+    h[key]?
+  end
+
+  def [](key : String) : TapeValue
+    self[TapeValue.new(key)]
+  end
+
+  def []?(key : String) : TapeValue?
+    self[TapeValue.new(key)]?
+  end
+
+  # An Int32 indexes a sequence and reaches an integer key of a mapping:
+  # `1: one` has the `Int64` key 1, and `doc[1]` panicked "expected a
+  # sequence, not a mapping" while `[]?` and `dig?` answered nil.
+  def [](index : Int32) : TapeValue
+    return self[TapeValue.new(index)] if kind == KIND_HASH
+    items = as_a
+    items[index < 0 ? items.size + index : index]
+  end
+
+  def []?(index : Int32) : TapeValue?
+    return self[TapeValue.new(index)]? if kind == KIND_HASH
+    a = as_a?
+    return nil if a.nil?
+    at = index < 0 ? a.size + index : index
+    at >= 0 && at < a.size ? a[at] : nil
+  end
+
+  def dig?(key : String | Int32) : TapeValue?
+    step?(key)
+  end
+
+  def dig?(key : String | Int32, *rest : String | Int32) : TapeValue?
+    v = step?(key)
+    return nil if v.nil?
+    v.dig?(*rest)
+  end
+
+  def dig(key : String | Int32) : TapeValue
+    step(key)
+  end
+
+  def dig(key : String | Int32, *rest : String | Int32) : TapeValue
+    step(key).dig(*rest)
+  end
+
+  private def step?(key : String | Int32) : TapeValue?
+    if key.is_a?(String)
+      self[key]?
+    else
+      self[key]?
+    end
+  end
+
+  private def step(key : String | Int32) : TapeValue
+    if key.is_a?(String)
+      self[key]
+    else
+      self[key]
+    end
+  end
+
+  # Structural: same kind, same value; a mapping equals a mapping with the
+  # same pairs in any order. `1` and `1.0` are different values.
+  def ==(other : TapeValue) : Bool
+    k = kind
+    return false unless k == other.kind
+    if k == KIND_ARRAY
+      a = as_a
+      b = other.as_a
+      return false unless a.size == b.size
+      a.each_with_index do |item, i|
+        return false unless item == b[i]
+      end
+      true
+    elsif k == KIND_HASH
+      a = @raw.as(TapeMapping)
+      b = other.raw.as(TapeMapping)
+      return false unless a.size == b.size
+      a.each do |key, value|
+        found = b[key]?
+        return false if found.nil?
+        return false unless found == value
+      end
+      true
+    elsif k == KIND_STRING
+      @raw.as(String) == other.raw.as(String)
+    elsif k == KIND_INT
+      @raw.as(Int64) == other.raw.as(Int64)
+    elsif k == KIND_FLOAT
+      @raw.as(Float64) == other.raw.as(Float64)
+    elsif k == KIND_BOOL
+      @raw.as(Bool) == other.raw.as(Bool)
+    else
+      true
+    end
+  end
+
+  def !=(other : TapeValue) : Bool
+    !(self == other)
+  end
+
+  def initialize(value : String | String)
+    @raw = value.as_tape
+  end
+
+  def [](key : String | String) : TapeValue
+    self[TapeValue.new(key)]
+  end
+
+  def []?(key : String | String) : TapeValue?
+    self[TapeValue.new(key)]?
+  end
+
+  # Agrees with `==`: the same kind and value hash the same, a mapping's
+  # hash does not depend on its order, and `0.0`/`-0.0` share one.
+  def hash : Int32
+    k = kind
+    if k == KIND_ARRAY
+      value = 0
+      as_a.each { |item| value = value &* 31 &+ item.hash }
+      {value, as_a.size}.hash
+    elsif k == KIND_HASH
+      pairs = as_h
+      value = 0
+      pairs.each { |key, item| value = value &+ {key.hash, item.hash}.hash }
+      {value, pairs.size}.hash
+    elsif k == KIND_STRING
+      @raw.as(String).hash
+    elsif k == KIND_INT
+      @raw.as(Int64).hash
+    elsif k == KIND_FLOAT
+      f = @raw.as(Float64)
+      return 3 if f == 0.0
+      bits = IyiFloatText.bits_of(f)
+      ((bits ^ bits.unsafe_shr(32_u64)) & 0x7FFFFFFF_u64).to_i32
+    elsif k == KIND_BOOL
+      @raw.as(Bool) ? 1 : 2
+    else
+      0
+    end
+  end
+
+  # A string as itself, a number or boolean as written, nil as nothing,
+  # a collection the way the prelude prints an array or a hash.
+  def to_s : String
+    k = kind
+    if k == KIND_STRING
+      @raw.as(String)
+    elsif k == KIND_NIL
+      ""
+    else
+      inspect
+    end
+  end
+
+  # A refusal names a duplicate key by this.
+  def inspect : String
+    String.build { |writer| inspect(writer) }
+  end
+
+  def inspect(writer : String::Builder) : Nil
+    k = kind
+    if k == KIND_ARRAY
+      writer << "["
+      as_a.each_with_index do |item, i|
+        writer << ", " if i > 0
+        item.inspect(writer)
+      end
+      writer << "]"
+    elsif k == KIND_HASH
+      writer << "{"
+      first = true
+      as_h.each do |key, item|
+        writer << ", " unless first
+        first = false
+        key.inspect(writer)
+        writer << " => "
+        item.inspect(writer)
+      end
+      writer << "}"
+    elsif k == KIND_STRING
+      writer << @raw.as(String).inspect
+    elsif k == KIND_INT
+      writer << @raw.as(Int64)
+    elsif k == KIND_FLOAT
+      writer << @raw.as(Float64)
+    elsif k == KIND_BOOL
+      writer << (@raw.as(Bool) ? "true" : "false")
+    else
+      writer << "nil"
+    end
+  end
+end
+
+@[OnTape]
+struct TapeBuffer
+  @writer : String::Builder
+  @texts : String::Builder
+
+  def initialize
+    @writer = String::Builder.new
+    @texts = String::Builder.new
+  end
+
+  def size : Int32
+    @writer.length
+  end
+
+  def clear : Nil
+    @writer.truncate(0)
+  end
+
+  def <<(byte : UInt8) : Nil
+    @writer.push(byte)
+  end
+
+  def <<(text : String | String) : Nil
+    @writer << text
+  end
+
+  def append(source : String, count : Int32) : Nil
+    @writer << source[0, count] if count > 0
+  end
+
+  def [](index : Int32) : UInt8
+    @writer.finish[index]
+  end
+
+  def truncate(count : Int32) : Nil
+    @writer.truncate(count)
+  end
+
+  def spaces(count : Int32) : Nil
+    count.times { @writer << " " }
+  end
+
+  def codepoint(point : Int32) : Nil
+    @writer << point.unsafe_chr
+  end
+
+  def keep(text : String) : String
+    from = @texts.bytesize
+    @texts << text
+    @texts.finish[from, text.bytesize]
+  end
+
+  def finish : String
+    keep(@writer.finish)
+  end
+end
+
+module TapeScalar
+  def self.resolve(text : String) : TapeValue
+    size = text.bytesize
+    return TapeValue.new(nil) if size == 0
+    bytes = text
+    first = bytes[0]
+    if first == 126_u8 # ~
+      return TapeValue.new(nil) if size == 1
+    elsif first == 110_u8 || first == 78_u8 # n N
+      return TapeValue.new(nil) if text == "null" || text == "Null" || text == "NULL"
+    elsif first == 116_u8 || first == 84_u8 # t T
+      return TapeValue.new(true) if text == "true" || text == "True" || text == "TRUE"
+    elsif first == 102_u8 || first == 70_u8 # f F
+      return TapeValue.new(false) if text == "false" || text == "False" || text == "FALSE"
+    end
+
+    if first == 48_u8 && size > 2 # 0x.. 0o..
+      if bytes[1] == 120_u8
+        v = text[2, size - 2].to_i64?(16)
+        if !v.nil? && hex_digits?(bytes[2, size - 2], size - 2)
+          return TapeValue.new(v)
+        end
+      elsif bytes[1] == 111_u8
+        v = text[2, size - 2].to_i64?(8)
+        if !v.nil? && octal_digits?(bytes[2, size - 2], size - 2)
+          return TapeValue.new(v)
+        end
+      end
+    end
+
+    at = 0
+    at = 1 if first == 45_u8 || first == 43_u8 # - +
+    return TapeValue.new(text) if at >= size
+
+    if bytes[at] == 46_u8 # .
+      rest = text[at, size - at]
+      if rest == ".inf" || rest == ".Inf" || rest == ".INF"
+        return TapeValue.new(first == 45_u8 ? "-Infinity".to_f : "Infinity".to_f)
+      end
+      return TapeValue.new("NaN".to_f) if at == 0 && (rest == ".nan" || rest == ".NaN" || rest == ".NAN")
+    end
+
+    if decimal_digits?(bytes[at, size - at], size - at)
+      v = text.to_i64?(10)
+      return TapeValue.new(v) unless v.nil?
+      return TapeValue.new(text.to_f)
+    end
+    if float_text?(bytes[at, size - at], size - at)
+      return TapeValue.new(text.to_f)
+    end
+    TapeValue.new(text)
+  end
+
+  def self.decimal_digits?(bytes : String, count : Int32) : Bool
+    return false if count == 0
+    i = 0
+    while i < count
+      return false if bytes[i] < 48_u8 || bytes[i] > 57_u8
+      i = i + 1
+    end
+    true
+  end
+
+  def self.octal_digits?(bytes : String, count : Int32) : Bool
+    return false if count == 0
+    i = 0
+    while i < count
+      return false if bytes[i] < 48_u8 || bytes[i] > 55_u8
+      i = i + 1
+    end
+    true
+  end
+
+  def self.hex_digits?(bytes : String, count : Int32) : Bool
+    return false if count == 0
+    i = 0
+    while i < count
+      b = bytes[i]
+      digit = (b >= 48_u8 && b <= 57_u8) || (b >= 97_u8 && b <= 102_u8) || (b >= 65_u8 && b <= 70_u8)
+      return false unless digit
+      i = i + 1
+    end
+    true
+  end
+
+  # `.5`, `7.`, `1.5`, `1e3`, `1.5E-3`: digits with at most one point,
+  # at least one digit, an optional exponent with at least one digit.
+  def self.float_text?(bytes : String, count : Int32) : Bool
+    i = 0
+    digits = 0
+    while i < count && bytes[i] >= 48_u8 && bytes[i] <= 57_u8
+      i = i + 1
+      digits = digits + 1
+    end
+    if i < count && bytes[i] == 46_u8
+      i = i + 1
+      while i < count && bytes[i] >= 48_u8 && bytes[i] <= 57_u8
+        i = i + 1
+        digits = digits + 1
+      end
+    end
+    return false if digits == 0
+    return true if i == count
+    return false unless bytes[i] == 101_u8 || bytes[i] == 69_u8
+    i = i + 1
+    i = i + 1 if i < count && (bytes[i] == 45_u8 || bytes[i] == 43_u8)
+    return false if i >= count
+    while i < count
+      return false if bytes[i] < 48_u8 || bytes[i] > 57_u8
+      i = i + 1
+    end
+    true
+  end
+end
+
+# Conversion scratch belongs to the public entry, outside the view cycle.
+class TapeViewScratch
+  getter items : Array(TapeValue)
+  getter pool : SlicePool(TapeValue)
+  property used : Int32
+
+  def initialize
+    @items = Array(TapeValue).new
+    @pool = SlicePool(TapeValue).new
+    @used = 0
+  end
+
+  def push(value : TapeValue) : Nil
+    if @used < @items.size
+      @items[@used] = value
+    else
+      @items << value
+    end
+    @used = @used + 1
+  end
+end
+
+@[OnTape]
+pub struct TapeParser
+  # Deep enough for any document a person wrote, and shallow enough for a
+  # task's 256 KB stack: at 256 a task parsing a 256-deep flow sequence,
+  # or comparing two 128 deep, died of a stack overflow that took the
+  # whole process - a config a server reads in a handler, say. At 100 a
+  # plain build parses, compares, prints, hashes and dumps the deepest in
+  # a task with room to spare.
+  DEPTH_LIMIT = 100
+  # How many nodes aliases may add to a stream, counted as they are
+  # expanded; the sentence below spells the same number.
+  ALIAS_NODE_LIMIT = 1_000_000_i64
+
+  @bytes : String
+  @size : Int32
+  # Per line: where it starts, where its text ends (before the line
+  # break), where its content starts (after the indentation; moved past a
+  # `- ` when a sequence entry is entered), whether a tab was in the
+  # indentation.
+  @starts : Array(Int32)
+  @ends : Array(Int32)
+  @heads : Array(Int32)
+  @tabbed : Array(Bool)
+  @line : Int32
+  @error : String?
+  @error_text : String::Builder
+  @anchors : TapeMap(String, TapeValue)
+  @open_anchors : Array(String)
+  # Nodes read so far, and per anchor how many nodes its value holds
+  # (measured between opening and closing it); an alias adds that many
+  # to `@nodes` and to `@expanded`, which is what ALIAS_NODE_LIMIT bounds.
+  @nodes : Int64
+  @expanded : Int64
+  @anchor_sizes : TapeMap(String, Int64)
+  @open_sizes : Array(Int64)
+  # Collections open now, and per anchor how deep its value nests: the
+  # deepest `@peak` reached while it was open, past the depth it opened
+  # at. An alias counts as its anchor's value written out in its place,
+  # as a merge written out is counted, so `@depth` plus that is what
+  # DEPTH_LIMIT bounds. Counting only the text, `aN: &aN [*aN-1]` was
+  # two levels a line and N as built: 110 such lines parsed in a task,
+  # and `==` on the last value then took the process down with a stack
+  # overflow.
+  @depth : Int32
+  @peak : Int32
+  @anchor_depths : TapeMap(String, Int32)
+  @open_peaks : Array(Int32)
+  @buffer : TapeBuffer
+  # Nested sequence parses share scratch owned outside their call cycle.
+  @pool : SlicePool(TapeValue)
+  @sequence_scratch : Array(TapeValue)
+  @sequence_used : Int32
+  @prepared : Bool = false
+
+  def initialize(text : String)
+    @bytes = text
+    @size = text.bytesize
+    @starts = Array(Int32).new
+    @ends = Array(Int32).new
+    @heads = Array(Int32).new
+    @tabbed = Array(Bool).new
+    @line = 0
+    @error = nil
+    @error_text = String::Builder.new(64)
+    @anchors = TapeMap(String, TapeValue).new
+    @open_anchors = Array(String).new
+    @nodes = 0_i64
+    @expanded = 0_i64
+    @anchor_sizes = TapeMap(String, Int64).new
+    @open_sizes = Array(Int64).new
+    @depth = 0
+    @peak = 0
+    @anchor_depths = TapeMap(String, Int32).new
+    @open_peaks = Array(Int32).new
+    @buffer = TapeBuffer.new
+    @pool = SlicePool(TapeValue).new
+    @sequence_scratch = Array(TapeValue).new
+    @sequence_used = 0
+  end
+
+  def error : String?
+    @error
+  end
+
+  # Every document in the stream, or nil with `error` set.
+  def parse_all : Array(TapeValue)?
+    unless @prepared
+      split_lines
+      @prepared = true
+    end
+    docs = Array(TapeValue).new
+    implicit_allowed = true
+    while true
+      skip_directives_and_blank
+      return nil if @error
+      break if @line >= @starts.size
+      explicit = false
+      node = TapeValue.new(nil)
+      if marker?(@line, 45_u8) # ---
+        explicit = true
+        pos = skip_blank(@starts[@line] + 3)
+        if pos < @ends[@line] && @bytes[pos] != 35_u8
+          @heads[@line] = pos
+          node = parse_block_node(-1, false)
+        else
+          @line = @line + 1
+          node = parse_block_node(-1, false)
+        end
+      elsif marker?(@line, 46_u8) # ... with nothing before it
+        fail("a document end marker with no document", @starts[@line])
+        return nil
+      else
+        unless implicit_allowed
+          fail("expected '---' before another document", @heads[@line])
+          return nil
+        end
+        node = parse_block_node(-1, false)
+      end
+      return nil if @error
+      # Every node leaves `@line` on the first line after it, so the next
+      # document starts here or on a later blank-free line.
+      @anchors.forget
+      @anchor_sizes.forget
+      @anchor_depths.forget
+      docs << node
+      implicit_allowed = false
+      skip_blank_lines
+      break if @line >= @starts.size
+      if marker?(@line, 46_u8)
+        # A document's end may be marked more than once, as libyaml reads
+        # it: the second `...` was refused as "a document end marker with
+        # no document".
+        while @line < @starts.size && marker?(@line, 46_u8)
+          pos = skip_blank(@starts[@line] + 3)
+          expect_line_end(pos)
+          return nil if @error
+          @line = @line + 1
+          skip_blank_lines
+        end
+        implicit_allowed = true
+      elsif !marker?(@line, 45_u8)
+        refuse_stray(@line)
+        return nil
+      end
+    end
+    docs
+  end
+
+  # ------------------------------------------------------------------
+  # Lines
+
+  # The first character the stream may not hold raw (a control or a
+  # noncharacter: see `unprintable`) is remembered and refused once every
+  # line is known, since the sentence needs the line table to say where.
+  private def split_lines : Nil
+    at = 0
+    at = 3 if @size >= 3 && @bytes[0] == 0xEF_u8 && @bytes[1] == 0xBB_u8 && @bytes[2] == 0xBF_u8
+    control = -1
+    point = 0
+    while at <= @size
+      start = at
+      while at < @size && @bytes[at] != 10_u8 && @bytes[at] != 13_u8
+        b = @bytes[at]
+        if control < 0 && (b < 32_u8 || b == 127_u8 || b == 0xC2_u8 || b == 0xEF_u8)
+          point = unprintable(at)
+          control = at if point >= 0
+        end
+        at = at + 1
+      end
+      finish = at
+      head = start
+      tabbed = false
+      while head < finish && @bytes[head] == 32_u8
+        head = head + 1
+      end
+      tabbed = head < finish && @bytes[head] == 9_u8
+      @starts << start
+      @ends << finish
+      @heads << head
+      @tabbed << tabbed
+      if at < @size
+        if @bytes[at] == 13_u8 && at + 1 < @size && @bytes[at + 1] == 10_u8
+          at = at + 2
+        else
+          at = at + 1
+        end
+      else
+        break
+      end
+    end
+    # A UTF-16 stream opens with its byte order mark, FF FE or FE FF -
+    # what Windows PowerShell 5.1's `Out-File` and `>` write - and was
+    # refused as "control character U+0000" at its first ASCII character.
+    if @size >= 2 && ((@bytes[0] == 0xFF_u8 && @bytes[1] == 0xFE_u8) || (@bytes[0] == 0xFE_u8 && @bytes[1] == 0xFF_u8))
+      fail("encoding 'UTF-16' is not supported: the input is read as UTF-8", 0)
+    elsif control >= 0
+      digits = "0123456789ABCDEF"
+      name = String.build do |t|
+        t.push(digits.byte_at((point >> 12) & 15))
+        t.push(digits.byte_at((point >> 8) & 15))
+        t.push(digits.byte_at((point >> 4) & 15))
+        t.push(digits.byte_at(point & 15))
+      end
+      what = point >= 0xFFFE ? "noncharacter" : "control character"
+      fail("#{what} U+#{name} is not allowed", control)
+    end
+  end
+
+  # The code point at `pos` if it is one a stream may not hold raw, or -1:
+  # a C0 control but tab, DEL, a C1 control but U+0085 (a line break to a
+  # 1.1 reader, text to 1.2), and the noncharacters U+FFFE and U+FFFF, as
+  # libyaml refuses them. The C1 controls and U+FFFE were read as text, so
+  # `a: b\u009B31mc` held a terminal escape the header said was refused.
+  private def unprintable(pos : Int32) : Int32
+    b = @bytes[pos]
+    return b.to_i32 if (b < 32_u8 && b != 9_u8) || b == 127_u8
+    if b == 0xC2_u8 && pos + 1 < @size
+      c = @bytes[pos + 1]
+      return c.to_i32 if c >= 0x80_u8 && c <= 0x9F_u8 && c != 0x85_u8
+    elsif b == 0xEF_u8 && pos + 2 < @size && @bytes[pos + 1] == 0xBF_u8
+      d = @bytes[pos + 2]
+      return d.to_i32 - 0xBE + 0xFFFE if d == 0xBE_u8 || d == 0xBF_u8
+    end
+    -1
+  end
+
+  private def indent_of(line : Int32) : Int32
+    @heads[line] - @starts[line]
+  end
+
+  # Nothing but whitespace, or a comment.
+  private def blank_line?(line : Int32) : Bool
+    pos = skip_blank(@heads[line])
+    pos >= @ends[line] || @bytes[pos] == 35_u8
+  end
+
+  # `---` or `...` at the first column, alone or followed by a space.
+  private def marker?(line : Int32, byte : UInt8) : Bool
+    start = @starts[line]
+    return false unless @heads[line] == start
+    return false if @ends[line] - start < 3
+    return false unless @bytes[start] == byte && @bytes[start + 1] == byte && @bytes[start + 2] == byte
+    @ends[line] - start == 3 || @bytes[start + 3] == 32_u8 || @bytes[start + 3] == 9_u8
+  end
+
+  private def document_marker?(line : Int32) : Bool
+    marker?(line, 45_u8) || marker?(line, 46_u8)
+  end
+
+  private def skip_blank_lines : Nil
+    while @line < @starts.size && blank_line?(@line)
+      @line = @line + 1
+    end
+  end
+
+  private def skip_directives_and_blank : Nil
+    while @line < @starts.size
+      if blank_line?(@line)
+        @line = @line + 1
+      elsif @heads[@line] == @starts[@line] && @bytes[@starts[@line]] == 37_u8 # %
+        @line = @line + 1
+        skip_blank_lines
+        if @line >= @starts.size || !marker?(@line, 45_u8)
+          at = @line < @starts.size ? @heads[@line] : @size
+          fail("expected '---' after a directive", at)
+          return
+        end
+      else
+        return
+      end
+    end
+  end
+
+  # The next non-blank line has no tab in its indentation, or the error
+  # says so.
+  private def refuse_tab(line : Int32) : Nil
+    fail("tab used for indentation", @heads[line]) if @tabbed[line]
+  end
+
+  # A line at an indentation that belongs to nothing: a sequence entry or
+  # mapping entry, named as such, or plain text.
+  private def refuse_stray(line : Int32) : Nil
+    if sequence_entry?(line)
+      fail("bad indentation of a sequence entry", @heads[line])
+    elsif key_colon(line) >= 0
+      fail("bad indentation of a mapping entry", @heads[line])
+    else
+      fail("unexpected content", @heads[line])
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # Positions and errors
+
+  private def fail(message : String, pos : Int32) : Nil
+    return unless @error.nil?
+    line = 0
+    lo = 0
+    hi = @starts.size - 1
+    while lo <= hi
+      mid = (lo + hi) // 2
+      if @starts[mid] <= pos
+        line = mid
+        lo = mid + 1
+      else
+        hi = mid - 1
+      end
+    end
+    column = 1
+    at = @starts[line]
+    while at < pos && at < @size
+      column = column + 1 if (@bytes[at] & 192_u8) != 128_u8
+      at = at + 1
+    end
+    # The sentence is written into a field made with the parser, so it
+    # outlives this def (SPEC 1.1).
+    @error_text << message << " at line " << (line + 1).to_s <<
+      ", column " << column.to_s
+    @error = @error_text.finish
+  end
+
+  private def skip_blank(pos : Int32) : Int32
+    while pos < @size && (@bytes[pos] == 32_u8 || @bytes[pos] == 9_u8)
+      pos = pos + 1
+    end
+    pos
+  end
+
+  private def blank_byte?(b : UInt8) : Bool
+    b == 32_u8 || b == 9_u8
+  end
+
+  # `pos` is the end of its line, or a comment starts there.
+  private def line_end?(pos : Int32) : Bool
+    pos = skip_blank(pos)
+    pos >= @ends[@line] || @bytes[pos] == 35_u8
+  end
+
+  private def expect_line_end(pos : Int32) : Nil
+    return if @error
+    at = skip_blank(pos)
+    return if at >= @ends[@line] || (@bytes[at] == 35_u8 && (at == pos || at > @heads[@line]))
+    if @bytes[at] == 58_u8 && value_indicator?(at, false, @ends[@line])
+      fail("a mapping value is not allowed here", at)
+    else
+      fail("unexpected content", at)
+    end
+  end
+
+  # A `:` that ends a key: followed by blank or line end, or in flow
+  # context by a flow indicator.
+  private def value_indicator?(pos : Int32, flow : Bool, finish : Int32) : Bool
+    return false unless @bytes[pos] == 58_u8
+    return true if pos + 1 >= finish
+    n = @bytes[pos + 1]
+    return true if blank_byte?(n)
+    flow && (n == 44_u8 || n == 93_u8 || n == 125_u8 || n == 91_u8 || n == 123_u8)
+  end
+
+  # ------------------------------------------------------------------
+  # Line shapes
+
+  private def sequence_entry?(line : Int32) : Bool
+    pos = @heads[line]
+    return false if pos >= @ends[line] || @bytes[pos] != 45_u8
+    pos + 1 >= @ends[line] || blank_byte?(@bytes[pos + 1])
+  end
+
+  # Where the key's `:` is on this line, or -1. Anchors and tags in front
+  # are skipped (whether they are properties of the key or of a flow
+  # collection is settled by what follows them). Quoted keys close on the
+  # same line; a plain key runs to the first `: ` that is not inside a
+  # comment.
+  private def key_colon(line : Int32) : Int32
+    pos = @heads[line]
+    finish = @ends[line]
+    while pos < finish && (@bytes[pos] == 38_u8 || @bytes[pos] == 33_u8)
+      pos = skip_blank(@bytes[pos] == 38_u8 ? name_end(pos + 1, finish) : tag_end(pos, finish))
+    end
+    return -1 if pos >= finish
+    b = @bytes[pos]
+    if b == 34_u8 || b == 39_u8
+      close = closing_quote_on_line(pos, finish)
+      return -1 if close < 0
+      at = skip_blank(close + 1)
+      return -1 if at >= finish
+      return value_indicator?(at, false, finish) ? at : -1
+    end
+    return -1 if b == 91_u8 || b == 123_u8 || b == 35_u8 || b == 124_u8 || b == 62_u8
+    return -1 if b == 45_u8 && (pos + 1 >= finish || blank_byte?(@bytes[pos + 1]))
+    at = pos
+    while at < finish
+      c = @bytes[at]
+      return -1 if c == 35_u8 && at > pos && blank_byte?(@bytes[at - 1])
+      return at if c == 58_u8 && value_indicator?(at, false, finish)
+      at = at + 1
+    end
+    -1
+  end
+
+  private def closing_quote_on_line(pos : Int32, finish : Int32) : Int32
+    quote = @bytes[pos]
+    at = pos + 1
+    while at < finish
+      c = @bytes[at]
+      if quote == 34_u8 && c == 92_u8
+        at = at + 2
+        next
+      end
+      if c == quote
+        if quote == 39_u8 && at + 1 < finish && @bytes[at + 1] == 39_u8
+          at = at + 2
+          next
+        end
+        return at
+      end
+      at = at + 1
+    end
+    -1
+  end
+
+  # ------------------------------------------------------------------
+  # Block nodes
+
+  # The node that starts on the next non-blank line, which must be
+  # indented past `parent`; a sequence at `parent`'s own indentation is
+  # taken when `sequence_at_parent` says so (the value of a mapping key).
+  # A line that is not indented past `parent` is left where it is and the
+  # node is null. Every node, scalar or collection, leaves `@line` on the
+  # first line after it, so a caller never guesses whether the line it is
+  # on was consumed.
+  private def parse_block_node(parent : Int32, sequence_at_parent : Bool) : TapeValue
+    skip_blank_lines
+    return TapeValue.new(nil) if @error
+    return TapeValue.new(nil) if @line >= @starts.size || document_marker?(@line)
+    refuse_tab(@line)
+    return TapeValue.new(nil) if @error
+    indent = indent_of(@line)
+    if indent <= parent
+      if sequence_at_parent && indent == parent && sequence_entry?(@line)
+        return parse_block_sequence(indent)
+      end
+      return TapeValue.new(nil)
+    end
+    if sequence_entry?(@line)
+      parse_block_sequence(indent)
+    elsif key_colon(@line) >= 0
+      parse_block_mapping(indent)
+    else
+      value = parse_inline_node(@heads[@line], parent, sequence_at_parent, nil)
+      value
+    end
+  end
+
+  # A node whose first token is at `pos` on the current line: properties,
+  # then an alias, a quoted or plain scalar, a flow collection, a block
+  # scalar, or (after properties alone) the block node on the lines below.
+  # Requires the rest of the value's last line to be empty and steps past
+  # it. `outer_tag` is a tag that stood alone on the line above.
+  private def parse_inline_node(pos : Int32, parent : Int32, sequence_at_parent : Bool, outer_tag : String?) : TapeValue
+    anchor = nil.as(String?)
+    tag = outer_tag
+    anchor_pos = pos
+    while true
+      b = pos < @ends[@line] ? @bytes[pos] : 0_u8
+      if b == 38_u8 # &
+        fail("a second anchor", pos) unless anchor.nil?
+        return TapeValue.new(nil) if @error
+        anchor_pos = pos
+        finish = name_end(pos + 1, @ends[@line])
+        anchor = @bytes[pos + 1, finish - pos - 1]
+        fail("an anchor with no name", pos) if !anchor.nil? && anchor.empty?
+        return TapeValue.new(nil) if @error
+        pos = skip_blank(finish)
+      elsif b == 33_u8 # !
+        # A node has one tag, as it has one anchor: `!!str !!int 1` read
+        # as the integer, the first tag dropped.
+        fail("a second tag", pos) unless tag.nil?
+        return TapeValue.new(nil) if @error
+        finish = tag_end(pos, @ends[@line])
+        tag = tag_text(pos, finish)
+        unless tag.nil? || known_tag?(tag)
+          fail("unknown tag #{tag}", pos)
+        end
+        return TapeValue.new(nil) if @error
+        pos = skip_blank(finish)
+      else
+        break
+      end
+    end
+    open_anchor(anchor)
+    value = TapeValue.new(nil)
+    if line_end?(pos)
+      # Properties alone on the line: the node is below.
+      @line = @line + 1
+      if tag.nil? || tag == "!!seq" || tag == "!!map"
+        value = parse_block_node(parent, sequence_at_parent)
+        value = apply_tag(tag, value, anchor_pos)
+      else
+        # A scalar tag is checked against the text below as written, and
+        # with nothing below it tags the empty scalar. Both went through
+        # the node below once resolved: `a: !!str` was refused as "!!str
+        # on null" and `!!str` over a `1` on the next line as "on an
+        # integer".
+        skip_blank_lines
+        empty = @line >= @starts.size || document_marker?(@line)
+        if !empty && indent_of(@line) <= parent
+          empty = !(sequence_at_parent && indent_of(@line) == parent && sequence_entry?(@line))
+        end
+        if empty
+          value = apply_tag(tag, TapeValue.new(""), anchor_pos)
+        elsif sequence_entry?(@line) || key_colon(@line) >= 0
+          value = apply_tag(tag, parse_block_node(parent, sequence_at_parent), anchor_pos)
+        else
+          refuse_tab(@line)
+          value = parse_inline_node(@heads[@line], parent, sequence_at_parent, tag) if @error.nil?
+        end
+      end
+    else
+      unless anchor.nil?
+        # An anchor in front of what would otherwise be a key: `&a k: v`.
+        # key_colon looks from the line's head; look from the properties.
+        # A tag alone goes on, as tags on keys are read: `k: !!str x: y`
+        # is a mapping value where none may be, below.
+        saved = @heads[@line]
+        @heads[@line] = anchor_pos
+        is_key = key_colon(@line) >= 0
+        @heads[@line] = saved
+        if is_key
+          fail("an anchor on a mapping key is not supported", anchor_pos)
+          return TapeValue.new(nil)
+        end
+      end
+      value = parse_inline_value(pos, parent, tag)
+      @line = @line + 1 unless @error
+    end
+    close_anchor(anchor, value)
+    value
+  end
+
+  # `@` and `` ` `` are reserved, `%` starts a directive, and `]`, `}` and
+  # `,` end or part flow entries: a scalar cannot start with one, a value
+  # or a key.
+  private def plain_first_refused?(b : UInt8) : Bool
+    b == 64_u8 || b == 96_u8 || b == 37_u8 || b == 93_u8 || b == 125_u8 || b == 44_u8
+  end
+
+  private def parse_inline_value(pos : Int32, parent : Int32, tag : String?) : TapeValue
+    @nodes = @nodes + 1
+    b = @bytes[pos]
+    if b == 42_u8 # *
+      finish = name_end(pos + 1, @ends[@line])
+      name = @bytes[pos + 1, finish - pos - 1]
+      value = resolve_alias(name, pos)
+      expect_line_end(finish)
+      return value
+    end
+    if b == 91_u8 || b == 123_u8
+      finish = 0
+      value = TapeValue.new(nil)
+      if b == 91_u8
+        value = parse_flow_sequence(pos)
+      else
+        value = parse_flow_mapping(pos)
+      end
+      return TapeValue.new(nil) if @error
+      expect_line_end(@flow_end)
+      return apply_tag(tag, value, pos)
+    end
+    if b == 124_u8 || b == 62_u8 # | >
+      value = parse_block_scalar(pos, parent)
+      return apply_tag(tag, value, pos)
+    end
+    if b == 34_u8 || b == 39_u8
+      text = parse_quoted(pos, parent, false)
+      return TapeValue.new(nil) if @error
+      expect_line_end(@flow_end)
+      return apply_tag(tag, TapeValue.new(text), pos)
+    end
+    # `?` and `-` start a plain scalar unless a blank follows them: `?a`
+    # is text (it was refused, and the emitter writes it plain), while
+    # `- b` after a key is a sequence entry where none may start (it was
+    # read as the text "- b").
+    lone = pos + 1 >= @ends[@line] || blank_byte?(@bytes[pos + 1])
+    if plain_first_refused?(b)
+      fail("a scalar cannot start with '#{b.unsafe_chr}'", pos)
+      return TapeValue.new(nil)
+    end
+    # `? a` is an explicit key, as on a mapping's later lines; on the
+    # first it was refused as "a scalar cannot start with '?'".
+    if b == 63_u8 && lone
+      fail("an explicit '?' key is not supported", pos)
+      return TapeValue.new(nil)
+    end
+    if b == 45_u8 && lone
+      fail("a sequence entry is not allowed here", pos)
+      return TapeValue.new(nil)
+    end
+    text = parse_plain_block(pos, parent)
+    return TapeValue.new(nil) if @error
+    expect_line_end(@flow_end)
+    if tag.nil?
+      TapeScalar.resolve(text)
+    else
+      apply_tag(tag, TapeValue.new(text), pos)
+    end
+  end
+
+  private def sequence_push(value : TapeValue) : Nil
+    if @sequence_used < @sequence_scratch.size
+      @sequence_scratch[@sequence_used] = value
+    else
+      @sequence_scratch << value
+    end
+    @sequence_used = @sequence_used + 1
+  end
+
+  private def parse_block_sequence(indent : Int32) : TapeValue
+    @nodes = @nodes + 1
+    mark = @sequence_used
+    enter(@heads[@line])
+    return TapeValue.new(@pool.alloc_slice(0)) if @error
+    while true
+      skip_blank_lines
+      break if @line >= @starts.size || document_marker?(@line)
+      refuse_tab(@line)
+      break if @error
+      at = indent_of(@line)
+      break if at < indent
+      if at > indent
+        refuse_stray(@line)
+        break
+      end
+      break unless sequence_entry?(@line)
+      dash = @heads[@line]
+      pos = skip_blank(dash + 1)
+      if pos >= @ends[@line] || @bytes[pos] == 35_u8
+        @line = @line + 1
+        sequence_push(parse_block_node(indent, false))
+      else
+        dash_line = @line
+        @heads[@line] = pos
+        sequence_push(parse_block_node(indent, false))
+        @heads[dash_line] = dash
+      end
+      break if @error
+    end
+    leave
+    # Materialize only after recursive children finish; no activation keeps
+    # its own growing array across a child parse.
+    items = @pool.alloc_slice(@sequence_used - mark)
+    index = mark
+    while index < @sequence_used
+      items[index - mark] = @sequence_scratch[index]
+      index = index + 1
+    end
+    @sequence_used = mark
+    TapeValue.new(items)
+  end
+
+  private def parse_block_mapping(indent : Int32) : TapeValue
+    @nodes = @nodes + 1
+    pairs = TapeMap(TapeValue, TapeValue).new
+    spelled = TapeMap(TapeValue, Bool).new
+    merged = false
+    result = TapeValue.new(nil)
+    enter(@heads[@line])
+    return result if @error
+    while true
+      skip_blank_lines
+      break if @line >= @starts.size || document_marker?(@line)
+      refuse_tab(@line)
+      break if @error
+      at = indent_of(@line)
+      break if at < indent
+      if at > indent
+        refuse_stray(@line)
+        break
+      end
+      key_pos = @heads[@line]
+      if @bytes[key_pos] == 63_u8 && (key_pos + 1 >= @ends[@line] || blank_byte?(@bytes[key_pos + 1]))
+        fail("an explicit '?' key is not supported", key_pos)
+        break
+      end
+      colon = key_colon(@line)
+      if colon < 0
+        if @bytes[key_pos] == 38_u8
+          fail("an anchor on a mapping key is not supported", key_pos)
+        else
+          fail("expected a mapping key", key_pos)
+        end
+        break
+      end
+      merge = false
+      key = TapeValue.new(nil)
+      # A core tag on a key is read as on a value: `!!str a: b` was
+      # refused as "an alias, anchor or tag as a mapping key", where the
+      # header refused only an anchor; PyYAML and ruamel read {a: b}.
+      tag = nil.as(String?)
+      text_pos = key_pos
+      while @error.nil? && @bytes[text_pos] == 33_u8
+        # One tag, as on any node: `!!str !!int a: b` kept the later.
+        fail("a second tag", text_pos) unless tag.nil?
+        break if @error
+        finish = tag_end(text_pos, @ends[@line])
+        tag = tag_text(text_pos, finish)
+        fail("unknown tag #{tag}", text_pos) unless known_tag?(tag)
+        text_pos = skip_blank(finish)
+      end
+      break if @error
+      b = @bytes[text_pos]
+      if b == 34_u8 || b == 39_u8
+        key = TapeValue.new(parse_quoted(text_pos, indent, false))
+      elsif b == 42_u8
+        fail("an alias as a mapping key is not supported", text_pos)
+      elsif b == 38_u8
+        fail("an anchor on a mapping key is not supported", text_pos)
+      elsif plain_first_refused?(b)
+        # `]: 1`, `}: 1` and `,: 1` were read as the keys "]", "}" and ",".
+        fail("a scalar cannot start with '#{b.unsafe_chr}'", text_pos)
+      else
+        finish = colon
+        while finish > text_pos && blank_byte?(@bytes[finish - 1])
+          finish = finish - 1
+        end
+        text = @bytes[text_pos, finish - text_pos]
+        merge = tag.nil? && text == "<<"
+        key = tag.nil? ? TapeScalar.resolve(text) : TapeValue.new(text)
+      end
+      key = apply_tag(tag, key, key_pos)
+      break if @error
+      # `<<` is spelled once, as any key is: a second merged as well,
+      # where ruamel refuses it, and `<<: [*a, *b]` merges two.
+      if merge && merged
+        fail("duplicate key #{key.inspect}", key_pos)
+        break
+      end
+      merged = merged || merge
+      if !merge && spelled.has_key?(key)
+        fail("duplicate key #{key.inspect}", key_pos)
+        break
+      end
+      spelled[key] = true unless merge
+      pos = skip_blank(colon + 1)
+      value = TapeValue.new(nil)
+      if pos >= @ends[@line] || @bytes[pos] == 35_u8
+        @line = @line + 1
+        value = parse_block_node(indent, true)
+      else
+        value = parse_inline_node(pos, indent, true, nil)
+      end
+      break if @error
+      if merge
+        merge_into(pairs, value, key_pos)
+      else
+        pairs[key] = value
+      end
+      break if @error
+    end
+    leave
+    TapeValue.new(pairs.freeze(@pool))
+  end
+
+  # The merged mappings' pairs go in where the `<<` is; a key already in
+  # the mapping keeps its value, and a key spelled later in the mapping
+  # replaces the merged one (a later `pairs[key] = value` does that).
+  private def merge_into(pairs : TapeMap(TapeValue, TapeValue), value : TapeValue, pos : Int32) : Nil
+    k = value.kind
+    if k == TapeValue::KIND_HASH
+      value.as_h.each do |key, item|
+        pairs[key] = item unless pairs.has_key?(key)
+      end
+    elsif k == TapeValue::KIND_ARRAY
+      value.as_a.each do |element|
+        unless element.kind == TapeValue::KIND_HASH
+          fail("a merge value must be a mapping or a sequence of mappings", pos)
+          return
+        end
+        element.as_h.each do |key, item|
+          pairs[key] = item unless pairs.has_key?(key)
+        end
+      end
+    else
+      fail("a merge value must be a mapping or a sequence of mappings", pos)
+    end
+  end
+
+  # A flow key at `pos` that read to `key` is a merge when it is the plain
+  # scalar `<<`: not quoted, no properties in front (`!!str <<` starts
+  # with `!`).
+  private def merge_key?(pos : Int32, key : TapeValue) : Bool
+    @bytes[pos] == 60_u8 && key.kind == TapeValue::KIND_STRING && key.as_s == "<<"
+  end
+
+  # ------------------------------------------------------------------
+  # Scalars
+
+  # The end of an anchor, alias or tag name on a line ending at `finish`:
+  # blank, line end, or a flow indicator.
+  private def name_end(pos : Int32, finish : Int32) : Int32
+    while pos < finish
+      b = @bytes[pos]
+      break if blank_byte?(b) || b == 44_u8 || b == 91_u8 || b == 93_u8 || b == 123_u8 || b == 125_u8
+      pos = pos + 1
+    end
+    pos
+  end
+
+  # The end of the tag at `pos` (a `!`): a verbatim `!<...>` runs to its
+  # `>`, whatever is inside; any other tag is a name.
+  private def tag_end(pos : Int32, finish : Int32) : Int32
+    return name_end(pos, finish) unless pos + 1 < finish && @bytes[pos + 1] == 60_u8
+    at = pos + 2
+    while at < finish
+      return at + 1 if @bytes[at] == 62_u8
+      at = at + 1
+    end
+    finish
+  end
+
+  # The tag's text; the verbatim spelling of a core tag,
+  # `!<tag:yaml.org,2002:str>`, is read as its `!!str` shorthand. TapeValue
+  # other tag keeps its spelling, so the refusal echoes it whole.
+  private def tag_text(pos : Int32, finish : Int32) : String
+    text = @bytes[pos, finish - pos]
+    prefix = "!<tag:yaml.org,2002:"
+    if text.starts_with?(prefix) && (text.bytesize > 0 && text[text.bytesize - 1] == 62_u8) && text.bytesize > prefix.bytesize + 1
+      name = text[prefix.bytesize, text.bytesize - prefix.bytesize - 1]
+      return "!!str" if name == "str"
+      return "!!int" if name == "int"
+      return "!!float" if name == "float"
+      return "!!bool" if name == "bool"
+      return "!!null" if name == "null"
+      return "!!seq" if name == "seq"
+      return "!!map" if name == "map"
+    end
+    text
+  end
+
+  private def known_tag?(tag : String) : Bool
+    tag == "!!str" || tag == "!!int" || tag == "!!float" || tag == "!!bool" || tag == "!!null" ||
+      tag == "!!seq" || tag == "!!map"
+  end
+
+  # A tagged scalar must read as what the tag says; `!!seq`/`!!map` only
+  # confirm the shape.
+  private def apply_tag(tag : String?, value : TapeValue, pos : Int32) : TapeValue
+    return value if tag.nil? || @error
+    k = value.kind
+    if tag == "!!seq"
+      fail("!!seq on #{value.kind_name}", pos) unless k == TapeValue::KIND_ARRAY
+      return value
+    elsif tag == "!!map"
+      fail("!!map on #{value.kind_name}", pos) unless k == TapeValue::KIND_HASH
+      return value
+    end
+    unless k == TapeValue::KIND_STRING
+      fail("#{tag} on #{value.kind_name}", pos)
+      return value
+    end
+    text = value.as_s
+    return value if tag == "!!str"
+    resolved = TapeScalar.resolve(text)
+    rk = resolved.kind
+    if tag == "!!int"
+      return TapeValue.new(resolved.as_i) if rk == TapeValue::KIND_INT
+      fail("not an integer: #{text.inspect}", pos)
+    elsif tag == "!!float"
+      return TapeValue.new(resolved.as_f) if rk == TapeValue::KIND_FLOAT
+      return TapeValue.new(resolved.as_i.to_f64) if rk == TapeValue::KIND_INT
+      fail("not a float: #{text.inspect}", pos)
+    elsif tag == "!!bool"
+      return TapeValue.new(resolved.as_bool) if rk == TapeValue::KIND_BOOL
+      fail("not a boolean: #{text.inspect}", pos)
+    else
+      return TapeValue.new(nil) if rk == TapeValue::KIND_NIL
+      fail("not null: #{text.inspect}", pos)
+    end
+    value
+  end
+
+  # After a scalar or flow collection: where it stopped on the line it
+  # stopped on.
+  @flow_end : Int32 = 0
+
+  # A plain scalar in block context, folded across the lines below that
+  # are indented past `parent`.
+  private def parse_plain_block(pos : Int32, parent : Int32) : String
+    @buffer.clear
+    stop = plain_piece_end(pos, false)
+    @buffer << @bytes[pos, stop - pos]
+    @flow_end = stop
+    return @buffer.finish if stop < @ends[@line] && @bytes[stop] == 58_u8
+    blanks = 0
+    look = @line + 1
+    while look < @starts.size
+      # A comment after the text ends the scalar: `a: b # c` over an
+      # indented `d` read as "b d", the comment dropped from its middle.
+      break if skip_blank(@flow_end) < @ends[@line]
+      break if document_marker?(look)
+      if blank_line?(look)
+        # A comment line ends the scalar; whitespace-only lines fold.
+        at = skip_blank(@heads[look])
+        break if at < @ends[look]
+        blanks = blanks + 1
+        look = look + 1
+        next
+      end
+      break if indent_of(look) <= parent
+      # Past the indentation, a continuation line is text even when it
+      # opens with a tab or with `- `: `a: b\n  - c` is "b - c" and
+      # `a: b\n  \tc` is "b c". Both were refused, as a sequence entry
+      # and as a tab in the indentation.
+      if key_colon(look) >= 0
+        fail("bad indentation of a mapping entry", @heads[look])
+        break
+      end
+      @line = look
+      start = skip_blank(@heads[look])
+      stop = plain_piece_end(start, false)
+      if stop < @ends[look] && @bytes[stop] == 58_u8
+        fail("a mapping value is not allowed here", stop)
+        break
+      end
+      if blanks == 0
+        @buffer << 32_u8
+      else
+        while blanks > 0
+          @buffer << 10_u8
+          blanks = blanks - 1
+        end
+      end
+      @buffer << @bytes[start, stop - start]
+      @flow_end = stop
+      look = look + 1
+    end
+    @buffer.finish
+  end
+
+  # Where the plain text on this line ends: before ` #`, at a value
+  # indicator, at a flow indicator in flow context, or at the line end,
+  # trailing blanks dropped.
+  private def plain_piece_end(pos : Int32, flow : Bool) : Int32
+    at = pos
+    finish = @ends[@line]
+    while at < finish
+      b = @bytes[at]
+      break if b == 35_u8 && at > pos && blank_byte?(@bytes[at - 1])
+      break if b == 58_u8 && value_indicator?(at, flow, finish)
+      break if flow && (b == 44_u8 || b == 91_u8 || b == 93_u8 || b == 123_u8 || b == 125_u8)
+      at = at + 1
+    end
+    while at > pos && blank_byte?(@bytes[at - 1])
+      at = at - 1
+    end
+    at
+  end
+
+  # A quoted scalar starting at `pos`; folded across lines, which in block
+  # context must be indented past `parent`. Leaves `@flow_end` after the
+  # closing quote.
+  private def parse_quoted(pos : Int32, parent : Int32, flow : Bool) : String
+    quote = @bytes[pos]
+    opener = pos
+    @buffer.clear
+    at = pos + 1
+    # The buffer's length up to its last byte that folding must keep: a
+    # non-blank, an escape (`\t`, `\ `, `\x20` are text, not trailing
+    # blanks), or what a line break folded to.
+    hard = 0
+    while true
+      if at >= @ends[@line]
+        # The line ended inside the string: fold onto the next line.
+        trim_trailing_blanks(hard)
+        at = next_quoted_line(opener, parent, flow, false)
+        return "".as_tape if @error
+        hard = @buffer.size
+        next
+      end
+      b = @bytes[at]
+      if b == quote
+        if quote == 39_u8 && at + 1 < @ends[@line] && @bytes[at + 1] == 39_u8
+          @buffer << 39_u8
+          hard = @buffer.size
+          at = at + 2
+          next
+        end
+        @flow_end = at + 1
+        return @buffer.finish
+      end
+      if quote == 34_u8 && b == 92_u8
+        if at + 1 >= @ends[@line]
+          # Escaped line break: the break is dropped and the blanks before
+          # the backslash stay (they were trimmed), and an empty line
+          # below is still a line feed (it was a refusal or a space).
+          at = next_quoted_line(opener, parent, flow, true)
+          return "".as_tape if @error
+          hard = @buffer.size
+          next
+        end
+        at = escape(at)
+        return "".as_tape if @error
+        hard = @buffer.size
+        next
+      end
+      @buffer << b
+      hard = @buffer.size unless blank_byte?(b)
+      at = at + 1
+    end
+    "".as_tape
+  end
+
+  # Past the line break a quoted scalar did not close before: writes what
+  # it folds to (a space, nothing after an escaped break, a line feed per
+  # empty line either way), moves to the next line with text and answers
+  # where that text starts.
+  private def next_quoted_line(opener : Int32, parent : Int32, flow : Bool, escaped : Bool) : Int32
+    blanks = 0
+    look = @line + 1
+    while look < @starts.size && !document_marker?(look) && skip_blank(@starts[look]) >= @ends[look]
+      blanks = blanks + 1
+      look = look + 1
+    end
+    if look >= @starts.size || document_marker?(look) || (!flow && indent_of(look) <= parent)
+      fail("unterminated quoted string", opener)
+      return 0
+    end
+    if blanks == 0
+      @buffer << 32_u8 unless escaped
+    else
+      while blanks > 0
+        @buffer << 10_u8
+        blanks = blanks - 1
+      end
+    end
+    @line = look
+    skip_blank(@starts[look])
+  end
+
+  # Drops the blanks the buffer ends with, back to `floor` at most, and
+  # in place: it was rebuilt through `to_s` at every line end, a copy of
+  # the whole scalar so far, and a quoted scalar of 20,000 lines took 4.9
+  # seconds to read where the same bytes on one line took 5 ms.
+  private def trim_trailing_blanks(floor : Int32) : Nil
+    count = @buffer.size
+    while count > floor && blank_byte?(@buffer[count - 1])
+      count = count - 1
+    end
+    @buffer.truncate(count)
+  end
+
+  # `at` is the backslash; appends the escape and answers where it ends.
+  private def escape(at : Int32) : Int32
+    e = @bytes[at + 1]
+    decoded = -1
+    if e == 110_u8
+      decoded = 10 # n
+    elsif e == 116_u8
+      decoded = 9 # t
+    elsif e == 114_u8
+      decoded = 13 # r
+    elsif e == 34_u8
+      decoded = 34 # "
+    elsif e == 92_u8
+      decoded = 92 # backslash
+    elsif e == 47_u8
+      decoded = 47 # /
+    elsif e == 48_u8
+      decoded = 0 # 0
+    elsif e == 97_u8
+      decoded = 7 # a
+    elsif e == 98_u8
+      decoded = 8 # b
+    elsif e == 101_u8
+      decoded = 27 # e
+    elsif e == 102_u8
+      decoded = 12 # f
+    elsif e == 118_u8
+      decoded = 11 # v
+    elsif e == 32_u8
+      decoded = 32 # space
+    elsif e == 9_u8
+      decoded = 9 # tab
+    elsif e == 78_u8
+      decoded = 0x85 # N
+    elsif e == 95_u8
+      decoded = 0xA0 # _
+    elsif e == 76_u8
+      decoded = 0x2028 # L
+    elsif e == 80_u8
+      decoded = 0x2029 # P
+    end
+    if decoded >= 0
+      @buffer.codepoint(decoded)
+      return at + 2
+    end
+    digits = 0
+    if e == 120_u8
+      digits = 2
+    elsif e == 117_u8
+      digits = 4
+    elsif e == 85_u8
+      digits = 8
+    else
+      fail("unknown escape '\\#{e.unsafe_chr}'", at)
+      return at + 2
+    end
+    # Short of its digits, the escape says what it wants: `"C:\Users\bob"`
+    # - a Windows path - was "unknown escape '\U'", which `\U` is not.
+    wants = "escape '\\#{e.unsafe_chr}' wants #{digits} hexadecimal digits: a backslash in double quotes is '\\\\', or single-quote the scalar"
+    point = 0
+    i = 0
+    while i < digits
+      p = at + 2 + i
+      if p >= @ends[@line]
+        fail(wants, at)
+        return at + 2
+      end
+      d = @bytes[p].unsafe_chr.to_i?(16)
+      if d.nil?
+        fail(wants, at)
+        return at + 2
+      end
+      point = point * 16 + d
+      i = i + 1
+    end
+    if point > 0x10FFFF
+      fail("escape past the last code point", at)
+      return at + 2
+    end
+    if point >= 0xD800 && point <= 0xDFFF
+      written = @bytes[at, 2 + digits]
+      fail("surrogate code point #{written} in escape", at)
+      return at + 2
+    end
+    @buffer.codepoint(point)
+    at + 2 + digits
+  end
+
+  # `|` or `>` at `pos`: the header, then the lines below.
+  private def parse_block_scalar(pos : Int32, parent : Int32) : TapeValue
+    literal = @bytes[pos] == 124_u8
+    chomp = 0 # clip
+    explicit = 0
+    at = pos + 1
+    finish = @ends[@line]
+    while at < finish
+      b = @bytes[at]
+      if b == 45_u8 && chomp == 0
+        chomp = -1
+      elsif b == 43_u8 && chomp == 0
+        chomp = 1
+      elsif b >= 49_u8 && b <= 57_u8 && explicit == 0
+        explicit = (b - 48_u8).to_i32
+      else
+        break
+      end
+      at = at + 1
+    end
+    expect_line_end(at)
+    return TapeValue.new(nil) if @error
+    indent = 0
+    if explicit > 0
+      indent = parent < 0 ? explicit : parent + explicit
+    else
+      # The first line with text sets the indentation, or an empty line
+      # before it with more spaces: the text line is then less indented
+      # and ends the scalar (a comment there is a trailing comment). Only
+      # the text line counted, and the empty lines' extra spaces went
+      # missing (see below). Indentation is spaces alone, as `@heads`
+      # has it, and a tab after them is text: counted, it made a first
+      # line ` \tbar` two columns deep, so the line ended its own scalar
+      # and was refused as "tab used for indentation".
+      look = @line + 1
+      while look < @starts.size
+        content = @heads[look]
+        if content < @ends[look]
+          indent = content - @starts[look] if content - @starts[look] > indent
+          break
+        end
+        spaces = 0
+        while @starts[look] + spaces < @ends[look] && @bytes[@starts[look] + spaces] == 32_u8
+          spaces = spaces + 1
+        end
+        indent = spaces if spaces > indent
+        look = look + 1
+      end
+      # At the root (`parent` -1) the text may start at the first column,
+      # where a document marker ends it (below). A floor of 1 there
+      # refused `--- |\nfoo` as "unexpected content" and read `|\n#x` as
+      # "", the line taken for a comment after an empty scalar.
+      floor = parent + 1
+      indent = floor if indent < floor
+    end
+    lines = Array(String).new
+    look = @line + 1
+    last_content = @line
+    while look < @starts.size
+      break if document_marker?(look)
+      start = @starts[look]
+      finish = @ends[look]
+      spaces = 0
+      while start + spaces < finish && @bytes[start + spaces] == 32_u8
+        spaces = spaces + 1
+      end
+      # A line of spaces past the indentation is text (those spaces); it
+      # was read as an empty line. The line after a final line break is
+      # no line at all; read as one, it added a line feed under `+`.
+      if start + spaces >= finish && spaces <= indent
+        break if finish >= @size
+        lines << "".as_tape
+        look = look + 1
+        next
+      end
+      break if spaces < indent
+      from = start + indent
+      lines << @bytes[from, finish - from]
+      last_content = look
+      look = look + 1
+    end
+    # Lines after the last content line are trailing breaks.
+    @line = look - 1
+    @flow_end = @ends[@line]
+    trailing = 0
+    while lines.size > 0 && lines[lines.size - 1].empty?
+      lines.pop
+      trailing = trailing + 1
+    end
+    @buffer.clear
+    if literal
+      i = 0
+      while i < lines.size
+        @buffer << 10_u8 if i > 0
+        @buffer << lines[i]
+        i = i + 1
+      end
+    else
+      i = 0
+      blanks = 0
+      previous_more = false
+      first = true
+      while i < lines.size
+        text = lines[i]
+        i = i + 1
+        if text.empty?
+          blanks = blanks + 1
+          next
+        end
+        more = blank_byte?(text[0])
+        if first
+          # Empty lines before the first text are line feeds; they were
+          # dropped.
+          first = false
+          while blanks > 0
+            @buffer << 10_u8
+            blanks = blanks - 1
+          end
+        elsif previous_more || more
+          @buffer << 10_u8
+          while blanks > 0
+            @buffer << 10_u8
+            blanks = blanks - 1
+          end
+        elsif blanks > 0
+          while blanks > 0
+            @buffer << 10_u8
+            blanks = blanks - 1
+          end
+        else
+          @buffer << 32_u8
+        end
+        blanks = 0
+        previous_more = more
+        @buffer << text
+      end
+    end
+    # The final line break is the one after the last text line: a stream
+    # that ends on that line has none to keep or clip, and `|` over `x`
+    # with no line break after it is "x", not "x\n".
+    final = lines.size > 0 && @ends[last_content] < @size
+    if chomp == 1
+      @buffer << 10_u8 if final
+      while trailing > 0
+        @buffer << 10_u8
+        trailing = trailing - 1
+      end
+    elsif chomp == 0
+      @buffer << 10_u8 if final
+    end
+    TapeValue.new(@buffer.finish)
+  end
+
+  # ------------------------------------------------------------------
+  # Flow collections
+
+  # Past blanks, comments and line breaks; -1 when the stream or the
+  # document ends first.
+  private def skip_flow_space(pos : Int32) : Int32
+    while true
+      finish = @ends[@line]
+      while pos < finish && blank_byte?(@bytes[pos])
+        pos = pos + 1
+      end
+      if pos < finish && @bytes[pos] == 35_u8 && (pos == @heads[@line] || blank_byte?(@bytes[pos - 1]))
+        pos = finish
+      end
+      return pos if pos < finish
+      return -1 if @line + 1 >= @starts.size || document_marker?(@line + 1)
+      @line = @line + 1
+      pos = @starts[@line]
+    end
+    -1
+  end
+
+  private def parse_flow_sequence(opener : Int32) : TapeValue
+    mark = @sequence_used
+    enter(opener)
+    return TapeValue.new(@pool.alloc_slice(0)) if @error
+    pos = opener + 1
+    while true
+      pos = skip_flow_space(pos)
+      if pos < 0
+        fail("unterminated flow sequence", opener)
+        break
+      end
+      b = @bytes[pos]
+      if b == 93_u8
+        @flow_end = pos + 1
+        break
+      end
+      if b == 44_u8
+        fail("expected a value before ','", pos)
+        break
+      end
+      item_pos = pos
+      item = parse_flow_node(pos)
+      break if @error
+      pos = skip_flow_space(@flow_end)
+      # After a quoted key the `:` needs no blank, as in a flow mapping:
+      # `["a":b]` was refused.
+      quoted_key = @bytes[item_pos] == 34_u8 || @bytes[item_pos] == 39_u8
+      if pos >= 0 && @bytes[pos] == 58_u8 && (quoted_key || value_indicator?(pos, true, @ends[@line]))
+        # `[key: value]`: a one-pair mapping.
+        # As in a flow mapping: `[[a]: b]` read to a mapping with a
+        # sequence key, which `dump` then panicked on.
+        if item.kind == TapeValue::KIND_ARRAY || item.kind == TapeValue::KIND_HASH
+          fail("a collection cannot be a mapping key", item_pos)
+          break
+        end
+        pair = TapeMap(TapeValue, TapeValue).new
+        pos = skip_flow_space(pos + 1)
+        if pos < 0
+          fail("unterminated flow sequence", opener)
+          break
+        end
+        value = TapeValue.new(nil)
+        unless @bytes[pos] == 44_u8 || @bytes[pos] == 93_u8
+          value = parse_flow_node(pos)
+          break if @error
+          pos = skip_flow_space(@flow_end)
+        end
+        # `[<<: {a: 1}]` merges like any mapping's `<<`; it was the
+        # string key "<<".
+        if merge_key?(item_pos, item)
+          merge_into(pair, value, item_pos)
+          break if @error
+        else
+          pair[item] = value
+        end
+        item = TapeValue.new(pair.freeze(@pool))
+      end
+      sequence_push(item)
+      if pos < 0
+        fail("unterminated flow sequence", opener)
+        break
+      end
+      b = @bytes[pos]
+      if b == 44_u8
+        pos = pos + 1
+      elsif b == 93_u8
+        @flow_end = pos + 1
+        break
+      else
+        fail("expected ',' or ']'", pos)
+        break
+      end
+    end
+    leave
+    # Materialize only after recursive children finish; no activation keeps
+    # its own growing array across a child parse.
+    items = @pool.alloc_slice(@sequence_used - mark)
+    index = mark
+    while index < @sequence_used
+      items[index - mark] = @sequence_scratch[index]
+      index = index + 1
+    end
+    @sequence_used = mark
+    TapeValue.new(items)
+  end
+
+  private def parse_flow_mapping(opener : Int32) : TapeValue
+    pairs = TapeMap(TapeValue, TapeValue).new
+    spelled = TapeMap(TapeValue, Bool).new
+    merged = false
+    result = TapeValue.new(nil)
+    enter(opener)
+    return result if @error
+    pos = opener + 1
+    while true
+      pos = skip_flow_space(pos)
+      if pos < 0
+        fail("unterminated flow mapping", opener)
+        break
+      end
+      b = @bytes[pos]
+      if b == 125_u8
+        @flow_end = pos + 1
+        break
+      end
+      if b == 44_u8
+        fail("expected a key before ','", pos)
+        break
+      end
+      key_pos = pos
+      if b == 63_u8 && (pos + 1 >= @ends[@line] || blank_byte?(@bytes[pos + 1]))
+        fail("an explicit '?' key is not supported", pos)
+        break
+      end
+      key = parse_flow_node(pos)
+      break if @error
+      kk = key.kind
+      if kk == TapeValue::KIND_ARRAY || kk == TapeValue::KIND_HASH
+        fail("a collection cannot be a mapping key", key_pos)
+        break
+      end
+      # The key is the plain scalar `<<` however it is followed: `{<< : x}`
+      # and `{<<}` were the string key "<<", where `{<<: x}` merged.
+      merge = merge_key?(key_pos, key)
+      # `<<` is spelled once here too, as in a block mapping.
+      if merge && merged
+        fail("duplicate key #{key.inspect}", key_pos)
+        break
+      end
+      merged = merged || merge
+      if !merge && spelled.has_key?(key)
+        fail("duplicate key #{key.inspect}", key_pos)
+        break
+      end
+      spelled[key] = true unless merge
+      pos = skip_flow_space(@flow_end)
+      if pos < 0
+        fail("unterminated flow mapping", opener)
+        break
+      end
+      value = TapeValue.new(nil)
+      if @bytes[pos] == 58_u8 && (value_indicator?(pos, true, @ends[@line]) || @bytes[key_pos] == 34_u8 || @bytes[key_pos] == 39_u8)
+        pos = skip_flow_space(pos + 1)
+        if pos < 0
+          fail("unterminated flow mapping", opener)
+          break
+        end
+        unless @bytes[pos] == 44_u8 || @bytes[pos] == 125_u8
+          value = parse_flow_node(pos)
+          break if @error
+          pos = skip_flow_space(@flow_end)
+          if pos < 0
+            fail("unterminated flow mapping", opener)
+            break
+          end
+        end
+      end
+      if merge
+        merge_into(pairs, value, key_pos)
+        break if @error
+      else
+        pairs[key] = value
+      end
+      b = @bytes[pos]
+      if b == 44_u8
+        pos = pos + 1
+      elsif b == 125_u8
+        @flow_end = pos + 1
+        break
+      else
+        fail("expected ',' or '}'", pos)
+        break
+      end
+    end
+    leave
+    TapeValue.new(pairs.freeze(@pool))
+  end
+
+  # One node inside a flow collection, starting at `pos` (not blank).
+  private def parse_flow_node(pos : Int32) : TapeValue
+    anchor = nil.as(String?)
+    tag = nil.as(String?)
+    anchor_pos = pos
+    while true
+      b = @bytes[pos]
+      if b == 38_u8
+        # One anchor and one tag, as in block context: `[&a &b 1]`
+        # dropped `&a` and `[!!int !!str 1]` the `!!int`.
+        fail("a second anchor", pos) unless anchor.nil?
+        return TapeValue.new(nil) if @error
+        anchor_pos = pos
+        finish = name_end(pos + 1, @ends[@line])
+        anchor = @bytes[pos + 1, finish - pos - 1]
+        fail("an anchor with no name", pos) if !anchor.nil? && anchor.empty?
+        return TapeValue.new(nil) if @error
+        pos = skip_flow_space(finish)
+      elsif b == 33_u8
+        fail("a second tag", pos) unless tag.nil?
+        return TapeValue.new(nil) if @error
+        finish = tag_end(pos, @ends[@line])
+        tag = tag_text(pos, finish)
+        unless tag.nil? || known_tag?(tag)
+          fail("unknown tag #{tag}", pos)
+        end
+        return TapeValue.new(nil) if @error
+        pos = skip_flow_space(finish)
+      else
+        break
+      end
+      if pos < 0
+        fail("a value was expected after the properties", anchor_pos)
+        return TapeValue.new(nil)
+      end
+    end
+    open_anchor(anchor)
+    @nodes = @nodes + 1
+    b = @bytes[pos]
+    value = TapeValue.new(nil)
+    if b == 91_u8
+      value = parse_flow_sequence(pos)
+    elsif b == 123_u8
+      value = parse_flow_mapping(pos)
+    elsif b == 34_u8 || b == 39_u8
+      value = TapeValue.new(parse_quoted(pos, -1, true))
+    elsif b == 42_u8
+      finish = name_end(pos + 1, @ends[@line])
+      name = @bytes[pos + 1, finish - pos - 1]
+      value = resolve_alias(name, pos)
+      @flow_end = finish
+    elsif (b == 44_u8 || b == 93_u8 || b == 125_u8) && !(anchor.nil? && tag.nil?)
+      # Properties over nothing are the empty scalar: `[!!str ]` is [""]
+      # and `[&a ]` is [nil]. They were refused as a missing value.
+      value = tag.nil? ? TapeValue.new(nil) : TapeValue.new("")
+      @flow_end = pos
+    elsif (b == 63_u8 || b == 45_u8) && (pos + 1 >= @ends[@line] || blank_byte?(@bytes[pos + 1]) ||
+          (b == 63_u8 && (@bytes[pos + 1] == 44_u8 || @bytes[pos + 1] == 93_u8 || @bytes[pos + 1] == 125_u8)))
+      # `[? a]` is an explicit key and `[- a]` a block entry where none
+      # may be; both were read as the strings "? a" and "- a".
+      if b == 63_u8
+        fail("an explicit '?' key is not supported", pos)
+      else
+        fail("a sequence entry is not allowed here", pos)
+      end
+    elsif b == 44_u8 || b == 93_u8 || b == 125_u8 || b == 64_u8 || b == 96_u8 || b == 37_u8 || b == 124_u8 || b == 62_u8 || b == 35_u8
+      # A `#` with no blank before it is no comment, and no scalar starts
+      # with it either: `[1,#c` read the string "#c".
+      fail("a value was expected", pos)
+    else
+      if plain_piece_end(pos, true) == pos
+        fail("a value was expected", pos)
+      else
+        text = parse_plain_flow(pos)
+        value = tag.nil? ? TapeScalar.resolve(text) : TapeValue.new(text)
+      end
+    end
+    return TapeValue.new(nil) if @error
+    value = apply_tag(tag, value, anchor_pos)
+    close_anchor(anchor, value)
+    value
+  end
+
+  # A plain scalar in a flow collection, folded across the lines below
+  # while each line it is on ends with it: a space, or a line feed per
+  # empty line, as in block context. A comment, a flow indicator or a
+  # value indicator ends it. It stopped at the line end, so `[a\n b]`
+  # was refused for want of a `,`. Leaves `@flow_end` after it.
+  private def parse_plain_flow(pos : Int32) : String
+    @buffer.clear
+    stop = plain_piece_end(pos, true)
+    @buffer << @bytes[pos, stop - pos]
+    @flow_end = stop
+    while skip_blank(stop) >= @ends[@line]
+      blanks = 0
+      look = @line + 1
+      while look < @starts.size && !document_marker?(look) && skip_blank(@starts[look]) >= @ends[look]
+        blanks = blanks + 1
+        look = look + 1
+      end
+      break if look >= @starts.size || document_marker?(look)
+      start = skip_blank(@starts[look])
+      b = @bytes[start]
+      break if b == 35_u8 || b == 44_u8 || b == 91_u8 || b == 93_u8 || b == 123_u8 || b == 125_u8
+      break if b == 58_u8 && value_indicator?(start, true, @ends[look])
+      @line = look
+      stop = plain_piece_end(start, true)
+      if blanks == 0
+        @buffer << 32_u8
+      else
+        while blanks > 0
+          @buffer << 10_u8
+          blanks = blanks - 1
+        end
+      end
+      @buffer << @bytes[start, stop - start]
+      @flow_end = stop
+    end
+    @buffer.finish
+  end
+
+  # ------------------------------------------------------------------
+  # Anchors and depth
+
+  private def open_anchor(name : String?) : Nil
+    return if name.nil?
+    @open_anchors << name
+    @open_sizes << @nodes
+    @open_peaks << @peak
+    @peak = @depth
+  end
+
+  private def close_anchor(name : String?, value : TapeValue) : Nil
+    return if name.nil?
+    started = @nodes
+    peak = @peak
+    if @open_anchors.size > 0
+      @open_anchors.pop
+      started = @open_sizes.pop
+      outer = @open_peaks.pop
+      @peak = outer if outer > @peak
+    end
+    return if @error
+    @anchors[name] = value
+    @anchor_sizes[name] = @nodes - started
+    @anchor_depths[name] = peak - @depth
+  end
+
+  # The anchored value, shared; the nodes it holds count as read again,
+  # and once aliases have added ALIAS_NODE_LIMIT nodes the stream is
+  # refused rather than built. Its levels count from where it is read.
+  private def resolve_alias(name : String, pos : Int32) : TapeValue
+    if name.empty?
+      fail("an alias with no name", pos)
+      return TapeValue.new(nil)
+    end
+    if @open_anchors.includes?(name)
+      fail("cyclic alias *#{name}", pos)
+      return TapeValue.new(nil)
+    end
+    found = @anchors[name]?
+    if found.nil?
+      fail("unknown anchor *#{name}", pos)
+      return TapeValue.new(nil)
+    end
+    deepest = @depth + @anchor_depths[name]
+    if deepest > DEPTH_LIMIT
+      fail("nesting deeper than #{DEPTH_LIMIT} levels", pos)
+      return TapeValue.new(nil)
+    end
+    @peak = deepest if deepest > @peak
+    size = @anchor_sizes[name]
+    @nodes = @nodes + size
+    @expanded = @expanded + size
+    if @expanded > ALIAS_NODE_LIMIT
+      fail("alias expansion past 1,000,000 nodes", pos)
+      return TapeValue.new(nil)
+    end
+    found
+  end
+
+  private def enter(pos : Int32) : Nil
+    @depth = @depth + 1
+    @peak = @depth if @depth > @peak
+    fail("nesting deeper than #{DEPTH_LIMIT} levels", pos) if @depth > DEPTH_LIMIT
+  end
+
+  private def leave : Nil
+    @depth = @depth - 1
+  end
+end
+
+@[OnTape]
+struct TapeEmitter
+  @out : String::Builder
+
+  def initialize(@out : String::Builder)
+  end
+
+  def dump(value : TapeValue) : Nil
+    k = value.kind
+    if (k == TapeValue::KIND_ARRAY || k == TapeValue::KIND_HASH) && value.size > 0
+      block(value, 0, false)
+    else
+      @out << scalar_text(value)
+      @out << "\n"
+    end
+    nil
+  end
+
+  # A non-empty collection, one entry per line at `indent`; when `inline`
+  # the first entry continues the current line.
+  private def block(value : TapeValue, indent : Int32, inline : Bool) : Nil
+    if value.kind == TapeValue::KIND_ARRAY
+      first = true
+      value.as_a.each do |item|
+        indent.times { @out << " " } unless first && inline
+        first = false
+        @out << "- "
+        entry(item, indent + 2)
+      end
+    else
+      first = true
+      value.as_h.each do |key, item|
+        indent.times { @out << " " } unless first && inline
+        first = false
+        kk = key.kind
+        raise "cannot dump #{key.kind_name} as a mapping key" if kk == TapeValue::KIND_ARRAY || kk == TapeValue::KIND_HASH
+        @out << scalar_text(key)
+        @out << ":"
+        if collection?(item)
+          @out << "\n"
+          block(item, indent + 2, false)
+        else
+          @out << " "
+          entry(item, indent + 2)
+        end
+      end
+    end
+  end
+
+  # After `- ` or `key: `: a scalar or empty collection on the line, a
+  # collection continuing it.
+  private def entry(item : TapeValue, indent : Int32) : Nil
+    if collection?(item)
+      block(item, indent, true)
+    else
+      @out << scalar_text(item)
+      @out << "\n"
+    end
+  end
+
+  private def collection?(value : TapeValue) : Bool
+    k = value.kind
+    (k == TapeValue::KIND_ARRAY || k == TapeValue::KIND_HASH) && value.size > 0
+  end
+
+  private def scalar_text(value : TapeValue) : String
+    k = value.kind
+    if k == TapeValue::KIND_STRING
+      return string_text(value.as_s)
+    end
+    String.build do |w|
+      if k == TapeValue::KIND_NIL
+        w << "null"
+      elsif k == TapeValue::KIND_BOOL
+        w << (value.as_bool ? "true" : "false")
+      elsif k == TapeValue::KIND_INT
+        w.append_int(value.as_i)
+      elsif k == TapeValue::KIND_FLOAT
+        f = value.as_f
+        if f != f
+          w << ".nan"
+        elsif f == "Infinity".to_f
+          w << ".inf"
+        elsif f == "-Infinity".to_f
+          w << "-.inf"
+        else
+          w.append_float(f)
+        end
+      else
+        w << (k == TapeValue::KIND_ARRAY ? "[]" : "{}")
+      end
+    end
+  end
+
+  # Plain when the parser would read it back as the same string, quoted
+  # otherwise.
+  private def string_text(text : String) : String
+    return quoted(text) unless plain_safe?(text)
+    text
+  end
+
+  # Plain when the parser would read it back as the same string: not an
+  # indicator, not `- `/`? ` (an entry), not `<<` (a merge as a key), not
+  # a document marker, no `: ` or ` #` inside, and not a value of another
+  # kind.
+  private def plain_safe?(text : String) : Bool
+    size = text.bytesize
+    return false if size == 0
+    bytes = text
+    first = bytes[0]
+    return false if blank_byte?(first) || blank_byte?(bytes[size - 1])
+    # `?` is quoted whatever follows it: the reader refuses a plain scalar
+    # that starts with one, so `?x` dumped bare did not read back. And a
+    # byte order mark first, which the reader skips at a stream's start.
+    return false if first == 63_u8
+    return false if size >= 3 && first == 0xEF_u8 && bytes[1] == 0xBB_u8 && bytes[2] == 0xBF_u8
+    if first == 45_u8 || first == 58_u8
+      return false if size == 1 || blank_byte?(bytes[1])
+    elsif indicator?(first)
+      return false
+    end
+    return false if text == "<<"
+    return false if text.starts_with?("---") || text.starts_with?("...")
+    i = 0
+    while i < size
+      b = bytes[i]
+      return false if b < 32_u8 || b == 127_u8
+      return false if b >= 0x80_u8 && escaped_point(bytes, i, size) >= 0
+      if b == 58_u8 && (i + 1 == size || blank_byte?(bytes[i + 1]))
+        return false
+      end
+      return false if b == 35_u8 && i > 0 && blank_byte?(bytes[i - 1])
+      i = i + 1
+    end
+    return false if other_in_1_1?(text, bytes, size)
+    TapeScalar.resolve(text).kind == TapeValue::KIND_STRING
+  end
+
+  # Whether a YAML 1.1 reader takes the text for something other than a
+  # string. PyYAML 6.0.3, the reader most programs on the other end use,
+  # reads `yes`, `No`, `on` and `OFF` as booleans, `1_000`, `0b101`,
+  # `0777` (as 511) and `22:30` (as 1350) as integers, `1:30.5` as a
+  # float, `2001-12-14` as a date, and refuses `=` (its "value" tag has no
+  # constructor); written plain, each was a string here and something
+  # else there. A string whose first character after an optional sign is
+  # a digit is quoted whatever follows: every 1.1 number and timestamp
+  # starts so, and `1st` quoted reads back as the same string anywhere,
+  # where telling it from `1_000` would be a second number reader. `y` and
+  # `n` are booleans in the 1.1 type repository though PyYAML reads them
+  # as strings, so they are quoted too.
+
+  private def other_in_1_1?(text : String, bytes : String,
+                            size : Int32) : Bool
+    # `==` each, as a `case` asks `String#===` of a String: false. A
+    # constant Array of literals would be request tape data in a constant.
+    return true if text == "y" || text == "Y" || text == "n" || text == "N" || text == "yes" || text == "Yes" ||
+                   text == "YES" || text == "no" || text == "No" || text == "NO" || text == "on" || text == "On" ||
+                   text == "ON" || text == "off" || text == "Off" || text == "OFF" || text == "="
+    i = bytes[0] == 43_u8 || bytes[0] == 45_u8 ? 1 : 0
+    i < size && bytes[i] >= 48_u8 && bytes[i] <= 57_u8
+  end
+
+  private def indicator?(b : UInt8) : Bool
+    b == 44_u8 || b == 91_u8 || b == 93_u8 || b == 123_u8 || b == 125_u8 || b == 35_u8 ||
+      b == 38_u8 || b == 42_u8 || b == 33_u8 || b == 124_u8 || b == 62_u8 || b == 39_u8 ||
+      b == 34_u8 || b == 37_u8 || b == 64_u8 || b == 96_u8
+  end
+
+  private def blank_byte?(b : UInt8) : Bool
+    b == 32_u8 || b == 9_u8
+  end
+
+  private def quoted(text : String) : String
+    buffer = TapeBuffer.new
+    buffer << 34_u8
+    bytes = text
+    i = 0
+    while i < text.bytesize
+      b = bytes[i]
+      if b == 34_u8
+        buffer << "\\\""
+      elsif b == 92_u8
+        buffer << "\\\\"
+      elsif b == 10_u8
+        buffer << "\\n"
+      elsif b == 9_u8
+        buffer << "\\t"
+      elsif b == 13_u8
+        buffer << "\\r"
+      elsif b < 32_u8 || b == 127_u8
+        buffer << "\\x"
+        buffer << hex_digit(b.to_i32 >> 4)
+        buffer << hex_digit(b.to_i32 & 15)
+      elsif b >= 0x80_u8 && escaped_point(bytes, i, text.bytesize) >= 0
+        point = escaped_point(bytes, i, text.bytesize)
+        if point < 0x100
+          buffer << "\\x"
+          i = i + 1
+        else
+          buffer << "\\u"
+          buffer << hex_digit(point >> 12)
+          buffer << hex_digit((point >> 8) & 15)
+          i = i + 2
+        end
+        buffer << hex_digit((point >> 4) & 15)
+        buffer << hex_digit(point & 15)
+      else
+        buffer << b
+      end
+      i = i + 1
+    end
+    buffer << 34_u8
+    buffer.finish
+  end
+
+  # The character at `i`, when it is one written as an escape though it
+  # is not ASCII: a C1 control U+0080 to U+009F and the non-characters
+  # U+FFFE and U+FFFF (not printable, so a reader refuses them raw),
+  # U+FEFF (a byte order mark, dropped at the start of a stream: the
+  # string "\uFEFF" read back as null), and U+0085, U+2028 and U+2029
+  # (line breaks to a YAML 1.1 reader). Its code point, or -1.
+  private def escaped_point(bytes : String, i : Int32,
+                            size : Int32) : Int32
+    b = bytes[i]
+    if b == 0xC2_u8 && i + 1 < size && bytes[i + 1] >= 0x80_u8 && bytes[i + 1] <= 0x9F_u8
+      return bytes[i + 1].to_i32
+    end
+    return -1 unless i + 2 < size
+    c = bytes[i + 1]
+    d = bytes[i + 2]
+    return d.to_i32 - 0xA8 + 0x2028 if b == 0xE2_u8 && c == 0x80_u8 && (d == 0xA8_u8 || d == 0xA9_u8)
+    return 0xFEFF if b == 0xEF_u8 && c == 0xBB_u8 && d == 0xBF_u8
+    return d.to_i32 - 0xBE + 0xFFFE if b == 0xEF_u8 && c == 0xBF_u8 && (d == 0xBE_u8 || d == 0xBF_u8)
+    -1
+  end
+
+  private def hex_digit(value : Int32) : UInt8
+    value < 10 ? (48 + value).to_u8 : (87 + value).to_u8
+  end
+end
+
+# A type that can write itself as a `TapeValue`. `YAML.to_yaml` and
+# `YAML.to_any` accept any value whose type implements it, as a `derive
+# yaml_serializable` type does.
+# A type that can write itself as a `TapeValue`. `YAML.to_yaml` and
+# `YAML.to_any` accept any value whose type implements it, as a `derive
+# yaml_serializable` type does.
+pub trait ToYAML
+  abstract def to_yaml_any(pool : SlicePool(TapeValue)) : TapeValue
+end
+
+# `derive yaml_serializable`, in a struct or class whose fields are written
+# with their types: the type reads and writes itself as a YAML mapping, a
+# key per field, named as the field is, in the order the fields are
+# written.
+#
+#     pub struct Coord
+#       getter x : Float64
+#       getter name : String
+#       derive yaml_serializable
+#     end
+#
+#     Coord.from_yaml("x: 1.5\nname: a\n").x   # => 1.5
+#     coord.to_yaml                            # => "x: 1.5\nname: a\n"
+#
+# It is std/json's `derive serializable` over YAML, field for field: a
+# value is read and written as `YAML.read_value` and `YAML.to_any` read and
+# write its type (the built-in scalars, an `Array` or `Hash` of them, an
+# `TapeValue`, another serializable type, each of them or nil), and `to_yaml`
+# writes through `YAML.dump`, so a string that would read as something
+# else is quoted. A key the type has no field for is passed over; a field
+# with no key keeps its default when it is written with one, as does a
+# field with a default whose key holds null where its type does not admit
+# nil; a field with neither is refused by name unless its type admits nil,
+# which it then holds. Anchors, aliases and `<<` merges are the parser's,
+# so a mapping merged into another fills its fields.
+#
+# The macro is named for its format because a derive names a macro bare:
+# with std/json's `serializable` imported as well, a second `serializable`
+# was refused as "'serializable' is ambiguous here", and `derive` takes no
+# qualified name. A type that is both writes `derive serializable,
+# yaml_serializable`; what the two generate shares no method (`to_json`,
+# `from_json` and `initialize(doc, at)` against `to_yaml`, `from_yaml`,
+# `to_yaml_any` and `initialize(yaml)`).
+pub macro yaml_serializable(declaration)
+  impl ::Std::Yaml::ToYAML for {{ declaration[:name].id }}
+    def to_yaml_any : ::Std::Yaml::TapeValue
+      to_yaml_any(::SlicePool(::Std::Yaml::TapeValue).new)
+    end
+
+    def to_yaml_any(pool : ::SlicePool(::Std::Yaml::TapeValue)) : ::Std::Yaml::TapeValue
+      yaml_pairs = ::Std::Yaml::TapeMap(::Std::Yaml::TapeValue, ::Std::Yaml::TapeValue).new
+      {% for field in declaration[:fields] %}
+        yaml_pairs[::Std::Yaml::TapeValue.new({{ field[:name][1..] }})] = ::Std::Yaml::YAML.to_any({{ field[:name].id }}, pool)
+      {% end %}
+      ::Std::Yaml::TapeValue.new(yaml_pairs.freeze(pool))
+    end
+  end
+
+  def to_yaml : String
+    ::Std::Yaml::YAML.dump(to_yaml_any)
+  end
+
+  def self.from_yaml(text : String) : self
+    ::Std::Yaml::YAML.from_yaml(text, self)
+  end
+
+  def initialize(yaml : ::Std::Yaml::TapeValue)
+    yaml_pairs = yaml.as_h? || raise "expected a mapping for #{ {{ declaration[:name] }} }, not #{yaml.kind_name}"
+    # A key that is not there is nil from `[]?`; a key holding null is an
+    # `TapeValue` that is `null?`. Each field's type is asked of the field
+    # (`typeof`), as std/json's derive asks it, and whether it has a
+    # default is asked of the type when this method is compiled, since the
+    # declaration carries names and types only.
+    {% for field in declaration[:fields] %}
+      yaml_found_{{ field[:name][1..].id }} = yaml_pairs[::Std::Yaml::TapeValue.new({{ field[:name][1..] }})]?
+      \{% if @type.instance_vars.any? { |ivar| ivar.name.stringify == {{ field[:name][1..] }} && ivar.has_default_value? } %}
+        {% if field[:type].nilable? %}
+          unless yaml_found_{{ field[:name][1..].id }}.nil?
+            {{ field[:name].id }} = yaml_found_{{ field[:name][1..].id }}.null? ? nil : ::Std::Yaml::YAML.read_value(yaml_found_{{ field[:name][1..].id }}, typeof({{ field[:name].id }} || raise("")))
+          end
+        {% else %}
+          if !yaml_found_{{ field[:name][1..].id }}.nil? && !yaml_found_{{ field[:name][1..].id }}.null?
+            {{ field[:name].id }} = ::Std::Yaml::YAML.read_value(yaml_found_{{ field[:name][1..].id }}, typeof({{ field[:name].id }}))
+          end
+        {% end %}
+      \{% elsif {{ field[:type].nilable? }} %}
+        {{ field[:name].id }} = yaml_found_{{ field[:name][1..].id }}.nil? || yaml_found_{{ field[:name][1..].id }}.null? ? nil : ::Std::Yaml::YAML.read_value(yaml_found_{{ field[:name][1..].id }}, typeof({{ field[:name].id }} || raise("")))
+      \{% else %}
+        raise "YAML for #{ {{ declaration[:name] }} } has no key #{ {{ field[:name][1..] }}.inspect }" if yaml_found_{{ field[:name][1..].id }}.nil?
+        {{ field[:name].id }} = ::Std::Yaml::YAML.read_value(yaml_found_{{ field[:name][1..].id }}, typeof({{ field[:name].id }}))
+      \{% end %}
+    {% end %}
+  end
+end
+
+@[OnTape]
+struct RisDecoded(T)
+  getter value : T
+
+  def initialize(value : TapeValue)
+    result = {% if T.nilable? %}
+      value.null? ? nil : YAML.read_value(value, {{ T.union_types.reject { |u| u == ::Nil }.first }})
+    {% elsif T < Hash %}
+      Hash({{ T.type_vars[0] }}, {{ T.type_vars[1] }}).new
+    {% else %}
+               T.new(value)
+             {% end %}
+    {% if T < Hash %}
+      entries = value.as_h
+      keys = Array(TapeValue).new(entries.size)
+      entries.each { |key, item| keys << key; nil }
+      decoded = Array({{ T.type_vars[1] }}).new(keys.size) do |i|
+        YAML.read_value(entries[keys[i]], {{ T.type_vars[1] }})
+      end
+      decoded_keys = Array({{ T.type_vars[0] }}).new(keys.size) do |i|
+        YAML.read_value(keys[i], {{ T.type_vars[0] }})
+      end
+      i = 0
+      while i < keys.size
+        result[decoded_keys[i]] = decoded[i]
+        i += 1
+      end
+    {% end %}
+    @value = result
+  end
+end
+
+pub struct YAML
+  # The parser is built in the caller's destination (SPEC 1.5): the value
+  # views its pool, which the caller's scope frees.
+  def self.parse(text : String) : TapeValue
+    first(TapeParser.new(text))
+  end
+
+  def self.first(parser : TapeParser) : TapeValue
+    docs = parser.parse_all
+    raise parser.error || "invalid YAML" if docs.nil?
+    docs.empty? ? TapeValue.new(nil) : docs[0]
+  end
+
+  def self.parse?(text : String) : TapeValue?
+    first?(TapeParser.new(text))
+  end
+
+  def self.first?(parser : TapeParser) : TapeValue?
+    docs = parser.parse_all
+    return nil if docs.nil?
+    docs.empty? ? TapeValue.new(nil) : docs[0]
+  end
+
+  def self.parse_all(text : String) : Array(TapeValue)
+    all(TapeParser.new(text))
+  end
+
+  def self.all(parser : TapeParser) : Array(TapeValue)
+    docs = parser.parse_all
+    raise parser.error || "invalid YAML" if docs.nil?
+    docs
+  end
+
+  def self.parse_all?(text : String) : Array(TapeValue)?
+    TapeParser.new(text).parse_all
+  end
+
+  def self.dump(value : TapeValue, writer : String::Builder) : Nil
+    TapeEmitter.new(writer).dump(value)
+  end
+
+  def self.dump(value : TapeValue) : String
+    String.build { |w| dump(value, w) }
+  end
+
+  # Block YAML for any value `to_any` knows, written as `dump` writes it.
+  def self.to_yaml(obj : T) : String forall T
+    dump(to_any(obj))
+  end
+
+  # The document `text` holds, read into `type`: `Nil`, `Bool`, `Int32`,
+  # `Int64`, `UInt8`, `UInt64`, `Float64`, `String`, `TapeValue`, a type with
+  # `derive yaml_serializable`, one of those or `nil`, or an `Array` or a
+  # `Hash` of those. Text that is not YAML panics as `parse` does; a value
+  # of another kind, or an integer outside the type, is refused.
+  def self.from_yaml(text : String, type : T.class) : T forall T
+    read_value(parse(text), type)
+  end
+
+  # The `TapeValue` a value is written as: the value or `nil`, the way
+  # `JSON.to_json` takes it. A nil is taken out here, before the rest
+  # dispatches, for the reason std/json's `write_or_null` gives: handed to
+  # `write_value` whole, `Int32 | Nil` matches the `ToYAML` overload as
+  # one type and does not build.
+  def self.to_any(val : T) : TapeValue forall T
+    to_any(val, SlicePool(TapeValue).new)
+  end
+
+  def self.to_any(val : T, pool : SlicePool(TapeValue)) : TapeValue forall T
+    if val.nil?
+      TapeValue.new(nil)
+    else
+      write_value(val, pool)
+    end
+  end
+
+  def self.write_value(val : Nil, pool : SlicePool(TapeValue)) : TapeValue
+    TapeValue.new(nil)
+  end
+
+  def self.write_value(val : Bool, pool : SlicePool(TapeValue)) : TapeValue
+    TapeValue.new(val)
+  end
+
+  def self.write_value(val : Int32, pool : SlicePool(TapeValue)) : TapeValue
+    TapeValue.new(val.to_i64)
+  end
+
+  def self.write_value(val : Int64, pool : SlicePool(TapeValue)) : TapeValue
+    TapeValue.new(val)
+  end
+
+  def self.write_value(val : UInt8, pool : SlicePool(TapeValue)) : TapeValue
+    TapeValue.new(val.to_i64)
+  end
+
+  # A YAML integer is read as an `Int64`, and one past it as a float, so a
+  # `UInt64` above 9223372036854775807 would read back as a different
+  # number: it is refused rather than written.
+  def self.write_value(val : UInt64, pool : SlicePool(TapeValue)) : TapeValue
+    raise "the UInt64 #{val} is past 9223372036854775807, the largest integer YAML reads back" if val > 9223372036854775807_u64
+    TapeValue.new(val.to_i64)
+  end
+
+  def self.write_value(val : Float64, pool : SlicePool(TapeValue)) : TapeValue
+    TapeValue.new(val)
+  end
+
+  def self.write_value(val : String, pool : SlicePool(TapeValue)) : TapeValue
+    TapeValue.new(val)
+  end
+
+  def self.write_value(val : TapeValue, pool : SlicePool(TapeValue)) : TapeValue
+    val
+  end
+
+  def self.write_value(val : Array(T), pool : SlicePool(TapeValue)) : TapeValue forall T
+    items = pool.alloc_slice(val.size)
+    val.each_with_index { |item, at| items[at] = to_any(item, pool) }
+    TapeValue.new(items)
+  end
+
+  # A key of any type `to_any` writes as a scalar: YAML keys are typed,
+  # so `Hash(Int32, String)` is written with integer keys and reads back
+  # as itself. A collection key is refused by `dump`.
+  def self.write_value(val : Hash(K, V), pool : SlicePool(TapeValue)) : TapeValue forall K, V
+    pairs = TapeMap(TapeValue, TapeValue).new
+    val.each { |key, item| pairs[to_any(key, pool)] = to_any(item, pool) }
+    TapeValue.new(pairs.freeze(pool))
+  end
+
+  def self.write_value(val : T, pool : SlicePool(TapeValue)) : TapeValue forall T : ToYAML
+    val.to_yaml_any(pool)
+  end
+
+  def self.read_value(value : TapeValue, type : Nil.class) : Nil
+    value.as_nil
+  end
+
+  def self.read_value(value : TapeValue, type : Bool.class) : Bool
+    value.as_bool
+  end
+
+  def self.read_value(value : TapeValue, type : Int32.class) : Int32
+    v = value.as_i
+    raise "integer #{v} out of Int32 range" if v < -2147483648_i64 || v > 2147483647_i64
+    v.to_i32
+  end
+
+  def self.read_value(value : TapeValue, type : Int64.class) : Int64
+    value.as_i
+  end
+
+  def self.read_value(value : TapeValue, type : UInt8.class) : UInt8
+    v = value.as_i
+    raise "integer #{v} out of UInt8 range" if v < 0_i64 || v > 255_i64
+    v.to_u8
+  end
+
+  def self.read_value(value : TapeValue, type : UInt64.class) : UInt64
+    v = value.as_i
+    raise "integer #{v} out of UInt64 range" if v < 0_i64
+    v.to_u64
+  end
+
+  # A float, or an integer widened to one: `y: 2` is the Float64 2.0.
+  def self.read_value(value : TapeValue, type : Float64.class) : Float64
+    value.as_f
+  end
+
+  def self.read_value(value : TapeValue, type : String.class) : String
+    value.as_s
+  end
+
+  def self.read_value(value : TapeValue, type : TapeValue.class) : TapeValue
+    value
+  end
+
+  def self.read_value(value : TapeValue, type : Array(T).class) : Array(T) forall T
+    items = value.as_a
+    Array(T).new(items.size) { |i| read_value(items[i], T) }
+  end
+
+  def self.read_value(value : TapeValue, type : Hash(K, V).class) : Hash(K, V) forall K, V
+    RisDecoded(Hash(K, V)).new(value).value
+  end
+
+  # Construct in the caller's scope, including nullable derived types.
+  def self.read_value(value : TapeValue, type : T.class) : T forall T
+    RisDecoded(T).new(value).value
+  end
+end
+
+@[OnTape]
+struct Point
+  getter name : String
+  getter x : Int32
+  getter tags : Array(String)
+  getter scale : Float64?
+  derive yaml_serializable
+end
+
+spec 8.1  # A std module follows the standard its header names (an RFC, a file…
+
+
+  # std/yaml on the caller's tape: documents read into TapeValue, dumped,
+  # read back and compared; derive yaml_serializable; no heap.
+
+
+  tagged = YAML.parse("a: !!int 12\nb: !!float 3\nc: !!bool true\n" \
+                      "d: !!null null\ne: !<tag:yaml.org,2002:str> 7\n")
+  tagged["a"].as_i == 12
+  tagged["b"].as_f == 3.0
+  tagged["c"].as_bool && tagged["d"].null?
+  tagged["e"].as_s == "7"
+  retained = YAML.parse("a: &a \"first\\ntext\"\nb: 'second'\nc: *a\n")
+  retained["a"].as_s == "first\ntext"
+  retained["c"] == retained["a"]
+  text = "name: café\nlist: [1, true, null, 0.125]\nquoted: \"a\\nb\"\n"
+  doc = YAML.parse(text)
+  YAML.parse("[1, 2]")[-1].as_i == 2
+  YAML.read_value(doc["name"], String?) == "café"
+  YAML.read_value(TapeValue.new(nil), Point?).nil?
+  copied = doc.copy_to(Program.tape)
+  copied == doc
+  doc["name"].as_s == "café"
+  doc["list"][0].as_i == 1
+  doc["quoted"].as_s == "a\nb"
+  w = String::Builder.new(1)
+  w << "prefix:"
+  YAML.dump(doc, w)
+  rendered = YAML.dump(doc)
+  print rendered
+  YAML.parse(rendered) == doc
+  YAML.parse(rendered).hash == doc.hash
+  w.finish.starts_with?("prefix:name:")
+  YAML.parse?("[bad").nil?
+  nested = YAML.parse("- [1, [2], 3]\n-\n  - 4\n  - [5, 6]\n")
+  nested[0][1][0].as_i == 2
+  nested[1][1][1].as_i == 6
+  YAML.parse(YAML.dump(nested)) == nested
+  print YAML.dump(nested)
+  puts nested.inspect
+  puts doc.inspect
+  docs = YAML.parse_all("a: 1\n---\n- x\n- {k: v}\n")
+  puts docs.size
+  docs.each { |d| print YAML.dump(d) }
+  p = Point.from_yaml("name: p\nx: 3\ntags: [a, b]\n")
+  puts "#{p.name} #{p.x} #{p.tags.join(",")} #{p.scale.nil?}"
+  print p.to_yaml
+end

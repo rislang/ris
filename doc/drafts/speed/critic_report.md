@@ -48,12 +48,12 @@ M8. Hash gates weak: "equal strings hash equal" holds for any
 function. Add: strings differing in one byte at each position 0-17
 hash differently; low-bit spread over k0..k999; unaligned view equals
 copy; how a spec puts a String end at a page boundary. Other FNV sites
-(tape.iyi:3094, tape_text.iyi:399, std/json.iyi:2569): in or out?
+(tape.ri:3094, tape_text.ri:399, std/json.ri:2569): in or out?
 
 ## Nit
 
 N1. Cite Goose implementation.md 6.2 (not C.2) and 6.10.
-N2. iyi has the same FNV (iyi string.iyi:408): list it in UPSTREAM.md.
+N2. iyi has the same FNV (iyi string.ri:408): list it in UPSTREAM.md.
 N3. The mark loads region, cursor and side, not one "tape top".
 N4. Define "makes nothing" once: "puts nothing on the tape".
 N5. Path test/ris/check.sh; current count 8 FAILED.

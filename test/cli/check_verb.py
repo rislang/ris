@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`ris check`: one verdict over format, deps, types, unused and test.
 
-    IYI=./bin/ris python3 test/cli/check_verb.py
+    RIS=./bin/ris python3 test/cli/check_verb.py
 
 Runs the real binary on scratch projects and asserts: a clean project
 is green with six part lines in fixed order; the no-manifest case
@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 
-IYI = os.path.abspath(os.environ.get("IYI", "./bin/ris"))
+RIS = os.path.abspath(os.environ.get("RIS", "./bin/ris"))
 PARTS = ["format", "deps", "spec", "types", "unused", "test"]
 AGENTS_TEXT = ("The work is done when `ris check` passes. Use `ris check "
                "--fix` to fix formatting and dependencies first; `ris check "
@@ -41,7 +41,7 @@ def step(name, ok, detail=""):
 
 
 def run(*args, cwd=None, stdin=None):
-    return subprocess.run([IYI, *args], capture_output=True, text=True,
+    return subprocess.run([RIS, *args], capture_output=True, text=True,
                           cwd=cwd, input=stdin)
 
 

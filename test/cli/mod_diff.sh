@@ -36,7 +36,7 @@ case "$(uname -s)" in
   *) PSEP=':' ;;
 esac
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 case "$(uname -s)" in
@@ -50,9 +50,9 @@ trap 'rm -rf "$WORK"' EXIT
 status=0
 cd "$WORK" || exit 1
 mkdir -p app
-export IYI_PATH="$REPO/src${PSEP}$WORK"
+export RIS_PATH="$REPO/src${PSEP}$WORK"
 
-cat > main.iyi <<'EOF'
+cat > main.ri <<'EOF'
 module main
 
 import app/twice
@@ -65,7 +65,7 @@ EOF
 # doc comment, the constant inside the block-taking def (which travels), and
 # the constant inside the ordinary one (which does not).
 write_module() {
-  cat > app/twice.iyi <<EOF
+  cat > app/twice.ri <<EOF
 module app/twice
 
 import app/base::{each_base}
@@ -88,7 +88,7 @@ EOF
 # changing it moves none of that module's own three hashes — only the edge
 # it was compiled against.
 write_base() {
-  cat > app/base.iyi <<EOF
+  cat > app/base.ri <<EOF
 module app/base
 
 pub def each_base(&block : Int32 -> Nil) : Nil
@@ -101,7 +101,7 @@ emit() {
   local into="$1"
   rm -rf "$into"
   mkdir -p "$into"
-  if ! "$IYI" build --emit-iyimod "$into" -o "bin_$into" main.iyi > "emit_$into.log" 2>&1; then
+  if ! "$RIS" build --emit-rimod "$into" -o "bin_$into" main.ri > "emit_$into.log" 2>&1; then
     echo "FAIL: cannot write artifacts for $into"
     sed -n '1,8p' "emit_$into.log"
     status=1
@@ -113,7 +113,7 @@ emit() {
 # of the module: the ground truth each verdict is checked against.
 answer_from() {
   local mods="$1" out="$2"
-  if ! "$IYI" build --use-iyimod "$mods" -o "$out" main.iyi > "use_$out.log" 2>&1; then
+  if ! "$RIS" build --use-rimod "$mods" -o "$out" main.ri > "use_$out.log" 2>&1; then
     echo "FAIL: cannot build against $mods"
     sed -n '1,8p' "use_$out.log"
     status=1
@@ -125,7 +125,7 @@ answer_from() {
 check() {
   local label="$1" mods="$2" want_exit="$3" want_answer="$4"
   local got_exit answer verdict
-  "$IYI" mod diff --exit-code base/app/twice.iyimod "$mods/app/twice.iyimod" > "diff_$mods.txt" 2>&1
+  "$RIS" mod diff --exit-code base/app/twice.rimod "$mods/app/twice.rimod" > "diff_$mods.txt" 2>&1
   got_exit=$?
   verdict="$(tail -1 "diff_$mods.txt")"
   answer="$(answer_from "$mods" "bin_answer_$mods")"
@@ -183,12 +183,12 @@ emit travels && check "a travelling body" travels 1 "1 9 40 "
 write_module "first note" 2 40
 write_base 5
 emit dependency && check "a module underneath" dependency 1 "1 2 45 "
-# The ground truth under that verdict: the old `twice.iyimod` beside the new
-# `base.iyimod` is what a build system that believed "nothing to do" would
+# The ground truth under that verdict: the old `twice.rimod` beside the new
+# `base.rimod` is what a build system that believed "nothing to do" would
 # link — and the compiler refuses that set outright (IV.3). A verdict of
 # "no rebuild" would have been advice its own compiler will not take.
-rm -rf mixed && cp -r base mixed && cp dependency/app/base.iyimod mixed/app/base.iyimod
-if "$IYI" build --use-iyimod mixed -o bin_mixed main.iyi > mixed.log 2>&1; then
+rm -rf mixed && cp -r base mixed && cp dependency/app/base.rimod mixed/app/base.rimod
+if "$RIS" build --use-rimod mixed -o bin_mixed main.ri > mixed.log 2>&1; then
   echo "FAIL: the old artifact linked against the new one, so nothing forced the rebuild"
   status=1
 else
@@ -196,7 +196,7 @@ else
 fi
 
 # And the case that always worked, kept here so the four are read together.
-cat > app/twice.iyi <<'EOF'
+cat > app/twice.ri <<'EOF'
 module app/twice
 
 # first note
@@ -209,7 +209,7 @@ pub def plain(offset : Int32) : Int32
   40 + offset
 end
 EOF
-cat > main.iyi <<'EOF'
+cat > main.ri <<'EOF'
 module main
 
 import app/twice

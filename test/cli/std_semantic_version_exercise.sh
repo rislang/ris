@@ -5,9 +5,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -43,12 +43,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_semantic_version_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_semantic_version_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -99,16 +99,16 @@ else
   mkdir -p "$WORK/patched/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/semantic_version.iyi").read_text()
+src = Path("$REPO/src/std/semantic_version.ri").read_text()
 old = 'return nil unless parts'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/semantic_version.iyi").write_text(src.replace(old, '# return nil unless parts', 1))
+Path("$WORK/patched/std/semantic_version.ri").write_text(src.replace(old, '# return nil unless parts', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_semantic_version_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_semantic_version_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on a broken module"
     status=1
   else
@@ -125,16 +125,16 @@ caught_at() {
   OLD="$old" NEW="$new" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/semantic_version.iyi").read_text()
+src = Path("$REPO/src/std/semantic_version.ri").read_text()
 old, new = os.environ["OLD"], os.environ["NEW"]
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/semantic_version.iyi").write_text(src.replace(old, new, 1))
+Path("$WORK/patched/std/semantic_version.ri").write_text(src.replace(old, new, 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  $label: the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_semantic_version_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_semantic_version_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the exercise PASSED on a broken module"
     status=1
   elif ! grep -qF "$expect" "$WORK/mut.out"; then

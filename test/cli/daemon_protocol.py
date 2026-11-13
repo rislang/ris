@@ -13,7 +13,7 @@ Every case below used to kill it. `daemon_accept` read the request frame with
 no rescue at all, so anything that could go wrong on a socket the daemon does
 not own the far end of went wrong all the way out of the accept loop:
 
-  * a client that connects and closes - `iyi daemon build` under Ctrl-C, a
+  * a client that connects and closes - `ris daemon build` under Ctrl-C, a
     health check, anything that probes the socket - was `End of file reached`,
     exit 1;
   * a length header with no body behind it, likewise;
@@ -27,7 +27,7 @@ not own the far end of went wrong all the way out of the accept loop:
     exited *successfully*, mid-sentence, and the next client got
     "no daemon listening".
 
-The ninth case is the other direction: a second `iyi daemon start` on a live
+The ninth case is the other direction: a second `ris daemon start` on a live
 socket used to `File.delete?` the incumbent's address and listen on a new
 socket with the same name. The first daemon kept running - a compiler and a
 warm prelude behind a socket with no name, unreachable and unreapable.
@@ -47,9 +47,9 @@ import tempfile
 import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-IYI = os.path.join(REPO, "bin", "iyi")
+RIS = os.path.join(REPO, "bin", "iyi")
 WORK = tempfile.mkdtemp(prefix="iyi-daemon-protocol")
-SOURCE = os.path.join(WORK, "ok.iyi")
+SOURCE = os.path.join(WORK, "ok.ri")
 FAILURES = []
 
 
@@ -68,7 +68,7 @@ def start(sock):
     buffer, and then read an empty log. Waiting for the second banner
     line leaves the log holding exactly what the cases below put in it.
     """
-    proc = subprocess.Popen([IYI, "daemon", "start", "--socket", sock],
+    proc = subprocess.Popen([RIS, "daemon", "start", "--socket", sock],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True)
     for _ in range(600):
@@ -104,7 +104,7 @@ def builds(sock, tag):
     """True when the daemon on *sock* still compiles a program."""
     try:
         done = subprocess.run(
-            [IYI, "daemon", "build", "--socket", sock,
+            [RIS, "daemon", "build", "--socket", sock,
              "-o", os.path.join(WORK, "out-%s" % tag), SOURCE],
             capture_output=True, text=True, timeout=300)
     except subprocess.TimeoutExpired:
@@ -170,7 +170,7 @@ def main():
 
     if daemon.poll() is None:
         # A second daemon must not take the socket out from under the first.
-        second = subprocess.run([IYI, "daemon", "start", "--socket", sock],
+        second = subprocess.run([RIS, "daemon", "start", "--socket", sock],
                                 capture_output=True, text=True, timeout=120)
         said = (second.stdout + second.stderr).strip()
         step("a second daemon on a live socket",

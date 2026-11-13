@@ -387,7 +387,7 @@ module Iyi
         freeze_type
       elsif freeze_type && iyi_declared_return? && (type.no_return? || type.implements?(freeze_type))
         # iyi: such a def's type is its error union whatever its body answers,
-        # virtual the way the `.iyimod` path reads it back (`Call#lookup_matches`),
+        # virtual the way the `.rimod` path reads it back (`Call#lookup_matches`),
         # so a source build and an artifact build type, check and mangle a
         # call alike. A body outside the annotation is left as it is, and
         # `set_type` reports it.

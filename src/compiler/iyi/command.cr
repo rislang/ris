@@ -50,19 +50,19 @@ class Iyi::Command
 
     Command:
         init                     generate a new project
-        get                      add a requirement to iyi.mod, or move one; -u brings all up to date
+        get                      add a requirement to ris.mod, or move one; -u brings all up to date
         doc                      print a module's exported surface, docs included
         build                    build an executable
         clear_cache              clear the compiler cache
         check                    format, deps, spec, types, unused, test: exit 0 means the work is done
         env                      print Crystal environment information
         eval                     eval code from args or standard input
-        mod                      inspect a .iyimod module artifact
+        mod                      inspect a .rimod module artifact
         lsp                      serve the language over stdio (editors, agents)
         mcp                      serve the compiler's verbs as MCP tools over stdio (agents)
         run (default)            build and run program
         spec                     the spec's clauses and the tests naming them
-        test                     run every *_test.iyi: exit 0 passes, anything else fails
+        test                     run every *_test.ri: exit 0 passes, anything else fails
         unsafe                   list @[Ffi], @[PointerUnsafe] and @[TapeUnsafe] marks
         tool                     run a tool
         help, --help, -h         show this help
@@ -239,7 +239,7 @@ class Iyi::Command
           options.unshift external_command
           exit_status, _ = Process.run(options, env: {
             "PATH"          => path,
-            "IYI_EXEC_PATH" => iyi_exec_path,
+            "RIS_EXEC_PATH" => iyi_exec_path,
           }, input: :inherit, output: :inherit, error: :inherit) do |process|
             # FIXME: There's a race condition between creating the sub-process and
             # registering the `on_terminate` callback.
@@ -253,7 +253,7 @@ class Iyi::Command
         {% else %}
           Process.exec(external_command, options, env: {
             "PATH"          => path,
-            "IYI_EXEC_PATH" => iyi_exec_path,
+            "RIS_EXEC_PATH" => iyi_exec_path,
           })
         {% end %}
       else
@@ -302,7 +302,7 @@ class Iyi::Command
     print_error ex.message
     ::exit ex.status
   rescue ex : IO::Error
-    # iyi: `mod dump big.iyimod | head` is somebody reading, not a bug in a
+    # iyi: `mod dump big.rimod | head` is somebody reading, not a bug in a
     # compiler. The reader closing the pipe is how `head` says it has enough,
     # and every other tool on the machine treats it as the end of the output
     # rather than as a crash with a backtrace and an invitation to file an
@@ -328,7 +328,7 @@ class Iyi::Command
     # fork's patches and every line of the compiler it built from.
     abort! "you've found a bug in the #{Command.program_name} compiler. Please open an issue, " \
            "including the trace above and source code that will allow us to reproduce it: " \
-           "https://github.com/iyilang/iyi/issues", :SOFTWARE_ERROR
+           "https://github.com/rislang/ris/issues", :SOFTWARE_ERROR
   end
 
   private def tool
@@ -454,10 +454,10 @@ class Iyi::Command
   def self.death_sentence(status : Process::Status) : String
     case status.exit_reason
     when .bad_memory_access?, .access_violation?
-      "the program died of a memory fault. Outside `Pointer`, an iyi program cannot reach memory " \
+      "the program died of a memory fault. Outside `Pointer`, a ris program cannot reach memory " \
       "it does not own: if the program uses `Pointer`, that is the place to look, and on a target " \
-      "without iyi's runtime it can also be the stack running out. If neither, it is a bug in " \
-      "#{program_name}'s own runtime, and ours to fix: https://github.com/iyilang/iyi/issues"
+      "without ris's runtime it can also be the stack running out. If neither, it is a bug in " \
+      "#{program_name}'s own runtime, and ours to fix: https://github.com/rislang/ris/issues"
     when .unknown?
       # The code is the one fact left, and without it an intermittent
       # Windows exit crash could not be told from another: a stack cookie
@@ -556,7 +556,7 @@ class Iyi::Command
     end
 
     unless status.exit_reason.normal?
-      if compiler.prelude == "iyi/prelude"
+      if compiler.prelude == "ris/prelude"
         STDERR.puts "#{Command.program_name}: #{Command.death_sentence(status)}"
       else
         STDERR.puts status.description
@@ -826,31 +826,31 @@ class Iyi::Command
         end
       end
 
-      # iyi: write a `.iyimod` per imported module into DIR (iyi SPEC IV.1).
+      # iyi: write a `.rimod` per imported module into DIR (iyi SPEC IV.1).
       #
       # Emitting from an ordinary build rather than from a "compile this module
       # alone" command, because compiling a module alone is the thing the
       # artifact is *for* and cannot precede it.
-      opts.on("--emit-iyimod DIR", "iyi: write a .iyimod per imported module\nthis build reads from source into DIR (a\npackage's is III.7 step 5's, and is not\none of these)") do |dir|
+      opts.on("--emit-rimod DIR", "ris: write a .rimod per imported module\nthis build reads from source into DIR (a\npackage's is III.7 step 5's, and is not\none of these)") do |dir|
         # iyi: answered here rather than by `Dir.mkdir_p` half an hour into a
         # build. A path that names a file, or a directory nobody may write to,
         # used to arrive as `Unable to create directory` and a stack trace.
         # And `""`, which is `"$DIR"` with `DIR` unset, arrived as
-        # `--emit-iyimod cannot use : No such file or directory` - a sentence
+        # `--emit-rimod cannot use : No such file or directory` - a sentence
         # with a hole where the name goes.
-        abort! "--emit-iyimod takes a directory", :USAGE_ERROR if dir.empty?
+        abort! "--emit-rimod takes a directory", :USAGE_ERROR if dir.empty?
         if File.exists?(dir) && !File.directory?(dir)
-          abort! "--emit-iyimod needs a directory, and #{dir} is a file", :USAGE_ERROR
+          abort! "--emit-rimod needs a directory, and #{dir} is a file", :USAGE_ERROR
         end
         begin
           Dir.mkdir_p(dir)
         rescue ex : File::Error
-          abort! "--emit-iyimod cannot use #{dir}: #{ex.os_error.try(&.message) || ex.message}", :USAGE_ERROR
+          abort! "--emit-rimod cannot use #{dir}: #{ex.os_error.try(&.message) || ex.message}", :USAGE_ERROR
         end
         compiler.emit_iyimod = dir
       end
 
-      # iyi: read imported modules from DIR's `.iyimod` files (iyi SPEC IV.1).
+      # iyi: read imported modules from DIR's `.rimod` files (iyi SPEC IV.1).
       #
       # No longer implies `--no-codegen`: an artifact carries its module's own
       # object code, the defs it declares are emitted as external declarations,
@@ -863,20 +863,20 @@ class Iyi::Command
       # file is not there (`Compiler.workspace_artifacts`, iyi SPEC IV.1f).
       # A reader who has seen a build use an artifact it was never told
       # about is owed the difference between the two.
-      opts.on("--use-iyimod DIR", "iyi: compile imported modules from DIR's\n.iyimod files first; `mods` beside the\nproject root is read for a module with\nno source either way") do |dir|
+      opts.on("--use-rimod DIR", "ris: compile imported modules from DIR's\n.rimod files first; `mods` beside the\nproject root is read for a module with\nno source either way") do |dir|
         # iyi: a module with no artifact is ordinary — the first build of the
         # loop has none at all, and compiles from source. A *directory* that is
         # not there is a typo, and it used to be ignored: the build compiled
         # every module from source and looked like it had used artifacts.
-        abort! "--use-iyimod takes a directory", :USAGE_ERROR if dir.empty?
+        abort! "--use-rimod takes a directory", :USAGE_ERROR if dir.empty?
         unless File.directory?(dir)
-          # A file that is there is not a directory that is missing: `--use-iyimod
-          # mods/app/lib.iyimod` answered "there is no mods/app/lib.iyimod" about
+          # A file that is there is not a directory that is missing: `--use-rimod
+          # mods/app/lib.rimod` answered "there is no mods/app/lib.rimod" about
           # the artifact the author had just been looking at.
           if File.exists?(dir)
-            abort! "--use-iyimod needs a directory of .iyimod files, and #{dir} is a file", :USAGE_ERROR
+            abort! "--use-rimod needs a directory of .rimod files, and #{dir} is a file", :USAGE_ERROR
           end
-          abort! "--use-iyimod needs a directory of .iyimod files, and there is no #{dir}", :USAGE_ERROR
+          abort! "--use-rimod needs a directory of .rimod files, and there is no #{dir}", :USAGE_ERROR
         end
         compiler.use_iyimod = dir
       end
@@ -987,7 +987,7 @@ class Iyi::Command
       abort! Lexer.iyi_miscased_sentence(entry.filename), :USAGE_ERROR
     end
     if !specified_prelude && sources.first?.try(&.filename.ris_source?)
-      compiler.prelude = "iyi/prelude"
+      compiler.prelude = "ris/prelude"
     end
 
     output_extension = compiler.cross_compile? ? compiler.codegen_target.object_extension : compiler.codegen_target.executable_extension
@@ -1011,7 +1011,7 @@ class Iyi::Command
 
       # iyi: and the same question of a name the author typed. The check
       # above covers only the name the compiler derives itself, so
-      # `-o good.iyi good.iyi` - one word, typed twice - read the source,
+      # `-o good.ri good.ri` - one word, typed twice - read the source,
       # built it and linked the executable over it: the program's only
       # copy was 12 KB of ELF, exit 0. A module the entry imports is the
       # same mistake one step removed, and is refused once it is known
@@ -1095,11 +1095,11 @@ class Iyi::Command
 
     # iyi: the artifacts a workspace keeps, where nobody said otherwise.
     #
-    # A library arrives as `.iyimod` files and no source (III.7). Told
-    # `--use-iyimod DIR` a build reads them first and does not open a
+    # A library arrives as `.rimod` files and no source (III.7). Told
+    # `--use-rimod DIR` a build reads them first and does not open a
     # source at all — that is the flag's contract and it is untouched here.
     # Told nothing, a build used to have no way to reach one, so a
-    # workspace that `build --use-iyimod mods` compiles was `can't find
+    # workspace that `build --use-rimod mods` compiles was `can't find
     # module 'app/base'` under `iyi build`, `iyi run` and `iyi test`: the
     # library was there, as the thing it ships as.
     #
@@ -1133,7 +1133,7 @@ class Iyi::Command
       expanded = File.expand_path(filename)
       # iyi: the commonest thing to get wrong about a command is the name of
       # the file, and the answer to it was "Error: Error opening file with
-      # mode 'r': '/…/typo.iyi': No such file or directory" — the word Error
+      # mode 'r': '/…/typo.ri': No such file or directory" — the word Error
       # twice, a mode nobody asked about, and the path spelled out twice over.
       unless File.file?(expanded)
         # And the second commonest is handing it a directory, which used to
@@ -1220,7 +1220,7 @@ class Iyi::Command
     return unless exe = Process.executable_path
     listing = IO::Memory.new
     Process.run(exe, ["build", "--target", compiler.codegen_target.to_s, "--mcpu", "help"],
-      env: {"IYI_OPTS" => nil, "CRYSTAL_OPTS" => nil}, error: listing)
+      env: {"RIS_OPTS" => nil, "CRYSTAL_OPTS" => nil}, error: listing)
     # "Available CPUs for this target:", a blank line, one `  name - what`
     # a line, and "Available features for this target:" after them.
     known = [] of String
@@ -1330,7 +1330,7 @@ class Iyi::Command
 
   # iyi: a refusal with no place in a source file, as a `-f json` frame: the
   # shape every frame has, with the place left empty as an error from a
-  # macro's virtual file leaves it. `no such file: x.iyi` was text there.
+  # macro's virtual file leaves it. `no such file: x.ri` was text there.
   private def json_message_frame(json : JSON::Builder, message : String) : Nil
     json.object do
       json.field "file", ""
@@ -1348,7 +1348,7 @@ class Iyi::Command
   end
 
   # Constructs an `OptionParser` from the given block and runs it twice, first
-  # time with `IYI_OPTS`, second time with the given *options*.
+  # time with `RIS_OPTS`, second time with the given *options*.
   #
   # Only flags are accepted in the first run; positional arguments, invalid
   # options (where they might be treated as normal arguments), and `--` are all
@@ -1364,12 +1364,12 @@ class Iyi::Command
       option_parser.unknown_args { }
       option_parser.invalid_option { |opt| raise OptionParser::InvalidOption.new(opt) }
       option_parser.before_each do |opt|
-        raise Error.new "IYI_OPTS may not contain --" if opt == "--"
+        raise Error.new "RIS_OPTS may not contain --" if opt == "--"
       end
 
       option_parser.parse(iyi_opts)
       unless iyi_opts.empty?
-        raise Error.new "IYI_OPTS may not contain positional arguments"
+        raise Error.new "RIS_OPTS may not contain positional arguments"
       end
 
       option_parser.unknown_args(&old_unknown_args) if old_unknown_args

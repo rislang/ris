@@ -8,12 +8,11 @@ end
 @[OnTape]
 struct Ctx
   getter vars : Vars
+
   def initialize(@vars); end
 end
 
-
 def held(vars : Vars, other : Vars)
-
   i = 0
   while i < vars.vals.size
     vars.vals.clear

@@ -10,6 +10,7 @@ def rows_of(text : String) : Array(Array(String))
   rows << row.copy_to(Program.tape)
   rows
 end
+
 tape do
   rows = rows_of("id,name\n1,Ada\n")
   puts rows.size

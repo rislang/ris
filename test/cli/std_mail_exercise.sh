@@ -35,7 +35,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 case "$(uname -s)" in
@@ -48,12 +48,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_mail_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_mail_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -574,7 +574,7 @@ fi
 
 echo
 echo "== what mail refuses"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/mail::{Mail, MailError}
@@ -631,9 +631,9 @@ when "text-or-panic"
   Mail.parse("Content-Type: text/plain; charset=koi8-r\r\n\r\nx").or_panic.text.or_panic
 end
 puts "accepted"
-IYI
+RIS
 refuse() { # refuse <case> <phrase>
-  if "$IYI" run "$WORK/refuse.iyi" -- "$1" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
   elif ! grep -qF -e "$2" "$WORK/refuse.out"; then
@@ -669,7 +669,7 @@ refuse text-or-panic "mail: the charset \"koi8-r\" is not one std/mail reads (UT
 patched() {
   rm -rf "$3"
   mkdir -p "$3/std"
-  OLD="$1" NEW="$2" "$PY" - "$REPO/src/std/mail.iyi" "$3/std/mail.iyi" <<'PY'
+  OLD="$1" NEW="$2" "$PY" - "$REPO/src/std/mail.ri" "$3/std/mail.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 if src.count(os.environ["OLD"]) == 0:
@@ -690,7 +690,7 @@ prove_broken() {
   if ! patched "$3" "$4" "$WORK/patched"; then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_mail_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_mail_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF -e "$2" "$WORK/mut.out"; then
@@ -797,7 +797,7 @@ prove_oracle() {
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/opatched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mail-broken" "$REPO/test/cli/std_mail_exercise.iyi" >"$WORK/obuild.log" 2>&1; then
+  if ! RIS_PATH="$WORK/opatched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mail-broken" "$REPO/test/cli/std_mail_exercise.ri" >"$WORK/obuild.log" 2>&1; then
     echo "  the $1 copy did not compile"
     status=1
     return

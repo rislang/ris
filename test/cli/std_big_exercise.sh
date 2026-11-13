@@ -3,7 +3,7 @@
 #
 #     bash test/cli/std_big_exercise.sh
 #
-# Runs test/cli/std_big_exercise.iyi plain and with --release, requires every
+# Runs test/cli/std_big_exercise.ri plain and with --release, requires every
 # section to report, checks the arithmetic the program printed against
 # python3 (`decimal` for BigDecimal, `fractions.Fraction` for BigRational,
 # `int(digits, base)` for every base 2..36, `pow(b, e, m)` for 3000 modular
@@ -13,8 +13,8 @@
 # proves that what the module refuses is refused with the prelude's sentence
 # (`division by zero`, `modulo by zero`, `not a decimal: "12x"`), reads the
 # module with `iyi doc`, checks the formatting, typechecks the exercise for
-# five targets, builds it again from `--emit-iyimod` artifacts, and proves
-# the checks can fail by patching copies of std/big.iyi through IYI_PATH.
+# five targets, builds it again from `--emit-rimod` artifacts, and proves
+# the checks can fail by patching copies of std/big.ri through RIS_PATH.
 #
 # A check that cannot fail is not a check. This script breaks addition,
 # multiplication, negation, the modulo sign rule, bitwise and, exponentiation,
@@ -52,7 +52,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -74,7 +74,7 @@ status=0
 run_case() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_big_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_big_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     sed -n '1,12p' "$WORK/$name.build.log"
@@ -525,8 +525,8 @@ echo
 echo "== what std/big refuses"
 big_panics_with() { # big_panics_with <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
-  printf 'module main\n\nimport std/big::{BigInt, BigDecimal, BigRational}\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/big::{BigInt, BigDecimal, BigRational}\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -545,7 +545,7 @@ big_panics_with() { # big_panics_with <label> <name> <phrase> <expression>
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 big_panics_with "integer division by zero" div_zero "division by zero" '42.to_big // 0.to_big'
 big_panics_with "integer modulo by zero" mod_zero "modulo by zero" '42.to_big % 0.to_big'
@@ -582,17 +582,17 @@ echo "== proving the checks can fail when big number operations are broken"
 prove_fails() {
   local label="$1" dir="$2" phrase="$3" sed_script="$4"
   mkdir -p "$WORK/$dir/std"
-  sed -e "$sed_script" "$REPO/src/std/big.iyi" > "$WORK/$dir/std/big.iyi"
+  sed -e "$sed_script" "$REPO/src/std/big.ri" > "$WORK/$dir/std/big.ri"
   # A patch that matches nothing leaves the library intact, and an intact
   # library passes, which reads as "this check cannot fail" when the truth is
   # that nothing was broken to test it. Line-anchored patches drift.
-  if cmp -s "$REPO/src/std/big.iyi" "$WORK/$dir/std/big.iyi"; then
+  if cmp -s "$REPO/src/std/big.ri" "$WORK/$dir/std/big.ri"; then
     echo "  $label: the patch changed nothing, so this proves nothing"
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/std_big_exercise.iyi" \
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/std_big_exercise.ri" \
        >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched big library did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
@@ -615,7 +615,7 @@ prove_fails() {
     return
   fi
   printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" \
-    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
 }
 
 # 1. Addition carry broken (dropped carry addition)
@@ -747,13 +747,13 @@ oracle_fails() { # oracle_fails <label> <dir> <op> <sed script>
     return
   fi
   mkdir -p "$WORK/$dir/std"
-  sed -e "$sed_script" "$REPO/src/std/big.iyi" > "$WORK/$dir/std/big.iyi"
-  if cmp -s "$REPO/src/std/big.iyi" "$WORK/$dir/std/big.iyi"; then
+  sed -e "$sed_script" "$REPO/src/std/big.ri" > "$WORK/$dir/std/big.ri"
+  if cmp -s "$REPO/src/std/big.ri" "$WORK/$dir/std/big.ri"; then
     echo "  $label: the patch changed nothing, so this proves nothing"
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build -o "$WORK/$dir/program" "$REPO/test/cli/std_big_exercise.iyi" >"$WORK/$dir/build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build -o "$WORK/$dir/program" "$REPO/test/cli/std_big_exercise.ri" >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched big library did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
     status=1
@@ -828,14 +828,14 @@ prove_fails "a one-limb quotient left at its estimate" no_one_limb_fix "div: a o
 
 echo
 echo "== documentation, formatting and the five targets"
-if "$IYI" doc "$REPO/src/std/big.iyi" >"$WORK/doc.out" 2>&1 && grep -q "pow_mod_secret" "$WORK/doc.out"; then
+if "$RIS" doc "$REPO/src/std/big.ri" >"$WORK/doc.out" 2>&1 && grep -q "pow_mod_secret" "$WORK/doc.out"; then
   echo "  iyi doc reads std/big, pow_mod_secret included"
 else
   echo "  FAIL: iyi doc: $(tail -2 "$WORK/doc.out")"
   status=1
 fi
 if [ -x "$REPO/bin/crystal" ]; then
-  if "$IYI" check format "$REPO/src/std/big.iyi" "$REPO/test/cli/std_big_exercise.iyi" >"$WORK/format.out" 2>&1; then
+  if "$RIS" check format "$REPO/src/std/big.ri" "$REPO/test/cli/std_big_exercise.ri" >"$WORK/format.out" 2>&1; then
     echo "  the module and the exercise are formatted"
   else
     echo "  FAIL: not formatted: $(head -3 "$WORK/format.out")"
@@ -844,7 +844,7 @@ if [ -x "$REPO/bin/crystal" ]; then
 fi
 crossed=0
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" "$REPO/test/cli/std_big_exercise.iyi" -o "$WORK/cross" >"$WORK/cross.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" "$REPO/test/cli/std_big_exercise.ri" -o "$WORK/cross" >"$WORK/cross.log" 2>&1; then
     echo "  FAIL: the exercise does not typecheck for $target: $(grep -m1 Error "$WORK/cross.log")"
     status=1
     crossed=1
@@ -854,14 +854,14 @@ done
 
 echo
 echo "== the same answers from artifacts"
-# Built once with --emit-iyimod and again from those artifacts: a method
+# Built once with --emit-rimod and again from those artifacts: a method
 # whose body the artifact keeps as text must read back as it was written.
 # The timing lines are left out of the comparison, being times.
 mkdir -p "$WORK/art"
-if ! (cd "$WORK/art" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_big_exercise.iyi") >"$WORK/art.log" 2>&1; then
+if ! (cd "$WORK/art" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_big_exercise.ri") >"$WORK/art.log" 2>&1; then
   echo "  FAIL: the build that writes the artifacts: $(tail -2 "$WORK/art.log")"
   status=1
-elif ! (cd "$WORK/art" && "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_big_exercise.iyi") >"$WORK/art.log" 2>&1; then
+elif ! (cd "$WORK/art" && "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_big_exercise.ri") >"$WORK/art.log" 2>&1; then
   echo "  FAIL: the build from the artifacts: $(grep -m1 -A2 'In mods' "$WORK/art.log" | tr '\n' ' ')"
   status=1
 else

@@ -45,7 +45,7 @@ class Iyi::Type
   # iyi: *include_private* reaches a type its namespace keeps to itself, which
   # is how a module's unexported types are written down (R-2b). Nothing a user
   # writes may name one; the compiler restoring a module's own instantiation
-  # from its `.iyimod` is not a user (iyi SPEC IV.1g).
+  # from its `.rimod` is not a user (iyi SPEC IV.1g).
   def lookup_type(node : ASTNode, self_type = self.instance_type, allow_typeof = true, free_vars : Hash(String, TypeVar)? = nil, find_root_generic_type_parameters = true, include_private = false) : Type
     TypeLookup.new(self, self_type, true, allow_typeof, free_vars, find_root_generic_type_parameters, include_private: include_private).lookup(node).not_nil!
   end
@@ -132,7 +132,7 @@ class Iyi::Type
     # Holder(T)` writing `def initialize(@value : T)` has `T` looked up again
     # with `Holder(Lib::Badge)` for a root, and what comes back is the caller's
     # type. Asked of the import wall, that is the wrong question to the wrong
-    # file — `holder.iyi` never wrote `Badge`, the program that instantiated it
+    # file — `holder.ri` never wrote `Badge`, the program that instantiated it
     # did — and the refusal landed on the line declaring the field:
     # ``Lib::Badge` is not imported here`. Any generic instantiated with another
     # module's type hit it.

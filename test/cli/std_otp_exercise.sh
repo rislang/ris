@@ -33,7 +33,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -51,12 +51,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_otp_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_otp_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -174,10 +174,10 @@ for _ in range(300):
     accepted = any(hotp(key, t // step + k, digits, name) == code for k in range(-window, window + 1) if t // step + k >= 0)
     lines.append(f'puts TOTP.verify(b("{key.hex()}"), "{code}", {t}_i64, {window}, {step}, {digits}, OTPAlgorithm::{name})')
     expected.append(f"{'true' if accepted else 'false'}\tverify {name} time {t} step {step} window {window} code {code}")
-open(os.path.join(work, "code_cases.iyi"), "w").write("\n".join(lines) + "\n")
+open(os.path.join(work, "code_cases.ri"), "w").write("\n".join(lines) + "\n")
 open(os.path.join(work, "code_expected.txt"), "w").write("\n".join(expected) + "\n")
 PY
-  if ! "$IYI" run "$WORK/code_cases.iyi" >"$WORK/code_got.txt" 2>&1; then
+  if ! "$RIS" run "$WORK/code_cases.ri" >"$WORK/code_got.txt" 2>&1; then
     echo "  the cases did not run: $(tail -1 "$WORK/code_got.txt")"
     status=1
   elif ! "$PY" - "$WORK" <<'PY'
@@ -266,12 +266,12 @@ for i in range(150):
     lines.append(f'  puts "#{{hex(p.secret)}}|#{{p.account}}|#{{p.issuer}}|#{{p.algorithm}}|#{{p.digits}}|#{{p.hotp? ? p.counter : p.period}}"')
     lines.append("end")
     read.append(f"{key.hex()}|{account}|{issuer or ''}|{name}|{digits}|{args['counter'] if kind == 'hotp' else period}\t{uri}")
-open(os.path.join(work, "uri_cases.iyi"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
+open(os.path.join(work, "uri_cases.ri"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
 import json
 json.dump(written, open(os.path.join(work, "uri_written.json"), "w"))
 open(os.path.join(work, "uri_read.txt"), "w", encoding="utf-8").write("\n".join(read) + "\n")
 PY
-  if ! "$IYI" run "$WORK/uri_cases.iyi" >"$WORK/uri_got.txt" 2>&1; then
+  if ! "$RIS" run "$WORK/uri_cases.ri" >"$WORK/uri_got.txt" 2>&1; then
     echo "  the cases did not run: $(tail -1 "$WORK/uri_got.txt")"
     status=1
   elif ! "$PY" - "$WORK" <<'PY'
@@ -316,7 +316,7 @@ fi
 
 echo
 echo "== what otp refuses"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/otp::{HOTP, TOTP, OTPAuth, OTPAlgorithm}
@@ -353,9 +353,9 @@ when "parse-or-panic"
   OTPAuth.parse("otpauth://totp/alice?secret=JBSWY3DPEHPK3PXPA").or_panic
 end
 puts "accepted"
-IYI
+RIS
 refuse() { # refuse <case> <phrase>
-  if "$IYI" run "$WORK/refuse.iyi" -- "$1" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
   elif ! grep -qF -e "$2" "$WORK/refuse.out"; then
@@ -395,15 +395,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/otp.iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/otp.ri").read_text(encoding="utf-8")
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/otp.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
+Path("$WORK/patched/std/otp.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_otp_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_otp_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF -e "$2" "$WORK/mut.out"; then

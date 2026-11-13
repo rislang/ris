@@ -15,7 +15,7 @@ class Iyi::Command
         `file:line: mark`: @[Ffi] modules, @[PointerUnsafe] defs with
         their reasons, @[TaskClosureUnsafe], and @[TapeUnsafe] defs.
         The source is every .ri
-        and .iyi file under each directory (default: the current one),
+        and .ri file under each directory (default: the current one),
         except hidden directories and lib/. A manifest's `forbid` line
         is printed first. Exit 0 whatever is found.
         USAGE

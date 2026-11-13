@@ -30,9 +30,9 @@ sections below and are listed here in order:
 
 * std on the tape, found porting the HTTP handlers (drift report in
   doc/drafts/server-answer-features.md): Router's `Pattern.parse` (SPEC
-  1.9, router.iyi:189), the HTTPS client (`records_handshake` returns
-  an owner, http.iyi:4847; blocks samples/iyi/autocert.iyi),
-  `Zstd.decompress` (view check, zstd.iyi:1410), `Cookie.parse_header`
+  1.9, router.ri:189), the HTTPS client (`records_handshake` returns
+  an owner, http.ri:4847; blocks samples/ris/autocert.ri),
+  `Zstd.decompress` (view check, zstd.ri:1410), `Cookie.parse_header`
   and `HTTP.cookie_pairs` (a Hash from a def). Then give `Incoming`
   back `form`, `multipart` and `cookies`, which `Request` had.
 
@@ -183,7 +183,7 @@ Unknown must be refused (SPEC 3.6).
   `::String.view(::String.view("page.eiy"))` and panics `cannot read`.
 * test/cli/packages_get.sh: 9 FAIL (get/reach/doc/mod context), 31 on main
   before ris check; test/cli/verbs_exercise.sh: a reopen of String (now a
-  struct) and `fix printed its edit` (split.iyi already clean).
+  struct) and `fix printed its edit` (split.ri already clean).
 
 * Build each test/cli program, group refusals by message, fix per group.
   2026-11-12, minitest with the rebuilt compiler: 101 of 133 programs
@@ -234,7 +234,7 @@ Unknown must be refused (SPEC 3.6).
 * std_http_exercise's and std_fuzz's parse checks call
   `Server.parse_request`, gone with `Request`: read through
   `Server.parse_head` or a socket round trip. Most of
-  std_http_exercise.sh's mutation patterns no longer match http.iyi.
+  std_http_exercise.sh's mutation patterns no longer match http.ri.
 
 ## 8. Speed
 
@@ -285,13 +285,13 @@ change. Gates stay structural.
 * TlsConfig system roots: check whether SystemRoots (00130b97e) already
   keeps them. If still read per handshake, make Certificate copyable to
   Program.tape to keep them once.
-* Autocert part B: test/cli/std_autocert_exercise.iyi and its driver, with
+* Autocert part B: test/cli/std_autocert_exercise.ri and its driver, with
   real TLS deadline and parallel-server cases, Pebble, restarts and
   mutation checks (part A's gates: test/ris/autocert.ri, autocert_wire.ri).
 * std_process: the `handlers` mutation proof (child keeps this program's
   TERM handler) is not caught.
 * Add 128-bit formatting, IDNA and URI resolution.
-* src/iyi/float.iyi's parser has a copy in src/iyi/tape.iyi: merge them.
+* src/ris/float.ri's parser has a copy in src/ris/tape.ri: merge them.
 
 ## 11. macOS arm64
 
@@ -313,10 +313,10 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
   three times of three. Find the race or the load-dependent fault.
 
 * Every growing tape value reserves 128 MiB of address space, even a
-  128-byte builder (SIDE_RESERVE, region.iyi:529). Under
+  128-byte builder (SIDE_RESERVE, region.ri:529). Under
   `vm.overcommit_memory=2` each is charged: a FileServer answer holds
   up to eight (doc/drafts/fileserver-outgoing.md, Memory).
-* A constant's initializer runs on the program tape only in a .ri/.iyi
+* A constant's initializer runs on the program tape only in a .ri
   file; a compiler_test example (source "spec") still needs
   `.copy_to(Program.tape)` for a constant or class variable (SPEC 7.5).
 * A branch that cannot be typed (`raise "#{f}"` with `f` untyped) does
@@ -325,10 +325,10 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
   growing text and names `::RisTextGrowth` (iyi_test.cr, std/int case).
 * test/cli/concurrency_exercise.sh needs `ulimit -n 8192` and is not in
   check.sh; recheck on minitest.
-* test/cli/parallel_exercise.iyi:124 (a task value's Panicked arm) and
-  test/speed/metric/metric.iyi (Array of the tape type Planet) do not
+* test/cli/parallel_exercise.ri:124 (a task value's Panicked arm) and
+  test/speed/metric/metric.ri (Array of the tape type Planet) do not
   typecheck; recheck on minitest.
-* test/cli/std_websocket_exercise.iyi appends to an `io` builder and reads
+* test/cli/std_websocket_exercise.ri appends to an `io` builder and reads
   it back: move it to a String local, then recheck the artifact
   comparison on minitest.
 * test/compiler/iyimod_test.cr's getter/defer case cannot resolve

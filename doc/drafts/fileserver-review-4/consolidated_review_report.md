@@ -5,7 +5,7 @@
 Verdict: **not ready**. No Blockers; four Majors, all text or small
 design fixes. MB1-MB6 of review 3 are resolved in substance (std/time
 Phase 1, Phase 0 TODO entry, five gates, Log claim at
-log.iyi:400-402), but MB5's memory text is still wrong (M1).
+log.ri:400-402), but MB5's memory text is still wrong (M1).
 
 ## Reviewer Status
 
@@ -27,16 +27,16 @@ log.iyi:400-402), but MB5's memory text is still wrong (M1).
 * **Scope:** lines 455-463, 627-629
 * **Description:** "about 256 GiB ... today's cost with one builder"
   is false. Every growing payload, Arrays too, reserves 128 MiB
-  (region.iyi:367-370, 523-535; tape.iyi:1163-1166). Today an
+  (region.ri:367-370, 523-535; tape.ri:1163-1166). Today an
   Outgoing holds 3, the new one 5 (`@spans`, `@given`, `@text`
-  added), plus format_head's builder (http.iyi:2422) and `fields`.
+  added), plus format_head's builder (http.ri:2422) and `fields`.
   Memory and Risks also disagree.
 * **Recommendation:** count reservations from the code, before and
   after; say which this change adds and the strict-overcommit cost.
   Consider folding `@given` into `@state`. No new fixed builder.
 
 ### M2 *max* above 128 MiB fails, not 500 - Severity: Major
-* **Lens:** codebase-details (confirmed at region.iyi:487-495)
+* **Lens:** codebase-details (confirmed at region.ri:487-495)
 * **Scope:** lines 450-453, 579-580
 * **Description:** the body builder's fixed 128 MiB reservation
   ends in "tape side reservation exhausted"; the `Int32::MAX` clamp
@@ -62,12 +62,12 @@ log.iyi:400-402), but MB5's memory text is still wrong (M1).
 
 ## Nits
 
-* Replace, not append to, http.iyi:2214-2216 "the one value that
+* Replace, not append to, http.ri:2214-2216 "the one value that
   grows" (583-586).
 * HEAD bodies: say FileServer writes the same body and the server
-  drops it (http.iyi:2446, 2458); defines the cap 500's length (443).
+  drops it (http.ri:2446, 2458); defines the cap 500's length (443).
 * Cite all seven `parse` defs (358, 650-651; count is right) and name
-  the `_answer` defs; say what `refuse` returns (time.iyi:2785).
+  the `_answer` defs; say what `refuse` returns (time.ri:2785).
 * `@state[2]` set to 1 before the yield (264, 305); clear before a
   raise if rescue is possible (289-304).
 * Length check on bodiless statuses (332).
@@ -76,6 +76,6 @@ log.iyi:400-402), but MB5's memory text is still wrong (M1).
 * Phase 0 and MAX_FILE written twice (127-131/646, 234/534).
 * P11, P12 not cited (811-816); "header B" (801); "tape twin"
   (299); "heap_trap" (811); "reads right" (373); comma splice
-  (617-619); "cases 14-15" should be 15 (623); file.iyi:2141 (519).
+  (617-619); "cases 14-15" should be 15 (623); file.ri:2141 (519).
 * Mapping targets not exact headings (838-859).
 * Optional: trim `Keep` and `read_into` listings; the 1% rule.

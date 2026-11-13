@@ -26,7 +26,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -44,12 +44,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_complex_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_complex_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -98,14 +98,14 @@ echo "== what the exercise cannot ask: a caller's cis, a zero divisor"
 # compile the caller, and a quotient that panics ends a program before any
 # check: neither can be a line of the exercise, so a small program asks,
 # and the answer names what broke.
-cat >"$WORK/edge.iyi" <<'IYI'
+cat >"$WORK/edge.ri" <<'RIS'
 import std/complex::{Complex}
 
 puts 0.5.cis.to_s
 puts (Complex.new(1.0, 1.0) / 0.0).to_s
-IYI
+RIS
 edge_check() {
-  if ! IYI_PATH="$1" "$IYI" build -o "$WORK/edge" "$WORK/edge.iyi" >"$WORK/edge.build.log" 2>&1; then
+  if ! RIS_PATH="$1" "$RIS" build -o "$WORK/edge" "$WORK/edge.ri" >"$WORK/edge.build.log" 2>&1; then
     echo "a number's cis did not compile without the caller importing Math"
     return
   fi
@@ -116,7 +116,7 @@ edge_check() {
     echo "a complex over a zero float is not infinite, as a float's quotient is: $(sed -n 2p "$WORK/edge.out")"
   fi
 }
-why="$(edge_check "$REPO/src${PSEP}$REPO/samples/iyi")"
+why="$(edge_check "$REPO/src${PSEP}$REPO/samples/ris")"
 if [ -n "$why" ]; then
   echo "  $why"
   status=1
@@ -137,7 +137,7 @@ else
     if ! PROOF="$label" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/complex.iyi").read_text()
+src = Path("$REPO/src/std/complex.ri").read_text()
 proofs = {
     "abs": ("Math.hypot(@real, @imag)", "@real + @imag"),
     "to_s": ('    joiner = @imag.nan? || Math.copysign(1.0, @imag) > 0.0 ? " + " : " - "\n'
@@ -172,7 +172,7 @@ proofs = {
 old, new = proofs[os.environ["PROOF"]]
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/complex.iyi").write_text(src.replace(old, new, 1))
+Path("$WORK/patched/std/complex.ri").write_text(src.replace(old, new, 1))
 PY
     then
       echo "  $label: the patch did not apply"
@@ -198,14 +198,14 @@ PY
       cis) want="a number's cis did not compile without the caller importing Math" ;;
       zero) want="a complex over a zero float is not infinite" ;;
     esac
-    path="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi"
+    path="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris"
     case "$label" in
       cis | zero) got="$(edge_check "$path")" ;;
       *)
-        if IYI_PATH="$path" "$IYI" run "$REPO/test/cli/std_complex_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+        if RIS_PATH="$path" "$RIS" run "$REPO/test/cli/std_complex_exercise.ri" >"$WORK/mut.out" 2>&1; then
           got=""
         else
-          got="$(grep -m1 'panic\|Error' "$WORK/mut.out" | sed 's/^iyi: panic: //')"
+          got="$(grep -m1 'panic\|Error' "$WORK/mut.out" | sed 's/^ris: panic: //')"
           [ -n "$got" ] || got="failed without a message"
         fi
         ;;

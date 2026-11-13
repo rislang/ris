@@ -15,7 +15,7 @@
 # came back "Negative argument" where the compiler says "negative count: -3".
 # Two implementations of the semantics is what V.11 objected to, and the
 # smaller one is still one too many.
-{% raise("Please use `make iyi` to build it, or set the i_know_what_im_doing flag if you know what you're doing") unless env("CRYSTAL_HAS_WRAPPER") || flag?("i_know_what_im_doing") %}
+{% raise("Please use `make ris` to build it, or set the i_know_what_im_doing flag if you know what you're doing") unless env("CRYSTAL_HAS_WRAPPER") || flag?("i_know_what_im_doing") %}
 
 require "log"
 require "./requires"
@@ -38,7 +38,7 @@ module Iyi
         get          add or move a requirement in ris.mod; -u updates all
         build        build an executable
         run          build and run a program (default)
-        mod          inspect a .iyimod artifact, a module's context or reach
+        mod          inspect a .rimod artifact, a module's context or reach
         doc          print a module's exported surface, or a prelude type's
         check        format, deps, spec, types, unused, test: exit 0 = done;
                      --fix fixes format and deps, `check types FILE` is quick
@@ -56,8 +56,8 @@ module Iyi
         help         print this text
 
     Switches worth knowing:
-        --emit-iyimod DIR        write a .iyimod per imported module into DIR
-        --use-iyimod DIR         compile imports from DIR's .iyimod files
+        --emit-rimod DIR        write a .rimod per imported module into DIR
+        --use-rimod DIR         compile imports from DIR's .rimod files
         --no-codegen             analyse only, produce nothing
         --release                optimise, and take longer about it
     USAGE
@@ -89,10 +89,10 @@ module Iyi
   def self.other_language_verb_sentence(verb : String) : String
     instead =
       case verb
-      when "eval" then "write the line to a file and `iyi run` it; there is no evaluator to hand a string to"
+      when "eval" then "write the line to a file and `ris run` it; there is no evaluator to hand a string to"
       else             "nothing here stands in for it"
       end
-    "iyi has no `#{verb}`: it belongs to Crystal, which this compiler is also built on. Here #{instead}."
+    "ris has no `#{verb}`: it belongs to Crystal, which this compiler is also built on. Here #{instead}."
   end
 
   def self.description : String
@@ -110,6 +110,16 @@ module Iyi
     # The delegated commands print their own usage, and it used to name the
     # binary underneath instead of the one that was typed.
     Iyi::Command.program_name = "ris"
+    Iyi::Config.notice_iyi_variables
+    # ris: iyi's artifact switches are refused with their new names (7.2).
+    options.each do |option|
+      {"--emit-iyimod" => "--emit-rimod", "--use-iyimod" => "--use-rimod"}.each do |old, new|
+        if option == old || option.starts_with?("#{old}=")
+          STDERR.puts "Error: #{old} is #{new} now: an artifact is a .rimod"
+          exit 1
+        end
+      end
+    end
 
     command = options.first?
 
@@ -129,7 +139,7 @@ module Iyi
           STDERR.puts other_language_verb_sentence(verb)
           exit 1
         else
-          STDERR.puts "iyi help: there is no `#{verb}` command. Run `iyi help` for what there is."
+          STDERR.puts "ris help: there is no `#{verb}` command. Run `ris help` for what there is."
           exit 1
         end
       end
@@ -139,7 +149,7 @@ module Iyi
       # `iyi version extra` printed the version and dropped the word, the way
       # `clear_cache extra` used to.
       if extra = options[1]?
-        STDERR.puts "iyi version takes no arguments, and '#{extra}' is one."
+        STDERR.puts "ris version takes no arguments, and '#{extra}' is one."
         exit 1
       end
       puts description
@@ -150,7 +160,7 @@ module Iyi
     when .in?(DELEGATED)
       Iyi::Command.run(options)
     else
-      # A filename, which `crystal foo.iyi` reads as "run this". Kept, because
+      # A filename, which `crystal foo.ri` reads as "run this". Kept, because
       # it is the shortest thing to type and the shell already made it a path.
       if File.file?(command)
         Iyi::Command.run(options)
@@ -169,13 +179,13 @@ module Iyi
           # that was right there. Said by name instead.
           # A lookup and nothing run: the name is built first, which is
           # how `build_tool_floor.sh` tells it from a tool the compiler runs.
-          if script = {".cmd", ".bat"}.compact_map { |ext| name = "iyi-#{command}#{ext}"; Process.find_executable(name) }.first?
-            STDERR.puts "iyi: #{script} is a batch file, and an extension must be an .exe: iyi-#{command}.exe."
+          if script = {".cmd", ".bat"}.compact_map { |ext| name = "ris-#{command}#{ext}"; Process.find_executable(name) }.first?
+            STDERR.puts "ris: #{script} is a batch file, and an extension must be an .exe: ris-#{command}.exe."
             exit 1
           end
         {% end %}
-        STDERR.puts "iyi: unknown command or missing file: #{command}"
-        STDERR.puts "Run `iyi help` for what there is."
+        STDERR.puts "ris: unknown command or missing file: #{command}"
+        STDERR.puts "Run `ris help` for what there is."
         exit 1
       end
     end

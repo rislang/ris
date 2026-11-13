@@ -12,6 +12,7 @@ def make : Workspace
   a = Workspace.new
   return a
 end
+
 tape do
   a = make
   nil

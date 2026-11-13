@@ -6,10 +6,12 @@ class RowReader
   @b : String::Builder
   @row : Array(String)
   @n = 0
+
   def initialize
     @b = String::Builder.new(64)
     @row = Array(String).new(4)
   end
+
   def next_row : Array(String)?
     @n += 1
     return nil if @n > 3
@@ -19,6 +21,7 @@ class RowReader
     @row << @b.finish
     @row
   end
+
   def each(&)
     while true
       got = next_row
@@ -27,8 +30,10 @@ class RowReader
     end
   end
 end
+
 r = RowReader.new
 r.each { |row| puts row[0] }
+
 # The same reader driven by its caller: each round's row is gone at the
 # next call, which clears and refills it.
 def drive(reader : RowReader) : Nil
@@ -36,5 +41,6 @@ def drive(reader : RowReader) : Nil
     puts got[0]
   end
 end
+
 driven = RowReader.new
 drive(driven)

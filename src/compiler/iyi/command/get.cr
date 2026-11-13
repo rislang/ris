@@ -11,8 +11,8 @@
 # The manifest stays the person's: the one `require` line is rewritten in
 # place or appended, and nothing else in the file moves. Nothing is written
 # until the whole graph has resolved under minimal version selection, every
-# selection is checked out, and `iyi.sum` has agreed with every checkout it
-# already knew - a `get` that fails leaves `iyi.mod` as it found it.
+# selection is checked out, and `ris.sum` has agreed with every checkout it
+# already knew - a `get` that fails leaves `ris.mod` as it found it.
 #
 # What it says is what changed: a requirement added or moved, any module
 # whose selected version is not the one its `require` line names, because

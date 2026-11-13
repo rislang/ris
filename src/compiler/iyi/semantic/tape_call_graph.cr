@@ -51,7 +51,7 @@ class Iyi::TapeCallGraph
     if text = target.ris_call_contract
       result = Contract.decode(text)
       unless result.parameters.size == target.args.size + 1
-        target.raise "invalid tape contract; rebuild the module with --emit-iyimod"
+        target.raise "invalid tape contract; rebuild the module with --emit-rimod"
       end
       result
     elsif target.is_a?(External)
@@ -64,7 +64,7 @@ class Iyi::TapeCallGraph
       nil
     end
   rescue ArgumentError
-    target.raise "invalid tape contract; rebuild the module with --emit-iyimod"
+    target.raise "invalid tape contract; rebuild the module with --emit-rimod"
   end
 
   class Effect

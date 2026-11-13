@@ -8,7 +8,7 @@
 #
 # An agent follows compiler errors, not prose, so each error names the
 # safe form that replaces the pointer, and the mark only for calling C.
-# std (`/std/`) and the runtime (`src/iyi/`, `.cr`) are exempt, as they are
+# std (`/std/`) and the runtime (`src/ris/`, `.cr`) are exempt, as they are
 # from the tape's rules (`TapeRules`), and so are std's exercises in ris's
 # own `test/cli/`: speed is std's to give, through the tape, not a pointer's.
 # Checked on the parsed source, so a def nothing calls is held to it too.

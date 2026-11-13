@@ -1445,7 +1445,7 @@ module Iyi
 
     it_parses "::A::B", Path.global(["A", "B"])
 
-    assert_syntax_error "$foo", "iyi has no global variables", 1, 1
+    assert_syntax_error "$foo", "ris has no global variables", 1, 1
 
     it_parses "macro foo;end", Macro.new("foo", [] of Arg, Expressions.new)
     it_parses "macro [];end", Macro.new("[]", [] of Arg, Expressions.new)
@@ -2076,7 +2076,7 @@ module Iyi
     assert_syntax_error "foo(**bar, out x)", "out argument not allowed after double splat"
 
     it "explains out used as a local name in an iyi argument" do
-      ["x.iyi", "x.ri"].each do |filename|
+      ["x.ri", "x.ri"].each do |filename|
         error = expect_raises(SyntaxException,
           "`out` starts an FFI output argument, as in " \
           "`Lib.fun(out value)`: use `output` as a local name") do
@@ -2486,7 +2486,7 @@ module Iyi
     # iyi: pcre2 is off the compiler, so the parser no longer validates a
     # pattern it cannot promise semantics for (iyi SPEC III.10). An invalid
     # pattern now fails where it is used: the macro engine refuses it by name,
-    # a `.cr` program's own Regex raises at startup, a `.iyi` literal is
+    # a `.cr` program's own Regex raises at startup, a `.ri` literal is
     # refused by the expander.
     it_parses "/foo)/", regex("foo)")
     assert_syntax_error "def =\nend"
@@ -4429,9 +4429,9 @@ end").as(ClassDef)
         "`pub abstract` takes a class, a struct or a def"
 
       it "keeps an impl or a trait written in a macro body inside the macro" do
-        node = parse("macro derived(declaration)\n  impl Greet for {{declaration[:name].id}}\n    def greet\n    end\n  end\n\n  def after\n  end\nend", filename: "x.iyi").as(Macro)
+        node = parse("macro derived(declaration)\n  impl Greet for {{declaration[:name].id}}\n    def greet\n    end\n  end\n\n  def after\n  end\nend", filename: "x.ri").as(Macro)
         node.body.to_s.should contain("def after")
-        node = parse("macro traited\n  trait Greet\n    abstract def greet : String\n  end\n\n  def after\n  end\nend", filename: "x.iyi").as(Macro)
+        node = parse("macro traited\n  trait Greet\n    abstract def greet : String\n  end\n\n  def after\n  end\nend", filename: "x.ri").as(Macro)
         node.body.to_s.should contain("def after")
       end
 
@@ -4441,7 +4441,7 @@ end").as(ClassDef)
       end
 
       it "closes a block with end! inside a macro body" do
-        node = parse("macro define_sum\n  def sum : Int32 | Fail\n    each_item do |i|\n    end!\n    1\n  end\n\n  def after\n  end\nend", filename: "x.iyi").as(Macro)
+        node = parse("macro define_sum\n  def sum : Int32 | Fail\n    each_item do |i|\n    end!\n    1\n  end\n\n  def after\n  end\nend", filename: "x.ri").as(Macro)
         node.body.to_s.should contain("def after")
       end
 
@@ -4649,13 +4649,13 @@ end").as(ClassDef)
         # name there is nothing to propagate, so a stray-token error would be
         # useless to whoever wrote a Crystal-style mutating name.
         expect_raises(SyntaxException, "`!` can't be part of a name in iyi") do
-          parse("def sort!\nend", filename: "x.iyi")
+          parse("def sort!\nend", filename: "x.ri")
         end
       end
 
       it "rejects `!` at the end of a def name with a receiver" do
         expect_raises(SyntaxException, "`!` can't be part of a name in iyi") do
-          parse("def self.sort!\nend", filename: "x.iyi")
+          parse("def self.sort!\nend", filename: "x.ri")
         end
       end
 
@@ -4665,7 +4665,7 @@ end").as(ClassDef)
       it "rejects a def named or or or_panic" do
         {"def or(x)\nend", "def self.or_panic\nend"}.each do |source|
           expect_raises(SyntaxException, "is a reserved name in iyi") do
-            parse(source, filename: "x.iyi")
+            parse(source, filename: "x.ri")
           end
         end
         parse("def or(x)\nend", filename: "x.cr")
@@ -4677,18 +4677,18 @@ end").as(ClassDef)
       it "rejects a def named group outside the prelude" do
         {"def group(&)\nend", "def self.group\nend"}.each do |source|
           expect_raises(SyntaxException, "`group` is a reserved name in iyi") do
-            parse(source, filename: "x.iyi")
+            parse(source, filename: "x.ri")
           end
         end
         parse("def group(&)\nend", filename: "x.cr")
-        parse("def group(&)\nend", filename: File.expand_path("../../../src/iyi/concurrency.iyi", __DIR__))
+        parse("def group(&)\nend", filename: File.expand_path("../../../src/ris/concurrency.ri", __DIR__))
       end
 
       # A bodiless `def` in a trait, with another `def` under it: the
       # requirement wanted `abstract`, and the nested-def report says so.
       it "explains a bodiless def in a trait" do
         expect_raises(SyntaxException, "the `def` above it has no `end`") do
-          parse("trait Shape\n  def area : Float64\n  def name : String\nend", filename: "x.iyi")
+          parse("trait Shape\n  def area : Float64\n  def name : String\nend", filename: "x.ri")
         end
       end
 
@@ -4698,12 +4698,12 @@ end").as(ClassDef)
       it "explains a bang method called with a block" do
         {"a.sort_by! { |x| x }", "a.sort_by! do |x|\n  x\nend", "a.sort_by!() { |x| x }"}.each do |source|
           expect_raises(SyntaxException, "`sort_by!` is not a method here") do
-            parse(source, filename: "x.iyi")
+            parse(source, filename: "x.ri")
           end
         end
         # An argument list after the `!` was told it "takes no block".
         expect_raises(SyntaxException, "`nomacro!` is not a method here: `!` propagates an error, and takes no arguments") do
-          parse("nomacro!(1)", filename: "x.iyi")
+          parse("nomacro!(1)", filename: "x.ri")
         end
       end
 
@@ -4713,10 +4713,10 @@ end").as(ClassDef)
       # keeps the parse it always had.
       it "explains a `->` return type" do
         expect_raises(SyntaxException, "a return type is `: Type` here, not `-> Type`") do
-          parse("def f(a : Int32) -> Int32\n  a\nend", filename: "x.iyi")
+          parse("def f(a : Int32) -> Int32\n  a\nend", filename: "x.ri")
         end
         expect_raises(SyntaxException, "a return type is `: Type` here, not `-> Type`") do
-          parse("def f -> Int32\n  1\nend", filename: "x.iyi")
+          parse("def f -> Int32\n  1\nend", filename: "x.ri")
         end
         ex = expect_raises(SyntaxException) { parse("def f(a : Int32) -> Int32\n  a\nend", filename: "x.cr") }
         ex.message.to_s.should_not contain("a return type is")
@@ -4724,10 +4724,10 @@ end").as(ClassDef)
 
       it "explains a lowercase type name" do
         expect_raises(SyntaxException, "a type name is capitalised here - `Int32`") do
-          parse("def f(a : int32) : Int32\n  a\nend", filename: "x.iyi")
+          parse("def f(a : int32) : Int32\n  a\nend", filename: "x.ri")
         end
         expect_raises(SyntaxException, "a type name is capitalised here - `Bool`") do
-          parse("def f : bool\n  true\nend", filename: "x.iyi")
+          parse("def f : bool\n  true\nend", filename: "x.ri")
         end
       end
 
@@ -4735,9 +4735,9 @@ end").as(ClassDef)
       # lowercase or a literal; only `Array<Int32>`'s touching shape is the
       # other languages' type arguments.
       it "reads a constant compared with < as a comparison" do
-        parse("Level::Info < Level::Error", filename: "x.iyi")
-        parse("Float32::MIN < 0.0_f32", filename: "x.iyi")
-        parse("A<b", filename: "x.iyi")
+        parse("Level::Info < Level::Error", filename: "x.ri")
+        parse("Float32::MIN < 0.0_f32", filename: "x.ri")
+        parse("A<b", filename: "x.ri")
       end
 
       # Habits of other languages that were bare token errors, or errors
@@ -4753,7 +4753,7 @@ end").as(ClassDef)
           "package main\nputs 1\n"                                 => "there is no `package`",
           "println!(\"{}\", 1)\n"                                  => "`println!` is Rust's macro",
           "v = vec![1, 2]\n"                                       => "`vec!` is Rust's macro",
-          "assert_eq!(1, 2)\n"                                     => "`assert_eq!` is Rust's macro, and iyi has none of those: `assert_eq a, b, \"why\"` panics showing both values",
+          "assert_eq!(1, 2)\n"                                     => "`assert_eq!` is Rust's macro, and ris has none of those: `assert_eq a, b, \"why\"` panics showing both values",
           "def add(a, b):\n  a + b\nend\n"                         => "a block is not opened with `:` and indentation",
           "x = 3\nif x > 1:\n  puts x\nend\n"                      => "a block is not opened with `:` and indentation",
           "case 3\nin 1 then puts 1\nend\n"                        => "`in 1` matches a value, and `in` matches types: a value is matched with `when 1 then ...`",
@@ -4769,7 +4769,7 @@ end").as(ClassDef)
           "export def f : Int32\n  1\nend\n"                       => "there is no `export`: `pub def f : Int32`",
           "def f(a : i32) : Int32\n  a\nend\n"                     => "Rust's `i32` is `Int32` here",
         }.each do |code, message|
-          expect_raises(SyntaxException, message) { parse(code, filename: "x.iyi") }
+          expect_raises(SyntaxException, message) { parse(code, filename: "x.ri") }
         end
         # A `.cr` file keeps the other library's reading.
         parse("x = 7 // 2\n", filename: "x.cr")
@@ -4779,7 +4779,7 @@ end").as(ClassDef)
       # impl lists, `where` on a function and Rust's `::` call.
       it "names the iyi spelling of an import path, a header and an impl" do
         {
-          "import app/util.iyi\n"                                           => "a module path has no extension: `import app/util`",
+          "import app/util.ri\n"                                           => "a module path has no extension: `import app/util`",
           "import \"app/util\"\n"                                           => "an import path is not quoted: `import app/util`",
           "import ./app/util\n"                                             => "has no `./` or `../`: `import app/util`",
           "import App::Util\n"                                              => "is how the module is named after it: `import app/util`",
@@ -4798,10 +4798,10 @@ end").as(ClassDef)
           "def hello(x : T) : String where T : Greet\n  \"\"\nend\n"        => "introduced by `forall`, which takes the same bounds: `forall T : Greet`",
           "puts App::Util::helper(1)\n"                                     => "a module's function is called with `.`: `App::Util.helper`",
         }.each do |code, message|
-          expect_raises(SyntaxException, message) { parse(code, filename: "x.iyi") }
+          expect_raises(SyntaxException, message) { parse(code, filename: "x.ri") }
         end
         # Each carries its edit, which `iyi fix` applies.
-        ex = expect_raises(SyntaxException) { parse("import \"app/util\"::{helper}\n", filename: "x.iyi") }
+        ex = expect_raises(SyntaxException) { parse("import \"app/util\"::{helper}\n", filename: "x.ri") }
         {ex.size, ex.suggestion}.should eq({17, "import app/util"})
       end
 
@@ -4810,11 +4810,11 @@ end").as(ClassDef)
       # Float64` met `where Elem : Show` and the call printed 1.5.
       it "refuses `where` beside a function's forall and on a requirement" do
         ex = expect_raises(SyntaxException, "introduced by `forall`, which takes the same bounds: `forall T : Greet`") do
-          parse("def hello(x : T) : String forall T where T : Greet\n  \"\"\nend\n", filename: "x.iyi")
+          parse("def hello(x : T) : String forall T where T : Greet\n  \"\"\nend\n", filename: "x.ri")
         end
         ex.suggestion.should be_nil
         expect_raises(SyntaxException, "`where` can't bound a requirement: every impl answers an `abstract def`") do
-          parse("trait Bag\n  type Elem\n  abstract def first : Elem where Elem : Show\nend\n", filename: "x.iyi")
+          parse("trait Bag\n  type Elem\n  abstract def first : Elem where Elem : Show\nend\n", filename: "x.ri")
         end
       end
 
@@ -4823,20 +4823,20 @@ end").as(ClassDef)
       # rule, never typed, and codegen died on "has no type".
       it "refuses a declaration as a unary operand" do
         expect_raises(SyntaxException, "unexpected '!': a module header is a declaration, not a value to negate") do
-          parse("!\nmodule x\n\nputs 1\n", filename: "x.iyi")
+          parse("!\nmodule x\n\nputs 1\n", filename: "x.ri")
         end
         expect_raises(SyntaxException, "unexpected '-': a def is a declaration") do
-          parse("module z\n\n-\ndef f\n  1\nend\n", filename: "z.iyi")
+          parse("module z\n\n-\ndef f\n  1\nend\n", filename: "z.ri")
         end
       end
 
       it "explains `else if` when the outer `if` is left open" do
         expect_raises(SyntaxException, "`else if` at line 3 opens a second `if` that needs its own `end`; `elsif` is the spelling here") do
-          parse("if true\n  1\nelse if false\n  2\nend\n", filename: "x.iyi")
+          parse("if true\n  1\nelse if false\n  2\nend\n", filename: "x.ri")
         end
         # Closed properly it is legal, and a plain missing `end` says nothing about it.
-        parse("if true\n  1\nelse if false\n  2\nend\nend\n", filename: "x.iyi")
-        ex = expect_raises(SyntaxException) { parse("if true\n  1\nelsif false\n  2\n", filename: "x.iyi") }
+        parse("if true\n  1\nelse if false\n  2\nend\nend\n", filename: "x.ri")
+        ex = expect_raises(SyntaxException) { parse("if true\n  1\nelsif false\n  2\n", filename: "x.ri") }
         ex.message.to_s.should_not contain("else if")
       end
 
@@ -4844,30 +4844,30 @@ end").as(ClassDef)
       # (iyi SPEC III.1.2). At a call site `!` is now the operator, which is the
       # whole reason it was taken out of names.
       it "reads `!` after a call as propagation" do
-        node = parse("a.sort!", filename: "x.iyi").as(Propagate)
+        node = parse("a.sort!", filename: "x.ri").as(Propagate)
         node.exp.should be_a(Call)
         node.exp.as(Call).name.should eq("sort")
       end
 
       it "reads `!` after a call with arguments" do
-        parse("read(path)!", filename: "x.iyi").as(Propagate).exp.as(Call).name.should eq("read")
+        parse("read(path)!", filename: "x.ri").as(Propagate).exp.as(Call).name.should eq("read")
       end
 
       it "chains a method onto a propagated value" do
-        node = parse("read(path)!.strip", filename: "x.iyi").as(Call)
+        node = parse("read(path)!.strip", filename: "x.ri").as(Call)
         node.name.should eq("strip")
         node.obj.should be_a(Propagate)
       end
 
       it "propagates twice in one expression" do
-        node = parse("parse(read(path)!)!", filename: "x.iyi").as(Propagate)
+        node = parse("parse(read(path)!)!", filename: "x.ri").as(Propagate)
         node.exp.as(Call).args[0].should be_a(Propagate)
       end
 
       it "leaves `!` with a space before it as the unary operator" do
         # `f !x` has always meant `f(!x)`, and still does: only an attached
         # `!` propagates.
-        node = parse("f !x", filename: "x.iyi").as(Call)
+        node = parse("f !x", filename: "x.ri").as(Call)
         node.name.should eq("f")
         node.args[0].should be_a(Not)
       end
@@ -4878,13 +4878,13 @@ end").as(ClassDef)
       it "refuses a detached `!` with nothing after it" do
         {"v = g(-1) !", "v = g(-1) !\nv", "(w) !", "w.itself !\n1", "[g(x) !]"}.each do |source|
           expect_raises(SyntaxException, "a `!` with a space before it doesn't propagate: write it attached") do
-            parse(source, filename: "x.iyi")
+            parse(source, filename: "x.ri")
           end
         end
         expect_raises(SyntaxException, "write it attached, `g(-1)!`") do
-          parse("v = g(-1) !", filename: "x.iyi")
+          parse("v = g(-1) !", filename: "x.ri")
         end
-        parse("v = g(-1)!", filename: "x.iyi").as(Assign).value.should be_a(Propagate)
+        parse("v = g(-1)!", filename: "x.ri").as(Assign).value.should be_a(Propagate)
       end
 
       it "leaves a Crystal file's `!` alone" do
@@ -4896,77 +4896,77 @@ end").as(ClassDef)
       end
 
       it "leaves the other uses of `!` and `?` alone" do
-        parse("!a", filename: "x.iyi").should eq(Not.new("a".call))
-        parse("a != b", filename: "x.iyi").as(Call).name.should eq("!=")
-        parse("a.empty?", filename: "x.iyi").as(Call).name.should eq("empty?")
+        parse("!a", filename: "x.ri").should eq(Not.new("a".call))
+        parse("a != b", filename: "x.ri").as(Call).name.should eq("!=")
+        parse("a.empty?", filename: "x.ri").as(Call).name.should eq("empty?")
       end
 
       # iyi: `.or(default)` and `.or_panic` (iyi SPEC III.1.3). Recognised by
       # name rather than dispatched, because by II.1 an ordinary call on
       # `Int32 | ConfigError` would demand the method from *both* members.
       it "reads `.or` as recovery" do
-        node = parse("read(path).or(8080)", filename: "x.iyi").as(Recover)
+        node = parse("read(path).or(8080)", filename: "x.ri").as(Recover)
         node.exp.as(Call).name.should eq("read")
         node.default.should eq(8080.int32)
         node.panic?.should be_false
       end
 
       it "reads `.or_panic` as recovery with no default" do
-        node = parse("read(path).or_panic", filename: "x.iyi").as(Recover)
+        node = parse("read(path).or_panic", filename: "x.ri").as(Recover)
         node.exp.as(Call).name.should eq("read")
         node.default.should be_nil
         node.panic?.should be_true
       end
 
       it "accepts empty parentheses after `.or_panic`" do
-        parse("read(path).or_panic()", filename: "x.iyi").as(Recover).panic?.should be_true
+        parse("read(path).or_panic()", filename: "x.ri").as(Recover).panic?.should be_true
       end
 
       # It was "expecting token ')', not 'DELIMITER_START'".
       it "says `.or_panic` takes no argument" do
         expect_raises(SyntaxException, "`.or_panic` takes no argument: it panics with the error's own `message`") do
-          parse(%(read(path).or_panic("msg")), filename: "x.iyi")
+          parse(%(read(path).or_panic("msg")), filename: "x.ri")
         end
       end
 
       it "requires a default in parentheses after `.or`" do
         expect_raises(SyntaxException, "`.or` takes the default to use when the value is an error") do
-          parse("read(path).or 8080", filename: "x.iyi")
+          parse("read(path).or 8080", filename: "x.ri")
         end
       end
 
       it "chains a method onto a recovered value" do
-        node = parse("read(path).or(8080).to_s", filename: "x.iyi").as(Call)
+        node = parse("read(path).or(8080).to_s", filename: "x.ri").as(Call)
         node.name.should eq("to_s")
         node.obj.should be_a(Recover)
       end
 
       it "recovers from a propagated value" do
-        parse("read(path)!.or(8080)", filename: "x.iyi").as(Recover).exp.should be_a(Propagate)
+        parse("read(path)!.or(8080)", filename: "x.ri").as(Recover).exp.should be_a(Propagate)
       end
 
       it "writes recovery back the way it was written" do
-        parse("read(path).or(8080)", filename: "x.iyi").to_s.should eq("read(path).or(8080)")
-        parse("read(path).or_panic", filename: "x.iyi").to_s.should eq("read(path).or_panic")
+        parse("read(path).or(8080)", filename: "x.ri").to_s.should eq("read(path).or(8080)")
+        parse("read(path).or_panic", filename: "x.ri").to_s.should eq("read(path).or_panic")
       end
 
       # iyi: `method_missing` is gone (iyi SPEC III.3). It needs a method set
       # open to names nobody declared, and R-3 closes that by construction.
       it "rejects `macro method_missing`" do
         expect_raises(SyntaxException, "`method_missing` doesn't exist in iyi") do
-          parse("macro method_missing(call)\n  0\nend", filename: "x.iyi")
+          parse("macro method_missing(call)\n  0\nend", filename: "x.ri")
         end
       end
 
       it "rejects `macro method_missing` inside a type" do
         expect_raises(SyntaxException, "`method_missing` doesn't exist in iyi") do
-          parse("struct Ghost\n  macro method_missing(call)\n    0\n  end\nend", filename: "x.iyi")
+          parse("struct Ghost\n  macro method_missing(call)\n    0\n  end\nend", filename: "x.ri")
         end
       end
 
       it "leaves other macros and other hooks alone" do
-        parse("macro gen\n  0\nend", filename: "x.iyi").as(Macro).name.should eq("gen")
-        parse("macro finished\n  0\nend", filename: "x.iyi").as(Macro).name.should eq("finished")
+        parse("macro gen\n  0\nend", filename: "x.ri").as(Macro).name.should eq("gen")
+        parse("macro finished\n  0\nend", filename: "x.ri").as(Macro).name.should eq("finished")
       end
 
       it "keeps `method_missing` in a Crystal file" do
@@ -4976,19 +4976,19 @@ end").as(ClassDef)
       # iyi: `defer` (iyi SPEC III.1.4). Recognised by name, so it is reserved in
       # an iyi program and only there.
       it "reads `defer`" do
-        node = parse("defer f.close", filename: "x.iyi").as(Defer)
+        node = parse("defer f.close", filename: "x.ri").as(Defer)
         node.exp.as(Call).name.should eq("close")
       end
 
       it "writes `defer` back the way it was written" do
-        parse("defer f.close", filename: "x.iyi").to_s.should eq("defer f.close")
+        parse("defer f.close", filename: "x.ri").to_s.should eq("defer f.close")
       end
 
       it "refuses `!` inside a `defer`" do
         # A `defer` runs while the scope is already being left, possibly
         # carrying an error of its own — Appendix B #7.
         expect_raises(SyntaxException, "`!` can't propagate out of a `defer`") do
-          parse("defer close(f)!", filename: "x.iyi")
+          parse("defer close(f)!", filename: "x.ri")
         end
       end
 
@@ -4996,15 +4996,15 @@ end").as(ClassDef)
       # and leaves no cleanup; it was refused as leaving the `defer`. A block
       # is the enclosing function's, so `!` in one still is.
       it "propagates out of a proc literal inside a `defer`" do
-        node = parse(%(defer (->(s : String) { parse(s)! }).call("x")), filename: "x.iyi").as(Defer)
+        node = parse(%(defer (->(s : String) { parse(s)! }).call("x")), filename: "x.ri").as(Defer)
         node.to_s.should contain("parse(s)!")
         expect_raises(SyntaxException, "`!` can't propagate out of a `defer`") do
-          parse("defer items.each { |x| close(x)! }", filename: "x.iyi")
+          parse("defer items.each { |x| close(x)! }", filename: "x.ri")
         end
       end
 
       it "still propagates after the `defer` body has been parsed" do
-        node = parse("defer f.close\nread(p)!", filename: "x.iyi").as(Expressions)
+        node = parse("defer f.close\nread(p)!", filename: "x.ri").as(Expressions)
         node.expressions[0].should be_a(Defer)
         node.expressions[1].should be_a(Propagate)
       end
@@ -5018,13 +5018,13 @@ end").as(ClassDef)
       # know, because this is where an identifier is decided to be a variable
       # rather than a call.
       it "reads `it` in a case branch as a variable" do
-        node = parse("case x\nin Int32 then it\nend", filename: "x.iyi").as(Case)
+        node = parse("case x\nin Int32 then it\nend", filename: "x.ri").as(Case)
         node.binds_it?.should be_true
         node.whens[0].body.should be_a(Var)
       end
 
       it "reads `it` in a `when` branch and in the else" do
-        node = parse("case x\nwhen Int32 then it\nelse it\nend", filename: "x.iyi").as(Case)
+        node = parse("case x\nwhen Int32 then it\nelse it\nend", filename: "x.ri").as(Case)
         node.whens[0].body.should be_a(Var)
         node.else.should be_a(Var)
       end
@@ -5032,13 +5032,13 @@ end").as(ClassDef)
       it "leaves `it` alone where a case has a tuple subject" do
         # No single value to name, so it is left a call rather than given one of
         # the elements.
-        node = parse("case {a, b}\nin {Int32, Int32} then it\nend", filename: "x.iyi").as(Case)
+        node = parse("case {a, b}\nin {Int32, Int32} then it\nend", filename: "x.ri").as(Case)
         node.binds_it?.should be_false
         node.whens[0].body.should be_a(Call)
       end
 
       it "leaves `it` alone in a case with no subject" do
-        node = parse("case\nwhen a then it\nend", filename: "x.iyi").as(Case)
+        node = parse("case\nwhen a then it\nend", filename: "x.ri").as(Case)
         node.binds_it?.should be_false
         node.whens[0].body.should be_a(Call)
       end

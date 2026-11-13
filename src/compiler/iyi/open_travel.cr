@@ -2,7 +2,7 @@ require "./program"
 
 module Iyi::OpenTravel
   def self.mark(program : Program) : Nil
-    return if ENV["IYI_OPEN_TRAVEL"]? == "off"
+    return if ENV["RIS_OPEN_TRAVEL"]? == "off"
 
     Walk.new(program).run
   end
@@ -74,7 +74,7 @@ module Iyi::OpenTravel
         @open << instance.object_id if calls.open?
 
         calls.callees.each do |callee|
-          # A def read from a `.iyimod` has no body here: its machine code is in
+          # A def read from a `.rimod` has no body here: its machine code is in
           # somebody else's object code, and its own artifact answered this
           # question when it was written.
           next if callee.iyi_from_artifact?
@@ -92,10 +92,10 @@ module Iyi::OpenTravel
     # A caller of an open instance is open: its object code calls the producer's
     # copy by name, and that copy holds the producer's set.
     private def propagate : Nil
-      # `IYI_OPEN_TRAVEL=trace` prints the seeds — the instantiations that hold
+      # `RIS_OPEN_TRAVEL=trace` prints the seeds — the instantiations that hold
       # a dispatch over an open set — and then what the closure reached. A
       # boundary that suddenly carries a body as source is read here first.
-      trace = ENV["IYI_OPEN_TRAVEL"]? == "trace"
+      trace = ENV["RIS_OPEN_TRAVEL"]? == "trace"
       if trace
         @open.each do |id|
           instance = @seen[id]?

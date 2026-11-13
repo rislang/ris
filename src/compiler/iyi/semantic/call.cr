@@ -766,7 +766,7 @@ class Iyi::Call
         use_cache = false unless block_type
       end
 
-      # iyi: a def read from a `.iyimod` has exactly one symbol, and the
+      # iyi: a def read from a `.rimod` has exactly one symbol, and the
       # producing build named it after the *declaration*.
       #
       # Everywhere else the name is built from what the call site passes, which
@@ -802,7 +802,7 @@ class Iyi::Call
           check_return_type(typed_def, typed_def_return_type, match, match_owner)
         end
 
-        # iyi: a def read from a `.iyimod` has no body to visit (iyi SPEC IV.1).
+        # iyi: a def read from a `.rimod` has no body to visit (iyi SPEC IV.1).
         #
         # Its type is the return annotation `check_return_type` just resolved,
         # which R-2 guarantees is there — a constructor being the one case that
@@ -902,7 +902,7 @@ class Iyi::Call
     typed_defs
   end
 
-  # iyi: the types a `.iyimod` declaration names for its parameters, or nil
+  # iyi: the types a `.rimod` declaration names for its parameters, or nil
   # where this call is not one and nothing should change.
   #
   # The declaration is the contract, so what the call is keyed on has to be
@@ -1016,7 +1016,7 @@ class Iyi::Call
     # the body and only checks it against the annotation, so `def f : Int32 |
     # IOErr` whose body answers `1` typed `f` as `Int32`: `f()!` was refused as
     # having "no error to propagate", a `case` with no `IOErr` branch
-    # compiled, and a build reading the same def from its `.iyimod`, which
+    # compiled, and a build reading the same def from its `.rimod`, which
     # types it from the annotation, refused `f() + 1` and failed to link
     # against the symbol the source build had mangled with `Int32`.
     # `Def#map_type` widens to it.
@@ -1026,8 +1026,8 @@ class Iyi::Call
     # std exercises read from their artifacts failed to link
     # `Std::Io::Sized#write`, which `std/io`'s object code never needed.
     #
-    # iyi: and a body that travelled in a `.iyimod` was written in iyi too. Its
-    # location is the artifact's path, which is no `.iyi`, so a default method
+    # iyi: and a body that travelled in a `.rimod` was written in iyi too. Its
+    # location is the artifact's path, which is no `.ri`, so a default method
     # declared `Int32 | Bad` whose body only answered `Int32` was typed
     # `Int32` by the consumer that compiles it, and `o.twice(x).or(-1)` that
     # built from source was refused there as having "no error to recover".
@@ -1037,7 +1037,7 @@ class Iyi::Call
     end
   end
 
-  # iyi: whether a def was written in iyi: in an `.iyi` file, or in an
+  # iyi: whether a def was written in iyi: in an `.ri` file, or in an
   # artifact built from one, whose declarations are parsed under the
   # artifact's own path (`SemanticVisitor`, `iyi_artifact_source_paths`).
   private def iyi_written?(filename) : Bool
@@ -1818,7 +1818,7 @@ class Iyi::Call
     # iyi: `Channel.new` with no type argument: the type parameter is
     # inferred from `new`'s arguments, and a channel's has none that holds
     # a `T`. The error was raised at the `T` inside the prelude
-    # (src/iyi/concurrency.iyi:3098), the one frame shown, in a file the
+    # (src/ris/concurrency.ri:3098), the one frame shown, in a file the
     # reader did not write; it is said at the call that left it out.
     if name == "new" && ex.message.try(&.starts_with?("can't infer the type parameter")) &&
        (meta = @obj.try(&.type?)).is_a?(MetaclassType) && (generic = meta.instance_type).is_a?(GenericClassType) &&

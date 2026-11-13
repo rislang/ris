@@ -451,7 +451,7 @@ module Iyi::Lsp
                       json.object do
                         json.field "watchers" do
                           json.array do
-                            {"**/*.iyi", "**/*.ri", "**/ris.mod", "**/ris.sum", "**/iyi.mod", "**/iyi.sum"}.each do |glob|
+                            {"**/*.ri", "**/ris.mod", "**/ris.sum"}.each do |glob|
                               json.object { json.field "globPattern", glob }
                             end
                           end

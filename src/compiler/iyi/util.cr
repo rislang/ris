@@ -32,7 +32,7 @@ module Iyi
   # false` to check a def against its own declaration. Those probes live in
   # the scope the file's top level lives in, which is where every surface
   # that answers "what is in scope here" reads from: `iyi tool types` on
-  # `samples/iyi/calc.iyi` answered with twenty-three of them and one
+  # `samples/ris/calc.ri` answered with twenty-three of them and one
   # variable the author wrote, `tool context` printed them in its table,
   # and the language server offered `__iyi_dt_1_r` and `__iyi_dt_1_v` to an
   # editor as the first two completions in the list, kind "Variable" on
@@ -74,7 +74,7 @@ module Iyi
   #
   # A module path is posix by grammar (R-1) and `File.join` translates nothing
   # inside a part it is handed, so `mods` and `m1/a` came out as
-  # `mods\m1/a.iyimod` — half native, half not, in a sentence naming a file the
+  # `mods\m1/a.rimod` — half native, half not, in a sentence naming a file the
   # reader has to go and open. `Dir.glob` needs none of this: it splits its
   # pattern on `/` and rejoins with `File.join`, so a posix pattern still
   # answers in the platform's own separators.
@@ -107,7 +107,7 @@ module Iyi
   # every path over in this form, and each verb that walks or compares
   # paths treated the prefix as part of the name: `fmt --check` and `test`
   # of a `\\?\` directory globbed `//\?/C:/...`, which matches nothing, and
-  # answered exit 0 and "no *_test.iyi found"; `check --affected` and `test
+  # answered exit 0 and "no *_test.ri found"; `check --affected` and `test
   # --affected` of a `\\?\` file compared `\\?\c:\...` with `c:\...`, chose
   # no consumer and called that a clean verdict; and `run` of a `\\?\` entry
   # named its cache directory `\-C:-...`, which Windows refuses for the
@@ -135,11 +135,11 @@ module Iyi
 
   # iyi: whether *filename* is the prelude's or a module of the standard
   # library beside it: a file under an `iyi/` or `std/` directory whose
-  # parent holds `iyi/prelude.iyi`. A project's own `std/` is its own.
+  # parent holds `ris/prelude.ri`. A project's own `std/` is its own.
   def self.library_source?(filename : String) : Bool
     posix = ::Path[filename].to_posix.to_s
-    {"/iyi/", "/std/"}.any? do |marker|
-      (index = posix.rindex(marker)) && File.file?(File.join(posix[0, index], "iyi", "prelude.iyi"))
+    {"/ris/", "/std/"}.any? do |marker|
+      (index = posix.rindex(marker)) && File.file?(File.join(posix[0, index], "ris", "prelude.ri"))
     end
   end
 
@@ -164,7 +164,7 @@ module Iyi
 
   # iyi: *path* spelled the way the platform's file system compares names:
   # as it is on Linux, and on Windows with one separator and one case,
-  # because NTFS does not tell `C:\App\Util.iyi` from `c:/app/util.iyi`,
+  # because NTFS does not tell `C:\App\Util.ri` from `c:/app/util.ri`,
   # and without a verbatim prefix, which names the same file (`unverbatim`).
   # For a path that may not exist yet, or a set of them, where
   # `same_file?` cannot ask. Every comparison that did not do this
@@ -208,7 +208,7 @@ module Iyi
 
   def self.writable_directory?(directory : String) : Bool
     {% if flag?(:win32) %}
-      probe = File.join(directory, ".iyi-write-probe-#{Process.pid}")
+      probe = File.join(directory, ".ri-write-probe-#{Process.pid}")
       begin
         File.write(probe, "")
       rescue File::AccessDeniedError
@@ -262,8 +262,8 @@ module Iyi
   # iyi: whether *a* and *b* name one file - asked of the file system,
   # which is the only thing that knows. A string compare of the expanded
   # paths is the same answer on Linux and wrong on Windows, where NTFS
-  # ignores case and Win32 drops a trailing space or dot: `-o PROG.iyi
-  # prog.iyi`, `-o c:\...\main.iyi` and `-o "prog.iyi "` each linked the
+  # ignores case and Win32 drops a trailing space or dot: `-o PROG.ri
+  # prog.ri`, `-o c:\...\main.ri` and `-o "prog.ri "` each linked the
   # program over its only source, exit 0. Two paths that do not both
   # exist are the same file only if they are the same string.
   def self.same_file?(a : String, b : String) : Bool
@@ -305,7 +305,7 @@ module Iyi
 
   # iyi: one per runner, by its process id. It was one per basename, and
   # Windows will not write over an executable that is running: two `iyi
-  # run main.iyi` at once - two different programs in two directories,
+  # run main.ri` at once - two different programs in two directories,
   # or one twice - and the second failed to link, `LNK1104: cannot open
   # file ...\iyi-run-main.exe.tmp.exe`.
   def self.temp_executable(basename)
@@ -351,11 +351,10 @@ module Iyi
   end
 end
 
-# ris: a file with the language's rules is a `.ri` file, or an `.iyi` one -
-# the prelude and every module carried over from iyi keep that name. Every
-# check that read `ends_with?(".iyi")` asks this instead.
+# ris: a file with the language's rules is a `.ri` file (SPEC 6.10); a
+# `.iyi` one is refused (`Lexer.iyi_named?`).
 class String
   def ris_source? : Bool
-    ends_with?(".ri") || ends_with?(".iyi")
+    ends_with?(".ri")
   end
 end

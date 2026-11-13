@@ -35,7 +35,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -53,12 +53,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_x509_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_x509_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -429,15 +429,15 @@ fi
 
 echo
 echo "== an error value's sentence, through .or_panic"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/x509::{Certificate}
 
 Certificate.parse([2_u8, 1_u8, 1_u8]).or_panic
 puts "accepted"
-IYI
-if "$IYI" run "$WORK/refuse.iyi" >"$WORK/refuse.out" 2>&1; then
+RIS
+if "$RIS" run "$WORK/refuse.ri" >"$WORK/refuse.out" 2>&1; then
   echo "  an INTEGER was accepted as a certificate"
   status=1
 elif ! grep -qF "x509: asn1: expected a SEQUENCE, found INTEGER at offset 0" "$WORK/refuse.out"; then
@@ -465,15 +465,15 @@ prove_broken() {
 import os
 from pathlib import Path
 module = os.environ["MODULE"]
-src = Path("$REPO/src/std/" + module + ".iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/" + module + ".ri").read_text(encoding="utf-8")
 if src.count(os.environ["OLD"]) != 1:
     raise SystemExit("patch site missing or not one")
-Path("$WORK/patched/std/" + module + ".iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
+Path("$WORK/patched/std/" + module + ".ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_x509_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_x509_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF -e "$2" "$WORK/mut.out"; then

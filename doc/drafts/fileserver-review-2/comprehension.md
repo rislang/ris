@@ -25,7 +25,7 @@ paraphrased; no Blockers.
 ## Nit
 
 * "quoted below" (21) but nothing is quoted; "flat Array" (42),
-  `@[OnTape]`, UPSTREAM (371), `IYI_PATH` (486) undefined.
+  `@[OnTape]`, UPSTREAM (371), `RIS_PATH` (486) undefined.
 * Why some helpers are `protected` (286-290).
 * "as Go's are" (174) assumes Go knowledge.
 * 304 dropping Content-Type (186, 194) is a change under "Behaviour,

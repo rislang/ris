@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Lazy sequences, exercised and driven. Runs the iterator exercise plain and
 # optimised, checks every section reported, and proves the checks can fail
-# by patching copies of the iterator library via IYI_PATH.
+# by patching copies of the iterator library via RIS_PATH.
 #
 #     bash test/cli/std_iterator_exercise.sh
 #
@@ -17,9 +17,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -45,13 +45,13 @@ esac
 
 status=0
 
-# Ensure foundation traits are present in IYI_PATH even if std/foundation
+# Ensure foundation traits are present in RIS_PATH even if std/foundation
 # has not yet been merged into current master branch.
 EXTRA_PATH=""
-if [ ! -f "$REPO/src/std/traits.iyi" ]; then
+if [ ! -f "$REPO/src/std/traits.ri" ]; then
   mkdir -p "$WORK/foundation/std"
-  git show origin/std/foundation:src/std/traits.iyi > "$WORK/foundation/std/traits.iyi" 2>/dev/null || true
-  git show origin/std/foundation:src/std/enumerable.iyi > "$WORK/foundation/std/enumerable.iyi" 2>/dev/null || true
+  git show origin/std/foundation:src/std/traits.ri > "$WORK/foundation/std/traits.ri" 2>/dev/null || true
+  git show origin/std/foundation:src/std/enumerable.ri > "$WORK/foundation/std/enumerable.ri" 2>/dev/null || true
   EXTRA_PATH="$WORK/foundation${PSEP}"
 fi
 
@@ -60,7 +60,7 @@ BASE_IYI_PATH="${EXTRA_PATH}${REPO}/src"
 run_case() {
   local label="$1" name="$2"
   shift 2
-  if ! IYI_PATH="$BASE_IYI_PATH" "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_iterator_exercise.iyi" \
+  if ! RIS_PATH="$BASE_IYI_PATH" "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_iterator_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     sed -n '1,12p' "$WORK/$name.build.log"
@@ -134,7 +134,7 @@ echo
 echo "== zip and chain take an iterator, and say so at the call"
 # `zip` and `chain` are bounded `forall O : Iterator`, as `Enumerable#zip`
 # is (iyi SPEC II.6 finding 6). Unbounded, a zip with an array was refused
-# from inside std/iterator.iyi, "undefined constant O::Elem" and "Did you
+# from inside std/iterator.ri, "undefined constant O::Elem" and "Did you
 # mean 'IO'?", and a chain with one, or with another element type, from
 # `ChainIterator#next`. The refusal names the caller's line, `O` and the
 # method now, and a chain of two element types yields either, as the other
@@ -142,15 +142,15 @@ echo "== zip and chain take an iterator, and say so at the call"
 refused_at_call() { # refused_at_call <label> <name> <method> <expression>
   local label="$1" name="$2" method="$3" expression="$4"
   printf 'module main\n\nimport std/iterator::{Iterator, ArrayIterator}\n\nputs (%s).to_a\n' \
-    "$expression" > "$WORK/$name.iyi"
-  if IYI_PATH="$BASE_IYI_PATH" "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" \
+    "$expression" > "$WORK/$name.ri"
+  if RIS_PATH="$BASE_IYI_PATH" "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" \
        > "$WORK/$name.build" 2>&1; then
     echo "  $label: it built"
     status=1
     return
   fi
   if ! grep -qF -- "required by \`O\` in \`$method\`" "$WORK/$name.build" ||
-     ! grep -qF -- "$name.iyi:5" "$WORK/$name.build"; then
+     ! grep -qF -- "$name.ri:5" "$WORK/$name.build"; then
     echo "  $label: refused, but not at the call"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -161,8 +161,8 @@ refused_at_call() { # refused_at_call <label> <name> <method> <expression>
 refused_at_call "a zip with an array" zip_array zip 'Iterator.of([1, 2]).zip([10, 20])'
 refused_at_call "a chain with an array" chain_array chain 'Iterator.of([1, 2]).chain([10, 20])'
 printf 'module main\n\nimport std/iterator::{Iterator, ArrayIterator}\n\nputs Iterator.of([1, 2]).chain(Iterator.of(["a"])).to_a\n' \
-  > "$WORK/chain_mixed.iyi"
-if IYI_PATH="$BASE_IYI_PATH" "$IYI" build -o "$WORK/chain_mixed" "$WORK/chain_mixed.iyi" \
+  > "$WORK/chain_mixed.ri"
+if RIS_PATH="$BASE_IYI_PATH" "$RIS" build -o "$WORK/chain_mixed" "$WORK/chain_mixed.ri" \
      > "$WORK/chain_mixed.build" 2>&1 &&
    [ "$("$WORK/chain_mixed" | tr -d '\r')" = '[1, 2, "a"]' ]; then
   echo '  a chain of Int32 and String yields both: [1, 2, "a"]'
@@ -181,9 +181,9 @@ prove_fails() {
   if [ -d "$WORK/foundation/std" ]; then
     cp -R "$WORK/foundation/std/." "$WORK/$dir/std/"
   fi
-  sed -e "$sed_script" "$REPO/src/std/iterator.iyi" > "$WORK/$dir/std/iterator.iyi"
-  if ! IYI_PATH="$WORK/$dir${PSEP}$BASE_IYI_PATH" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/std_iterator_exercise.iyi" \
+  sed -e "$sed_script" "$REPO/src/std/iterator.ri" > "$WORK/$dir/std/iterator.ri"
+  if ! RIS_PATH="$WORK/$dir${PSEP}$BASE_IYI_PATH" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/std_iterator_exercise.ri" \
        >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched iterator library did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
@@ -204,7 +204,7 @@ prove_fails() {
     return
   fi
   printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" \
-    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
 }
 
 # 1. Take pulls wrong element count (take(n) takes n + 1)

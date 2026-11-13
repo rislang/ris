@@ -112,7 +112,7 @@ class Iyi::Command
       @walk_all = files.empty?
       if files.empty?
         # iyi: both extensions, because this fork formats both languages and
-        # a directory of `.iyi` files is the ordinary case here. The `.iyi`
+        # a directory of `.ri` files is the ordinary case here. The `.ri`
         # one in any case, so that `UP.IYI` is refused by name
         # (`Lexer.iyi_miscased?`) rather than walked past at exit 0.
         files = Dir["./**/*.cr"] + Dir["./**/*.[iI][yY][iI]"]
@@ -134,7 +134,7 @@ class Iyi::Command
 
     # Which language a pipe carries is the one thing a path says and a pipe
     # does not, and the whole compiler reads it off the extension: `!` is a
-    # token in a `.iyi` file and a different one in a `.cr` file. `"STDIN"`
+    # token in a `.ri` file and a different one in a `.cr` file. `"STDIN"`
     # ends in neither, so stdin was read as Crystal — the one language this
     # binary is not for. `iyi tool format -` answered valid iyi source with
     # a syntax error on `!`, with "expecting identifier 'end'" on a `pub
@@ -146,7 +146,7 @@ class Iyi::Command
     # is what an editor formatting a buffer knows and wants in its errors.
     private def format_stdin
       source = @stdin.gets_to_end
-      format_source(@stdin_filename || "STDIN.iyi", source)
+      format_source(@stdin_filename || "STDIN.ri", source)
     end
 
     private def format_many(files, excludes : Array(String)?)
@@ -157,13 +157,13 @@ class Iyi::Command
 
     # The excludes a walk from *root* prunes with, spelled as `path_key`s:
     # under an exclude as a path is, not as a string starts - `fmt --check
-    # .` and `fmt --check <absolute dir>` walked to `.\.\lib\x.iyi` and
-    # `C:\...\lib\x.iyi`, which never start with `.\lib`, and checked the
+    # .` and `fmt --check <absolute dir>` walked to `.\.\lib\x.ri` and
+    # `C:\...\lib\x.ri`, which never start with `.\lib`, and checked the
     # `lib` the bare `fmt --check` leaves alone.
     #
     # An exclude prunes what a walk finds; it does not take back a path the
     # caller named, which is Black's rule for `--exclude`. `fmt --check
-    # lib/x.iyi` and `fmt --check lib` checked nothing and exited 0, because
+    # lib/x.ri` and `fmt --check lib` checked nothing and exited 0, because
     # the default exclude, `lib`, held them: a CI step written for one
     # vendored module passed without reading it. So a named file is never
     # excluded, and a named directory drops the excludes that hold it.
@@ -186,7 +186,7 @@ class Iyi::Command
       if File.file?(filename)
         # A name the caller typed is read as the one stored: a walk's names
         # already are, and on Windows `MAIN.IYI` typed for a stored
-        # `main.iyi` is that iyi file (`Lexer.stored_name`), not a
+        # `main.ri` is that iyi file (`Lexer.stored_name`), not a
         # `Lexer.iyi_miscased?` one.
         format_file(excludes ? filename : Lexer.stored_name(filename)) unless excludes && excluded?(filename, excludes)
       elsif Dir.exists?(filename)
@@ -196,7 +196,7 @@ class Iyi::Command
         # nothing. Nothing arrives spelled that way while `normalize_path`
         # chops it first, and now nothing depends on that.
         directory = Iyi.glob_root(filename)
-        # And `.iyi` in any case, as above (`Lexer.iyi_miscased?`).
+        # And `.ri` in any case, as above (`Lexer.iyi_miscased?`).
         filenames = Dir[directory.join("**", "*.cr")] + Dir[directory.join("**", "*.[iI][yY][iI]")]
         format_many filenames, walk_excludes(filename)
       else
@@ -212,7 +212,7 @@ class Iyi::Command
       # next. Asking what the path is, and reading it, were outside every
       # rescue: on Windows a file this user may not read cannot be asked
       # either, and one such file ended `fmt DIR` with "Error:
-      # .\.\a_noread.iyi: Access is denied." before the files after it were
+      # .\.\a_noread.ri: Access is denied." before the files after it were
       # looked at.
       print_error "cannot read '#{filename}': #{ex.os_error.try(&.message) || ex.message}"
       @status_code = 1
@@ -251,7 +251,7 @@ class Iyi::Command
     rescue ex : InvalidByteSequenceError
       # The same question the compiler asks: whichever language the file is
       # written in, not whichever one this command was forked from.
-      language = filename.ris_source? ? "iyi" : "Crystal"
+      language = filename.ris_source? ? "ris" : "Crystal"
       print_error "file '#{filename}' is not a valid #{language} source file: #{ex.message}"
       @status_code = 1
     rescue ex : Iyi::SyntaxException
@@ -272,7 +272,7 @@ class Iyi::Command
       if @show_backtrace
         ex.inspect_with_backtrace @stderr
         @stderr.puts
-        print_error "couldn't format '#{filename}', please report a bug including the contents of it: https://github.com/iyilang/iyi/issues"
+        print_error "couldn't format '#{filename}', please report a bug including the contents of it: https://github.com/rislang/ris/issues"
       else
         print_error "there's a bug formatting '#{filename}', to show more information, please run:\n\n  $ #{File.basename(PROGRAM_NAME)} tool format --show-backtrace #{@format_stdin ? "-" : "'#{filename}'"}\n"
       end

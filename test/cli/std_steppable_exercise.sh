@@ -13,9 +13,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -54,14 +54,14 @@ status=0
 # A proof that did not run is counted, so the closing line cannot claim more
 # than was measured.
 unmeasured=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 export PATH="/opt/homebrew/bin:$PATH"
 export LIBRARY_PATH="/opt/homebrew/opt/bdw-gc/lib"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_steppable_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_steppable_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -127,12 +127,12 @@ prove_fails() {
   "$PY" - <<PY
 from pathlib import Path
 import sys
-src = Path("$REPO/src/std/steppable.iyi").read_text()
+src = Path("$REPO/src/std/steppable.ri").read_text()
 old = """$old_pat"""
 if old not in src:
     sys.stderr.write(f"patch site missing for {sys.argv}\n")
     sys.exit(2)
-Path("$WORK/$dir/std/steppable.iyi").write_text(src.replace(old, """$new_pat""", 1))
+Path("$WORK/$dir/std/steppable.ri").write_text(src.replace(old, """$new_pat""", 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  $label: the patch did not apply"
@@ -141,7 +141,7 @@ PY
   fi
   # Build first, then run: a patch that does not compile would also "fail",
   # and that proves nothing about whether the exercise catches the break.
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/$dir.bin" "$REPO/test/cli/std_steppable_exercise.iyi" >"$WORK/$dir.out" 2>&1; then
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/$dir.bin" "$REPO/test/cli/std_steppable_exercise.ri" >"$WORK/$dir.out" 2>&1; then
     echo "  $label: the broken copy did not compile"
     sed -n '1,6p' "$WORK/$dir.out"
     status=1

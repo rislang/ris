@@ -47,9 +47,9 @@ describe Iyi::Command::FormatCommand do
     stdout.to_s.should be_empty
     # iyi: `STDIN` ends in neither extension, and the language a file is in
     # comes off its name everywhere in the compiler, so a pipe was read by
-    # the other language's rules. It is `STDIN.iyi` now, which says which
+    # the other language's rules. It is `STDIN.ri` now, which says which
     # rules read it, and `--stdin-filename` replaces it.
-    stderr.to_s.should contain("syntax error in 'STDIN.iyi:1:3': unexpected token: EOF")
+    stderr.to_s.should contain("syntax error in 'STDIN.ri:1:3': unexpected token: EOF")
   end
 
   it "formats stdin (invalid byte sequence error)" do
@@ -61,7 +61,7 @@ describe Iyi::Command::FormatCommand do
     format_command.run
     format_command.status_code.should eq(1)
     stdout.to_s.should be_empty
-    stderr.to_s.should contain("file 'STDIN.iyi' is not a valid iyi source file: Unexpected byte 0xfe at position 0, malformed UTF-8")
+    stderr.to_s.should contain("file 'STDIN.ri' is not a valid ris source file: Unexpected byte 0xfe at position 0, malformed UTF-8")
   end
 
   it "formats stdin (bug)" do
@@ -73,7 +73,7 @@ describe Iyi::Command::FormatCommand do
     format_command.run
     format_command.status_code.should eq(1)
     stdout.to_s.should be_empty
-    stderr.to_s.should contain("there's a bug formatting 'STDIN.iyi', to show more information, please run:")
+    stderr.to_s.should contain("there's a bug formatting 'STDIN.ri', to show more information, please run:")
     # iyi: the advice names the binary that was run, whatever it was
     # called - it used to say `crystal tool format`, a command the reader
     # may not have.
@@ -90,7 +90,7 @@ describe Iyi::Command::FormatCommand do
     format_command.status_code.should eq(1)
     stdout.to_s.should be_empty
     stderr.to_s.should contain("format command test")
-    stderr.to_s.should contain("couldn't format 'STDIN.iyi', please report a bug including the contents of it: https://github.com/iyilang/iyi/issues")
+    stderr.to_s.should contain("couldn't format 'STDIN.ri', please report a bug including the contents of it: https://github.com/iyilang/iyi/issues")
   end
 
   it "reads stdin as the language --stdin-filename names" do
@@ -339,11 +339,11 @@ describe Iyi::Command::FormatCommand do
     stderr = IO::Memory.new
 
     with_tempdir do
-      format_command = Iyi::Command::FormatCommand.new(["nosuch.iyi"], check: true, color: false, stdin: stdin, stdout: stdout, stderr: stderr)
+      format_command = Iyi::Command::FormatCommand.new(["nosuch.ri"], check: true, color: false, stdin: stdin, stdout: stdout, stderr: stderr)
       format_command.run
       format_command.status_code.should eq(1)
       stdout.to_s.should be_empty
-      stderr.to_s.should contain("file or directory does not exist: #{Path[".", "nosuch.iyi"]}")
+      stderr.to_s.should contain("file or directory does not exist: #{Path[".", "nosuch.ri"]}")
     end
   end
 end

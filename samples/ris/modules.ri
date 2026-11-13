@@ -1,0 +1,124 @@
+# Modules across files: `import`, and the names it brings into scope.
+#
+#   ./bin/ris run samples/ris/modules.ri
+#
+# Everything below compiles and runs today. `hello.ri` covers traits and
+# `impl` in a single file; this one covers the part a single file cannot show.
+
+module samples/modules
+
+# R-1: `import` names a module and loads it at most once, so the import graph
+# is a DAG rather than textual inclusion. Bare, it brings the module into
+# scope under its qualified name and nothing more: after `import app/greeter`
+# alone, the module's names are reachable only as `App::Greeter::Greet` and
+# `App::Greeter.polite`.
+import app/greeter::*
+import app/formal::{address}
+
+# II.3: `::*` and `::{...}` are what make those names available unqualified.
+# They are written by the consumer, not performed by the library: a bare
+# import never changes what the importer's unqualified names mean, so a
+# library cannot capture a name in your file by adding one to itself.
+
+# The selective form narrows an import's names to the ones listed. Here it
+# is not decoration — `app/greeter` and `app/formal` both export `title`, and
+# taking both whole would make every unqualified `title` in this module
+# ambiguous.
+
+pub struct User
+  getter name : String
+
+  def initialize(@name : String)
+  end
+end
+
+# `Greet` resolves through `import app/greeter::*` above, so `impl` needs no
+# qualification.
+#
+# R-3's orphan rule allows this impl here because `User` is declared here:
+# this is the type's module. It would equally be allowed in `app/greeter`,
+# the trait's module. Nowhere else — a third module that imports both is
+# refused, which is what makes two modules unable to define the same impl.
+impl Greet for User
+  def greet : String
+    # `polite` comes from `app/greeter`, `address` from `app/formal`, and
+    # `shout` is this module's own function, declared below. All three are
+    # written the same way, because to this file they are all just names.
+    shout(polite(name)) + " " + address(name)
+  end
+end
+
+# A module's own functions are in scope for the types declared in it, without
+# `self.` and without qualification: an iyi module is a compilation unit, and
+# these are its functions. Not exported, so nothing outside can call it.
+def shout(text : String) : String
+  text.upcase
+end
+
+puts User.new("iyi").greet
+
+# `title` was reachable unqualified from neither import: `app/greeter`'s was
+# left ambiguous by nothing (only one import was whole), and `app/formal`'s
+# was excluded by the selective form. Qualification always works.
+puts App::Greeter.title
+puts App::Formal.title
+
+# ---------------------------------------------------------------------------
+# What this sample would report as an error
+# ---------------------------------------------------------------------------
+#
+# * Widening the second import to `import app/formal::*` and then writing an
+#   unqualified `title` is an error, and it is reported at the `title`, not at
+#   the import. Widening it alone is not an error at all: two modules
+#   exporting the same name is not by itself a mistake, so nothing is wrong
+#   until a name is written that could mean either (iyi SPEC II.3).
+#
+# * Adding `def title` here makes even that legal again. A local definition
+#   beats an imported one, silently, which is what keeps a library from
+#   breaking its consumers by adding an export.
+#
+# * Moving the `impl` above into a module that is neither `app/greeter` nor
+#   this one is refused by R-3, naming both modules where it would be allowed.
+#
+# * `import app/greeter::{greeting}` — `greeting` is declared there without
+#   `pub`, so it is not part of the module's surface. The error names it at the
+#   import, where the author can see which of the names they asked for they
+#   cannot have. Widening to `import app/greeter::*` does not reach it
+#   either; it simply is not there to be found (R-2b).
+#
+# * `App::Greeter.greeting` — qualifying it does not get around `pub` either.
+#   It has to be unreachable, not merely absent from an import's names:
+#   `.rimod` carries a module's exports and nothing else, so if another
+#   module could call an unmarked name, that metadata would not be enough to
+#   compile against (iyi SPEC IV.2).
+#
+# * `import app/v_1`, or any path segment that is not `[a-z][a-z0-9]*` with
+#   single `_` between groups. A module declared `app/greeter` is reached as
+#   `App::Greeter`, and the two notations are kept in step by making the
+#   mapping reversible: the name splits back into a path at every upper-case
+#   letter. `camelcase` drops an underscore before a digit, so `v_1` and `v1`
+#   would both be `V1` — two paths naming one module (iyi SPEC IV.6 #6).
+#
+# ---------------------------------------------------------------------------
+# Compiling this file without `app/greeter.ri`
+# ---------------------------------------------------------------------------
+#
+# R-1 says a module that imports another reads its `.rimod` and never opens
+# its source. That is not a claim about a future release:
+#
+#     ./bin/crystal build --no-codegen --emit-rimod /tmp/mods samples/ris/modules.ri
+#     ./bin/crystal mod dump --declarations /tmp/mods/app/greeter.rimod
+#     mv samples/ris/app /tmp/app-elsewhere
+#     ./bin/crystal build --no-codegen --use-rimod /tmp/mods samples/ris/modules.ri   # compiles
+#     mv /tmp/app-elsewhere samples/ris/app
+#
+# The second command prints what the third one compiles against: `app/greeter`
+# with `pub def polite(name : String) : String`, `pub trait Greet` with its
+# requirement, and no bodies at all. `greeting` is not in it — it carries no
+# `pub`, and R-2b's "unreachable rather than absent from an import's names"
+# is the same statement as "not in the artifact".
+#
+# * No object code here: the first build was `--no-codegen`, so its artifacts
+#   carry what another module may call and not how it is done, and the third
+#   build typechecks against them; one that links is refused by name (iyi SPEC
+#   IV.1f). `--emit-rimod` without `--no-codegen` carries the code too.

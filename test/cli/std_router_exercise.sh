@@ -46,7 +46,7 @@ for candidate in "${GO:-}" go /usr/local/go/bin/go "$HOME"/.local/share/mise/ins
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping, so the
@@ -61,12 +61,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_router_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_router_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -77,7 +77,7 @@ build_and_run() {
   local exit_code=$?
   # The refusals the exercise provokes on purpose print their panic as it
   # happens; the exercise checks each sentence itself.
-  grep -v '^iyi: panic: Router: ' "$WORK/$name.out" | sed 's/^/  /'
+  grep -v '^ris: panic: Router: ' "$WORK/$name.out" | sed 's/^/  /'
   if [ "$exit_code" -ne 0 ]; then
     echo "$label: exited $exit_code"
     status=1
@@ -106,8 +106,8 @@ echo "== what a router refuses before it serves"
 refuses() { # refuses <label> <name> <phrase> <statements>
   local label="$1" name="$2" phrase="$3" statements="$4"
   printf 'module main\n\nimport std/router::{Router}\nimport std/http::{Request, Response}\n\nrouter = Router.new\n%s\nputs "registered"\n' \
-    "$statements" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$statements" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -380,15 +380,15 @@ prove_broken() { # prove_broken <label> <phrase> <old> <new>
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/router.iyi").read_text()
+src = Path("$REPO/src/std/router.ri").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/router.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/router.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_router_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_router_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -F "ASSERTION FAILED" "$WORK/mut.out" | grep -qF "$2"; then

@@ -1,0 +1,400 @@
+# iyi: the weaker atomic verbs, and the bitwise ones, on the prelude's
+# `Atomic(T)`.
+#
+# The prelude's `Atomic(T)` has six verbs and one ordering, sequentially
+# consistent, with no parameter to weaken it; it records that a weaker
+# spelling arrives "as its own verb rather than a parameter, so a call site
+# says what it means". This module is those verbs. Each name carries its
+# ordering as a suffix — `add_relaxed`, `get_acquire`, `set_release`,
+# `swap_acq_rel`, `compare_and_set_acq_rel` — so the ordering is a constant
+# the compiler emits as that one instruction, never a runtime branch, and a
+# reader of the call site does not have to look up an argument.
+#
+# The suffixes: `_relaxed` is atomic and nothing more (LLVM's monotonic);
+# `_acquire` is a load nothing after it may move before; `_release` is a
+# store nothing before it may move after; `_acq_rel` is both, for a
+# read-modify-write. A load has no release half and a store no acquire
+# half, so `get` has two weaker spellings and `set` two; the
+# read-modify-writes have four. `compare_and_set_*` names the success
+# ordering; the failure ordering is the strongest a failed exchange can
+# carry (acquire under `_acquire`/`_acq_rel`, relaxed otherwise).
+#
+# The bitwise verbs `and`, `nand`, `xor`, `max`, `min` are sequentially
+# consistent like the prelude's, and answer what the word held before.
+# Bitwise or is spelled `bitwise_or`: `.or` is iyi's recovery keyword
+# (`expr.or { fallback }`) and cannot be a method name. `max`/`min` pick
+# the signed or unsigned instruction from `T` at compile time.
+#
+# `Atomic.fence` is a full fence; `fence_acquire`, `fence_release` and
+# `fence_acq_rel` are the weaker ones. There is no relaxed fence: LLVM
+# has none and neither does the hardware.
+#
+# `T` is what the prelude admits: Int32, Int64, UInt8 or UInt64. There is
+# no `Atomic(Bool)` and no flag type here; the prelude refuses the
+# instantiation, and a flag is a `UInt8` word with `swap`.
+
+module std/atomic
+
+# The one instruction the prelude's `IyiAtomic` does not declare: a
+# fence. It goes on that holder beside the other four, not on
+# `Atomic(T)`, for the reason the prelude gives there: a call on a generic
+# instance's class passes the class as its first argument, and the code
+# generator reads the fence's ordering from the front. Declared on
+# `Atomic(T)`, `Atomic.fence` built and `Atomic(Int64).fence` stopped the
+# compiler ("Multiple assignment count mismatch", "you've found a bug in
+# the iyi compiler"). `ordering` must be a symbol literal at the call
+# site; the fence verbs below are the only callers.
+struct ::IyiAtomic
+  @[Primitive(:fence)]
+  def self.fence(ordering : Symbol, singlethread : Bool) : Nil
+  end
+end
+
+struct ::Atomic(T)
+  # A full fence: nothing crosses it in either direction.
+  def self.fence : Nil
+    IyiAtomic.fence(:sequentially_consistent, false)
+  end
+
+  # Nothing after this fence moves before it.
+  def self.fence_acquire : Nil
+    IyiAtomic.fence(:acquire, false)
+  end
+
+  # Nothing before this fence moves after it.
+  def self.fence_release : Nil
+    IyiAtomic.fence(:release, false)
+  end
+
+  # Both halves, without the total order of `fence`.
+  def self.fence_acq_rel : Nil
+    IyiAtomic.fence(:acquire_release, false)
+  end
+
+  # The word, read once, atomic and nothing more.
+  def get_relaxed : T
+    IyiAtomic.load(pointerof(@value), :monotonic, false)
+  end
+
+  # The word, read once; nothing after the read moves before it.
+  def get_acquire : T
+    IyiAtomic.load(pointerof(@value), :acquire, false)
+  end
+
+  # The word, written once, atomic and nothing more.
+  def set_relaxed(value : T) : Nil
+    IyiAtomic.store(pointerof(@value), value, :monotonic, false)
+  end
+
+  # The word, written once; nothing before the write moves after it.
+  def set_release(value : T) : Nil
+    IyiAtomic.store(pointerof(@value), value, :release, false)
+  end
+
+  # `add`, `sub` and `swap` at each of the four weaker orderings; every one
+  # answers what the word held before, as the prelude's do.
+  {% for suffix, ordering in {relaxed: :monotonic, acquire: :acquire, release: :release, acq_rel: :acquire_release} %}
+    def add_{{suffix}}(value : T) : T
+      IyiAtomic.rmw(:add, pointerof(@value), value, {{ordering}}, false)
+    end
+
+    def sub_{{suffix}}(value : T) : T
+      IyiAtomic.rmw(:sub, pointerof(@value), value, {{ordering}}, false)
+    end
+
+    def swap_{{suffix}}(value : T) : T
+      IyiAtomic.rmw(:xchg, pointerof(@value), value, {{ordering}}, false)
+    end
+  {% end %}
+
+  # `compare_and_set` at each weaker ordering: if the word holds
+  # `expected` it now holds `desired`; answers what the word held and
+  # whether the exchange happened.
+  def compare_and_set_relaxed(expected : T, desired : T) : Tuple(T, Bool)
+    IyiAtomic.cmpxchg(pointerof(@value), expected, desired, :monotonic, :monotonic)
+  end
+
+  def compare_and_set_acquire(expected : T, desired : T) : Tuple(T, Bool)
+    IyiAtomic.cmpxchg(pointerof(@value), expected, desired, :acquire, :acquire)
+  end
+
+  def compare_and_set_release(expected : T, desired : T) : Tuple(T, Bool)
+    IyiAtomic.cmpxchg(pointerof(@value), expected, desired, :release, :monotonic)
+  end
+
+  def compare_and_set_acq_rel(expected : T, desired : T) : Tuple(T, Bool)
+    IyiAtomic.cmpxchg(pointerof(@value), expected, desired, :acquire_release, :acquire)
+  end
+
+  # `word &= value`; answers what the word held before.
+  def and(value : T) : T
+    IyiAtomic.rmw(:and, pointerof(@value), value, :sequentially_consistent, false)
+  end
+
+  # `word = ~(word & value)`; answers what the word held before.
+  def nand(value : T) : T
+    IyiAtomic.rmw(:nand, pointerof(@value), value, :sequentially_consistent, false)
+  end
+
+  # `word |= value`; answers what the word held before.
+  def bitwise_or(value : T) : T
+    IyiAtomic.rmw(:or, pointerof(@value), value, :sequentially_consistent, false)
+  end
+
+  # `word ^= value`; answers what the word held before.
+  def xor(value : T) : T
+    IyiAtomic.rmw(:xor, pointerof(@value), value, :sequentially_consistent, false)
+  end
+
+  # `word = max(word, value)`, signed or unsigned as `T` is; answers what
+  # the word held before.
+  def max(value : T) : T
+    {% if T == UInt8 || T == UInt64 %}
+      IyiAtomic.rmw(:umax, pointerof(@value), value, :sequentially_consistent, false)
+    {% else %}
+      IyiAtomic.rmw(:max, pointerof(@value), value, :sequentially_consistent, false)
+    {% end %}
+  end
+
+  # `word = min(word, value)`, signed or unsigned as `T` is; answers what
+  # the word held before.
+  def min(value : T) : T
+    {% if T == UInt8 || T == UInt64 %}
+      IyiAtomic.rmw(:umin, pointerof(@value), value, :sequentially_consistent, false)
+    {% else %}
+      IyiAtomic.rmw(:min, pointerof(@value), value, :sequentially_consistent, false)
+    {% end %}
+  end
+end
+
+pub class RisAtomicSpecShared
+  getter count : ::Atomic(Int64)
+  getter flag : ::Atomic(UInt8)
+  getter payload : ::Atomic(UInt64)
+
+  def initialize
+    @count = ::Atomic(Int64).new(0_i64)
+    @flag = ::Atomic(UInt8).new(0_u8)
+    @payload = ::Atomic(UInt64).new(0_u64)
+  end
+end
+
+THREADS    =       4
+PER_THREAD = 250_000
+
+ATOMIC_SPEC_SHARED = RisAtomicSpecShared.new.copy_to(Program.tape)
+ATOMIC_SPEC_BOX    = RisAtomicSpecShared.new.copy_to(Program.tape)
+
+# atomic.1 The admitted words are Int32, Int64, UInt8 and UInt64; other types
+#   are refused by the prelude.
+spec atomic.1
+  ::Atomic(Int32).new(0).get == 0
+  ::Atomic(Int64).new(0_i64).get == 0_i64
+  ::Atomic(UInt8).new(0_u8).get == 0_u8
+  ::Atomic(UInt64).new(0_u64).get == 0_u64
+end
+
+# atomic.2 get_relaxed and set_relaxed are atomic without synchronization;
+#   get_acquire and set_release use acquire loads and release stores.
+spec atomic.2
+  i32 = ::Atomic(Int32).new(5)
+  i32.set_relaxed(-4)
+  atomic_spec_check(i32.get_relaxed == -4, "Int32 set_relaxed")
+  i32.set_release(-8)
+  atomic_spec_check(i32.get_acquire == -8, "Int32 set_release")
+
+  i64 = ::Atomic(Int64).new(-1_i64)
+  i64.set_release(100_i64)
+  atomic_spec_check(i64.get_acquire == 100_i64 && i64.get_relaxed == 100_i64, "Int64 set/get")
+  i64.set_relaxed(7_i64)
+  atomic_spec_check(i64.get == 7_i64, "Int64 set_relaxed")
+
+  u8 = ::Atomic(UInt8).new(250_u8)
+  u8.set_relaxed(9_u8)
+  u8.set_release(10_u8)
+  atomic_spec_check(u8.get == 10_u8, "UInt8 set_*")
+
+  u64 = ::Atomic(UInt64).new(0_u64)
+  u64.set_relaxed(5_u64)
+  atomic_spec_check(u64.get_relaxed == 5_u64, "UInt64 set_relaxed")
+  u64.set_release(6_u64)
+  atomic_spec_check(u64.get == 6_u64, "UInt64 set_release")
+  atomic_spec_handoff
+end
+
+# atomic.3 add, sub and swap with relaxed, acquire, release or acq_rel
+#   suffixes use that ordering and return the previous word.
+spec atomic.3
+  i32 = ::Atomic(Int32).new(5)
+  atomic_spec_check(i32.add_relaxed(1) == 5 && i32.get_relaxed == 6, "Int32 add_relaxed")
+  atomic_spec_check(i32.add_acquire(1) == 6 && i32.get_acquire == 7, "Int32 add_acquire")
+  atomic_spec_check(i32.add_release(1) == 7, "Int32 add_release")
+  atomic_spec_check(i32.add_acq_rel(1) == 8 && i32.get == 9, "Int32 add_acq_rel")
+  atomic_spec_check(i32.sub_relaxed(2) == 9 && i32.sub_acquire(2) == 7 && i32.sub_release(2) == 5 && i32.sub_acq_rel(2) == 3, "Int32 sub_*")
+  atomic_spec_check(i32.get == 1, "Int32 after four subs")
+  atomic_spec_check(i32.swap_relaxed(10) == 1 && i32.swap_acquire(20) == 10 && i32.swap_release(30) == 20 && i32.swap_acq_rel(40) == 30, "Int32 swap_*")
+  i32.set_relaxed(-4)
+  i32.set_release(-8)
+
+  i64 = ::Atomic(Int64).new(-1_i64)
+  atomic_spec_check(i64.add_relaxed(3_i64) == -1_i64 && i64.add_acq_rel(3_i64) == 2_i64, "Int64 add")
+  atomic_spec_check(i64.sub_release(1_i64) == 5_i64 && i64.swap_acquire(9_i64) == 4_i64, "Int64 sub/swap")
+  i64.set_release(100_i64)
+  atomic_spec_check(i64.add_acquire(0_i64) == 100_i64 && i64.add_release(0_i64) == 100_i64, "Int64 add_acquire/release")
+  atomic_spec_check(i64.sub_relaxed(0_i64) == 100_i64 && i64.sub_acquire(0_i64) == 100_i64 && i64.sub_acq_rel(0_i64) == 100_i64, "Int64 sub_*")
+  atomic_spec_check(i64.swap_relaxed(100_i64) == 100_i64 && i64.swap_release(100_i64) == 100_i64 && i64.swap_acq_rel(100_i64) == 100_i64, "Int64 swap_*")
+  i64.set_relaxed(7_i64)
+
+  u8 = ::Atomic(UInt8).new(250_u8)
+  atomic_spec_check(u8.add_relaxed(5_u8) == 250_u8 && u8.get_relaxed == 255_u8, "UInt8 add_relaxed to 255")
+  atomic_spec_check(u8.add_acquire(1_u8) == 255_u8 && u8.get_acquire == 0_u8, "UInt8 add wraps at the word")
+  atomic_spec_check(u8.sub_relaxed(1_u8) == 0_u8 && u8.get == 255_u8, "UInt8 sub wraps at the word")
+  atomic_spec_check(u8.swap_acq_rel(1_u8) == 255_u8 && u8.swap_relaxed(2_u8) == 1_u8 && u8.swap_acquire(3_u8) == 2_u8 && u8.swap_release(4_u8) == 3_u8, "UInt8 swap_*")
+  atomic_spec_check(u8.add_release(0_u8) == 4_u8 && u8.add_acq_rel(0_u8) == 4_u8, "UInt8 add_release/acq_rel")
+  atomic_spec_check(u8.sub_acquire(0_u8) == 4_u8 && u8.sub_release(0_u8) == 4_u8 && u8.sub_acq_rel(0_u8) == 4_u8, "UInt8 sub_*")
+  u8.set_relaxed(9_u8)
+  u8.set_release(10_u8)
+
+  u64 = ::Atomic(UInt64).new(0_u64)
+  atomic_spec_check(u64.sub_relaxed(1_u64) == 0_u64 && u64.get == 18446744073709551615_u64, "UInt64 sub wraps at the word")
+  atomic_spec_check(u64.add_acq_rel(1_u64) == 18446744073709551615_u64 && u64.get_acquire == 0_u64, "UInt64 add wraps at the word")
+  atomic_spec_check(u64.add_relaxed(0_u64) == 0_u64 && u64.add_acquire(0_u64) == 0_u64 && u64.add_release(0_u64) == 0_u64, "UInt64 add_*")
+  atomic_spec_check(u64.sub_acquire(0_u64) == 0_u64 && u64.sub_release(0_u64) == 0_u64 && u64.sub_acq_rel(0_u64) == 0_u64, "UInt64 sub_*")
+  atomic_spec_check(u64.swap_relaxed(1_u64) == 0_u64 && u64.swap_acquire(2_u64) == 1_u64 && u64.swap_release(3_u64) == 2_u64 && u64.swap_acq_rel(4_u64) == 3_u64, "UInt64 swap_*")
+  u64.set_relaxed(5_u64)
+  u64.set_release(6_u64)
+  atomic_spec_counting
+end
+
+# atomic.4 compare_and_set with an ordering suffix returns the previous word
+#   and whether expected was exchanged for desired. Failure is acquire for
+#   acquire and acq_rel success, relaxed otherwise.
+spec atomic.4
+  cas = ::Atomic(Int64).new(1_i64)
+  r = cas.compare_and_set_relaxed(1_i64, 2_i64)
+  atomic_spec_check(r[0] == 1_i64 && r[1] && cas.get == 2_i64, "relaxed: exchanged when expected held")
+  r = cas.compare_and_set_relaxed(1_i64, 3_i64)
+  atomic_spec_check(r[0] == 2_i64 && !r[1] && cas.get == 2_i64, "relaxed: refused when it did not")
+  r = cas.compare_and_set_acquire(2_i64, 3_i64)
+  atomic_spec_check(r[0] == 2_i64 && r[1] && cas.get == 3_i64, "acquire: exchanged")
+  r = cas.compare_and_set_acquire(9_i64, 4_i64)
+  atomic_spec_check(r[0] == 3_i64 && !r[1], "acquire: refused")
+  r = cas.compare_and_set_release(3_i64, 4_i64)
+  atomic_spec_check(r[0] == 3_i64 && r[1] && cas.get == 4_i64, "release: exchanged")
+  r = cas.compare_and_set_release(9_i64, 5_i64)
+  atomic_spec_check(r[0] == 4_i64 && !r[1], "release: refused")
+  r = cas.compare_and_set_acq_rel(4_i64, 5_i64)
+  atomic_spec_check(r[0] == 4_i64 && r[1] && cas.get == 5_i64, "acq_rel: exchanged")
+  r = cas.compare_and_set_acq_rel(9_i64, 6_i64)
+  atomic_spec_check(r[0] == 5_i64 && !r[1] && cas.get == 5_i64, "acq_rel: refused")
+
+  cas32 = ::Atomic(Int32).new(1)
+  atomic_spec_check(cas32.compare_and_set_relaxed(1, 2)[1] && cas32.compare_and_set_acquire(2, 3)[1] && cas32.compare_and_set_release(3, 4)[1] && cas32.compare_and_set_acq_rel(4, 5)[1] && cas32.get == 5, "Int32 chain")
+  cas8 = ::Atomic(UInt8).new(1_u8)
+  atomic_spec_check(cas8.compare_and_set_relaxed(1_u8, 2_u8)[1] && cas8.compare_and_set_acquire(2_u8, 3_u8)[1] && cas8.compare_and_set_release(3_u8, 4_u8)[1] && cas8.compare_and_set_acq_rel(4_u8, 5_u8)[1] && cas8.get == 5_u8, "UInt8 chain")
+  cas64 = ::Atomic(UInt64).new(1_u64)
+  atomic_spec_check(cas64.compare_and_set_relaxed(1_u64, 2_u64)[1] && cas64.compare_and_set_acquire(2_u64, 3_u64)[1] && cas64.compare_and_set_release(3_u64, 4_u64)[1] && cas64.compare_and_set_acq_rel(4_u64, 5_u64)[1] && cas64.get == 5_u64, "UInt64 chain")
+end
+
+# atomic.5 and, nand, bitwise_or and xor atomically replace the word with the
+#   named bit operation and return its previous value, sequentially
+#   consistently.
+spec atomic.5
+  b = ::Atomic(Int32).new(0b1100)
+  atomic_spec_check(b.and(0b1010) == 0b1100 && b.get == 0b1000, "and")
+  atomic_spec_check(b.bitwise_or(0b0011) == 0b1000 && b.get == 0b1011, "bitwise_or")
+  atomic_spec_check(b.xor(0b0110) == 0b1011 && b.get == 0b1101, "xor")
+  atomic_spec_check(b.nand(0b0101) == 0b1101 && b.get == -6, "nand: ~(0b1101 & 0b0101) is -6")
+  b64 = ::Atomic(Int64).new(-8_i64)
+  atomic_spec_check(b64.and(6_i64) == -8_i64 && b64.bitwise_or(1_i64) == 0_i64 && b64.xor(3_i64) == 1_i64 && b64.nand(2_i64) == 2_i64 && b64.get == -3_i64, "Int64 and/or/xor/nand")
+  b8 = ::Atomic(UInt8).new(0xF0_u8)
+  atomic_spec_check(b8.and(0x3C_u8) == 0xF0_u8 && b8.bitwise_or(0x03_u8) == 0x30_u8 && b8.xor(0xFF_u8) == 0x33_u8 && b8.nand(0xFF_u8) == 0xCC_u8 && b8.get == 0x33_u8, "UInt8 and/or/xor/nand")
+  bu = ::Atomic(UInt64).new(0xFF00_u64)
+  atomic_spec_check(bu.and(0x0FF0_u64) == 0xFF00_u64 && bu.bitwise_or(0x000F_u64) == 0x0F00_u64 && bu.xor(0x0F0F_u64) == 0x0F0F_u64 && bu.nand(0_u64) == 0_u64 && bu.get == 18446744073709551615_u64, "UInt64 and/or/xor/nand")
+
+end
+
+# atomic.6 max and min return the old word and store the selected extremum,
+#   using signed comparison for signed words and unsigned comparison
+#   otherwise.
+spec atomic.6
+  m32 = ::Atomic(Int32).new(5)
+  atomic_spec_check(m32.max(-3) == 5 && m32.get == 5, "Int32 max keeps the larger, signed")
+  atomic_spec_check(m32.min(-3) == 5 && m32.get == -3, "Int32 min takes the smaller, signed")
+  m64 = ::Atomic(Int64).new(-1_i64)
+  atomic_spec_check(m64.max(-2_i64) == -1_i64 && m64.get == -1_i64 && m64.min(-2_i64) == -1_i64 && m64.get == -2_i64, "Int64 max/min signed")
+  atomic_spec_check(m64.max(3_i64) == -2_i64 && m64.get == 3_i64, "Int64 max moves up")
+  m8 = ::Atomic(UInt8).new(1_u8)
+  atomic_spec_check(m8.max(255_u8) == 1_u8 && m8.get == 255_u8, "UInt8 max is unsigned: 255 beats 1")
+  atomic_spec_check(m8.min(128_u8) == 255_u8 && m8.get == 128_u8, "UInt8 min is unsigned: 128 under 255")
+  mu = ::Atomic(UInt64).new(1_u64)
+  atomic_spec_check(mu.max(18446744073709551615_u64) == 1_u64 && mu.get == 18446744073709551615_u64, "UInt64 max is unsigned: 2^64-1 beats 1")
+  atomic_spec_check(mu.min(2_u64) == 18446744073709551615_u64 && mu.get == 2_u64, "UInt64 min is unsigned")
+  atomic_spec_check(mu.min(9_u64) == 2_u64 && mu.get == 2_u64, "UInt64 min keeps the smaller")
+end
+
+# atomic.7 fence, fence_acquire, fence_release and fence_acq_rel emit the
+#   corresponding process-wide LLVM fence. No relaxed fence is supplied.
+spec atomic.7
+  ::Atomic.fence
+  ::Atomic.fence_acquire
+  ::Atomic.fence_release
+  ::Atomic.fence_acq_rel
+  ::Atomic(Int64).fence
+  ::Atomic(UInt8).fence_acquire
+  ::Atomic(Int32).fence_release
+  ::Atomic(UInt64).fence_acq_rel
+  true
+end
+
+private def atomic_spec_handoff : Bool
+  50.times do |handoff|
+    box = ATOMIC_SPEC_BOX
+    box.flag.set_relaxed(0_u8)
+    writer = IyiThread.start do
+      ATOMIC_SPEC_BOX.payload.set_relaxed(0xDEADBEEF_u64 + handoff.to_u64)
+      ATOMIC_SPEC_BOX.flag.set_release(1_u8)
+      nil
+    end
+    spins = 0_i64
+    while box.flag.get_acquire == 0_u8
+      spins += 1_i64
+    end
+    atomic_spec_check(box.payload.get_relaxed == 0xDEADBEEF_u64 + handoff.to_u64, "payload whole after the flag was seen (handoff #{handoff})")
+    writer.join
+  end
+  true
+end
+
+private def atomic_spec_counting : Bool
+  threads = Array(IyiThread).new
+  t = 0
+  while t < THREADS
+    threads << IyiThread.start do
+      n = 0
+      while n < PER_THREAD
+        ATOMIC_SPEC_SHARED.count.add_relaxed(1_i64)
+        ATOMIC_SPEC_SHARED.count.add_acq_rel(1_i64)
+        # A retry loop: the failed exchange hands back the word it saw.
+        seen = ATOMIC_SPEC_SHARED.count.get_relaxed
+        loop do
+          outcome = ATOMIC_SPEC_SHARED.count.compare_and_set_acq_rel(seen, seen + 1_i64)
+          break if outcome[1]
+          seen = outcome[0]
+        end
+        n += 1
+      end
+      nil
+    end
+    t += 1
+  end
+  threads.each { |th| th.join }
+  expected = (THREADS * PER_THREAD * 3).to_i64
+  atomic_spec_check(ATOMIC_SPEC_SHARED.count.get == expected, "#{THREADS} threads x #{PER_THREAD} x 3 verbs: counted #{ATOMIC_SPEC_SHARED.count.get}, expected #{expected}")
+  true
+end
+
+private def atomic_spec_check(cond : Bool, what : String) : Bool
+  raise "ASSERTION FAILED: #{what}" unless cond
+  true
+end

@@ -125,7 +125,7 @@ module Iyi
 
       formatter = new(source, flags: flags)
       # iyi: the formatter re-lexes the source, and `!` is one token in a
-      # `.iyi` file and another in a `.cr` one. Without the name it would read
+      # `.ri` file and another in a `.cr` one. Without the name it would read
       # a file by rules the parser above did not use.
       formatter.filename = filename
       formatter.skip_space_or_newline
@@ -207,6 +207,7 @@ module Iyi
     getter no_rstrip_lines
     property vars
     property inside_lib
+    property inside_def
     property inside_enum
     property inside_struct_or_union
     property indent
@@ -823,9 +824,10 @@ module Iyi
       # In this case, slash is tokenized on comment skipping (#4626).
       # However this slash must be a start delimiter of regex because
       # this is parsed as regex literal once before.
-      if @token.type.op_slash?
-        @lexer.reader.previous_char
-        @lexer.column_number -= 1
+      if @token.type.op_slash? || @token.type.op_slash_eq?
+        width = @token.type.op_slash_eq? ? 2 : 1
+        width.times { @lexer.reader.previous_char }
+        @lexer.column_number -= width
         slash_is_regex!
         next_token
       end
@@ -1899,6 +1901,7 @@ module Iyi
       # language, which is what decides whether `v = risky()!` is one.
       validate = Parser.new(source)
       validate.filename = @filename
+      validate.def_nest = @inside_def
       validate.parse
 
       formatter, value = subformat(source)
@@ -2443,10 +2446,14 @@ module Iyi
       # body back exactly as it was typed. A macro whose body used iyi's own
       # operator was the one macro the formatter left alone.
       parser.filename = @filename
+      parser.def_nest = @inside_def
       nodes = parser.parse(mode)
 
       formatter = Formatter.new(source)
       formatter.filename = @filename
+      # Macro branches share the enclosing locals and lexical context.
+      formatter.vars = @vars
+      formatter.inside_def = @inside_def
       formatter.inside_lib = @inside_lib
       formatter.inside_enum = @inside_enum
       formatter.inside_struct_or_union = @inside_struct_or_union
@@ -2895,6 +2902,8 @@ module Iyi
         write node.name
       end
       next_token
+      # ris parses merge! as an identifier followed by a bang token.
+      next_token if node.name == "merge!" && @token.type.op_bang?
 
       passed_backslash_newline = @token.passed_backslash_newline
 
@@ -3694,7 +3703,7 @@ module Iyi
       false
     end
 
-    # iyi: the name the lexer judges `!` by, and the only thing about a `.iyi`
+    # iyi: the name the lexer judges `!` by, and the only thing about a `.ri`
     # file the formatter's own lexer cannot work out from the source. Kept,
     # not only handed to the lexer, because a fenced code block in a doc
     # comment is formatted by a second formatter and is in the same language
@@ -3725,7 +3734,7 @@ module Iyi
         # `write_token` found `.` where it wanted `/` and raised — and the
         # command turned that into "there's a bug formatting '<file>', please
         # report a bug" about valid iyi source. Every file that imports a
-        # package was unformattable, and the repository's own `.iyi` files all
+        # package was unformattable, and the repository's own `.ri` files all
         # import local modules, which is why all of them format.
         (1 + 2 * segment.count { |char| char == '.' || char == '-' }).times do
           @lexer.wants_regex = false
@@ -3899,7 +3908,7 @@ module Iyi
     end
 
     # iyi: `defer close(handle)` (III.1.4). An identifier to the lexer rather
-    # than a keyword, and one only a `.iyi` file gets, so it is written by name.
+    # than a keyword, and one only a `.ri` file gets, so it is written by name.
     def visit(node : Defer)
       write "defer "
       next_token_skip_space
@@ -5337,7 +5346,7 @@ module Iyi
               # iyi: an untagged fence is in the file's own language, and so
               # is one tagged with that language's name. `crystal` and `cr`
               # say so of a `.cr` file and are dropped there, as they always
-              # were; in a `.iyi` file they name the other language, and
+              # were; in a `.ri` file they name the other language, and
               # dropping them relabelled the other language's example as
               # iyi, to be read - and formatted - by iyi's rules from then
               # on; while an `iyi` fence, the file's own code, never was.
@@ -5347,7 +5356,7 @@ module Iyi
                 language = ""
               end
 
-              needs_format = language.empty? || (iyi && language == "iyi")
+              needs_format = language.empty? || (iyi && language.in?("ris", "iyi"))
               @current_doc_comment = CommentInfo.new(@line + 1, needs_format)
             end
           end

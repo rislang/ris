@@ -6,7 +6,7 @@ require "./test_helper"
 # `test/compiler/semantic/iyi_test.cr` covers everything that needs only a
 # module to exist and declares it inline. What is left is what only real files
 # can show: where an imported module is declared, and what happens when the
-# module a build imports arrives as a `.iyimod` instead of as source.
+# module a build imports arrives as a `.rimod` instead of as source.
 private def with_iyi_modules(files : Hash(String, String), &)
   with_tempdir("iyi_import") do
     files.each do |path, source|
@@ -57,14 +57,14 @@ private def write_iyimod(dir : String, module_name : String,
   reference = Iyi::Program.new
   artifact = Iyi::IyiMod::Artifact.new(
     module_name: module_name,
-    source_path: "#{module_name}.iyi",
+    source_path: "#{module_name}.ri",
     compiler_version: compiler_version,
     target_triple: reference.codegen_target.to_s,
     flags: reference.flags.to_a.sort!,
     imports: imports.map { |name| Iyi::IyiMod::ImportEdge.new(name) },
     exports: exports,
   )
-  Iyi::IyiMod.write artifact, File.join(dir, "#{module_name}.iyimod")
+  Iyi::IyiMod.write artifact, File.join(dir, "#{module_name}.rimod")
 end
 
 describe "Semantic: iyi import" do
@@ -77,12 +77,12 @@ describe "Semantic: iyi import" do
   # its top level twice — which III.5's ordering is written to prevent.
   it "loads a module once however many paths reach it" do
     with_iyi_modules({
-      "main.iyi"      => "module main\n\nimport app/left::*\nimport app/right\n\npair\n",
-      "app/left.iyi"  => "module app/left\n\nimport app/base::*\n\npub def pair : Int32\n  value\nend\n",
-      "app/right.iyi" => "module app/right\n\nimport app/base\n",
-      "app/base.iyi"  => "module app/base\n\npub def value : Int32\n  41\nend\n",
+      "main.ri"      => "module main\n\nimport app/left::*\nimport app/right\n\npair\n",
+      "app/left.ri"  => "module app/left\n\nimport app/base::*\n\npub def pair : Int32\n  value\nend\n",
+      "app/right.ri" => "module app/right\n\nimport app/base\n",
+      "app/base.ri"  => "module app/base\n\npub def value : Int32\n  41\nend\n",
     }) do
-      program = semantic_iyi("main.iyi")
+      program = semantic_iyi("main.ri")
 
       # Keyed by filename, one entry per module, whichever path reached it.
       program.iyi_module_paths.values.sort.should eq ["app/base", "app/left", "app/right"]
@@ -90,7 +90,7 @@ describe "Semantic: iyi import" do
 
       # Both importers still record the edge, because the second one adds no
       # initialiser and does constrain where the first one's may be moved to.
-      importers = program.iyi_module_imports.select { |_, edges| edges.any?(&.ends_with?(File.join("app", "base.iyi"))) }
+      importers = program.iyi_module_imports.select { |_, edges| edges.any?(&.ends_with?(File.join("app", "base.ri"))) }
       importers.size.should eq 2
     end
   end
@@ -101,33 +101,33 @@ describe "Semantic: iyi import" do
     # this file's, so the import wall still holds.
     it "loads a module and brings in the names its import lists" do
       with_iyi_modules({
-        "main.iyi"    => "module app/main\n\nimport app/dep::{value}\n\nvalue\n",
-        "app/dep.iyi" => "module app/dep\n\npub def value : Int32\n  2\nend\n\npub def other : Int32\n  3\nend\n",
+        "main.ri"    => "module app/main\n\nimport app/dep::{value}\n\nvalue\n",
+        "app/dep.ri" => "module app/dep\n\npub def value : Int32\n  2\nend\n\npub def other : Int32\n  3\nend\n",
       }) do
-        program = semantic_iyi("main.iyi")
+        program = semantic_iyi("main.ri")
         program.iyi_module_paths.values.should eq ["app/dep"]
-        importers = program.iyi_module_imports.select { |_, edges| edges.any?(&.ends_with?(File.join("app", "dep.iyi"))) }
-        importers.keys.map { |file| File.basename(file) }.should eq ["main.iyi"]
+        importers = program.iyi_module_imports.select { |_, edges| edges.any?(&.ends_with?(File.join("app", "dep.ri"))) }
+        importers.keys.map { |file| File.basename(file) }.should eq ["main.ri"]
       end
     end
 
     it "keeps a name the list left out qualified" do
       with_iyi_modules({
-        "main.iyi"    => "module app/main\n\nimport app/dep::{value}\n\nother\n",
-        "app/dep.iyi" => "module app/dep\n\npub def value : Int32\n  2\nend\n\npub def other : Int32\n  3\nend\n",
+        "main.ri"    => "module app/main\n\nimport app/dep::{value}\n\nother\n",
+        "app/dep.ri" => "module app/dep\n\npub def value : Int32\n  2\nend\n\npub def other : Int32\n  3\nend\n",
       }) do
         expect_raises(Iyi::TypeException, /undefined local variable or method 'other'/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
 
     it "brings in every exported name with `::*`" do
       with_iyi_modules({
-        "main.iyi"    => "module app/main\n\nimport app/dep::*\n\nvalue\nother\n",
-        "app/dep.iyi" => "module app/dep\n\npub def value : Int32\n  2\nend\n\npub def other : Int32\n  3\nend\n",
+        "main.ri"    => "module app/main\n\nimport app/dep::*\n\nvalue\nother\n",
+        "app/dep.ri" => "module app/dep\n\npub def value : Int32\n  2\nend\n\npub def other : Int32\n  3\nend\n",
       }) do
-        semantic_iyi("main.iyi").iyi_module_paths.values.should eq ["app/dep"]
+        semantic_iyi("main.ri").iyi_module_paths.values.should eq ["app/dep"]
       end
     end
 
@@ -135,10 +135,10 @@ describe "Semantic: iyi import" do
     # the names of both reachable, and neither ambiguous with the other.
     it "loads a module named on two lines once, with the names of both" do
       with_iyi_modules({
-        "main.iyi"    => "module app/main\n\nimport app/dep\nimport app/dep::{value}\nimport app/dep::{value, other}\n\nvalue\nother\n",
-        "app/dep.iyi" => "module app/dep\n\npub def value : Int32\n  2\nend\n\npub def other : Int32\n  3\nend\n",
+        "main.ri"    => "module app/main\n\nimport app/dep\nimport app/dep::{value}\nimport app/dep::{value, other}\n\nvalue\nother\n",
+        "app/dep.ri" => "module app/dep\n\npub def value : Int32\n  2\nend\n\npub def other : Int32\n  3\nend\n",
       }) do
-        program = semantic_iyi("main.iyi")
+        program = semantic_iyi("main.ri")
         program.iyi_module_paths.values.should eq ["app/dep"]
       end
     end
@@ -149,23 +149,23 @@ describe "Semantic: iyi import" do
     # refused `Rel`'s names. The unit is the file whose header made it.
     it "reaches a root module whose own submodule loaded first" do
       with_iyi_modules({
-        "main.iyi"     => "import rel::*\n\na\nRel.a\n",
-        "rel.iyi"      => "module rel\n\nimport rel/util::{twice}\n\npub def a : Int32\n  twice(1)\nend\n",
-        "rel/util.iyi" => "module rel/util\n\npub def twice(n : Int32) : Int32\n  n\nend\n",
+        "main.ri"     => "import rel::*\n\na\nRel.a\n",
+        "rel.ri"      => "module rel\n\nimport rel/util::{twice}\n\npub def a : Int32\n  twice(1)\nend\n",
+        "rel/util.ri" => "module rel/util\n\npub def twice(n : Int32) : Int32\n  n\nend\n",
       }) do
-        semantic_iyi("main.iyi").iyi_module_paths.values.sort.should eq ["rel", "rel/util"]
+        semantic_iyi("main.ri").iyi_module_paths.values.sort.should eq ["rel", "rel/util"]
       end
     end
 
     it "still walls the root module off from a file that imported only its submodule" do
       with_iyi_modules({
-        "main.iyi"     => "import rel\nimport other\n",
-        "other.iyi"    => "module other\n\nimport rel/util\n\npub def go : Int32\n  Rel.a\nend\n",
-        "rel.iyi"      => "module rel\n\nimport rel/util::{twice}\n\npub def a : Int32\n  twice(1)\nend\n",
-        "rel/util.iyi" => "module rel/util\n\npub def twice(n : Int32) : Int32\n  n\nend\n",
+        "main.ri"     => "import rel\nimport other\n",
+        "other.ri"    => "module other\n\nimport rel/util\n\npub def go : Int32\n  Rel.a\nend\n",
+        "rel.ri"      => "module rel\n\nimport rel/util::{twice}\n\npub def a : Int32\n  twice(1)\nend\n",
+        "rel/util.ri" => "module rel/util\n\npub def twice(n : Int32) : Int32\n  n\nend\n",
       }) do
         expect_raises(Iyi::TypeException, /`Rel` is not imported here/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
@@ -174,58 +174,58 @@ describe "Semantic: iyi import" do
     # it is still not this file's to name.
     it "refuses a qualified name the file wrote no import for" do
       with_iyi_modules({
-        "main.iyi"    => "module app/main\n\nimport app/mid::{go}\n\ngo\nApp::Dep.value\n",
-        "app/mid.iyi" => "module app/mid\n\nimport app/dep\n\npub def go : Int32\n  App::Dep.value\nend\n",
-        "app/dep.iyi" => "module app/dep\n\npub def value : Int32\n  2\nend\n",
+        "main.ri"    => "module app/main\n\nimport app/mid::{go}\n\ngo\nApp::Dep.value\n",
+        "app/mid.ri" => "module app/mid\n\nimport app/dep\n\npub def go : Int32\n  App::Dep.value\nend\n",
+        "app/dep.ri" => "module app/dep\n\npub def value : Int32\n  2\nend\n",
       }) do
         expect_raises(Iyi::TypeException, /`App::Dep` is not imported here/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
 
-    # `import calc/ad` beside `calc/add.iyi` is a typo, and the sentence
+    # `import calc/ad` beside `calc/add.ri` is a typo, and the sentence
     # about the path rule read as if the rule were the problem.
     it "names the nearest module beside a mistyped import" do
       with_iyi_modules({
-        "main.iyi"    => "module app/main\n\nimport app/dpe\n",
-        "app/dep.iyi" => "module app/dep\n\npub def value : Int32\n  2\nend\n",
+        "main.ri"    => "module app/main\n\nimport app/dpe\n",
+        "app/dep.ri" => "module app/dep\n\npub def value : Int32\n  2\nend\n",
       }) do
         expect_raises(Iyi::TypeException, /can't find module 'app\/dpe'.*Did you mean `app\/dep`\?/m) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
 
     it "says which module exports a name that is imported but not used" do
       with_iyi_modules({
-        "main.iyi"    => "module app/main\n\nimport app/dep\n\nvalue\n",
-        "app/dep.iyi" => "module app/dep\n\npub def value : Int32\n  2\nend\n",
+        "main.ri"    => "module app/main\n\nimport app/dep\n\nvalue\n",
+        "app/dep.ri" => "module app/dep\n\npub def value : Int32\n  2\nend\n",
       }) do
         expect_raises(Iyi::TypeException, /`value` is exported by `app\/dep`/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
 
     it "says which module exports a type that is imported but not used" do
       with_iyi_modules({
-        "main.iyi"    => "module app/main\n\nimport app/dep\n\nBox.new\n",
-        "app/dep.iyi" => "module app/dep\n\npub struct Box\nend\n",
+        "main.ri"    => "module app/main\n\nimport app/dep\n\nBox.new\n",
+        "app/dep.ri" => "module app/dep\n\npub struct Box\nend\n",
       }) do
         expect_raises(Iyi::TypeException, /`Box` is exported by `app\/dep`.*`import app\/dep::\{Box\}`.*`App::Dep::Box`/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
 
     it "says when the type is there and was not marked `pub`" do
       with_iyi_modules({
-        "main.iyi"    => "module app/main\n\nimport app/dep::*\n\nBox.new\n",
-        "app/dep.iyi" => "module app/dep\n\nstruct Box\nend\n",
+        "main.ri"    => "module app/main\n\nimport app/dep::*\n\nBox.new\n",
+        "app/dep.ri" => "module app/dep\n\nstruct Box\nend\n",
       }) do
         expect_raises(Iyi::TypeException, /declares `Box` and does not mark it `pub`/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
@@ -235,11 +235,11 @@ describe "Semantic: iyi import" do
     # the very name the file had imported.
     it "says an imported name was called with arguments its defs do not take" do
       with_iyi_modules({
-        "main.iyi"    => "module app/main\n\nimport app/dep::{value}\n\nvalue(\"x\")\n",
-        "app/dep.iyi" => "module app/dep\n\npub def value(n : Int32) : Int32\n  n\nend\n",
+        "main.ri"    => "module app/main\n\nimport app/dep::{value}\n\nvalue(\"x\")\n",
+        "app/dep.ri" => "module app/dep\n\npub def value(n : Int32) : Int32\n  n\nend\n",
       }) do
         error = expect_raises(Iyi::TypeException, /expected argument #1 to 'App::Dep\.value' to be Int32, not String/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
         error.message.to_s.should_not contain("brought it into scope")
       end
@@ -247,31 +247,31 @@ describe "Semantic: iyi import" do
 
     it "says when the name is there and was not marked `pub`" do
       with_iyi_modules({
-        "main.iyi"    => "module app/main\n\nimport app/dep::*\n\nsecret\n",
-        "app/dep.iyi" => "module app/dep\n\ndef secret : Int32\n  2\nend\n",
+        "main.ri"    => "module app/main\n\nimport app/dep::*\n\nsecret\n",
+        "app/dep.ri" => "module app/dep\n\ndef secret : Int32\n  2\nend\n",
       }) do
         expect_raises(Iyi::TypeException, /does not mark it `pub`/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
 
     it "refuses a library `require` and names `import` instead" do
       with_iyi_modules({
-        "main.iyi" => "module app/main\n\nrequire \"json\"\n",
+        "main.ri" => "module app/main\n\nrequire \"json\"\n",
       }) do
         expect_raises(Iyi::TypeException, /iyi has no `require`/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
 
     it "says where it looked for a module that is not there" do
       with_iyi_modules({
-        "main.iyi" => "module app/main\n\nimport app/ghost\n",
+        "main.ri" => "module app/main\n\nimport app/ghost\n",
       }) do
-        expect_raises(Iyi::TypeException, /this one is `app\/ghost\.ri` \(or `\.iyi`\)/) do
-          semantic_iyi("main.iyi")
+        expect_raises(Iyi::TypeException, /this one is `app\/ghost\.ri` \(or `\.ri`\)/) do
+          semantic_iyi("main.ri")
         end
       end
     end
@@ -284,32 +284,32 @@ describe "Semantic: iyi import" do
   # `app/dep`'s protected method.
   it "refuses a protected method from another module under the same root" do
     with_iyi_modules({
-      "main.iyi"    => "module app/main\n\nimport app/dep::*\n\nDog.new.prot\n",
-      "app/dep.iyi" => "module app/dep\n\npub struct Dog\n  def initialize\n  end\n\n  protected def prot : Int32\n    1\n  end\nend\n",
+      "main.ri"    => "module app/main\n\nimport app/dep::*\n\nDog.new.prot\n",
+      "app/dep.ri" => "module app/dep\n\npub struct Dog\n  def initialize\n  end\n\n  protected def prot : Int32\n    1\n  end\nend\n",
     }) do
       expect_raises(Iyi::TypeException, /protected method 'prot' called for App::Dep::Dog/) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
   end
 
   it "lets a module call its own type's protected method" do
     with_iyi_modules({
-      "main.iyi"    => "module app/main\n\nimport app/dep::*\n\nasked\n",
-      "app/dep.iyi" => "module app/dep\n\npub struct Dog\n  def initialize\n  end\n\n  protected def prot : Int32\n    1\n  end\nend\n\npub def asked : Int32\n  Dog.new.prot\nend\n",
+      "main.ri"    => "module app/main\n\nimport app/dep::*\n\nasked\n",
+      "app/dep.ri" => "module app/dep\n\npub struct Dog\n  def initialize\n  end\n\n  protected def prot : Int32\n    1\n  end\nend\n\npub def asked : Int32\n  Dog.new.prot\nend\n",
     }) do
-      semantic_iyi("main.iyi")
+      semantic_iyi("main.ri")
     end
   end
 
   # An `import` written below other code used to declare the module inside the
   # importing one — `Samples::InitOrder::Boot::Registry` — which compiled,
   # because the importing file reaches it under the same name either way. The
-  # first thing to look from outside was `--emit-iyimod`, which found no
+  # first thing to look from outside was `--emit-rimod`, which found no
   # `Boot::Registry` at the top level and wrote an artifact with no exports.
   it "declares an imported module at the top level wherever the import is written" do
     with_iyi_modules({
-      "main.iyi" => <<-IYI,
+      "main.ri" => <<-IYI,
         module app/main
 
         def own : Int32
@@ -318,7 +318,7 @@ describe "Semantic: iyi import" do
 
         import app/dep
         IYI
-      "app/dep.iyi" => <<-IYI,
+      "app/dep.ri" => <<-IYI,
         module app/dep
 
         pub def value : Int32
@@ -326,7 +326,7 @@ describe "Semantic: iyi import" do
         end
         IYI
     }) do
-      program = semantic_iyi("main.iyi")
+      program = semantic_iyi("main.ri")
 
       program.iyi_module_type("app/dep").should_not be_nil
 
@@ -337,13 +337,13 @@ describe "Semantic: iyi import" do
 
   describe "the import wall and a generic's own type variables (iyi SPEC R-1)" do
     # The wall asks a *file* whether it imported a name it wrote. A generic's
-    # methods are re-resolved against the instance, so `T` in `holder.iyi`
+    # methods are re-resolved against the instance, so `T` in `holder.ri`
     # comes back as whatever the program chose — and the wall took that for a
-    # name `holder.iyi` had written. Any generic instantiated with another
+    # name `holder.ri` had written. Any generic instantiated with another
     # module's type was refused on the line declaring its own field.
     it "lets a generic be instantiated with a type its own file never named" do
       with_iyi_modules({
-        "lib/holder.iyi" => <<-IYI,
+        "lib/holder.ri" => <<-IYI,
           module lib/holder
 
           pub struct Holder(T)
@@ -357,7 +357,7 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "lib/badge.iyi" => <<-IYI,
+        "lib/badge.ri" => <<-IYI,
           module lib/badge
 
           pub struct Badge
@@ -371,7 +371,7 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import lib/holder::{Holder}
@@ -383,20 +383,20 @@ describe "Semantic: iyi import" do
           end
           IYI
       }) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
     # And the wall still stands where a file really does write the name.
     it "still refuses a name the file did not import" do
       with_iyi_modules({
-        "lib/badge.iyi" => <<-IYI,
+        "lib/badge.ri" => <<-IYI,
           module lib/badge
 
           pub struct Badge
           end
           IYI
-        "lib/peek.iyi" => <<-IYI,
+        "lib/peek.ri" => <<-IYI,
           module lib/peek
 
           import lib/badge
@@ -405,7 +405,7 @@ describe "Semantic: iyi import" do
             nil
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import lib/peek
@@ -414,7 +414,7 @@ describe "Semantic: iyi import" do
           IYI
       }) do
         expect_raises(Iyi::TypeException, /is not imported here/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
@@ -424,7 +424,7 @@ describe "Semantic: iyi import" do
     # A concrete generic instance has no locations of its own. The import
     # wall must ask its template before treating its methods as extensions.
     files = {
-      "lib/reader.iyi" => <<-IYI,
+      "lib/reader.ri" => <<-IYI,
         module lib/reader
 
         pub trait Reader
@@ -436,7 +436,7 @@ describe "Semantic: iyi import" do
           end
         end
         IYI
-      "lib/box.iyi" => <<-IYI,
+      "lib/box.ri" => <<-IYI,
         module lib/box
         import lib/reader::{Reader}
 
@@ -456,7 +456,7 @@ describe "Semantic: iyi import" do
           end
         end
         IYI
-      "lib/caller.iyi" => <<-IYI,
+      "lib/caller.ri" => <<-IYI,
         module lib/caller
 
         pub def answer(type : T.class) : Int32 forall T
@@ -466,48 +466,48 @@ describe "Semantic: iyi import" do
     }
 
     it "allows a trait default to call a generic type's own implementation" do
-      with_iyi_modules(files.merge({"main.iyi" => <<-IYI})) do
+      with_iyi_modules(files.merge({"main.ri" => <<-IYI})) do
         module main
         import lib/box::{Box}
         Box(Int32).new(1).read
         IYI
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
     it "finds own methods through an instantiated generic ancestor" do
       with_iyi_modules(files.merge({
-        "lib/child.iyi" => <<-IYI,
+        "lib/child.ri" => <<-IYI,
           module lib/child
           import lib/box::{Box}
 
           pub class Child < Box(Int32)
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module main
           import lib/child::{Child}
           Child.new(1).read
           IYI
       })) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
     it "finds the declaration behind a generic metaclass" do
-      with_iyi_modules(files.merge({"main.iyi" => <<-IYI})) do
+      with_iyi_modules(files.merge({"main.ri" => <<-IYI})) do
         module main
         import lib/box::{Box}
         import lib/caller::{answer}
         answer(Box(Int32))
         IYI
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
     it "finds the declaration behind an ordinary metaclass" do
       with_iyi_modules(files.merge({
-        "lib/plain.iyi" => <<-IYI,
+        "lib/plain.ri" => <<-IYI,
           module lib/plain
           pub class Plain
             def self.answer : Int32
@@ -515,28 +515,28 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module main
           import lib/plain::{Plain}
           import lib/caller::{answer}
           answer(Plain)
           IYI
       })) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
     it "still requires importing a module that extends a generic type" do
       with_iyi_modules({
-        "prelude/box.iyi" => <<-IYI,
+        "prelude/box.ri" => <<-IYI,
           struct ::Box(T)
             def initialize
             end
           end
           IYI
-        "app/extension.iyi" => <<-IYI,
+        "app/extension.ri" => <<-IYI,
           module app/extension
-          require "../prelude/box.iyi"
+          require "../prelude/box.ri"
 
           struct ::Box(T)
             def added : Int32
@@ -544,15 +544,15 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "app/caller.iyi" => <<-IYI,
+        "app/caller.ri" => <<-IYI,
           module app/caller
-          require "../prelude/box.iyi"
+          require "../prelude/box.ri"
 
           pub def read : Int32
             Box(Int32).new.added
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module main
           import app/extension
           import app/caller::{read}
@@ -560,11 +560,11 @@ describe "Semantic: iyi import" do
           IYI
       }) do |dir|
         expect_raises(Iyi::TypeException, /comes from `app\/extension`.*not imported here/m) do
-          semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
+          semantic_iyi("main.ri", prelude_dir: File.join(dir, "prelude"))
         end
         # Importing that extension in the actual caller makes it valid.
-        File.write("app/caller.iyi", File.read("app/caller.iyi").sub("module app/caller", "module app/caller\nimport app/extension"))
-        semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
+        File.write("app/caller.ri", File.read("app/caller.ri").sub("module app/caller", "module app/caller\nimport app/extension"))
+        semantic_iyi("main.ri", prelude_dir: File.join(dir, "prelude"))
       end
     end
     # `std/int` reopens `struct ::Int` as well as `UInt8`, and a wall that
@@ -572,7 +572,7 @@ describe "Semantic: iyi import" do
     # through as `UInt8`'s own. The type asked is the one holding the def.
     it "still requires importing a module that reopens the type's parent too" do
       with_iyi_modules({
-        "prelude/num.iyi" => <<-IYI,
+        "prelude/num.ri" => <<-IYI,
           abstract struct ::Num
           end
 
@@ -581,9 +581,9 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "app/extension.iyi" => <<-IYI,
+        "app/extension.ri" => <<-IYI,
           module app/extension
-          require "../prelude/num.iyi"
+          require "../prelude/num.ri"
 
           abstract struct ::Num
             def base : Int32
@@ -597,15 +597,15 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "app/caller.iyi" => <<-IYI,
+        "app/caller.ri" => <<-IYI,
           module app/caller
-          require "../prelude/num.iyi"
+          require "../prelude/num.ri"
 
           pub def read : Int32
             Small.new.shifted
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module main
           import app/extension
           import app/caller::{read}
@@ -613,7 +613,7 @@ describe "Semantic: iyi import" do
           IYI
       }) do |dir|
         expect_raises(Iyi::TypeException, /`shifted`.*comes from `app\/extension`.*not imported here/m) do
-          semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
+          semantic_iyi("main.ri", prelude_dir: File.join(dir, "prelude"))
         end
       end
     end
@@ -622,26 +622,26 @@ describe "Semantic: iyi import" do
   describe "the import wall and lexical lookup (iyi SPEC R-1)" do
     # `module lib/tuple` declares `Lib::Tuple`. Looking `Tuple` up from
     # `Lib::Pair` walks to `Lib` first, where it found the sibling unit —
-    # and the wall then refused a name `pair.iyi` never meant. A unit the
+    # and the wall then refused a name `pair.ri` never meant. A unit the
     # file has not imported is not in scope: the walk goes on outward and
     # finds the prelude's `::Tuple`.
     it "does not let a sibling module namespace hide a prelude type" do
       with_iyi_modules({
-        "lib/tuple.iyi" => <<-IYI,
+        "lib/tuple.ri" => <<-IYI,
           module lib/tuple
 
           pub def arity : Int32
             2
           end
           IYI
-        "lib/pair.iyi" => <<-IYI,
+        "lib/pair.ri" => <<-IYI,
           module lib/pair
 
           pub def pair : Tuple(Int32, Int32)
             {1, 2}
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import lib/tuple
@@ -650,7 +650,7 @@ describe "Semantic: iyi import" do
           pair
           IYI
       }) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
@@ -658,20 +658,20 @@ describe "Semantic: iyi import" do
     # outside resolves the name: the sentence names the import to add.
     it "still refuses a sibling module reached lexically without an import" do
       with_iyi_modules({
-        "lib/badge.iyi" => <<-IYI,
+        "lib/badge.ri" => <<-IYI,
           module lib/badge
 
           pub struct Badge
           end
           IYI
-        "lib/peek.iyi" => <<-IYI,
+        "lib/peek.ri" => <<-IYI,
           module lib/peek
 
           pub def peek : Badge::Badge?
             nil
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import lib/badge
@@ -681,18 +681,18 @@ describe "Semantic: iyi import" do
           IYI
       }) do
         expect_raises(Iyi::TypeException, /`Lib::Badge` is not imported here/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
   end
 
-  describe "from a .iyimod (iyi SPEC IV.1)" do
+  describe "from a .rimod (iyi SPEC IV.1)" do
     # R-1's contract, stated as a test: the source is not opened. Not opened
-    # rather than not preferred — there is no `app/dep.iyi` on disk at all.
+    # rather than not preferred — there is no `app/dep.ri` on disk at all.
     it "compiles a module that has no source" do
       with_iyi_modules({
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep
@@ -708,7 +708,7 @@ describe "Semantic: iyi import" do
           artifact_signature("value", return_type: "Int32"),
         ])
 
-        program = semantic_iyi("main.iyi", iyi_module_dir: root)
+        program = semantic_iyi("main.ri", iyi_module_dir: root)
         program.iyi_module_type("app/dep").should_not be_nil
       end
     end
@@ -717,14 +717,14 @@ describe "Semantic: iyi import" do
     # happened to agree": the two disagree, and what compiles is the artifact's.
     it "reads the artifact rather than the source that is sitting next to it" do
       with_iyi_modules({
-        "app/dep.iyi" => <<-IYI,
+        "app/dep.ri" => <<-IYI,
           module app/dep
 
           pub def from_source : Int32
             1
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep
@@ -740,20 +740,20 @@ describe "Semantic: iyi import" do
           artifact_signature("from_artifact", return_type: "Int32"),
         ])
 
-        semantic_iyi("main.iyi", iyi_module_dir: root)
+        semantic_iyi("main.ri", iyi_module_dir: root)
       end
     end
 
     it "does not reach a name that only the source has" do
       with_iyi_modules({
-        "app/dep.iyi" => <<-IYI,
+        "app/dep.ri" => <<-IYI,
           module app/dep
 
           pub def from_source : Int32
             1
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep
@@ -770,7 +770,7 @@ describe "Semantic: iyi import" do
         ])
 
         expect_raises(Iyi::TypeException, /undefined method 'from_source'/) do
-          semantic_iyi("main.iyi", iyi_module_dir: root)
+          semantic_iyi("main.ri", iyi_module_dir: root)
         end
       end
     end
@@ -779,7 +779,7 @@ describe "Semantic: iyi import" do
     # the front end gets from an artifact — there is no body to type.
     it "types a call from the signature alone" do
       with_iyi_modules({
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep
@@ -798,7 +798,7 @@ describe "Semantic: iyi import" do
         # `check` promises `Int32` and the artifact says `value` gives a
         # `String`. Nothing but the signature could have caught that.
         expect_raises(Iyi::TypeException, /must return Int32/) do
-          semantic_iyi("main.iyi", iyi_module_dir: root)
+          semantic_iyi("main.ri", iyi_module_dir: root)
         end
       end
     end
@@ -808,7 +808,7 @@ describe "Semantic: iyi import" do
     # against artifacts slower than it looks and prove nothing.
     it "refuses an artifact from another compiler" do
       with_iyi_modules({
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep
@@ -817,7 +817,7 @@ describe "Semantic: iyi import" do
         write_iyimod root, "app/dep", exports, compiler_version: "0.0.0+nope"
 
         expect_raises(Iyi::TypeException, /written by iyi 0\.0\.0\+nope/) do
-          semantic_iyi("main.iyi", iyi_module_dir: root)
+          semantic_iyi("main.ri", iyi_module_dir: root)
         end
       end
     end
@@ -842,7 +842,7 @@ describe "Semantic: iyi import" do
       end
 
       with_iyi_modules({
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep
@@ -851,7 +851,7 @@ describe "Semantic: iyi import" do
         write_iyimod root, "app/dep", exports,
           compiler_version: Iyi::IyiMod.compiler_version
 
-        semantic_iyi("main.iyi", iyi_module_dir: root)
+        semantic_iyi("main.ri", iyi_module_dir: root)
       end
     end
 
@@ -860,7 +860,7 @@ describe "Semantic: iyi import" do
     # may say, and these are the four answers that make up the rule.
     it "runs a macro another module exported" do
       with_iyi_modules({
-        "app/dep.iyi" => <<-IYI,
+        "app/dep.ri" => <<-IYI,
           module app/dep
 
           pub macro declare(name)
@@ -869,7 +869,7 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep::*
@@ -877,7 +877,7 @@ describe "Semantic: iyi import" do
           declare(made)
           IYI
       }) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
@@ -887,7 +887,7 @@ describe "Semantic: iyi import" do
     # so the wall asks what the macro's file reaches, not only the caller.
     it "lets a macro name a type its own module reaches" do
       with_iyi_modules({
-        "app/inner.iyi" => <<-IYI,
+        "app/inner.ri" => <<-IYI,
           module app/inner
 
           pub class Helper
@@ -900,7 +900,7 @@ describe "Semantic: iyi import" do
             ::App::Inner::Helper.answer
           end
           IYI
-        "app/outer.iyi" => <<-IYI,
+        "app/outer.ri" => <<-IYI,
           module app/outer
           import app/inner
 
@@ -908,7 +908,7 @@ describe "Semantic: iyi import" do
             ::App::Inner.inner_answer
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/outer::{answer}
@@ -916,13 +916,13 @@ describe "Semantic: iyi import" do
           answer
           IYI
       }) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
     it "runs an exported macro through the module's name" do
       with_iyi_modules({
-        "app/dep.iyi" => <<-IYI,
+        "app/dep.ri" => <<-IYI,
           module app/dep
 
           pub macro declare(name)
@@ -931,7 +931,7 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep
@@ -939,13 +939,13 @@ describe "Semantic: iyi import" do
           App::Dep.declare(made)
           IYI
       }) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
     it "refuses an unexported macro by name, as it refuses an unexported def" do
       with_iyi_modules({
-        "app/dep.iyi" => <<-IYI,
+        "app/dep.ri" => <<-IYI,
           module app/dep
 
           macro declare(name)
@@ -954,7 +954,7 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep
@@ -963,14 +963,14 @@ describe "Semantic: iyi import" do
           IYI
       }) do
         expect_raises(Iyi::TypeException, /does not export 'declare'/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
 
     it "leaves an unexported macro out of what an import's names bring in" do
       with_iyi_modules({
-        "app/dep.iyi" => <<-IYI,
+        "app/dep.ri" => <<-IYI,
           module app/dep
 
           macro declare(name)
@@ -979,7 +979,7 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep::*
@@ -991,7 +991,7 @@ describe "Semantic: iyi import" do
         # macro. `declare(made)` would be read as a call taking a variable
         # nobody declared, and fail one word earlier for a different reason.
         expect_raises(Iyi::TypeException, /undefined method 'declare'/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
@@ -1001,12 +1001,12 @@ describe "Semantic: iyi import" do
     # format for it, which is why these are the whole of the rule.
     it "reads a constant another module exported" do
       with_iyi_modules({
-        "app/dep.iyi" => <<-IYI,
+        "app/dep.ri" => <<-IYI,
           module app/dep
 
           pub LIMIT = 42
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep
@@ -1014,18 +1014,18 @@ describe "Semantic: iyi import" do
           App::Dep::LIMIT
           IYI
       }) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
     it "refuses an unmarked constant, as it refuses an unmarked def" do
       with_iyi_modules({
-        "app/dep.iyi" => <<-IYI,
+        "app/dep.ri" => <<-IYI,
           module app/dep
 
           SECRET = 42
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep
@@ -1034,21 +1034,21 @@ describe "Semantic: iyi import" do
           IYI
       }) do
         expect_raises(Iyi::TypeException, /does not export App::Dep::SECRET/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
 
     it "refuses `require` while iyi's own prelude is what a program has" do
       with_iyi_modules({
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           require "json"
           IYI
       }) do
         expect_raises(Iyi::TypeException, /iyi has no `require`/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
@@ -1061,17 +1061,17 @@ describe "Semantic: iyi import" do
     # because what the rule reads is where a definition was written.
     it "refuses a module that replaces a method of the prelude" do
       with_iyi_modules({
-        "prelude/shout.iyi" => <<-IYI,
+        "prelude/shout.ri" => <<-IYI,
           class ::Shouter
             def shout : Int32
               1
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
-          require "./prelude/shout.iyi"
+          require "./prelude/shout.ri"
 
           class ::Shouter
             def shout : Int32
@@ -1081,7 +1081,7 @@ describe "Semantic: iyi import" do
           IYI
       }) do |dir|
         expect_raises(Iyi::TypeException, /Shouter#shout is the prelude's method, and this replaces it/) do
-          semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
+          semantic_iyi("main.ri", prelude_dir: File.join(dir, "prelude"))
         end
       end
     end
@@ -1089,17 +1089,17 @@ describe "Semantic: iyi import" do
     # And adding to a prelude type is still how a module extends one.
     it "lets a module add a method to a type of the prelude" do
       with_iyi_modules({
-        "prelude/shout.iyi" => <<-IYI,
+        "prelude/shout.ri" => <<-IYI,
           class ::Shouter
             def shout : Int32
               1
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
-          require "./prelude/shout.iyi"
+          require "./prelude/shout.ri"
 
           class ::Shouter
             def whisper : Int32
@@ -1108,36 +1108,36 @@ describe "Semantic: iyi import" do
           end
           IYI
       }) do |dir|
-        semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
+        semantic_iyi("main.ri", prelude_dir: File.join(dir, "prelude"))
       end
     end
 
     # The prelude extends itself: one library deciding its own surface, which
-    # is how `number.iyi` writes a method `primitives.iyi` declared.
+    # is how `number.ri` writes a method `primitives.ri` declared.
     it "lets the prelude replace its own method" do
       with_iyi_modules({
-        "prelude/shout.iyi" => <<-IYI,
+        "prelude/shout.ri" => <<-IYI,
           class ::Shouter
             def shout : Int32
               1
             end
           end
           IYI
-        "prelude/louder.iyi" => <<-IYI,
+        "prelude/louder.ri" => <<-IYI,
           class ::Shouter
             def shout : Int32
               2
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
-          require "./prelude/shout.iyi"
-          require "./prelude/louder.iyi"
+          require "./prelude/shout.ri"
+          require "./prelude/louder.ri"
           IYI
       }) do |dir|
-        semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
+        semantic_iyi("main.ri", prelude_dir: File.join(dir, "prelude"))
       end
     end
 
@@ -1146,11 +1146,11 @@ describe "Semantic: iyi import" do
     # type with a `tag` of its own had the first one's code run the second's.
     it "refuses a module that replaces a method another module added" do
       with_iyi_modules({
-        "prelude/shout.iyi" => "class ::Shouter\nend\n",
-        "app/x.iyi"         => <<-IYI,
+        "prelude/shout.ri" => "class ::Shouter\nend\n",
+        "app/x.ri"         => <<-IYI,
           module app/x
 
-          require "../prelude/shout.iyi"
+          require "../prelude/shout.ri"
 
           class ::Shouter
             def tag : Int32
@@ -1158,7 +1158,7 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/x
@@ -1171,7 +1171,7 @@ describe "Semantic: iyi import" do
           IYI
       }) do |dir|
         expect_raises(Iyi::TypeException, /Shouter#tag is app\/x's method, and this replaces it/) do
-          semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
+          semantic_iyi("main.ri", prelude_dir: File.join(dir, "prelude"))
         end
       end
     end
@@ -1183,7 +1183,7 @@ describe "Semantic: iyi import" do
     # consumer can inherit it from a module whose source it never reads.
     it "refuses a module that replaces a macro of the prelude" do
       with_iyi_modules({
-        "prelude/macros.iyi" => <<-IYI,
+        "prelude/macros.ri" => <<-IYI,
           class ::Object
             macro reader(name)
               def {{name.id}} : Int32
@@ -1192,10 +1192,10 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
-          require "./prelude/macros.iyi"
+          require "./prelude/macros.ri"
 
           class ::Object
             macro reader(name)
@@ -1207,7 +1207,7 @@ describe "Semantic: iyi import" do
           IYI
       }) do |dir|
         expect_raises(Iyi::TypeException, /Object\.reader is the prelude's macro, and this replaces it/) do
-          semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
+          semantic_iyi("main.ri", prelude_dir: File.join(dir, "prelude"))
         end
       end
     end
@@ -1216,7 +1216,7 @@ describe "Semantic: iyi import" do
     # macro on a type the module declared is its own however it is spelled.
     it "lets a module add a macro to a type of the prelude" do
       with_iyi_modules({
-        "prelude/macros.iyi" => <<-IYI,
+        "prelude/macros.ri" => <<-IYI,
           class ::Object
             macro reader(name)
               def {{name.id}} : Int32
@@ -1225,10 +1225,10 @@ describe "Semantic: iyi import" do
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
-          require "./prelude/macros.iyi"
+          require "./prelude/macros.ri"
 
           class ::Object
             macro writer(name)
@@ -1246,7 +1246,7 @@ describe "Semantic: iyi import" do
           end
           IYI
       }) do |dir|
-        semantic_iyi("main.iyi", prelude_dir: File.join(dir, "prelude"))
+        semantic_iyi("main.ri", prelude_dir: File.join(dir, "prelude"))
       end
     end
 
@@ -1255,20 +1255,20 @@ describe "Semantic: iyi import" do
     # `Tally`: what it said was that `Tally` was not `App::Count::Tally`, at
     # the first line that used one, with nothing pointing at the import.
     # A module path is a file's path, so it cannot mean something different
-    # depending on where it is written. Found by `samples/iyi/calc`: a module
+    # depending on where it is written. Found by `samples/ris/calc`: a module
     # called `samples/calc` importing `calc/lexer` resolved `Calc` to itself
     # and then said the module was not imported, which is a true-looking
     # sentence about the wrong thing.
     it "reads a module path from the root, not from where it is written" do
       with_iyi_modules({
-        "calc/lexer.iyi" => <<-IYI,
+        "calc/lexer.ri" => <<-IYI,
           module calc/lexer
 
           pub def scan : Int32
             1
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module samples/calc
 
           import calc/lexer::*
@@ -1276,26 +1276,26 @@ describe "Semantic: iyi import" do
           scan
           IYI
       }) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
     it "refuses an import of a name the module's own name already takes" do
       with_iyi_modules({
-        "app/dep.iyi" => <<-IYI,
+        "app/dep.ri" => <<-IYI,
           module app/dep
 
           pub struct Thing
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/thing
 
           import app/dep::{Thing}
           IYI
       }) do
         expect_raises(Iyi::TypeException, /is this module's own name/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
@@ -1306,14 +1306,14 @@ describe "Semantic: iyi import" do
     # nested `App::Greeter` is not what `import app/greeter::*` means.
     it "lets a local definition beat a name an import brought in" do
       with_iyi_modules({
-        "app/greeter.iyi" => <<-IYI,
+        "app/greeter.ri" => <<-IYI,
           module app/greeter
 
           pub def polite : Int32
             1
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/consumer
 
           import app/greeter::*
@@ -1331,20 +1331,20 @@ describe "Semantic: iyi import" do
           User.new.greet
           IYI
       }) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
 
     it "falls back to the used one when there is no local definition" do
       with_iyi_modules({
-        "app/greeter.iyi" => <<-IYI,
+        "app/greeter.ri" => <<-IYI,
           module app/greeter
 
           pub def polite : Int32
             1
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/consumer
 
           import app/greeter::*
@@ -1359,21 +1359,21 @@ describe "Semantic: iyi import" do
           IYI
       }) do
         expect_raises(Iyi::TypeException, /must return Bool/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
 
     it "falls back to the source when there is no artifact" do
       with_iyi_modules({
-        "app/dep.iyi" => <<-IYI,
+        "app/dep.ri" => <<-IYI,
           module app/dep
 
           pub def from_source : Int32
             1
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/dep
@@ -1385,7 +1385,7 @@ describe "Semantic: iyi import" do
           check
           IYI
       }) do |root|
-        semantic_iyi("main.iyi", iyi_module_dir: root)
+        semantic_iyi("main.ri", iyi_module_dir: root)
       end
     end
   end
@@ -1393,7 +1393,7 @@ end
 
 # `iyi fix`'s rewrite of `using`, the keyword one `import` replaced.
 describe "Iyi::UsingRewrite" do
-  rewrite = ->(text : String) { Iyi::UsingRewrite.rewrite(text, "main.iyi").try(&.[0]) }
+  rewrite = ->(text : String) { Iyi::UsingRewrite.rewrite(text, "main.ri").try(&.[0]) }
 
   it "writes each `using` as the import that replaced it" do
     rewrite.call("using app/a\nusing app/b::{x, Y}\n\nputs 1\n").should eq(
@@ -1434,8 +1434,8 @@ end
 # A package's modules live under its name in a consumer's build; they were at
 # the root in the package's own, so a `pub macro` that names one absolutely -
 # it expands in the caller's file - had no spelling that built in both. Each
-# layout below is built twice, as the program (the package's own `inside.iyi`)
-# and as a requirement (`app.iyi`, through `replace`), and the module has to
+# layout below is built twice, as the program (the package's own `inside.ri`)
+# and as a requirement (`app.ri`, through `replace`), and the module has to
 # be the same type in both.
 private IYI_PACKAGE_LAYOUTS = [
   # A module at the package's root.
@@ -1455,12 +1455,12 @@ private def write_iyi_package_layout(layout, written : String) : Nil
   dir = layout[:dir]
   Dir.mkdir_p(File.join(dir, File.dirname(layout[:path])))
   Dir.mkdir_p("app")
-  File.write(File.join(dir, "iyi.mod"), "module #{layout[:package]}\n")
-  File.write(File.join(dir, "#{layout[:path]}.iyi"), "module #{layout[:path]}\n\npub def shout(s : String) : String\n  s\nend\n")
-  File.write(File.join(dir, "dsl.iyi"), "module dsl\n\npub import #{layout[:path]}\n\npub macro loud(x)\n  #{written}.shout({{ x }})\nend\n")
-  File.write(File.join(dir, "inside.iyi"), "module inside\n\nimport dsl::*\n\nloud(\"inside\")\n")
-  File.write("app/iyi.mod", "module app\n\nrequire #{layout[:package]} v0.1.0 as web\n\nreplace #{layout[:package]} => ../#{dir}\n")
-  File.write("app/app.iyi", "module app\n\nimport web/dsl::*\n\nloud(\"consumer\")\n")
+  File.write(File.join(dir, "ris.mod"), "module #{layout[:package]}\n")
+  File.write(File.join(dir, "#{layout[:path]}.ri"), "module #{layout[:path]}\n\npub def shout(s : String) : String\n  s\nend\n")
+  File.write(File.join(dir, "dsl.ri"), "module dsl\n\npub import #{layout[:path]}\n\npub macro loud(x)\n  #{written}.shout({{ x }})\nend\n")
+  File.write(File.join(dir, "inside.ri"), "module inside\n\nimport dsl::*\n\nloud(\"inside\")\n")
+  File.write("app/ris.mod", "module app\n\nrequire #{layout[:package]} v0.1.0 as web\n\nreplace #{layout[:package]} => ../#{dir}\n")
+  File.write("app/app.ri", "module app\n\nimport web/dsl::*\n\nloud(\"consumer\")\n")
 end
 
 private def compile_iyi_package_file(file : String, emit : String? = nil, use : String? = nil) : {Iyi::Compiler::Result, Iyi::Compiler}
@@ -1485,8 +1485,8 @@ describe "Semantic: a package's modules, one name in every build" do
     it "names #{layout[:path]} of #{layout[:package]} #{layout[:name]} in the package's own build and in a consumer's" do
       with_tempdir("iyi_package_names") do
         write_iyi_package_layout(layout, absolute)
-        inside, _ = compile_iyi_package_file(File.join(layout[:dir], "inside.iyi"))
-        consumer, _ = compile_iyi_package_file("app/app.iyi")
+        inside, _ = compile_iyi_package_file(File.join(layout[:dir], "inside.ri"))
+        consumer, _ = compile_iyi_package_file("app/app.ri")
         iyi_package_module(inside, layout[:name]).should eq(layout[:name])
         iyi_package_module(consumer, layout[:name]).should eq(layout[:name])
         unless layout[:old] == layout[:name]
@@ -1501,9 +1501,9 @@ describe "Semantic: a package's modules, one name in every build" do
         write_iyi_package_layout(layout, absolute)
         mods = File.expand_path("mods")
         Dir.mkdir_p(mods)
-        compile_iyi_package_file(File.join(layout[:dir], "inside.iyi"), emit: mods)
-        File.read(File.join(mods, "#{layout[:path]}.iyimod")).should_not be_empty
-        read, _ = compile_iyi_package_file(File.join(layout[:dir], "inside.iyi"), use: mods)
+        compile_iyi_package_file(File.join(layout[:dir], "inside.ri"), emit: mods)
+        File.read(File.join(mods, "#{layout[:path]}.rimod")).should_not be_empty
+        read, _ = compile_iyi_package_file(File.join(layout[:dir], "inside.ri"), use: mods)
         read.program.iyi_artifact_modules.values.sort.should eq(["dsl", layout[:path]].sort)
         iyi_package_module(read, layout[:name]).should eq(layout[:name])
       end
@@ -1513,13 +1513,13 @@ describe "Semantic: a package's modules, one name in every build" do
       it "still builds the package with `::#{layout[:old]}`, the name it had there, and warns with the edit" do
         with_tempdir("iyi_package_old_name") do
           write_iyi_package_layout(layout, "::#{layout[:old]}")
-          _, compiler = compile_iyi_package_file(File.join(layout[:dir], "inside.iyi"))
+          _, compiler = compile_iyi_package_file(File.join(layout[:dir], "inside.ri"))
           compiler.warnings.infos.join.should contain("`::#{layout[:old]}` is `#{absolute}`")
 
           # Written in the package's file rather than a macro's expansion,
           # the warning carries the edit `iyi fix` makes.
-          File.write(File.join(layout[:dir], "direct.iyi"), "import #{layout[:path]}\n\n::#{layout[:old]}.shout(\"direct\")\n")
-          _, compiler = compile_iyi_package_file(File.join(layout[:dir], "direct.iyi"))
+          File.write(File.join(layout[:dir], "direct.ri"), "import #{layout[:path]}\n\n::#{layout[:old]}.shout(\"direct\")\n")
+          _, compiler = compile_iyi_package_file(File.join(layout[:dir], "direct.ri"))
           report = compiler.warnings.reports.first.as(Iyi::TypeException)
           report.suggestion.should eq("::#{layout[:name].split("::").first}::#{layout[:old].split("::").first}")
         end
@@ -1528,7 +1528,7 @@ describe "Semantic: a package's modules, one name in every build" do
       it "refuses `::#{layout[:old]}` in a consumer, as it always did, naming #{absolute}" do
         with_tempdir("iyi_package_old_consumer") do
           write_iyi_package_layout(layout, "::#{layout[:old]}")
-          error = expect_raises(Iyi::CodeError) { compile_iyi_package_file("app/app.iyi") }
+          error = expect_raises(Iyi::CodeError) { compile_iyi_package_file("app/app.ri") }
           error.to_s.should contain("undefined constant ::#{layout[:old]}")
         end
       end
@@ -1536,14 +1536,14 @@ describe "Semantic: a package's modules, one name in every build" do
   end
 
   # The old name is answered only where a lookup reaches the root, as it was:
-  # a generic's own `T` stops the walk there, so a package module `t.iyi`
+  # a generic's own `T` stops the walk there, so a package module `t.ri`
   # does not become what `T` means inside `Box(T)`.
   it "leaves a type parameter named like a package module alone" do
     with_tempdir("iyi_package_type_parameter") do
-      File.write("iyi.mod", "module example.test/x/kit\n")
-      File.write("t.iyi", "module t\n\npub def one : Int32\n  1\nend\n")
-      File.write("inside.iyi", "module inside\n\nimport t\n\nclass Box(T)\n  def get(x : T) : T\n    x\n  end\nend\n")
-      _, compiler = compile_iyi_package_file("inside.iyi")
+      File.write("ris.mod", "module example.test/x/kit\n")
+      File.write("t.ri", "module t\n\npub def one : Int32\n  1\nend\n")
+      File.write("inside.ri", "module inside\n\nimport t\n\nclass Box(T)\n  def get(x : T) : T\n    x\n  end\nend\n")
+      _, compiler = compile_iyi_package_file("inside.ri")
       compiler.warnings.infos.join.should_not contain("`T` is")
     end
   end

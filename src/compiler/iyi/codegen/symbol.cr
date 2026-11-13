@@ -12,7 +12,7 @@ class Iyi::CodeGenVisitor
   # program's: a build numbers its symbols in the order it meets them. An
   # artifact's unit baked the producer's numbers in, so a consumer whose own
   # code met one symbol more, or met them in another order, compared
-  # `:before` against a different number - `samples/webapp.iyi` built from
+  # `:before` against a different number - `samples/webapp.ri` built from
   # its artifacts counted no before-filter, because `case kind when :before`
   # in the router's unit never matched the `:before` the consumer passed.
   # It passed only while nothing moved the numbering; the prelude's

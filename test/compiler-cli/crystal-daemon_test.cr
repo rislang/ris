@@ -186,7 +186,7 @@ describe "`crystal daemon`" do
   # that adopts a preanalysed prelude never runs `new_program`, so every switch
   # that method turns into a setting on the program was whatever the *daemon*
   # had — which is none of them. Most are safe because they are in the prelude's
-  # cache key. `--use-iyimod` is not: it was accepted, ignored, and the build
+  # cache key. `--use-rimod` is not: it was accepted, ignored, and the build
   # compiled every module from source without a word.
   #
   # Caught here by deleting the module's source, which is the only way to tell
@@ -195,14 +195,14 @@ describe "`crystal daemon`" do
     with_daemon do |socket|
       with_tempfile("daemon-iyimod") do |dir|
         Dir.mkdir_p(File.join(dir, "app"))
-        File.write(File.join(dir, "app", "twice.iyi"), <<-IYI)
+        File.write(File.join(dir, "app", "twice.ri"), <<-IYI)
           module app/twice
 
           pub def twice(n : Int32) : Int32
             n + n
           end
           IYI
-        File.write(File.join(dir, "main.iyi"), <<-IYI)
+        File.write(File.join(dir, "main.ri"), <<-IYI)
           module main
 
           import app/twice
@@ -210,11 +210,11 @@ describe "`crystal daemon`" do
           puts App::Twice.twice(21)
           IYI
 
-        daemon_build(socket, "--emit-iyimod", "mods", "-o", "out", "main.iyi", chdir: dir)
+        daemon_build(socket, "--emit-rimod", "mods", "-o", "out", "main.ri", chdir: dir)
           .should be_success
-        File.delete(File.join(dir, "app", "twice.iyi"))
+        File.delete(File.join(dir, "app", "twice.ri"))
 
-        daemon_build(socket, "--use-iyimod", "mods", "-o", "out", "main.iyi", chdir: dir)
+        daemon_build(socket, "--use-rimod", "mods", "-o", "out", "main.ri", chdir: dir)
           .should be_success
         Process.capture_result(File.join(dir, "out"))
           .should(be_success).output.should(eq("42\n"))

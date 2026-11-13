@@ -43,7 +43,7 @@ states them.
 - Problem: `demo(...)` and `wait_for` rely on a per-block timeout, but
   the limit is per test binary: on expiry test.cr:444-454 kills the
   tree and marks the whole file hung; `RisSpecRun.block`
-  (testing.iyi:260-285) has no timer. (codebase-details)
+  (testing.ri:260-285) has no timer. (codebase-details)
 - Fix: state that the limit is per file today and becomes per block
   in step 4, adding it to step 4's scope and gate; or drop the reliance.
 
@@ -85,7 +85,7 @@ states them.
 - Section: 5.7 vs 5.2, step 4 gate.
 - Problem: 5.7 puts RisTmp, RisRun, RisProcess, RisProgram in
   std/ris_spec "which only `ris build --spec` imports"; RisSpecRun is
-  in the prelude (testing.iyi:213) and `ris_lower_spec` injects no
+  in the prelude (testing.ri:213) and `ris_lower_spec` injects no
   import (parser.cr:430-437). Nothing says how `tmp` and `free_port`
   reach a block. (all four)
 - Fix: say `ris_lower_spec` adds `import std/ris_spec` to kept nodes,
@@ -96,7 +96,7 @@ states them.
 
 - Section: 5.7, 4.4, 4.5.
 - Problem: `RisSpecRun.match` picks the pattern by
-  `left.is_a?(String)` (testing.iyi:250); a RisRun on the left prints
+  `left.is_a?(String)` (testing.ri:250); a RisRun on the left prints
   as the pattern. The type check (parser.cr:463) also needs RisRun's
   `=~` and `==(String)`, which 5.7 does not declare. (codebase-details)
 - Fix: decide by `is_a?(Regex)` in step 4; declare RisRun `=~ :
@@ -106,8 +106,8 @@ states them.
 
 - Section: 5.7, step 4.
 - Problem: std/process reports exit code and signal separately
-  (process.iyi:163, :268), not "128 + N"; it has `terminate`, `kill`,
-  `signal` (process.iyi:517-533) but no timed wait, which `stop`
+  (process.ri:163, :268), not "128 + N"; it has `terminate`, `kill`,
+  `signal` (process.ri:517-533) but no timed wait, which `stop`
   (SIGTERM, 2 s, SIGKILL) and `wait_for(regex, timeout)` need.
   (codebase-details)
 - Fix: define status as `signal > 0 ? 128 + signal : exit_code`;
@@ -122,7 +122,7 @@ states them.
   no tasks but not what `tmp`, `demo`, `start` do there.
   (impl-readiness)
 - Fix: state the reader (e.g. one task per stream appending to a
-  builder, reusing process.iyi's child output state) and the wasm32
+  builder, reusing process.ri's child output state) and the wasm32
   rule (e.g. `demo`, `start`, `free_port` are compile errors; `tmp`
   works).
 
@@ -134,7 +134,7 @@ states them.
   `RIS_SPEC_PROGRAM` leak into the child and change a ris runner
   under test. (design, impl-readiness)
 - Fix: "parent environment minus `RIS_SPEC_*`, then HOME and TMPDIR,
-  then *env*", same for `start`; process.iyi's nil env values unset.
+  then *env*", same for `start`; process.ri's nil env values unset.
 
 ### M-9 5.16 hint misses the draft's own example
 

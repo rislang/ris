@@ -8,13 +8,13 @@ require "../../test_helper"
 # since that is where `===` lives.
 private def iyi_compiler
   compiler = create_spec_compiler
-  compiler.prelude = "iyi/prelude"
+  compiler.prelude = "ris/prelude"
   compiler
 end
 
 private def run_iyi(name : String, code : String) : String
-  File.write "#{name}.iyi", code
-  source = Iyi::Compiler::Source.new(File.expand_path("#{name}.iyi"), code)
+  File.write "#{name}.ri", code
+  source = Iyi::Compiler::Source.new(File.expand_path("#{name}.ri"), code)
   iyi_compiler.compile(source, File.expand_path(name))
   Process.capture(File.expand_path(name))
 end

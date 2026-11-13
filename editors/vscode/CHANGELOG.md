@@ -7,7 +7,7 @@
   change and a running process does not re-read it — so `spawn iyi ENOENT`
   was the first thing a fresh Windows install said. The client now also
   looks where the installers put it: `%LOCALAPPDATA%\Programs\iyi\bin`,
-  `~/.local/bin`, `/usr/local/bin`, `/usr/bin`, and `$IYI_PREFIX/bin`.
+  `~/.local/bin`, `/usr/local/bin`, `/usr/bin`, and `$RIS_PREFIX/bin`.
 - On Windows, resolve `iyi.exe` through PATHEXT with `.exe` preferred, and
   spawn a `.bat` or `.cmd` through a shell, which node otherwise refuses.
 - The message for a missing binary says what to do: install it, then reopen
@@ -33,4 +33,4 @@
 
 ## 0.1.0
 
-- First release: spawn `iyi lsp`, hand it `.iyi` documents.
+- First release: spawn `iyi lsp`, hand it `.ri` documents.

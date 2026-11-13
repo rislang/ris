@@ -3277,7 +3277,7 @@ class Iyi::TapeShrinkChecker
         boundary = target.is_a?(External) || @graph.proc_call?(target) ||
                    (target.iyi_from_artifact? && !target.iyi_body_travelled?)
         if boundary && target.iyi_from_artifact? && !target.ris_call_contract
-          node.raise "imported def lacks a checked tape contract; rebuild the module with --emit-iyimod"
+          node.raise "imported def lacks a checked tape contract; rebuild the module with --emit-rimod"
         end
         if boundary && (checked = @graph.contract(target))
           # A directly known proc is executed below with its environment.

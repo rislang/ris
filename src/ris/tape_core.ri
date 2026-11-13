@@ -1,0 +1,1068 @@
+# The everyday String and Array surface on String and Array, so a program's
+# usual calls answer tape values and need no heap. Every result is built
+# on the current tape; names follow Crystal's String and Array.
+
+struct String
+  def split(separator : String) : Array(String)
+    pieces = Array(String).new
+    if separator.bytesize == 0
+      i = 0
+      while i < bytesize
+        width = point_width(i)
+        pieces << self[i, width]
+        i += width
+      end
+      return pieces
+    end
+    start = 0
+    while at = byte_index(separator, start)
+      pieces << self[start, at - start]
+      start = at + separator.bytesize
+    end
+    pieces << self[start, bytesize - start]
+    pieces
+  end
+
+  # Word boundaries decode UTF-8; each word still views the input bytes.
+  def split : Array(String)
+    pieces = Array(String).new
+    start = -1
+    each_point do |point, at|
+      if point >= 0 && point.unsafe_chr.whitespace?
+        pieces << self[start, at - start] if start >= 0
+        start = -1
+      elsif start < 0
+        start = at
+      end
+    end
+    pieces << self[start, bytesize - start] if start >= 0
+    pieces
+  end
+
+  def self.space?(byte : UInt8) : Bool
+    byte == 32_u8 || (byte >= 9_u8 && byte <= 13_u8)
+  end
+
+  def upcase : String
+    String.build(bytesize) do |w|
+      each_byte { |b| w.push(b >= 97_u8 && b <= 122_u8 ? b - 32_u8 : b) }
+    end
+  end
+
+  def downcase : String
+    String.build(bytesize) do |w|
+      each_byte { |b| w.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b) }
+    end
+  end
+
+  def capitalize : String
+    String.build(bytesize) do |w|
+      i = 0
+      each_byte do |b|
+        if i == 0
+          w.push(b >= 97_u8 && b <= 122_u8 ? b - 32_u8 : b)
+        else
+          w.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b)
+        end
+        i += 1
+      end
+    end
+  end
+
+  def lstrip : String
+    first = space_end
+    self[first, bytesize - first]
+  end
+
+  def rstrip : String
+    self[0, space_start(0)]
+  end
+
+  def strip : String
+    lstrip.rstrip
+  end
+
+  def chomp : String
+    return self[0, bytesize - 2] if bytesize >= 2 && self[bytesize - 2] == 13_u8 && self[bytesize - 1] == 10_u8
+    return self[0, bytesize - 1] if bytesize >= 1 && self[bytesize - 1] == 10_u8
+    self
+  end
+
+  def includes?(search : String) : Bool
+    !byte_index(search).nil?
+  end
+
+  def index(search : String, offset : Int32 = 0) : Int32?
+    byte_index(search, offset)
+  end
+
+  def count(search : String) : Int32
+    return 0 if search.bytesize == 0
+    n = 0
+    at = 0
+    while found = byte_index(search, at)
+      n += 1
+      at = found + search.bytesize
+    end
+    n
+  end
+
+  # Every *search* replaced by *replacement*.
+  def gsub(search : String, replacement : String) : String
+    return self if search.bytesize == 0
+    String.build(bytesize) do |w|
+      start = 0
+      while at = byte_index(search, start)
+        w.append(self[start, at - start])
+        w.append(replacement)
+        start = at + search.bytesize
+      end
+      w.append(self[start, bytesize - start])
+    end
+  end
+
+  # The first *search* replaced by *replacement*.
+  def sub(search : String, replacement : String) : String
+    at = byte_index(search)
+    return self unless at
+    String.build(bytesize) do |w|
+      w.append(self[0, at])
+      w.append(replacement)
+      w.append(self[at + search.bytesize, bytesize - at - search.bytesize])
+    end
+  end
+
+  def reverse : String
+    String.build(bytesize) do |writer|
+      stop = bytesize
+      while stop > 0
+        start = char_start(stop)
+        point = point_at(start, stop - start)
+        writer << (point < 0 ? 0xFFFD : point).unsafe_chr
+        stop = start
+      end
+    end
+  end
+
+  def lines : Array(String)
+    result = Array(String).new
+    each_line { |line| result << line }
+    result
+  end
+
+  def chars : Array(Char)
+    result = Array(Char).new(bytesize < 4 ? 4 : bytesize)
+    each_char { |c| result << c }
+    result
+  end
+
+  def each_char(& : Char -> Nil) : Nil
+    i = 0
+    while i < bytesize
+      lead = self[i].to_i32
+      width = if lead < 0x80
+                1
+              elsif lead >= 0xC2 && lead <= 0xDF
+                2
+              elsif lead >= 0xE0 && lead <= 0xEF
+                3
+              elsif lead >= 0xF0 && lead <= 0xF4
+                4
+              else
+                0
+              end
+      valid = width > 0 && i <= bytesize - width
+      point = width == 1 ? lead : lead & (0x7F >> width)
+      k = 1
+      while valid && k < width
+        byte = self[i + k].to_i32
+        valid = byte >= 0x80 && byte <= 0xBF
+        if k == 1
+          valid = false if (lead == 0xE0 && byte < 0xA0) ||
+                           (lead == 0xED && byte >= 0xA0) ||
+                           (lead == 0xF0 && byte < 0x90) ||
+                           (lead == 0xF4 && byte >= 0x90)
+        end
+        point = (point << 6) | (byte & 0x3F)
+        k += 1
+      end
+      yield (valid ? point : 0xFFFD).unsafe_chr
+      i += valid ? width : 1
+    end
+  end
+
+  def ljust(width : Int32, pad : Char = ' ') : String
+    return self if bytesize >= width
+    String.build(width) do |w|
+      w.append(self)
+      (width - bytesize).times { w << pad }
+    end
+  end
+
+  def rjust(width : Int32, pad : Char = ' ') : String
+    return self if bytesize >= width
+    String.build(width) do |w|
+      (width - bytesize).times { w << pad }
+      w.append(self)
+    end
+  end
+end
+
+struct Array(T)
+  # Element by element, as Array#== compares.
+  def ==(other : Array) : Bool
+    return false unless size == other.size
+    i = 0
+    while i < size
+      return false unless self[i] == other[i]
+      i += 1
+    end
+    true
+  end
+
+  def sort : self
+    sorted
+  end
+
+  def sort(& : T, T -> Int32) : self
+    sorted { |a, b| yield a, b }
+  end
+
+  def sort_by(& : T -> U) : self forall U
+    sorted_by { |v| yield v }
+  end
+
+  def reverse : self
+    reversed
+  end
+
+  def last : T
+    raise "Array#last: empty" if size == 0
+    self[size - 1]
+  end
+
+  def []?(index : Int32) : T?
+    index += size if index < 0
+    index >= 0 && index < size ? self[index] : nil
+  end
+
+  def reject(& : T -> Bool) : self
+    self.select { |v| !(yield v) }
+  end
+
+  def min : T
+    raise "Array#min: empty" if size == 0
+    best = self[0]
+    each { |v| best = v if v < best }
+    best
+  end
+
+  def max : T
+    raise "Array#max: empty" if size == 0
+    best = self[0]
+    each { |v| best = v if best < v }
+    best
+  end
+
+  def each_slice(n : Int32, & : Array(T) -> Nil) : Nil
+    raise "slice size must be positive" if n <= 0
+    i = 0
+    while i < size
+      piece = self.class.new(n < 4 ? 4 : n)
+      j = i
+      while j < i + n && j < size
+        piece << self[j]
+        j += 1
+      end
+      yield piece
+      i += n
+    end
+  end
+
+  def find(& : T -> Bool) : T?
+    each { |v| return v if yield v }
+    nil
+  end
+
+  def reduce(initial : U, & : U, T -> U) : U forall U
+    acc = initial
+    each { |v| acc = yield acc, v }
+    acc
+  end
+
+  def compact_map(& : T -> U?) : Array(U) forall U
+    result = Array(U).new(size < 4 ? 4 : size)
+    each do |v|
+      got = yield v
+      result << got unless got.nil?
+    end
+    result
+  end
+
+  def flat_map(& : T -> Array(U)) : Array(U) forall U
+    result = Array(U).new(size < 4 ? 4 : size)
+    each { |v| (yield v).each { |u| result << u } }
+    result
+  end
+
+  def tally : Hash(T, Int32)
+    counts = Hash(T, Int32).new
+    each { |v| counts[v] = counts.fetch(v, 0) + 1 }
+    counts
+  end
+end
+
+struct Hash(K, V)
+  def map(& : K, V -> U) : Array(U) forall U
+    result = Array(U).new(size < 4 ? 4 : size)
+    each { |k, v| result << (yield k, v) }
+    result
+  end
+
+  def select(& : K, V -> Bool) : Hash(K, V)
+    result = Hash(K, V).new(size)
+    each { |k, v| result[k] = v if yield k, v }
+    result
+  end
+
+  def reject(& : K, V -> Bool) : Hash(K, V)
+    self.select { |k, v| !(yield k, v) }
+  end
+
+  def transform_values(& : V, K -> U) : Hash(K, U) forall U
+    result = Hash(K, U).new(size)
+    each { |k, v| result[k] = yield v, k }
+    result
+  end
+
+  def any?(& : K, V -> Bool) : Bool
+    each { |k, v| return true if yield k, v }
+    false
+  end
+
+  def count(& : K, V -> Bool) : Int32
+    n = 0
+    each { |k, v| n += 1 if yield k, v }
+    n
+  end
+
+  def sum(& : K, V -> U) : U forall U
+    n = U.zero
+    each { |k, v| n += yield k, v }
+    n
+  end
+
+  def to_a : Array(Tuple(K, V))
+    result = Array(Tuple(K, V)).new(size < 4 ? 4 : size)
+    each { |k, v| result << {k, v} }
+    result
+  end
+end
+
+struct String::Builder
+  def append_value(value : Bool) : Nil
+    append(value ? "true" : "false")
+  end
+
+  def append_value(value : Symbol) : Nil
+    append(value.to_s)
+  end
+
+  def append_value(value : Array) : Nil
+    push(91_u8)
+    first = true
+    value.each do |item|
+      append(", ") unless first
+      append_inspect(item)
+      first = false
+    end
+    push(93_u8)
+  end
+
+  def append_value(value : Hash) : Nil
+    push(123_u8)
+    first = true
+    value.each do |key, item|
+      append(", ") unless first
+      append_inspect(key)
+      append(" => ")
+      append_inspect(item)
+      first = false
+    end
+    push(125_u8)
+  end
+
+  def append_value(value : Tuple(*T)) : Nil forall T
+    push(123_u8)
+    {% for i in 0...T.size %}
+      append(", ") if {{i}} > 0
+      append_inspect(value[{{i}}])
+    {% end %}
+    push(125_u8)
+  end
+
+  # A value as `inspect` shows it inside a collection: text quoted.
+  def append_inspect(value) : Nil
+    if value.is_a?(String)
+      value.inspect(self)
+    elsif value.is_a?(Char)
+      push(39_u8)
+      append_value(value)
+      push(39_u8)
+    elsif value.nil?
+      append("nil")
+    else
+      append_value(value)
+    end
+  end
+end
+
+struct String
+  # Byte slices borrow their source; no builder or byte copy is involved.
+  def byte_slice(start : Int32, count : Int32) : String
+    self[start, count]
+  end
+
+  def byte_slice(start : Int32) : String
+    start += bytesize if start < 0
+    self[start, bytesize - start]
+  end
+
+  def to_i(base : Int32) : Int32
+    value = to_i64?(base)
+    raise "invalid Int32 text" unless value
+    raise "Int32 text out of range" if value < -2147483648_i64 ||
+                                       value > 2147483647_i64
+    value.to_i32
+  end
+
+  def to_i64(base : Int32 = 10) : Int64
+    to_i64?(base) || raise "invalid Int64 text"
+  end
+end
+
+struct Hash(K, V)
+  def fetch(key : K) : V
+    self[key]
+  end
+
+  def fetch(key : K, & : K -> U) : V | U forall U
+    index = find(key)
+    index < 0 ? yield(key) : @values[index]
+  end
+end
+
+struct Char
+  def bytesize : Int32
+    point = ord
+    point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4
+  end
+
+  def to_s : String
+    String.build(bytesize) { |writer| writer.append_value(self) }
+  end
+end
+
+struct String
+  # The old view keeps its original length. Extend only at the exact end
+  # of the current mapping's live bytes, so no existing bytes change.
+  def __ris_append(other : String) : String
+    region = RisRegion.tape
+    start = @ptr.address
+    stop = RisRegion.size_add(start, bytesize.to_u64)
+    size = RisRegion.count(RisRegion.size_add(bytesize.to_u64,
+      other.bytesize.to_u64))
+    if region != 0 && start >= region + RisRegion::DATA &&
+       stop == IyiHeap.read64(region + RisRegion::OFF_CURSOR)
+      finish = RisRegion.size_add(start, size.to_u64)
+      aligned = RisRegion.size_add(finish, 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+      if aligned <= IyiHeap.read64(region + RisRegion::OFF_LIMIT)
+        (@ptr + bytesize).copy_from(other.to_unsafe, other.bytesize)
+        IyiHeap.write64(region + RisRegion::OFF_CURSOR, aligned)
+        return String.new(@ptr, size.to_i32)
+      end
+    end
+    self + other
+  end
+
+  def __ris_append(other) : String
+    String.build { |writer| writer << self << other }
+  end
+end
+
+struct String
+  def <=>(other : String) : Int32
+    i = 0
+    while i < bytesize && i < other.bytesize
+      difference = self[i].to_i32 - other[i].to_i32
+      return difference if difference != 0
+      i += 1
+    end
+    bytesize - other.bytesize
+  end
+end
+
+struct String::Builder
+  def bytesize : Int32
+    length
+  end
+
+  def write_byte(byte : UInt8) : Nil
+    push(byte)
+  end
+end
+
+struct Array(T)
+  # Internal FFI borrow; consumers keep the Array as the owning value.
+  def to_unsafe : Pointer(T)
+    Pointer(T).new(@state.value)
+  end
+end
+
+struct Char
+  def each_byte(& : UInt8 -> _) : Nil
+    point = ord
+    if point < 0x80
+      yield point.to_u8
+    elsif point < 0x800
+      yield (0xC0 | (point >> 6)).to_u8
+      yield (0x80 | (point & 0x3F)).to_u8
+    elsif point < 0x10000
+      yield (0xE0 | (point >> 12)).to_u8
+      yield (0x80 | ((point >> 6) & 0x3F)).to_u8
+      yield (0x80 | (point & 0x3F)).to_u8
+    else
+      yield (0xF0 | (point >> 18)).to_u8
+      yield (0x80 | ((point >> 12) & 0x3F)).to_u8
+      yield (0x80 | ((point >> 6) & 0x3F)).to_u8
+      yield (0x80 | (point & 0x3F)).to_u8
+    end
+  end
+end
+
+struct Array(T)
+  def [](start : Int32, count : Int32) : Array::View(T)
+    start += size if start < 0
+    Array::View(T).new(self, start, count)
+  end
+end
+
+struct Array(T)
+  def join(separator : Char) : String
+    join(separator.to_s)
+  end
+end
+
+struct SlicePool(T)
+  def store(text : String) : Run(UInt8)
+    {% unless T == UInt8 %}
+      {% raise "store(String) needs SlicePool(UInt8)" %}
+    {% end %}
+    run = alloc_slice(text.bytesize)
+    i = 0
+    text.each_byte do |byte|
+      run[i] = byte
+      i += 1
+    end
+    run
+  end
+
+  # The run of *size* elements at *offset*, as `alloc_slice` answered it:
+  # kept as two numbers, a run is a flat value of its holder.
+  def run_at(offset : Int32, size : Int32) : Run(T)
+    run(offset, size)
+  end
+end
+
+struct SlicePool::Run(T)
+  # A view, valid until the owning run is freed or relocated.
+  def string : String
+    {% unless T == UInt8 %}
+      {% raise "string needs a SlicePool(UInt8) run" %}
+    {% end %}
+    address = @state.value + @offset.to_u64
+    String.new(Pointer(UInt8).new(address), @size)
+  end
+end
+
+struct StaticArray(T, N)
+  # Creates a new StaticArray filled by invoking the block for each index.
+  # In the runtime, so the loop keeps each element the block makes on the
+  # caller's tape, as Array.new's does (a std loop round frees its own).
+  def self.new(& : Int32 -> T) : self
+    array = uninitialized self
+    i = 0
+    while i < N
+      pointerof(array.@buffer)[i] = yield i
+      i += 1
+    end
+    array
+  end
+
+  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
+    target.value = self
+    i = 0
+    while i < N
+      slot = target.as(Pointer(UInt8)) + i.to_i64 * sizeof(T)
+      source = pointerof(@buffer) + i
+      work.push(source.value, slot.as(Pointer(T)))
+      i += 1
+    end
+  end
+end
+
+struct Array(T)
+  # Reorder fixed-size slots without changing their backing owner or size.
+  def __rotate_slots(steps : Int32) : Nil
+    return if size < 2
+    shift = steps % size
+    shift += size if shift < 0
+    return if shift == 0
+    __reverse_slots(0, shift - 1)
+    __reverse_slots(shift, size - 1)
+    __reverse_slots(0, size - 1)
+  end
+
+  private def __reverse_slots(left : Int32, right : Int32) : Nil
+    while left < right
+      value = unsafe_at(left)
+      Pointer(T).new(@state.value + left.to_u64 * sizeof(T).to_u64).value =
+        unsafe_at(right)
+      Pointer(T).new(@state.value + right.to_u64 * sizeof(T).to_u64).value =
+        value
+      left += 1
+      right -= 1
+    end
+  end
+end
+
+struct Array(T)
+  def view : Array::View(T)
+    self[0, size]
+  end
+
+  def truncate(count : Int32) : Nil
+    raise "array truncate out of bounds" if count < 0 || count > size
+    i = count
+    while i < size
+      release(unsafe_at(i))
+      i += 1
+    end
+    (@state + 1_i64).value = count.to_u64
+  end
+end
+
+struct Array::View(T)
+  def view : self
+    self
+  end
+
+  def [](start : Int32, count : Int32) : self
+    raise "array view out of bounds" if start < 0 || count < 0 ||
+                                        start > size - count
+    if at = @at
+      indexes = Array(Int32).new(count) { |i| at[start + i] }
+      self.class.new(@target, indexes)
+    else
+      self.class.new(@target, @offset + start, count)
+    end
+  end
+
+  def slice_from(start : Int32) : self
+    self[start, size - start]
+  end
+
+  def empty? : Bool
+    size == 0
+  end
+
+  def last : T
+    self[size - 1]
+  end
+
+  def dup : Array(T)
+    to_a
+  end
+end
+
+struct Array(T)
+  def concat(values : Array::View(T)) : self
+    values.each { |value| self << value }
+    self
+  end
+end
+
+struct Array(T)
+  def shift : T
+    raise "shift of an empty array" if empty?
+    __remove_slot(0)
+  end
+
+  def shift? : T?
+    empty? ? nil : shift
+  end
+
+  def unshift(value : T) : self
+    push(value)
+    last = unsafe_at(size - 1)
+    i = size - 1
+    while i > 0
+      Pointer(T).new(@state.value + i.to_u64 * sizeof(T).to_u64).value =
+        unsafe_at(i - 1)
+      i -= 1
+    end
+    Pointer(T).new(@state.value).value = last
+    self
+  end
+
+  private def api_compact_element
+    value = self[0]
+    raise "nil element" if value.nil?
+    value
+  end
+
+  def compact
+    result = Array(typeof(api_compact_element)).new(size)
+    each { |value| result << value unless value.nil? }
+    result
+  end
+
+  def +(other : Array::View(T)) : self
+    result = self.class.new(size + other.size)
+    each { |value| result << value }
+    other.each { |value| result << value }
+    result
+  end
+end
+
+struct Array::View(T)
+  def map(& : T -> U) : Array(U) forall U
+    Array(U).new(size) { |i| yield self[i] }
+  end
+end
+
+struct Hash(K, V)
+  def dup : self
+    Tape.owner_copy(self, RisCurrentTape.new)
+  end
+
+  def reject_in_place(& : K, V -> Bool) : self
+    removed = Array(K).new(size)
+    each { |key, value| removed << key if yield key, value }
+    removed.each { |key| delete(key) }
+    self
+  end
+end
+
+struct String
+  def starts_with?(char : Char) : Bool
+    return false if bytesize < char.bytesize
+    i = 0
+    char.each_byte do |byte|
+      return false unless self[i] == byte
+      i += 1
+    end
+    true
+  end
+
+  def ends_with?(char : Char) : Bool
+    return false if bytesize < char.bytesize
+    i = bytesize - char.bytesize
+    char.each_byte do |byte|
+      return false unless self[i] == byte
+      i += 1
+    end
+    true
+  end
+end
+
+struct String::Builder
+  def write(text : String) : Nil
+    append(text)
+  end
+end
+
+struct Array::View(T)
+  def join(writer : String::Builder, separator : String = "") : Nil
+    i = 0
+    while i < size
+      writer << separator if i > 0
+      writer << self[i]
+      i += 1
+    end
+  end
+
+  def join(separator : String = "") : String
+    String.build { |writer| join(writer, separator) }
+  end
+
+  def join(separator : Char) : String
+    join(separator.to_s)
+  end
+end
+
+struct Array::View(T)
+  def ==(other : Array(U) | Array::View(U)) : Bool forall U
+    return false unless size == other.size
+    i = 0
+    while i < size
+      return false unless self[i] == other[i]
+      i += 1
+    end
+    true
+  end
+end
+
+struct Array::View(T)
+  def each_with_index(& : T, Int32 -> _) : Nil
+    i = 0
+    while i < size
+      yield self[i], i
+      i += 1
+    end
+  end
+
+  def includes?(value : T) : Bool
+    each { |item| return true if item == value }
+    false
+  end
+
+  def empty? : Bool
+    size == 0
+  end
+
+  def +(other : Array::View(T)) : Array(T)
+    result = Array(T).new(size + other.size)
+    each { |value| result << value }
+    other.each { |value| result << value }
+    result
+  end
+end
+
+struct Array::View(T)
+  # A contiguous byte view borrows its source. Gathered bytes are built
+  # on the caller's tape because their indexes need not be consecutive.
+  def bytes : String
+    {% unless T == UInt8 %}
+      {% raise "byte views require UInt8 elements" %}
+    {% end %}
+    if @at
+      String.build(size) { |writer| each { |byte| writer.push(byte) } }
+    else
+      String.new(@target.to_unsafe + @offset, @count)
+    end
+  end
+end
+
+struct String
+  def as_view : self
+    self
+  end
+end
+
+struct Array(T)
+  def as_view : Array::View(T)
+    view
+  end
+end
+
+struct RisTree(T)
+  def view : RisTree::View(T)
+    RisTree::View(T).new(self)
+  end
+end
+
+# A read-only tree handle. It cannot add, close or remove nodes.
+@[OnTape]
+struct RisTree::View(T)
+  @target : RisTree(T)
+  @count : Int32
+
+  def initialize(@target : RisTree(T))
+    @count = @target.size
+  end
+
+  def size : Int32
+    @count
+  end
+
+  def [](index : Int32) : T
+    raise "tree view out of bounds" if index < 0 || index >= @count
+    @target[index]
+  end
+
+  def stop(index : Int32) : Int32
+    raise "tree view out of bounds" if index < 0 || index >= @count
+    @target.stop(index)
+  end
+
+  def each_child(index : Int32, & : Int32 -> _) : Nil
+    child = index + 1
+    last = stop(index)
+    while child < last
+      yield child
+      child = stop(child)
+    end
+  end
+end
+
+struct Array(T)
+  # Consume a prefix without replacing the array's reservation.
+  def drop_prefix(count : Int32) : Nil
+    raise "array prefix out of bounds" if count < 0 || count > size
+    left = size - count
+    i = 0
+    while i < left
+      self[i] = self[i + count]
+      i += 1
+    end
+    truncate(left)
+  end
+end
+
+struct Array::View(T)
+  def all?(& : T -> Bool) : Bool
+    each { |item| return false unless yield item }
+    true
+  end
+end
+
+struct Array::View(T)
+  def hash : Int32
+    value = 0x9E3779B97F4A7C15_u64 ^ size.to_i64.unsafe_to_u64
+    each do |element|
+      value = (value ^ element.hash.to_i64.unsafe_to_u64) &* 0x100000001B3_u64
+      value = value ^ value.unsafe_shr(29_u64)
+    end
+    value.hash
+  end
+end
+
+struct Array::View(T)
+  def as_view : self
+    self
+  end
+end
+
+struct Array(T)
+  # Identity of the reservation, independent of its current contents.
+  def same_storage?(other : self) : Bool
+    @state == other.@state
+  end
+end
+
+# Compiler companion for an appended binding. Creating a slot allocates no
+# text; a tape's first slot takes one empty side region as its boundary
+# (RisRegion.text_anchor). Its home is captured with the field's other
+# initializers.
+@[OnTape]
+struct RisTextGrowth
+  @writer : String::Builder? = nil
+  @home : UInt64 = 0_u64
+  # The home's newest side region when this slot was made: a reservation
+  # first taken later, in a shorter scope, is linked behind it, so that
+  # scope's end does not release it (SPEC 1.1).
+  @side : UInt64 = 0_u64
+
+  def initialize
+    @home = RisRegion.tape
+    @side = RisRegion.text_anchor(@home)
+  end
+
+  # A copied object starts lazily in its destination owner. The String
+  # field is copied independently; it becomes this slot's first input.
+  def __iyi_copy_into(target : Pointer(self), work : RisCopyWork) : Nil
+    target.value = self.class.new
+  end
+
+  def __ris_text_reset(text : String) : String
+    if writer = @writer
+      writer.clear
+      writer.append(text)
+      RisRegion.text_reset_copy(text.bytesize.to_u64)
+      writer.finish
+    else
+      text
+    end
+  end
+
+  def __ris_text_reset(text)
+    text
+  end
+
+  def append(text : String, value) : String
+    writer = @writer
+    if writer
+      previous = writer.finish
+      unless previous.to_unsafe.address == text.to_unsafe.address &&
+             previous.bytesize == text.bytesize
+        raise "growing text lost its checked reset; copy_to(owner) first"
+      end
+    end
+    unless writer
+      writer = String::Builder.__ris_text_home(@home, @side, text.bytesize)
+      writer.append(text)
+      RisRegion.text_initial_copy(text.bytesize.to_u64)
+      @writer = writer
+    end
+    writer.append_value(value)
+    writer.finish
+  end
+
+  # `greet(text)` with `def greet(io : String::Builder)`: the callee gets
+  # this local's writer, holding its text, and appends in place.
+  def __ris_lend(text : String) : String::Builder
+    if writer = @writer
+      previous = writer.finish
+      unless previous.to_unsafe.address == text.to_unsafe.address &&
+             previous.bytesize == text.bytesize
+        raise "growing text lost its checked reset; copy_to(owner) first"
+      end
+      return writer
+    end
+    writer = String::Builder.__ris_text_home(@home, @side, text.bytesize)
+    writer.append(text)
+    RisRegion.text_initial_copy(text.bytesize.to_u64)
+    @writer = writer
+    writer
+  end
+
+  # After the call the local reads what its writer holds: the callee's
+  # appends, or its unchanged text when nothing was lent.
+  def self.__ris_take_back(slot : RisTextGrowth, text : String) : String
+    if writer = slot.@writer
+      writer.finish
+    else
+      text
+    end
+  end
+
+  def self.__ris_take_back(slot, text)
+    text
+  end
+end
+
+struct String::Builder
+  # State and bytes share a side reservation linked directly to *home*.
+  # No allocation on a temporary caller tape can escape through a field.
+  def self.__ris_text_home(home : UInt64, after : UInt64, capacity : Int32) : self
+    made = uninitialized self
+    pointerof(made.@state).value = RisRegion.text_state(home, capacity.to_u64, after)
+    made
+  end
+end
+
+struct String
+  def __ris_append_parameter(value)
+    {% raise "a String parameter is a view of the caller's text; " +
+             "appending to it would change only a local copy.\n\n" +
+             "Take `io : String::Builder` to append to the caller's text, " +
+             "or return a new String" %}
+  end
+
+  def __ris_append_field_owner(value)
+    {% raise "growing text needs a concrete field owner;\n\n" +
+             "declare the append method in the owning class or " +
+             "an @[OnTape] struct" %}
+  end
+end
