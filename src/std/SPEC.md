@@ -345,19 +345,6 @@ BitArray stores a fixed count of Boolean values in packed words.
   array under SPEC 1.4.
   <!-- todo: Needs proof -->
 
-## box
-
-Box holds a typed value for passing opaque context through a foreign call.
-
-* box.1 A Box(T) retains its object and unbox of that box's pointer returns it
-  as T. (test/cli/std_box_exercise.iyi)
-* box.2 Unboxing a null pointer returns nil when T admits nil, and otherwise
-  panics with Unboxing null pointer. (test/cli/std_box_exercise.iyi)
-* box.3 to_unsafe returns the box's address without copying its object. The
-  pointer is valid only while the tape-owned box is alive; the caller must
-  supply a live pointer to the matching Box(T).
-  <!-- todo: Needs proof -->
-
 ## bzip2
 
 Bzip2 compresses whole Strings and decodes whole or streamed bzip2 data.
