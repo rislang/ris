@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# spec: 6.7@73ca726d, 6.8@4a174319
+# spec: 6.7@10750e35, 6.8@82707d6b
 # Spec blocks: `ris spec` on blocks, .spec.lock, the clause label and the
 # hint for a missing package spec import (doc/drafts/spec-blocks/
 # spec-blocks.md 5.9, 5.10, 5.14-5.16; step 6).

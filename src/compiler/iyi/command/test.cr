@@ -575,11 +575,11 @@ class Iyi::Command
     false
   end
 
-  # ris: whether *file* holds a spec section: a line that starts `spec N`
+  # ris: whether *file* holds a spec section: a line that starts `spec `
   # (5.9; `build --spec` then parses it and refuses a wrong shape).
   private def spec_module?(file : String) : Bool
     File.each_line(file) do |line|
-      return true if line.starts_with?("spec ") && line[5]?.try(&.ascii_number?)
+      return true if line.starts_with?("spec ")
     end
     false
   rescue File::Error
