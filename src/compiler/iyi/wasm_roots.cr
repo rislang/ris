@@ -18,7 +18,7 @@
 # Which values: the function's parameters and every instruction whose type
 # can carry an address - a pointer; an integer of 32 bits or more, as the
 # allocator answers an address and a union made in place holds its payload
-# (test/cli/wasm32_exercise.sh fails without either); a struct or an array -
+# (the removed wasm32 GC fixture failed without either); a struct or an array -
 # unless it is an alloca, whose memory is already scanned. No program found
 # yet keeps an aggregate across a call (wasm32 returns one through memory),
 # and nothing that runs after this pass deletes a store today: aggregates
