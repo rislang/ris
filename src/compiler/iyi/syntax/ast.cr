@@ -1608,6 +1608,9 @@ module Iyi
     # iyi: `pub def` — exported, so it appears in `.iyimod` (R-2).
     property? exported = false
 
+    # ris: the program runner generated for a spec build, not a source def.
+    property? ris_spec_runner = false
+
     # iyi: written in an `impl` body (iyi SPEC IV.2).
     #
     # An impl defines its methods on the target type, so by the time anything
@@ -1714,6 +1717,7 @@ module Iyi
       a_def.iyi_from_artifact = iyi_from_artifact?
       a_def.iyi_body_travelled = iyi_body_travelled?
       a_def.iyi_compiler_made = iyi_compiler_made?
+      a_def.ris_spec_runner = ris_spec_runner?
       # The clone of an instance answers for the same written def: an expansion
       # of one is still that method's code.
       a_def.iyi_origin = iyi_origin

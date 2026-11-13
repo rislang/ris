@@ -101,6 +101,31 @@ def main():
              and "Build::UnusedSpec#answer" not in proc.stdout,
              proc.stdout + proc.stderr)
 
+    # The spec build replaces top-level calls into an imported module.
+    with tempfile.TemporaryDirectory(prefix="ris-unused-both-") as bare:
+        write(os.path.join(bare, "SPEC.md"),
+              "# Spec\n\n## 1. Answer\n\n* 1.1 The answer is 42.\n")
+        write(os.path.join(bare, "blog.ri"),
+              "module blog\n\nimport site::{layout, answer}\n\n"
+              "puts layout\n\nspec 1.1\n  answer == 42\nend\n")
+        site = os.path.join(bare, "site.ri")
+        write(site, "module site\n\n"
+              "pub def layout : Int32\n  7\nend\n\n"
+              "pub def answer : Int32\n  42\nend\n")
+        proc = run("check", "unused", "blog.ri", cwd=bare)
+        step("unused keeps plain and spec callers across modules",
+             proc.returncode == 0, proc.stdout + proc.stderr)
+
+        write(site, "\npub def unused_page : Int32\n  0\nend\n", "a")
+        proc = run("check", "unused", "blog.ri", cwd=bare)
+        findings = [ln for ln in proc.stdout.splitlines()
+                    if re.search(r"\.ri:\d+:\d+\t", ln)]
+        step("unused reports only the uncalled imported def",
+             proc.returncode == 1 and len(findings) == 1
+             and "Site#unused_page" in findings[0]
+             and re.search(r"site\.ri:11:\d+\t", findings[0]),
+             proc.stdout + proc.stderr)
+
     root = new_project("hello")
     agents = os.path.join(root, "AGENTS.md")
     text = " ".join(open(agents).read().split())

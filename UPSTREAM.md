@@ -10,7 +10,8 @@ back.
 
 * Unused checks retain callers from both the plain program and spec
   blocks, using `build --spec` setup for the latter. Files without spec
-  blocks keep the plain analysis. Gate: test/cli/check_verb.py.
+  blocks keep the plain analysis. Generated spec program runners are
+  marked and excluded from findings. Gate: test/cli/check_verb.py.
 
 * std/sse: reconnect restores the ID buffer from the last dispatched
   event ID. An unended event's ID must not survive into the next stream.
