@@ -146,6 +146,27 @@ def main():
              and "#untested" in findings[0],
              proc.stdout + proc.stderr)
 
+    # A default initialize the compiler made is not the author's to remove.
+    with tempfile.TemporaryDirectory(prefix="ris-unused-init-") as lib:
+        write(os.path.join(lib, "SPEC.md"),
+              "# Spec\n\n## 1. Greet\n\n* 1.1 Names greet.\n")
+        write(os.path.join(lib, "ris.mod"), "module repro\n")
+        write(os.path.join(lib, "repro.ri"), "module repro\n\n"
+              "pub struct Names\n"
+              "  def self.greet(name : String) : String\n"
+              "    \"hi #{name}\"\n  end\nend\n\n"
+              "pub struct Kept\n  def initialize\n  end\nend\n\n"
+              "pub def unwritten_caller : Int32\n  7\nend\n\n"
+              "spec 1.1\n  Names.greet(\"x\") == \"hi x\"\nend\n")
+        proc = run("check", "unused", cwd=lib)
+        findings = [ln for ln in proc.stdout.splitlines()
+                    if re.search(r"\.ri:\d+:\d+\t", ln)]
+        step("unused skips a generated initialize, keeps a written def",
+             proc.returncode == 1 and len(findings) == 2
+             and "Kept#initialize" in findings[0]
+             and "#unwritten_caller" in findings[1],
+             proc.stdout + proc.stderr)
+
     root = new_project("hello")
     agents = os.path.join(root, "AGENTS.md")
     text = " ".join(open(agents).read().split())
