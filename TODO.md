@@ -21,8 +21,8 @@ sections below and are listed here in order:
   time web/static_test.ri once it builds (it fails: web/spec import
   before the first `spec` block, a web-side change).
 * Benches build (section 7), including `HTTP.tls_config=` callers.
-* compiler_test passes: all but exception_test.cr (48, the user decides
-  its fate; section 12).
+* compiler_test passes (exception_test.cr is removed: ris has no
+  `rescue`); rerun it whole on minitest.
 * Release: Linux tarball and its job, `install_ris.sh`, tag v0.1.0;
   `ris --version` prints 0.1.0.
 
@@ -316,9 +316,6 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
   128-byte builder (SIDE_RESERVE, region.iyi:529). Under
   `vm.overcommit_memory=2` each is charged: a FileServer answer holds
   up to eight (doc/drafts/fileserver-outgoing.md, Memory).
-* compiler_test: only test/compiler/codegen/exception_test.cr fails
-  (48 examples; its fate is the user's decision), each top-level describe
-  run apart in parallel on minitest.
 * A constant's initializer runs on the program tape only in a .ri/.iyi
   file; a compiler_test example (source "spec") still needs
   `.copy_to(Program.tape)` for a constant or class variable (SPEC 7.5).
