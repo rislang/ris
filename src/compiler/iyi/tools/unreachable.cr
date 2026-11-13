@@ -9,7 +9,8 @@ module Iyi
     # line has to name the one that was typed. `iyi vet` with no file
     # answered "Usage: iyi tool unreachable [options] ...", which sends the
     # author to a command they did not run.
-    private def unreachable(verb = "tool unreachable", with_plain = false)
+    private def unreachable(verb = "tool unreachable", with_plain = false,
+                            package_specs = [] of String)
       plain_options = options.reject { |option| option == "--spec" }
       config, result = compile_no_codegen verb, path_filter: true, unreachable_command: true, allowed_formats: %w[text json csv codecov]
       results = [result]
@@ -18,6 +19,13 @@ module Iyi
         _, plain_result = compile_no_codegen verb, path_filter: true,
           unreachable_command: true, allowed_formats: %w[text json csv codecov]
         results << plain_result
+      end
+      # ris: a library's other modules, whose spec blocks call its root.
+      package_specs.each do |file|
+        options.replace(["--check", "--spec", file])
+        _, spec_result = compile_no_codegen verb, path_filter: true,
+          unreachable_command: true, allowed_formats: %w[text json csv codecov]
+        results << spec_result
       end
 
       unreachable = UnreachableVisitor.new
