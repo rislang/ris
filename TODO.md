@@ -355,8 +355,5 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
     as request storage; a plain build passes (ricord).
   * The formatter fails on `x.each(&.destroy.or_panic)`; macro
     declarations are dropped in a spec build (ricord).
-  * `ris check` checks a library's root module as a program, so its
-    exported defs read as unreachable when the proofs live in other
-    modules (slim, htmlparse, ricord); a package with no root module
-    skips the part. Needs a rule for library roots.
+  * `ris check unused` skips a package with no root module.
   * `ris check format` reads files git ignores (web's tmp/).

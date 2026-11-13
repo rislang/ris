@@ -149,7 +149,7 @@ class Iyi::Command
         with_specs = spec_module?(target)
         options.replace(["--check", target])
         options.unshift("--spec") if with_specs
-        unreachable "vet", with_specs
+        unreachable "vet", with_specs, package_spec_modules(target)
       end
     when "test"
       options.replace((jobs ? ["-j", jobs] : [] of String) +
@@ -487,6 +487,20 @@ class Iyi::Command
       end
     end
     files
+  end
+
+  # A library's root exports are proven by spec blocks in the package's
+  # other modules: those modules count as callers of the root (ris check
+  # unused). Empty unless *target* is the package's root module.
+  private def package_spec_modules(target : String) : Array(String)
+    dir = File.dirname(target)
+    root = ok_root_module(dir)
+    return [] of String unless root && File.expand_path(root) == File.expand_path(target)
+    Dir.glob(File.join(dir, "**", "*.ri")).sort!.select do |file|
+      !file.ends_with?("_test.ri") &&
+        File.expand_path(file) != File.expand_path(target) &&
+        spec_module?(file)
+    end
   end
 
   private def ok_root_module(dir : String) : String?
