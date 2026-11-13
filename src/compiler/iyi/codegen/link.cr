@@ -127,7 +127,7 @@ module Iyi
     private def lib_flags_windows(cross_compiling)
       flags = [] of String
 
-      # Add IYI_LIBRARY_PATH locations, so the linker preferentially
+      # Add RIS_LIBRARY_PATH locations, so the linker preferentially
       # searches user-given library paths.
       if has_flag?("msvc")
         IyiLibraryPath.paths.each do |path|
@@ -155,7 +155,7 @@ module Iyi
       # Instruct the linker to link statically if the user asks
       flags << "-static" if static_build
 
-      # Add IYI_LIBRARY_PATH locations, so the linker preferentially
+      # Add RIS_LIBRARY_PATH locations, so the linker preferentially
       # searches user-given library paths. A directory that does not
       # exist contributes nothing but darwin ld's "search path not
       # found" warning — which lands in stderr the gates compare — so
@@ -197,7 +197,7 @@ module Iyi
       end
     end
 
-    # Searches among IYI_LIBRARY_PATH, the compiler's directory, and PATH
+    # Searches among RIS_LIBRARY_PATH, the compiler's directory, and PATH
     # for every DLL specified in the used `@[Link]` annotations. Yields the
     # absolute path and `true` if found, the base name and `false` if not found.
     # The directories should match `Iyi::Repl::Context#dll_search_paths`

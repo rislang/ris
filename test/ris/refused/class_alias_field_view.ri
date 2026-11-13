@@ -28,4 +28,5 @@ def run
   other.wipe
   puts kept
 end
+
 tape { run }

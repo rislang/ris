@@ -3,4 +3,5 @@ class Box
     @h = {}
   end
 end
+
 Box.new

@@ -1,10 +1,10 @@
 require "crystal/digest/md5"
 require "./config"
 
-# iyi: `.iyimod`, the module artifact — iyi SPEC Part IV.
+# iyi: `.rimod`, the module artifact — iyi SPEC Part IV.
 #
 # The contract: to compile module B which imports A, the compiler reads A's
-# `.iyimod` and never opens A's source. Everything R-1 rests on is this file,
+# `.rimod` and never opens A's source. Everything R-1 rests on is this file,
 # and so is the measured win — the top-level pass costs 0.99 s today and 0.004 s
 # when the prelude arrives pre-analysed (IV.1a).
 #
@@ -33,7 +33,7 @@ module Iyi::IyiMod
   MAGIC = "IYIMOD\0\0".to_slice
 
   # Bumped when the layout of any section changes incompatibly. IV.5: a
-  # `.iyimod` from another version is rejected and rebuilt, never migrated.
+  # `.rimod` from another version is rejected and rebuilt, never migrated.
   # v45: the object code allocates class instances through `__iyi_new`
   # with the class's `:headed` byte, and an object's fields begin at its
   # pointer with nothing under them unless that byte says so; v44 code
@@ -293,7 +293,7 @@ module Iyi::IyiMod
   # when this one was compiled against it (IV.3).
   #
   # The hashes are what makes an artifact a cache rather than a claim: a build
-  # that finds `app/box.iyimod` can ask whether the `std/list` it describes is
+  # that finds `app/box.rimod` can ask whether the `std/list` it describes is
   # the `std/list` this build has, and read the artifact only if it is.
   #
   # Both hashes, because a consumer depends on both halves of what a module
@@ -307,7 +307,7 @@ module Iyi::IyiMod
     exported : Bool = false
 
   # A cache key rather than a signature, which is why MD5 is enough and why the
-  # compiler's own vendored copy is the one to use: `.iyimod` decides what to
+  # compiler's own vendored copy is the one to use: `.rimod` decides what to
   # rebuild, and nothing downstream trusts an artifact it did not write.
   def self.digest(value : String) : String
     ::Crystal::Digest::MD5.hexdigest(value)
@@ -377,7 +377,7 @@ module Iyi::IyiMod
   # An equality test rather than a range, because IV.5 rejects and rebuilds an
   # artifact rather than migrating it. What the two sides have to agree on is
   # the **released version**: two builds of iyi 0.1.0 read each other's
-  # artifacts, which is what makes a `.iyimod` something to hand to somebody
+  # artifacts, which is what makes a `.rimod` something to hand to somebody
   # rather than a file that only its own build can open. The target and the
   # flags are checked beside this one and are no less part of the answer.
   #
@@ -886,7 +886,7 @@ module Iyi::IyiMod
     scan_offsets : Array(UInt32),
     noscan_offsets : Array(UInt32)
 
-  # What a `.iyimod` says about the module it was built from.
+  # What a `.rimod` says about the module it was built from.
   #
   # Only the parts the compiler can already produce. This grows a field at a
   # time as the sections above are filled in, and each addition is a format
@@ -947,7 +947,7 @@ module Iyi::IyiMod
 
     # The machine code for this module's own definitions. See `ObjectUnit`.
     #
-    # Empty when the build that wrote this generated no code — `--emit-iyimod`
+    # Empty when the build that wrote this generated no code — `--emit-rimod`
     # is allowed on a `--no-codegen` build, and an artifact from one carries
     # declarations and nothing to link. That is a build that produced no object
     # code rather than a module that has none, and the two are told apart by
@@ -1061,7 +1061,7 @@ module Iyi::IyiMod
     # code reads.
     #
     # Empty unless a body that travelled held a regex literal, which makes it
-    # empty for every module built under iyi's prelude: a `.iyi` file has no
+    # empty for every module built under iyi's prelude: a `.ri` file has no
     # runtime `Regex` and its literals are refused where they are expanded.
     #
     # Settable alongside `object_code`, and for the same reason.
@@ -1175,7 +1175,7 @@ module Iyi::IyiMod
     property declarations_only : Bool
 
     # The package name the module's types live under, empty for a module of
-    # no package: `iyi_web` for `codec.iyi` of `github.com/x/iyi-web`, whose
+    # no package: `iyi_web` for `codec.ri` of `github.com/x/iyi-web`, whose
     # types are `IyiWeb::Codec` in every build (iyi SPEC III.7). The header
     # below writes `module codec`, and the reader puts it under this name,
     # which the object code's symbols already spell.
@@ -1367,18 +1367,18 @@ module Iyi::IyiMod
     return if checksum(payload) == sum
     name = section ? section.to_s : "an unknown"
     raise Error.new("#{path}: the #{name} section is damaged, its checksum does " \
-                    "not match what was written. Rebuild it with `--emit-iyimod`")
+                    "not match what was written. Rebuild it with `--emit-rimod`")
   end
 
   # The magic, the format version and the section table.
   private def self.read_table(file : IO, path : String) : Array({UInt16, UInt32, UInt64})
     magic = Bytes.new(MAGIC.size)
-    file.read_fully?(magic) || raise Error.new("#{path} is too short to be a .iyimod")
-    raise Error.new("#{path} is not a .iyimod") unless magic == MAGIC
+    file.read_fully?(magic) || raise Error.new("#{path} is too short to be a .rimod")
+    raise Error.new("#{path} is not a .rimod") unless magic == MAGIC
 
     format_version = file.read_bytes(UInt32, FORMAT)
     unless format_version == FORMAT_VERSION
-      raise Error.new("#{path} is .iyimod format v#{format_version}, this compiler writes v#{FORMAT_VERSION}; rebuild the module with --emit-iyimod")
+      raise Error.new("#{path} is .rimod format v#{format_version}, this compiler writes v#{FORMAT_VERSION}; rebuild the module with --emit-rimod")
     end
 
     count = file.read_bytes(UInt32, FORMAT)
@@ -1455,11 +1455,11 @@ module Iyi::IyiMod
   rescue ex : Error
     raise ex
   rescue ex : IO::EOFError
-    # iyi: a `.iyimod` is the one input here that nobody typed, and this
+    # iyi: a `.rimod` is the one input here that nobody typed, and this
     # reader assumed it was one this compiler had written. Truncate one and
     # `skip` raised `IO::EOFError` with a stack trace, naming no file and
     # reading as a compiler bug rather than as a damaged file.
-    raise Error.new("#{path} is truncated: it ends in the middle of a .iyimod")
+    raise Error.new("#{path} is truncated: it ends in the middle of a .rimod")
   rescue ex : IO::Error
     # The file, not the artifact: no permission to it, gone between the
     # caller's check and this read, or a directory where a file was named.
@@ -1469,9 +1469,9 @@ module Iyi::IyiMod
     # wording, which names this reader's open mode rather than what happened.
     raise Error.new("#{path} cannot be read: #{ex.os_error.try(&.message) || "it could not be opened"}")
   rescue ex
-    raise Error.new("#{path} is not a readable .iyimod: #{ex.message || "its bytes are not the ones this reader expects"}. " \
+    raise Error.new("#{path} is not a readable .rimod: #{ex.message || "its bytes are not the ones this reader expects"}. " \
                     "It is damaged, or was written by something that is not this " \
-                    "compiler; rebuild it with `--emit-iyimod`")
+                    "compiler; rebuild it with `--emit-rimod`")
   end
 
   # Reads the artifact at *path*.
@@ -1570,20 +1570,20 @@ module Iyi::IyiMod
   rescue ex : Error
     raise ex
   rescue ex : IO::EOFError
-    # iyi: a `.iyimod` is the one input here that nobody typed, and this
+    # iyi: a `.rimod` is the one input here that nobody typed, and this
     # reader assumed it was one this compiler had written. Truncate one and
     # `skip` raised `IO::EOFError` with a stack trace, naming no file and
     # reading as a compiler bug rather than as a damaged file.
-    raise Error.new("#{path} is truncated: it ends in the middle of a .iyimod")
+    raise Error.new("#{path} is truncated: it ends in the middle of a .rimod")
   rescue ex : IO::Error
     # The same distinction `read_summary` makes: a file this process cannot
     # open is not a damaged artifact, and the remedy it used to be given -
     # rebuild it - reads it no better.
     raise Error.new("#{path} cannot be read: #{ex.os_error.try(&.message) || "it could not be opened"}")
   rescue ex
-    raise Error.new("#{path} is not a readable .iyimod: #{ex.message || "its bytes are not the ones this reader expects"}. " \
+    raise Error.new("#{path} is not a readable .rimod: #{ex.message || "its bytes are not the ones this reader expects"}. " \
                     "It is damaged, or was written by something that is not this " \
-                    "compiler; rebuild it with `--emit-iyimod`")
+                    "compiler; rebuild it with `--emit-rimod`")
   end
 
   # Text for `crystal mod dump` — under the eventual `iyi` binary this is
@@ -2167,7 +2167,7 @@ module Iyi::IyiMod
 
       R-2 asks an exported signature for full types so that a consumer infers \
       nothing, and a block parameter is a parameter. The body stays in this \
-      module, so a module reading `#{a_def.name}` from its `.iyimod` has no \
+      module, so a module reading `#{a_def.name}` from its `.rimod` has no \
       `yield` left to infer the block from.
 
       Annotate it — `& : Elem -> Nil` — or leave the def unexported.
@@ -2244,7 +2244,7 @@ module Iyi::IyiMod
         `#{a_def.name}` is exported and does not say what #{untyped.size == 1 ? "`#{untyped.first}` is" : "#{untyped.map { |name| "`#{name}`" }.join(", ")} are"}
 
         R-2 asks an exported signature for full types, so that a module reading \
-        it from a `.iyimod` infers nothing. Nothing here can be recovered from \
+        it from a `.rimod` infers nothing. Nothing here can be recovered from \
         the body, because the body is what stays behind.
 
         Annotate the parameter, or leave the def unexported.
@@ -2410,15 +2410,15 @@ module Iyi::IyiMod
       end
 
       unless text = node.ris_call_contract
-        node.raise "imported def lacks a checked tape contract; rebuild the module with --emit-iyimod"
+        node.raise "imported def lacks a checked tape contract; rebuild the module with --emit-rimod"
       end
       begin
         checked = TapeCallGraph::Contract.decode(text)
         unless checked.parameters.size == node.args.size + 1
-          node.raise "invalid tape contract; rebuild the module with --emit-iyimod"
+          node.raise "invalid tape contract; rebuild the module with --emit-rimod"
         end
       rescue ArgumentError
-        node.raise "invalid tape contract; rebuild the module with --emit-iyimod"
+        node.raise "invalid tape contract; rebuild the module with --emit-rimod"
       end
       node.iyi_from_artifact = true
       node.uses_block_arg = true if node.block_arg.try(&.restriction)
@@ -2826,7 +2826,7 @@ module Iyi::IyiMod
     constants = [] of {String, String}
     return constants if artifact.initialiser.empty?
     parser = Parser.new("module #{artifact.module_name}\n#{artifact.initialiser}")
-    parser.filename = "#{artifact.module_name}.iyi"
+    parser.filename = "#{artifact.module_name}.ri"
     collect_exported_constants parser.parse, constants
     constants
   rescue CodeError
@@ -2930,7 +2930,7 @@ module Iyi::IyiMod
   def self.absolute_type(text : String, parameters : Array(String) = [] of String) : String
     return text if text.empty? || text == "?"
     parser = Parser.new(text)
-    parser.filename = "type.iyi"
+    parser.filename = "type.ri"
     parser.next_token
     type = parser.parse_bare_proc_type
     parser.check :EOF

@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-RIS = str(Path(os.environ.get('IYI', ROOT / 'bin/ris')).resolve())
+RIS = str(Path(os.environ.get('RIS', ROOT / 'bin/ris')).resolve())
 TEXT = 'A value keeps its bytes.'
 VERSION = hashlib.sha256(TEXT.encode()).hexdigest()[:8]
 BASE = '# Demo\n## 1. Values\n* 1.1 ' + TEXT + '\n'

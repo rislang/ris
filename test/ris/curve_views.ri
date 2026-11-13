@@ -1,7 +1,7 @@
 # Exercises `std/curve25519`.
 #
 # Run via:
-#     ./bin/iyi run test/cli/std_curve25519_exercise.iyi
+#     ./bin/ris run test/cli/std_curve25519_exercise.ri
 
 module test/ris/curve_views
 

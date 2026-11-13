@@ -18,7 +18,7 @@ module Iyi
 
     # iyi: whether the source being parsed writes `extend self` for itself
     # where it wants one, so the module header must not supply it. Set when
-    # parsing a `.iyimod`'s declarations, which carry the fact. See the header
+    # parsing a `.rimod`'s declarations, which carry the fact. See the header
     # handling below.
     property? iyi_module_extends_written = false
     property def_nest : Int32
@@ -113,7 +113,7 @@ module Iyi
     # passes after the parser overflowed on; `&&`, `elsif`, `case` and
     # unary chains went further. The deepest real code measured, every file
     # of src/, test/cli/, samples/, test/ and the other library's src/, was 23
-    # levels of descent (src/std/yaml.iyi) and a tree 39 deep.
+    # levels of descent (src/std/yaml.ri) and a tree 39 deep.
     NESTING_LIMIT =  128
     DEPTH_LIMIT   = 1000
 
@@ -233,7 +233,7 @@ module Iyi
     @ris_exprs_depth = 0
     @ris_spec_blocks : Array(SpecBlock)? = nil
 
-    # A statement of the file's own top level in a `.ri` / `.iyi` file.
+    # A statement of the file's own top level in a `.ri` / `.ri` file.
     private def ris_top_level? : Bool
       @iyi && @filename.is_a?(String) && @ris_exprs_depth == 1 &&
         @def_nest == 0 && @type_nest == 0 && @fun_nest == 0
@@ -1018,8 +1018,8 @@ module Iyi
         first = expressions.first
         # A header after an `import` or a declaration is the file's only
         # header in the wrong place, and was told the file "already declares
-        # `no module`" and that `app/main` belongs in `app/main.iyi` — said
-        # to `app/main.iyi`.
+        # `no module`" and that `app/main` belongs in `app/main.ri` — said
+        # to `app/main.ri`.
         unless first.is_a?(ModuleHeader)
           raise "the `module` header comes first in a file: `module #{node.path.join('/')}` " \
                 "goes above every `import` and declaration, with only comments " \
@@ -1030,7 +1030,7 @@ module Iyi
               "`#{first.path.join('/')}`. " \
               "A module is a compilation unit and its path is its file's path " \
               "(iyi SPEC R-1, IV.6), so `#{node.path.join('/')}` belongs in " \
-              "`#{node.path.join('/')}.iyi`",
+              "`#{node.path.join('/')}.ri`",
           location.try(&.line_number) || 1, location.try(&.column_number) || 1
       end
 
@@ -1089,7 +1089,7 @@ module Iyi
       # In iyi a module is a compilation unit, not a mixin, so its functions
       # belong to the module itself.
       #
-      # Except where the source writes its own, which a `.iyimod`'s declarations
+      # Except where the source writes its own, which a `.rimod`'s declarations
       # do. Those may be of a module of the *other* language, where a module is
       # a mixin: `module Random` has `abstract def next_u` for its includers to
       # answer, and extending it anyway put it into its own metaclass, which
@@ -2294,7 +2294,7 @@ module Iyi
         # sent a program's shared count to a class variable, which the
         # thread gate refuses once a thread names it (iyi SPEC III.4.5). It
         # was said one column past the name.
-        raise "iyi has no global variables: pass the value to what needs it, make one that never changes " \
+        raise "ris has no global variables: pass the value to what needs it, make one that never changes " \
               "a constant (`LIMIT = 10`), and keep a count threads share in an `Atomic(Int32)` or send values " \
               "over a `Channel` (iyi SPEC III.4.5)", @token
       when .op_dollar_tilde?, .op_dollar_question?
@@ -3299,7 +3299,7 @@ module Iyi
       check_import_path_shape(location)
       path = parse_import_path
       if path.last.ris_source?
-        refuse_import_path "a module path has no extension", location, @iyi_import_end, path.join('/').rchop(".iyi")
+        refuse_import_path "a module path has no extension", location, @iyi_import_end, path.join('/').rchop(".ri")
       end
       names = nil
       name_locations = nil
@@ -3333,14 +3333,14 @@ module Iyi
     # before: `import "app/util"` was "expecting token 'IDENT', not
     # 'DELIMITER_START'", `import ./app/util` the same with '.', `import
     # App::Util` the same with 'App', `import app\util` was "unknown token:
-    # 'u'", and `import app/util.iyi` was told to add an `iyi.mod`
+    # 'u'", and `import app/util.ri` was told to add an `ris.mod`
     # requirement for a file beside the entry.
     private def check_import_path_shape(location : Location) : Nil
       case @token.type
       when .delimiter_start?
         literal = parse_delimiter(want_skip_space: false)
         written = literal.is_a?(StringLiteral) ? literal.value : "app/util"
-        written = written.lchop("./").rchop(".iyi").gsub('\\', '/')
+        written = written.lchop("./").rchop(".ri").gsub('\\', '/')
         refuse_import_path "an import path is not quoted", location, literal.end_location, written
       when .op_period?, .op_period_period?
         while @token.type.op_period? || @token.type.op_period_period? || @token.type.op_slash?
@@ -3348,7 +3348,7 @@ module Iyi
           next_token
         end
         rest = parse_import_path.join('/') if @token.type.ident?
-        refuse_import_path "an import path is read from the entry's directory and IYI_PATH, " \
+        refuse_import_path "an import path is read from the entry's directory and RIS_PATH, " \
                            "never from the importing file's, so it has no `./` or `../`",
           location, @iyi_import_end, rest || "app/util"
       when .const?
@@ -3495,7 +3495,7 @@ module Iyi
     end
 
     # iyi: `pub` marks a declaration as exported (R-2). Exported declarations
-    # appear in the module's `.iyimod` and must carry full type signatures.
+    # appear in the module's `.rimod` and must carry full type signatures.
     def parse_pub
       pub_location = @token.location
       # The doc comment rides the `pub` token; captured here or it is gone
@@ -4331,7 +4331,7 @@ module Iyi
         # stops pretending to check them. A macro pattern is compiled by
         # Iyi::Rx when the macro runs and refused there by name; a `.cr`
         # program's pattern is compiled by the Regex that program links, when
-        # its `$Regex` constant initialises at startup; a `.iyi` program's
+        # its `$Regex` constant initialises at startup; a `.ri` program's
         # literal is refused by the literal expander, which has no runtime
         # Regex to offer.
         result = RegexLiteral.new(result, options).at(result)
@@ -4695,7 +4695,8 @@ module Iyi
     end
 
     private def ris_collection_syntax? : Bool
-      @token.location.original_filename.try(&.ends_with?(".ri")) || false
+      return false unless @token.location.original_filename.try(&.ends_with?(".ri"))
+      !TapePointerCheckerLibrary.library?(@token.location)
     end
 
     def parse_empty_array_literal
@@ -6251,27 +6252,27 @@ module Iyi
     private def check_iyi_reserved_def_name
       return unless iyi?
       if @token.value == "group" && !iyi_prelude_file?
-        raise "`group` is a reserved name in iyi: `group do ... end` is the task " \
+        raise "`group` is a reserved name in ris: `group do ... end` is the task " \
               "group the compiler knows by name, so a method called `group` would " \
               "be lowered as one (iyi SPEC III.4.9)", @token
       end
       return unless @token.value.in?("or", "or_panic")
 
-      raise "`#{@token.value}` is a reserved name in iyi: `.#{@token.value}` is the " \
+      raise "`#{@token.value}` is a reserved name in ris: `.#{@token.value}` is the " \
             "error recovery the compiler knows by name, so a method called " \
             "`#{@token.value}` could never be called (iyi SPEC III.1.3)", @token
     end
 
-    # iyi: a file of the prelude: one beside the `prelude.iyi` of an `iyi/`
-    # directory, which is where IYI_PATH finds the prelude, so a copy of it
+    # iyi: a file of the prelude: one beside the `prelude.ri` of an `iyi/`
+    # directory, which is where RIS_PATH finds the prelude, so a copy of it
     # a gate patches in a scratch directory is the prelude too (it was
-    # refused by a `src/iyi/` path test). An expansion is the file it
+    # refused by a `src/ris/` path test). An expansion is the file it
     # expands in: the prelude's `property group : IyiGroup?` writes a `def
     # group` into a virtual file.
     private def iyi_prelude_file? : Bool
       return false unless filename = @token.location.original_filename
       dir = ::File.dirname(filename)
-      ::File.basename(dir) == "iyi" && ::File.exists?(::File.join(dir, "prelude.iyi"))
+      ::File.basename(dir) == "ris" && ::File.exists?(::File.join(dir, "prelude.ri"))
     end
 
     # iyi: `items.sort_by! { |x| ... }` — the same mistake at a call site.
@@ -6288,7 +6289,7 @@ module Iyi
       # for `vec![`, "undefined local variable or method 'vec'".
       if call.obj.nil? && call.args.empty? && (spelling = IYI_RUST_MACROS[call.name]?) &&
          (@token.type.op_lparen? || (@token.type.op_lsquare? && call.name == "vec"))
-        raise "`#{call.name}!` is Rust's macro, and iyi has none of those: #{spelling}", call.name_location || @token.location
+        raise "`#{call.name}!` is Rust's macro, and ris has none of those: #{spelling}", call.name_location || @token.location
       end
       return unless @token.type.op_lcurly? || @token.type.op_lparen? || @token.keyword?(:do)
 
@@ -6297,7 +6298,7 @@ module Iyi
       raise <<-MSG, @token
         `#{call.name}!` is not a method here: `!` propagates an error, and takes no #{taken}
 
-        `!` can't be part of a name in iyi (iyi SPEC III.1.7a), so the pair
+        `!` can't be part of a name in ris (iyi SPEC III.1.7a), so the pair
         Crystal spells `#{call.name}` and `#{call.name}!` is spelled after the
         participle for the copy and with `_in_place` for the one that changes
         its receiver — `sorted`, `sort_in_place`, `sorted_by`, `sort_in_place_by`.

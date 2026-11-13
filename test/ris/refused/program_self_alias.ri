@@ -1,5 +1,6 @@
 class State
   @@held : Holder? = nil
+
   def self.keep(value : Holder)
     @@held = value
   end
@@ -7,6 +8,7 @@ end
 
 class Holder
   getter text : String
+
   def initialize(@text : String)
   end
 

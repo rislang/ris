@@ -40,7 +40,7 @@ gone_port = nobody.local_port
 nobody.close
 refused = IyiSocket.connect("gone.he.test", gone_port, he, 10000)
 check refused.is_a?(SocketError) && refused.refused? &&
-  refused.message.count("connection refused") == 2, "every address refused: #{refused.inspect}"
+      refused.message.count("connection refused") == 2, "every address refused: #{refused.inspect}"
 puts "refused: ok"
 
 live = IyiSocket.listen("127.0.0.1", 0)
@@ -73,7 +73,7 @@ began = Resolver.now_ms
 late = IyiSocket.connect("hang.he.test", port, he, 600)
 took = Resolver.now_ms - began
 check late.is_a?(SocketError) && late.timed_out? &&
-  late.message.includes?("timed out after 600 ms"), "deadline: #{late.inspect}"
+      late.message.includes?("timed out after 600 ms"), "deadline: #{late.inspect}"
 check took >= 590 && took < 1500, "deadline kept: #{took} ms"
 check descriptors == before, "timed-out sockets closed"
 puts "deadline: ok"

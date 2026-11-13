@@ -8,6 +8,7 @@ class Reg
     found << args[0] if args.size > 0
   end
 end
+
 r = Reg.new
 found = [] of String
 r.parse(Program.args, found)

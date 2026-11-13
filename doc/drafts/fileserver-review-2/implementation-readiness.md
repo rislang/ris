@@ -12,7 +12,7 @@ Blockers. Phases build and gate on their own.
   weekday check, case, `GMT`, ranges, second 60, whitespace, and the
   civil-to-unix conversion. Add malformed-fixdate test cases.
 * R3 (158-163): `answered_on_tape?` is not the only writer. Public
-  `Server.format_response` (src/std/http.iyi:2444-2447) is called by
+  `Server.format_response` (src/std/http.ri:2444-2447) is called by
   samples/ris/serve.ri:72 and test/ris/server_groups.ri:76 and skips
   the check. Name the raise site; say what `head` true does.
 * R4 (346-348, 458): the GET-with-wrong-`length=` raise and
@@ -20,9 +20,9 @@ Blockers. Phases build and gate on their own.
 
 ## Nit
 
-* tape.iyi:214 (`as_tape`), 895 (`reserve`); `reserve` takes
+* tape.ri:214 (`as_tape`), 895 (`reserve`); `reserve` takes
   `Int32 | Int64`, so the clamp reason holds only for `read_str`.
-* `seek` is on `IyiIO` (src/std/file.iyi:2141), not `File`.
+* `seek` is on `IyiIO` (src/std/file.ri:2141), not `File`.
 * Block `header`: LINES count, name refusal before the block,
   rollback of `@text` on a rejected value, the exact view `each_line`
   yields.

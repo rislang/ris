@@ -36,7 +36,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 WORK="$(cd "$WORK" && pwd -P)"
@@ -67,7 +67,7 @@ cleanup() {
 trap cleanup EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 # A second device: /dev/shm where it is a tmpfs of its own, which on Linux
 # it is; a move across devices is otherwise unmeasured, and said so.
@@ -80,7 +80,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_file_utils_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_file_utils_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -135,7 +135,7 @@ fi
 
 # One program that runs each operation on its arguments, built once: the
 # oracle and the refusals below call it many times.
-cat >"$WORK/tool.iyi" <<'IYI'
+cat >"$WORK/tool.ri" <<'RIS'
 module tool
 
 import std/file_utils::{FileUtils}
@@ -150,9 +150,9 @@ when "mv"      then FileUtils.mv(args[1], args[2])
 when "compare" then puts FileUtils.compare_file(args[1], args[2])
 else                raise "no such operation: #{args[0]}"
 end
-IYI
+RIS
 TOOL="$WORK/tool"
-if ! "$IYI" build --release -o "$TOOL" "$WORK/tool.iyi" >"$WORK/tool.build.log" 2>&1; then
+if ! "$RIS" build --release -o "$TOOL" "$WORK/tool.ri" >"$WORK/tool.build.log" 2>&1; then
   echo "the tool did not build"
   tail -12 "$WORK/tool.build.log"
   status=1
@@ -414,7 +414,7 @@ prove_broken() {
   n=$((n + 1))
   local dir="$WORK/patched$n"
   mkdir -p "$dir/std"
-  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/file_utils.iyi" "$dir/std/file_utils.iyi" <<'PY'
+  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/file_utils.ri" "$dir/std/file_utils.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 if src.count(os.environ["OLD"]) != 1:
@@ -426,7 +426,7 @@ PY
     status=1
     return
   fi
-  if ! IYI_PATH="$dir${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$dir/program" "$REPO/test/cli/std_file_utils_exercise.iyi" >"$dir/build.log" 2>&1; then
+  if ! RIS_PATH="$dir${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$dir/program" "$REPO/test/cli/std_file_utils_exercise.ri" >"$dir/build.log" 2>&1; then
     echo "  $1: the broken copy did not compile"
     sed -n '1,6p' "$dir/build.log" | sed 's/^/    /'
     status=1

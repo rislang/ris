@@ -15,9 +15,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -51,8 +51,8 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
-EXERCISE="$REPO/test/cli/std_toml_exercise.iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
+EXERCISE="$REPO/test/cli/std_toml_exercise.ri"
 
 # What the person reading the gate sees: the exercise's own lines, not its
 # records for Python.
@@ -63,7 +63,7 @@ shown() {
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -253,7 +253,7 @@ echo
 echo "== what is refused by panicking, each in its own program"
 refuse_program() {
   local name="$1" sentence="$2" body="$3"
-  cat >"$WORK/refuse_$name.iyi" <<IYI
+  cat >"$WORK/refuse_$name.ri" <<RIS
 module refuse_$name
 
 import std/toml::{TOML, Any, TOMLDateTime, toml_serializable}
@@ -267,11 +267,11 @@ end
 
 $body
 puts "accepted"
-IYI
-  if "$IYI" run "$WORK/refuse_$name.iyi" >"$WORK/refuse_$name.out" 2>&1; then
+RIS
+  if "$RIS" run "$WORK/refuse_$name.ri" >"$WORK/refuse_$name.out" 2>&1; then
     echo "  accepted: $body"
     status=1
-  elif ! grep -qxF "iyi: panic: $sentence" "$WORK/refuse_$name.out"; then
+  elif ! grep -qxF "ris: panic: $sentence" "$WORK/refuse_$name.out"; then
     echo "  refused, but not with \"$sentence\":"
     sed 's/^/    /' "$WORK/refuse_$name.out"
     status=1
@@ -299,7 +299,7 @@ patch_module() {
   local old="$1" new="$2" dest="$3"
   rm -rf "$dest"
   mkdir -p "$dest/std"
-  OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/toml.iyi" "$dest/std/toml.iyi" <<'PY'
+  OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/toml.ri" "$dest/std/toml.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 old = os.environ["OLD"]
@@ -324,7 +324,7 @@ prove_caught() {
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mut-$mutations" "$EXERCISE" >"$WORK/mut.out" 2>&1; then
+  if ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations" "$EXERCISE" >"$WORK/mut.out" 2>&1; then
     echo "  the broken copy did not compile:"
     grep -m2 -E 'Error|BUG' "$WORK/mut.out" | sed 's/^/    /'
     status=1
@@ -428,7 +428,7 @@ if [ -z "$PY" ]; then
 elif ! patch_module $'    elsif e == 102_u8\n      simple = 12_u8' $'    elsif e == 102_u8\n      simple = 11_u8' "$WORK/patched_f"; then
   echo "  the patch did not apply"
   status=1
-elif ! IYI_PATH="$WORK/patched_f${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/broken_f" "$EXERCISE" >"$WORK/broken_f.log" 2>&1; then
+elif ! RIS_PATH="$WORK/patched_f${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/broken_f" "$EXERCISE" >"$WORK/broken_f.log" 2>&1; then
   echo "  the broken copy did not compile"
   status=1
 else
@@ -443,14 +443,14 @@ fi
 
 echo
 echo "== doc, format, other platforms and artifacts"
-if "$IYI" doc "$REPO/src/std/toml.iyi" >"$WORK/doc.txt" 2>&1; then
+if "$RIS" doc "$REPO/src/std/toml.ri" >"$WORK/doc.txt" 2>&1; then
   echo "  iyi doc reads std/toml ($(grep -c '^ *def ' "$WORK/doc.txt") methods)"
 else
   echo "  iyi doc fails: $(grep -m1 -E 'Error|BUG' "$WORK/doc.txt")"
   status=1
 fi
 if [ -x "$REPO/bin/crystal" ]; then
-  if "$IYI" check format "$REPO/src/std/toml.iyi" "$EXERCISE" >"$WORK/format.log" 2>&1; then
+  if "$RIS" check format "$REPO/src/std/toml.ri" "$EXERCISE" >"$WORK/format.log" 2>&1; then
     echo "  the module and its exercise are formatted"
   else
     echo "  not formatted: $(grep -m1 produced "$WORK/format.log")"
@@ -459,7 +459,7 @@ if [ -x "$REPO/bin/crystal" ]; then
 fi
 apart=""
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross" "$EXERCISE" >"$WORK/cross.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" -o "$WORK/cross" "$EXERCISE" >"$WORK/cross.log" 2>&1; then
     echo "  $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross.log")"
     apart="$apart $target"
   fi
@@ -471,8 +471,8 @@ else
   echo "  the exercise typechecks for x86_64-linux-gnu, aarch64-darwin, x86_64-windows-msvc, aarch64-linux-gnu, x86_64-linux-musl"
 fi
 mkdir -p "$WORK/r1/mods"
-if (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$EXERCISE" \
-  && "$IYI" build --use-iyimod mods -o from-artifact "$EXERCISE") >"$WORK/r1/build.log" 2>&1; then
+if (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$EXERCISE" \
+  && "$RIS" build --use-rimod mods -o from-artifact "$EXERCISE") >"$WORK/r1/build.log" 2>&1; then
   "$WORK/r1/from-source" >"$WORK/r1/source.out" 2>&1
   "$WORK/r1/from-artifact" >"$WORK/r1/artifact.out" 2>&1
   if cmp -s "$WORK/r1/source.out" "$WORK/r1/artifact.out" && grep -q "ALL CHECKS PASSED" "$WORK/r1/artifact.out"; then

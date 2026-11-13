@@ -29,9 +29,9 @@ class Iyi::Command
     # Read the flag from either side of the path, the way `mod dump` does.
     # Looking for it only *before* the filename meant everything the loop
     # did not recognise fell through to the `File.file?` test below, so
-    # `fix --nonesuch ok.iyi` answered `file '--nonesuch' does not exist`
+    # `fix --nonesuch ok.ri` answered `file '--nonesuch' does not exist`
     # about a flag, and a second path was dropped without a word: `fix
-    # ok.iyi extra.iyi` fixed the first and exited 0.
+    # ok.ri extra.ri` fixed the first and exited 0.
     json_mode = false
     paths = [] of String
     while option = options.shift?
@@ -51,7 +51,7 @@ class Iyi::Command
           in another file of the program, the verb names it (`cause` in
           `--json`): that is the file to fix next.
 
-          Several files, or a directory - every .iyi under it, hidden
+          Several files, or a directory - every .ri under it, hidden
           directories and lib/ aside - are one run: every `using` in all
           of them is rewritten first, since one file's compile reads the
           others, and then each is fixed in turn; `--json` prints one
@@ -83,7 +83,7 @@ class Iyi::Command
         # A directory is the migration's shape: `iyi fix .` over a project
         # written before `import X::{...}` replaced `using`.
         found = fix_sources(given)
-        abort! "#{given} is a directory with no .iyi file under it", :USAGE_ERROR if found.empty?
+        abort! "#{given} is a directory with no .ri file under it", :USAGE_ERROR if found.empty?
         files.concat(found)
       else
         abort! "no such file: #{given}", :USAGE_ERROR
@@ -92,7 +92,7 @@ class Iyi::Command
     files.uniq!
 
     # Every `using` first, in every file: one file's compile reads the
-    # modules it imports, and `fix a.iyi` stopped at the `using` in the
+    # modules it imports, and `fix a.ri` stopped at the `using` in the
     # module `a` imported - a file this run did not name.
     rewrites = {} of String => Array({Int32, Int32, String, String})
     files.each do |file|
@@ -114,7 +114,7 @@ class Iyi::Command
     exit clean.all? ? 0 : 1
   end
 
-  # The `.iyi` files under *dir*, hidden directories and `lib/` aside.
+  # The `.ri` files under *dir*, hidden directories and `lib/` aside.
   private def fix_sources(dir : String) : Array(String)
     found = [] of String
     Dir.each_child(dir) do |entry|
@@ -167,7 +167,7 @@ class Iyi::Command
         # nothing on the terminal at all — a refusal with no sentence. The
         # same sentence, said where it can be read; `iyi doc` states it
         # this way too.
-        abort! "file '#{file}' is not a valid iyi source file: " \
+        abort! "file '#{file}' is not a valid ris source file: " \
                "it holds bytes that are not UTF-8 text", :USAGE_ERROR
       end
       # Definition-site typing is the compiler's own rule now, so this
@@ -228,7 +228,7 @@ class Iyi::Command
     end
 
     # Where the remaining error actually is, when that is another file of
-    # the program's own: `fix main.iyi` with the typo in `app/lib.iyi`
+    # the program's own: `fix main.ri` with the typo in `app/lib.ri`
     # printed main's frame, `undefined method 'helperr'`, and `Did you
     # mean 'helper'?` - an edit this verb will not make, because it edits
     # the file it was named, and a sentence that reads as an invitation

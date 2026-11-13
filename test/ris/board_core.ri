@@ -1,8 +1,10 @@
 struct BoardJob
   getter value : Int32
+
   def initialize(@value : Int32)
   end
 end
+
 alias BoardJobAlias = BoardJob
 
 def board_value(value : BoardJob | Cancelled) : Int32

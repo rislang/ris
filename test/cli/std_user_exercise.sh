@@ -18,9 +18,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -70,13 +70,13 @@ LINUX=0
 [ -n "${USER:-}" ] || export USER="$(id -un 2>/dev/null)"
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
-EXERCISE="$REPO/test/cli/std_user_exercise.iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
+EXERCISE="$REPO/test/cli/std_user_exercise.ri"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -376,13 +376,13 @@ patch_copy() { # patch_copy <old> <new> [<old> <new> ...]
   "$PY" - "$@" <<PY
 import sys
 from pathlib import Path
-src = Path("$REPO/src/std/user.iyi").read_text()
+src = Path("$REPO/src/std/user.ri").read_text()
 pairs = sys.argv[1:]
 for old, new in zip(pairs[0::2], pairs[1::2]):
     if src.count(old) != 1:
         raise SystemExit("patch site missing or not unique: " + old)
     src = src.replace(old, new, 1)
-Path("$WORK/patched/std/user.iyi").write_text(src)
+Path("$WORK/patched/std/user.ri").write_text(src)
 PY
 }
 
@@ -393,8 +393,8 @@ patched_build=0
 build_patched() {
   patched_build=$((patched_build + 1))
   PATCHED_BIN="$WORK/patched-$patched_build.bin"
-  IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" \
-    "$IYI" build -o "$PATCHED_BIN" "$EXERCISE" >"$WORK/patched.build" 2>&1
+  RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" \
+    "$RIS" build -o "$PATCHED_BIN" "$EXERCISE" >"$WORK/patched.build" 2>&1
 }
 
 # The lookups pointed at the fixture the exercise wrote: its passwd and
@@ -461,7 +461,7 @@ else
     if [ $? -eq 0 ]; then
       echo "  no account, \$USER $unset: answered instead of refusing"
       status=1
-    elif ! grep -qxF "iyi: panic: $sentence" "$WORK/refuse.out"; then
+    elif ! grep -qxF "ris: panic: $sentence" "$WORK/refuse.out"; then
       echo "  no account, \$USER $unset: refused with another sentence:"
       sed -n '1,3p' "$WORK/refuse.out" | sed 's/^/    /'
       status=1
@@ -515,7 +515,7 @@ prove_broken() {
     sed -n '1,4p' "$WORK/mut.out" | sed 's/^/    /'
     status=1
   else
-    echo "  $label: caught - $(grep -m1 'ASSERTION FAILED' "$WORK/mut.out" | sed 's/^iyi: panic: ASSERTION FAILED: //')"
+    echo "  $label: caught - $(grep -m1 'ASSERTION FAILED' "$WORK/mut.out" | sed 's/^ris: panic: ASSERTION FAILED: //')"
   fi
 }
 if [ "$LINUX" -eq 0 ] || [ -z "$PY" ] || [ ! -s "$WORK/fixture/passwd" ]; then

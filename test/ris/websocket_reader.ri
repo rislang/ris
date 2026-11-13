@@ -81,11 +81,11 @@ end
       sender.send(text).or_panic
       got = reader.receive
       raise "compressed round trip" unless got.is_a?(Message) &&
-        got.data == text
+                                           got.data == text
       reader.send("answer answer answer").or_panic
       answer = sender.receive
       raise "compressed answer" unless answer.is_a?(Message) &&
-        answer.data == "answer answer answer"
+                                       answer.data == "answer answer answer"
     end
     peer.close
     socket.close

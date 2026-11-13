@@ -18,9 +18,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -52,8 +52,8 @@ status=0
 # The module's own tree comes first, then whatever search path the caller
 # gave: in the repository that is nothing more, and a tree holding only
 # this module finds the prelude through the caller's path.
-SEARCH="$REPO/src${PSEP}$REPO/samples/iyi${IYI_PATH:+${PSEP}$IYI_PATH}"
-export IYI_PATH="$SEARCH"
+SEARCH="$REPO/src${PSEP}$REPO/samples/ris${RIS_PATH:+${PSEP}$RIS_PATH}"
+export RIS_PATH="$SEARCH"
 export PYTHONIOENCODING=utf-8
 
 if [ -z "$PY" ] || [ ! -x /bin/sh ]; then
@@ -120,7 +120,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_shlex_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_shlex_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -210,10 +210,10 @@ echo
 echo "== std/shlex reaches nothing"
 # It imports nothing, and declares no C and calls no runtime hook: a
 # program that only splits words reaches no file, process or clock.
-if grep -nE '^import ' "$REPO/src/std/shlex.iyi" >/dev/null; then
-  echo "  std/shlex imports: $(grep -E '^import ' "$REPO/src/std/shlex.iyi" | tr '\n' ' ')"
+if grep -nE '^import ' "$REPO/src/std/shlex.ri" >/dev/null; then
+  echo "  std/shlex imports: $(grep -E '^import ' "$REPO/src/std/shlex.ri" | tr '\n' ' ')"
   status=1
-elif grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)|__iyi_' "$REPO/src/std/shlex.iyi" >/dev/null; then
+elif grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)|__iyi_' "$REPO/src/std/shlex.ri" >/dev/null; then
   echo "  std/shlex binds the platform"
   status=1
 else
@@ -225,8 +225,8 @@ echo "== what the module refuses, by name"
 refuses() { # refuses <label> <name> <phrase> <statements>
   local label="$1" name="$2" phrase="$3" statements="$4"
   printf 'module main\n\nimport std/shlex::{Shlex, ShlexError}\n\n%s\nputs "ANSWERED"\n' \
-    "$statements" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$statements" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -239,7 +239,7 @@ refuses() { # refuses <label> <name> <phrase> <statements>
     status=1
     return
   fi
-  if ! grep -qxF "iyi: panic: $phrase" "$WORK/$name.out"; then
+  if ! grep -qxF "ris: panic: $phrase" "$WORK/$name.out"; then
     echo "  $label: refused, but not with '$phrase' (exit $code)"
     tail -2 "$WORK/$name.out"
     status=1
@@ -263,7 +263,7 @@ prove_broken() {
   mutations=$((mutations + 1))
   rm -rf "$WORK/patched"
   mkdir -p "$WORK/patched/std"
-  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/shlex.iyi" "$WORK/patched/std/shlex.iyi" <<'PY'
+  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/shlex.ri" "$WORK/patched/std/shlex.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 if os.environ["OLD"] not in src:
@@ -273,7 +273,7 @@ PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif ! IYI_PATH="$WORK/patched${PSEP}$SEARCH" "$IYI" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_shlex_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched${PSEP}$SEARCH" "$RIS" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_shlex_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the $1 copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1
@@ -324,7 +324,7 @@ echo "  $mutations broken copies tried"
 
 echo
 echo "== doc, format, other platforms and artifacts"
-if "$IYI" doc "$REPO/src/std/shlex.iyi" >"$WORK/doc.txt" 2>&1; then
+if "$RIS" doc "$REPO/src/std/shlex.ri" >"$WORK/doc.txt" 2>&1; then
   echo "  iyi doc reads std/shlex ($(grep -c '^ *def ' "$WORK/doc.txt") methods)"
 else
   echo "  iyi doc fails: $(grep -m1 -E 'Error|BUG' "$WORK/doc.txt")"
@@ -332,7 +332,7 @@ else
 fi
 # `iyi fmt`, the formatter of the iyi the gate runs: `bin/crystal` is the
 # bootstrap compiler on darwin's runner, which reads no iyi.
-if "$IYI" check format "$REPO/src/std/shlex.iyi" "$REPO/test/cli/std_shlex_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$RIS" check format "$REPO/src/std/shlex.ri" "$REPO/test/cli/std_shlex_exercise.ri" >"$WORK/format.log" 2>&1; then
   echo "  the module and its exercise are formatted"
 else
   echo "  not formatted: $(head -3 "$WORK/format.log")"
@@ -340,7 +340,7 @@ else
 fi
 apart=""
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_shlex_exercise.iyi" >"$WORK/cross.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_shlex_exercise.ri" >"$WORK/cross.log" 2>&1; then
     echo "  $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross.log")"
     apart="$apart $target"
   fi
@@ -352,8 +352,8 @@ else
   echo "  the exercise typechecks for x86_64-linux-gnu, aarch64-darwin, x86_64-windows-msvc, aarch64-linux-gnu, x86_64-linux-musl"
 fi
 mkdir -p "$WORK/r1/mods"
-if (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_shlex_exercise.iyi" \
-      && "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_shlex_exercise.iyi") >"$WORK/r1/build.log" 2>&1; then
+if (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_shlex_exercise.ri" \
+      && "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_shlex_exercise.ri") >"$WORK/r1/build.log" 2>&1; then
   "$WORK/r1/from-source" "$WORK/corpus" >"$WORK/r1/source.out" 2>&1
   "$WORK/r1/from-artifact" "$WORK/corpus" >"$WORK/r1/artifact.out" 2>&1
   if cmp -s "$WORK/r1/source.out" "$WORK/r1/artifact.out" && grep -q "ALL CHECKS PASSED" "$WORK/r1/artifact.out"; then

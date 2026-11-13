@@ -1,0 +1,347 @@
+# standard: INI grammar
+# INI configuration text: `[section]` headers, `key = value` lines,
+# comments opened by `#` or `;`, and keys before the first header filed
+# under the section named `""`.
+#
+# `INI.parse` reads a String or an IO into a `RisIni` on the caller's
+# tape - its sections in order, each key's value by section and key, the
+# values viewing the text - and panics with a located sentence for what it refuses: a `[` with no
+# `]` (`unterminated section at line 3, column 6`), anything after the
+# `]` including a trailing space (`data after section at line 3, column 7`),
+# and a line that is neither header, comment nor assignment (`expected
+# declaration at line 4, column 4`). The column counts characters, so a
+# section named `[café]` is a section and not an error. A line of nothing
+# but whitespace is skipped like an empty one. Repeating a header
+# continues the earlier section; a value keeps every `=` after its first.
+#
+# `INI.build(ini, space)` and `INI.build(io, ini, space)` write the same
+# text: top-level keys first, then each section as `[name]`, its keys and
+# one blank line. `space` chooses `key = value` over `key=value` and is
+# false unless asked, so `parse(build(x))` and `build(parse(text))` round
+# trip for text written the compact way. What `parse` would read back as
+# something else is refused rather than written: a line break in a name
+# or a value, a `]` in a section's name, a key that is empty, holds `=`
+# or opens with `#`, `;`, `[` or U+FEFF (read as a byte order mark), and
+# blanks at either end of a key or a value. INI has no escapes, so the
+# one honest answer is the panic. The IO form takes the IO first, the
+# way `io.write` reads, and calls only `write`.
+
+module std/ini
+
+pub struct INI
+  # Past a byte order mark, which Windows PowerShell 5.1's `Set-Content
+  # -Encoding UTF8` and older Notepad write: it panicked "expected
+  # declaration at line 1, column 8" at a `[section]` behind one, and the
+  # first key of a file without a section kept it and never matched.
+  def self.parse(string : String) : RisIni
+    RisIni.new(string)
+  end
+
+  def self.parse(io : IO) : RisIni
+    parse(io.read_all)
+  end
+
+  # Each line of *lines* into *ini*.
+  protected def self.fill(ini : RisIni, lines : Array(String)) : Nil
+    current = ""
+    lineno = 0
+
+    lines.each do |line|
+      lineno += 1
+      raw = line
+      len = line.bytesize
+      len -= 1 if len > 0 && raw.byte_at(len - 1) == 13_u8 # a CRLF file's '\r'
+
+      # Leading whitespace is ASCII whitespace, as the other library skips
+      # it: only space and tab were, so `\v[s]` was refused as a key with no
+      # `=` and a line of just `\f` was not the blank line it is.
+      offset = 0
+      while offset < len && (raw.byte_at(offset) == 32_u8 || (raw.byte_at(offset) >= 9_u8 && raw.byte_at(offset) <= 13_u8))
+        offset += 1
+      end
+      next if offset >= len
+
+      first_byte = raw.byte_at(offset)
+      next if first_byte == 35_u8 || first_byte == 59_u8 # '#' or ';'
+
+      if first_byte == 91_u8 # '['
+        end_idx = -1
+        i = offset + 1
+        while i < len
+          if raw.byte_at(i) == 93_u8 # ']'
+            end_idx = i
+            break
+          end
+          i += 1
+        end
+
+        raise "unterminated section at line #{lineno}, column #{column(line, len)}" if end_idx < 0
+        raise "data after section at line #{lineno}, column #{column(line, end_idx + 1)}" unless end_idx == len - 1
+
+        current = line[offset + 1, end_idx - offset - 1]
+        # Repeating a header continues the earlier section.
+        ini.add_section(current)
+      else
+        eq_idx = -1
+        i = offset
+        while i < len
+          if raw.byte_at(i) == 61_u8 # '='
+            eq_idx = i
+            break
+          end
+          i += 1
+        end
+
+        raise "expected declaration at line #{lineno}, column #{column(line, len)}" if eq_idx < 0
+
+        key = trim(line[offset, eq_idx - offset])
+        value = trim(line[eq_idx + 1, len - eq_idx - 1])
+        ini[current, key] = value
+      end
+    end
+  end
+
+  # The 1-based character column of byte *index* in *line*: every byte
+  # that is not a UTF-8 continuation byte begins a character.
+  private def self.column(line : String, index : Int32) : Int32
+    raw = line
+    count = 0
+    i = 0
+    while i < index
+      count += 1 if (raw.byte_at(i) & 0xC0_u8) != 0x80_u8
+      i += 1
+    end
+    count + 1
+  end
+
+  def self.build(ini : RisIni, space : Bool = false) : String
+    String.build { |w| build(ini, w, space) }
+  end
+
+  def self.build(ini : RisIni, writer : String::Builder,
+                 space : Bool = false) : Nil
+    delim = space ? " = " : "="
+    # Written verbatim, a value holding a line break wrote lines of its
+    # own: `"hello\r\n[admin]\r\nrole=root"` read back as a section
+    # `admin` with a key `role`, and a padded value came back unpadded.
+    ini.sections.each do |section|
+      if why = unwritable_section(section)
+        raise "INI.build: section #{section.inspect} " \
+              "cannot be written: #{why}"
+      end
+      ini.each(section) do |key, value|
+        if bad_key = unwritable_key(key)
+          raise "INI.build: key #{key.inspect} in section " \
+                "#{section.inspect} cannot be written: #{bad_key}"
+        end
+        if bad_value = unwritable_value(value)
+          raise "INI.build: the value of #{key.inspect} in " \
+                "section #{section.inspect} cannot be written: #{bad_value}"
+        end
+      end
+    end
+
+    ini.each("") do |key, value|
+      writer << key << delim << value << "\n"
+    end
+
+    ini.sections.each do |section|
+      next if section.empty?
+      writer << "[" << section << "]\n"
+      ini.each(section) do |key, value|
+        writer << key << delim << value << "\n"
+      end
+      writer << "\n"
+    end
+    nil
+  end
+
+  def self.build(io : IO, ini : RisIni, space : Bool = false) : Nil
+    io.write(build(ini, space))
+  end
+
+  private def self.unwritable_section(name : String) : String?
+    return "it holds a line break" if line_break?(name)
+    return "it holds `]`" if name.includes?(']')
+    nil
+  end
+
+  # `parse` reads past a U+FEFF at the front of the text as a byte order
+  # mark, so a top-level key opening with one, written first, came back
+  # without it: `{"" => {"\uFEFFkey" => "v"}}` read back as `key`. Which
+  # key is first is the hash's order, so it is refused wherever it is.
+  private def self.unwritable_key(key : String) : String?
+    return "it is empty" if key.empty?
+    return "it holds a line break" if line_break?(key)
+    return "it holds `=`" if key.includes?('=')
+    if key.starts_with?("#") || key.starts_with?(";") || key.starts_with?("[")
+      return "it opens with #{key.byte_at(0).unsafe_chr.inspect}, which starts " \
+             "a comment or a section"
+    end
+    if key.starts_with?("\uFEFF")
+      return "it opens with U+FEFF, which is read as a byte order mark"
+    end
+    return "blanks at either end are not read back" if key != trim(key)
+    nil
+  end
+
+  private def self.unwritable_value(value : String) : String?
+    return "it holds a line break" if line_break?(value)
+    return "blanks at either end are not read back" if value != trim(value)
+    nil
+  end
+
+  private def self.trim(text : String) : String
+    first = 0
+    last = text.bytesize
+    while first < last
+      width = blank_width(text, first)
+      break if width == 0
+      first += width
+    end
+    while last > first
+      at = last - 1
+      while at > first && (text.byte_at(at) & 0xC0_u8) == 0x80_u8
+        at -= 1
+      end
+      break unless blank_width(text, at) == last - at
+      last = at
+    end
+    text[first, last - first]
+  end
+
+  # Char#whitespace?'s UTF-8 bytes, as String#strip reads them.
+  private def self.blank_width(text : String, at : Int32) : Int32
+    b = text.byte_at(at)
+    return 1 if b == 32_u8 || (b >= 9_u8 && b <= 13_u8)
+    left = text.bytesize - at
+    return 2 if left >= 2 && b == 0xC2_u8 && text.byte_at(at + 1) == 0xA0_u8
+    return 0 if left < 3
+    c = text.byte_at(at + 1)
+    d = text.byte_at(at + 2)
+    return 3 if b == 0xE1_u8 && c == 0x9A_u8 && d == 0x80_u8
+    if b == 0xE2_u8
+      if c == 0x80_u8
+        return 3 if (d >= 0x80_u8 && d <= 0x8A_u8) ||
+                    d == 0xA8_u8 || d == 0xA9_u8 || d == 0xAF_u8
+      end
+      return 3 if c == 0x81_u8 && d == 0x9F_u8
+    end
+    return 3 if b == 0xE3_u8 && c == 0x80_u8 && d == 0x80_u8
+    0
+  end
+
+  private def self.line_break?(text : String) : Bool
+    text.includes?('\n') || text.includes?('\r')
+  end
+end
+
+# An INI document on the caller's tape: its sections in the order they
+# first appear (`""` for the keys before the first header, when there
+# are any), and each key's last value. Keys and values view the parsed
+# text. `copy_to(owner)` keeps one past its tape.
+@[OnTape]
+pub struct RisIni
+  getter sections : Array(String)
+  # Each assignment's section index, key and value, in order; a key set
+  # again keeps its first place and takes the new value.
+  @entries : Array({Int32, String, String})
+  @section_at : Hash(String, Int32)
+  # By section index and key: views of what was parsed, no new text.
+  @entry_at : Hash({Int32, String}, Int32)
+
+  # The sections and keys *string* holds. A `new`, so it builds in its
+  # caller's destination (SPEC 1.5); its names view *string*.
+  def self.new(string : String) : RisIni
+    text = string.starts_with?("\uFEFF") ? string[3, string.bytesize - 3] : string
+    lines = text.split('\n')
+    ini = new(lines.size)
+    INI.fill(ini, lines)
+    ini
+  end
+
+  def initialize(lines : Int32 = 16)
+    @sections = Array(String).new(lines + 1)
+    @entries = Array({Int32, String, String}).new(lines + 1)
+    @section_at = Hash(String, Int32).new
+    @entry_at = Hash({Int32, String}, Int32).new
+  end
+
+  # The section named *name*, added at the end when it is new.
+  def add_section(name : String) : Int32
+    if at = @section_at[name]?
+      return at
+    end
+    @sections << name
+    @section_at[name] = @sections.size - 1
+    @sections.size - 1
+  end
+
+  def []=(section : String, key : String, value : String) : Nil
+    at = add_section(section)
+    slot = {at, key}
+    if found = @entry_at[slot]?
+      @entries[found] = {at, key, value}
+    else
+      @entries << {at, key, value}
+      @entry_at[slot] = @entries.size - 1
+    end
+  end
+
+  def []?(section : String, key : String) : String?
+    at = @section_at[section]?
+    return nil unless at
+    found = @entry_at[{at, key}]?
+    return nil unless found
+    @entries[found][2]
+  end
+
+  def [](section : String, key : String) : String
+    got = self[section, key]?
+    raise "INI: section #{section.inspect} has no key #{key.inspect}" unless got
+    got
+  end
+
+  def section?(name : String) : Bool
+    @section_at.has_key?(name)
+  end
+
+  # Each key of *section* and its value, in order.
+  def each(section : String, & : String, String -> Nil) : Nil
+    at = @section_at[section]?
+    return unless at
+    @entries.each do |entry|
+      yield entry[1], entry[2] if entry[0] == at
+    end
+  end
+
+  # How many keys the document holds, in all its sections.
+  def size : Int32
+    @entries.size
+  end
+
+  def empty? : Bool
+    @entries.empty?
+  end
+
+  def ==(other : RisIni) : Bool
+    return false unless @sections == other.sections && size == other.size
+    @sections.each do |section|
+      same = true
+      each(section) do |key, value|
+        same = false unless other[section, key]? == value
+      end
+      return false unless same
+    end
+    true
+  end
+end
+
+spec 8.1  # A std module follows the standard its header names (an RFC, a file…
+  doc = INI.parse("top=yes\n[s]\na=café\na=last\n")
+  doc["", "top"] == "yes"
+  doc["s", "a"] == "last"
+  doc["s", "missing"]?.nil?
+  INI.parse(INI.build(doc)) == doc
+  INI.parse("").empty?
+end

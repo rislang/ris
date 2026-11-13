@@ -238,7 +238,7 @@ module Iyi
 
     # iyi: *name* at the root, where a module of the program's own package
     # was before the package's own build named it as a consumer's does
-    # (`iyi_root_package`, iyi SPEC III.7): `Codec` of `codec.iyi` in
+    # (`iyi_root_package`, iyi SPEC III.7): `Codec` of `codec.ri` in
     # `iyi-web` is `IyiWeb::Codec` in both builds now. The old spelling
     # compiled, in this build only, so it still resolves - here, at the
     # root, where a lookup that would have found it then arrives - and

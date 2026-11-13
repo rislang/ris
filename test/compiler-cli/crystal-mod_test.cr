@@ -6,13 +6,13 @@ require "./test_helper"
 # of two files on disk, and because the exit code is half of what a script uses
 # it for.
 private def build_artifact(directory : String, dir_name : String, body : String)
-  File.write(File.join(directory, "app", "greeter.iyi"), body)
+  File.write(File.join(directory, "app", "greeter.ri"), body)
   Process.capture_result(
-    crystal, "build", "--prelude=iyi/prelude", "--no-codegen",
-    "--emit-iyimod", dir_name, "-o", "out", "main.iyi",
+    crystal, "build", "--prelude=ris/prelude", "--no-codegen",
+    "--emit-rimod", dir_name, "-o", "out", "main.ri",
     chdir: directory
   ).should(be_success)
-  File.join(directory, dir_name, "app", "greeter.iyimod")
+  File.join(directory, dir_name, "app", "greeter.rimod")
 end
 
 private def with_two_versions(&)
@@ -21,7 +21,7 @@ private def with_two_versions(&)
     # Imports and calls nothing: what these specs are about is the artifact,
     # and a consumer that called `polite` would stop compiling the moment the
     # second version changes it, which is the thing being measured.
-    File.write "main.iyi", <<-IYI
+    File.write "main.ri", <<-IYI
       module app/main
 
       import app/greeter

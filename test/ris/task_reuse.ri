@@ -42,10 +42,10 @@ group do |g|
   stale = kept[0]
   answer = g.spawn { stale.value }.value
   raise "stale task read" unless answer.is_a?(Panicked) &&
-    answer.message.includes?("group has ended")
+                                 answer.message.includes?("group has ended")
   old = groups[0]
   spawned = g.spawn { old.spawn { 1 }; 0 }.value
   raise "stale group spawn" unless spawned.is_a?(Panicked) &&
-    spawned.message.includes?("group has ended")
+                                   spawned.message.includes?("group has ended")
 end
 puts "PASS: task reuse"

@@ -8,8 +8,8 @@ import std/xml::{parse, parse?, escape, unescape?, TapeNode, XmlTree}
 
 tape do
   text = "<root xmlns:p=\"urn:x\" a=\"&amp;\"><p:child>café &lt;" \
-    "<![CDATA[raw]]></p:child><!--ok--><item n=\"1\"/><item n=\"2\">" \
-    "<item n=\"3\"/></item></root>"
+         "<![CDATA[raw]]></p:child><!--ok--><item n=\"1\"/><item n=\"2\">" \
+         "<item n=\"3\"/></item></root>"
   doc = parse(text)
   exit 1 unless doc.root.name == "root"
   exit 2 unless doc.root["a"] == "&"

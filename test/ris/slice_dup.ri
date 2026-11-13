@@ -9,7 +9,7 @@ tape do
   raise "empty bytes" unless Slice(UInt8).new(0).to_s == "Bytes[]"
   raise "bytes" unless Slice(UInt8).new(2, 7_u8).to_s == "Bytes[7, 7]"
   raise "quoted strings" unless Slice(String).new(1, "a\n").to_s ==
-    "Slice[\"a\\n\"]"
+                                  "Slice[\"a\\n\"]"
   a = Slice(Int32).new(4) { |i| i * 10 }
   b = a.dup
   b[1] = 99

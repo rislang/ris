@@ -120,7 +120,7 @@ module Iyi
     # iyi: what `-f json` writes to standard error, whatever ends the run: one
     # JSON array, the frames the block writes and then every warning, marked
     # `"severity": "warning"`. Warnings were printed there as text, so
-    # `check -f json` on a file with one answered `In colon2.iyi:3:17 ...
+    # `check -f json` on a file with one answered `In colon2.ri:3:17 ...
     # Warning: ...` and exit 0, and a caller parsing it as JSON got nothing.
     def json_report(& : JSON::Builder ->) : Nil
       STDERR.puts(JSON.build do |json|

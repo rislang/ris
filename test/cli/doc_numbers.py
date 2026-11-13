@@ -37,7 +37,7 @@ def bang_names() -> int:
     """Distinct method names ending in `!` in Crystal's standard library.
 
     README says `!` propagates an error in iyi, so a Crystal method whose name
-    ends in one cannot be called from a `.iyi` file, and quotes how many such
+    ends in one cannot be called from a `.ri` file, and quotes how many such
     names there are. `src/compiler/` is excluded because the compiler is not the
     standard library, and `__crystal_pseudo_!` is excluded because it is a
     compiler intrinsic rather than a name a person calls.
@@ -74,7 +74,7 @@ def generated_project_lines() -> int:
             [sys.executable, "test/speed/incremental/generate_project.py", work],
             cwd=REPO, capture_output=True, text=True, check=True,
         )
-        return wc(sorted((pathlib.Path(work) / "iyi").rglob("*.iyi")))
+        return wc(sorted((pathlib.Path(work) / "iyi").rglob("*.ri")))
 
 
 # The spec files that exist because of iyi's own rules, named rather than
@@ -115,27 +115,27 @@ def iyi_spec_lines() -> int:
 def measured() -> dict[str, int]:
     """The numbers, measured the way the docs say they are measured."""
     return {
-        "prelude": wc(sorted((REPO / "src/iyi").glob("*.iyi"))),
+        "prelude": wc(sorted((REPO / "src/ris").glob("*.ri"))),
         "prelude_library": prelude_library_lines(),
         # The platform floor the rule above excludes, and the library with it
         # still in: both are stated in iyi SPEC beside the figure itself, so
         # that what the ceiling does not count is as visible as what it does.
         "platform_floor": platform_floor_lines(),
         "library_with_floor": library_with_floor_lines(),
-        "std": wc(sorted((REPO / "src/std").glob("*.iyi"))),
+        "std": wc(sorted((REPO / "src/std").glob("*.ri"))),
         "compiler": wc(sorted((REPO / "src/compiler").rglob("*.cr"))),
-        "samples": len(sorted((REPO / "samples/iyi").glob("*.iyi"))),
+        "samples": len(sorted((REPO / "samples/ris").glob("*.ri"))),
         "samples_roundtrip": samples_roundtrip(),
         # Bytes on disk, not lines: the docs quote the library's size as a
         # download, which is what a person unpacking the tarball sees.
         "prelude_kb": round(
-            sum(p.stat().st_size for p in sorted((REPO / "src/iyi").glob("*.iyi"))) / 1024
+            sum(p.stat().st_size for p in sorted((REPO / "src/ris").glob("*.ri"))) / 1024
         ),
         # The other half of that download, quoted the same way: the modules
         # `import std/...` resolves to, which the tarball shipped none of
         # until 0.12.0.
         "std_kb": round(
-            sum(p.stat().st_size for p in sorted((REPO / "src/std").glob("*.iyi"))) / 1024
+            sum(p.stat().st_size for p in sorted((REPO / "src/std").glob("*.ri"))) / 1024
         ),
         "bang_names": bang_names(),
         "generated": generated_project_lines(),
@@ -158,9 +158,9 @@ def prelude_library_lines() -> int:
     """The figure iyi SPEC holds to the 4,650-line ceiling: the library
     without any platform's floor.
 
-    Everything under `src/iyi/` except two things. First, what Crystal's
+    Everything under `src/ris/` except two things. First, what Crystal's
     0.1.0 core got from outside its own count - the allocator and collector
-    (Boehm's libgc; the block between two marks in prelude.iyi), the
+    (Boehm's libgc; the block between two marks in prelude.ri), the
     scheduler and kernel thread (pthreads and libevent, beyond the 183 lines
     the ceiling already carries for fibers), and the float printer and parser
     (libc's printf and strtod). Second, every platform's floor
@@ -171,7 +171,7 @@ def prelude_library_lines() -> int:
 
     `library_with_floor` is the same walk without that second exclusion, and
     is stated beside this everywhere this is, because a reader opening
-    `src/iyi/` sees those lines too.
+    `src/ris/` sees those lines too.
     """
     return library_with_floor_lines() - platform_floor_lines()
 
@@ -183,19 +183,19 @@ def library_with_floor_lines() -> int:
 
 
 def library_files() -> list[list[str]]:
-    """The lines of each file the ceiling counts: `src/iyi/` without what
+    """The lines of each file the ceiling counts: `src/ris/` without what
     `prelude_library_lines` names as outside it, and without ris's tape -
-    `tape.iyi`, `ris.iyi` and the block of prelude.iyi that requires the
+    `tape.ri`, `ris.ri` and the block of prelude.ri that requires the
     tape. The tape is
     ris's addition beside iyi's collector, where Goose's model is the
     measure, and iyi SPEC I.4's ceiling is iyi's, set before there was one."""
-    outside = {"concurrency.iyi", "thread.iyi", "float.iyi", "tape.iyi", "ris.iyi"}
+    outside = {"concurrency.ri", "thread.ri", "float.ri", "tape.ri", "ris.ri"}
     files = []
-    for path in sorted((REPO / "src/iyi").glob("*.iyi")):
+    for path in sorted((REPO / "src/ris").glob("*.ri")):
         if path.name in outside:
             continue
         lines = path.read_text().splitlines()
-        if path.name == "prelude.iyi":
+        if path.name == "prelude.ri":
             start = next(i for i, l in enumerate(lines) if l.startswith("# ── The memory layer"))
             end = next(i for i, l in enumerate(lines) if l.startswith("# ── end of the memory layer"))
             lines = lines[:start] + lines[end + 1:]
@@ -300,7 +300,7 @@ def targets() -> int:
 
 
 def iyimod_format() -> int:
-    """The `.iyimod` format version the compiler writes.
+    """The `.rimod` format version the compiler writes.
 
     iyi SPEC quotes it as a current fact about the artifact, and it said v19
     while the compiler wrote v51 — thirty-three bumps, none of which anyone
@@ -337,7 +337,7 @@ CLAIMS: list[tuple[str, str, str, int]] = [
     ("platform_floor", r"the platform floor measures \*\*([\d,]+) lines\*\*", "iyi SPEC", 1),
     ("platform_floor", r"floor of ([\d,]+) lines", "iyi SPEC", 1),
     ("library_with_floor", r"([\d,]+) with every platform's floor", "iyi SPEC", 1),
-    ("library_with_floor", r"pening `src/iyi/` counts ([\d,]+)", "iyi SPEC", 1),
+    ("library_with_floor", r"pening `src/ris/` counts ([\d,]+)", "iyi SPEC", 1),
     ("prelude_library", r"of which the library is ([\d,]+)", "iyi SPEC", 1),
     ("prelude_library", r"the library:\n\*\*([\d,]+) lines\*\* of the", "iyi SPEC", 1),
     ("prelude", r"still true of iyi's own ([\d,]+) lines", "iyi SPEC", 1),
@@ -345,7 +345,7 @@ CLAIMS: list[tuple[str, str, str, int]] = [
     ("prelude", r"\| ([\d,]+)-line own prelude", "iyi SPEC", 1),
     ("prelude", r"against iyi's own ([\d,]+)-line prelude", "iyi SPEC", 1),
     ("prelude", r"against iyi's own ([\d,]+)-line library", "CHANGELOG.md", 1),
-    ("prelude", r"against iyi's own ([\d,]+)-line", "samples/iyi/calc.iyi", 1),
+    ("prelude", r"against iyi's own ([\d,]+)-line", "samples/ris/calc.ri", 1),
     ("std", r"own prelude \+ ([\d,]+) in std", "iyi SPEC", 1),
     ("compiler", r"\| ([\d,]+) lines, Crystal, forked", "iyi SPEC", 1),
     # The other place the compiler's size is stated as current, and the reason
@@ -356,12 +356,12 @@ CLAIMS: list[tuple[str, str, str, int]] = [
     ("spec_iyi", r"\| ([\d,]+) for iyi \|", "iyi SPEC", 1),
     # The artifact format, which drifted furthest of anything here: the
     # sentence said v19 while the compiler wrote v51.
-    ("iyimod_format", r"`\.iyimod` v([\d,]+), checksum per section", "iyi SPEC", 1),
+    ("iyimod_format", r"`\.rimod` v([\d,]+), checksum per section", "iyi SPEC", 1),
     ("prelude_kb", r"library is ([\d,]+) KB on disk", "README.iyi.md", 1),
     ("prelude_kb", r"iyi's own ([\d,]+) KB prelude", "README.iyi.md", 1),
     ("std_kb", r"the ([\d,]+) KB of `src/std`", "README.iyi.md", 1),
     ("std_kb", r"the directory's ([\d,]+) KB is a second", "Makefile", 1),
-    ("prelude_kb", r"beside `bin/iyi` is ([\d,]+) KB", "Makefile", 1),
+    ("prelude_kb", r"beside `bin/ris` is ([\d,]+) KB", "Makefile", 1),
     ("prelude_kb", r"ships only iyi's own ([\d,]+) KB", "Makefile", 1),
     ("prelude_kb", r"its own, and it is ([\d,]+) KB", "Makefile", 1),
     ("bang_names", r"standard library has \*\*([\d,]+) such names\*\*", "README.iyi.md", 1),

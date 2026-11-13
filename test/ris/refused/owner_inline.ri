@@ -11,4 +11,5 @@ end
 def use(w : Workspace)
   w.left.size
 end
+
 tape { use(Workspace.new) }

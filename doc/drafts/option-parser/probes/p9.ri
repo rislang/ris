@@ -6,5 +6,6 @@ class Reg
     {% end %}
   end
 end
+
 r = Reg.new
 r.on("-v") { |v| }

@@ -5,8 +5,8 @@
 #       example.com/liba v0.1.0 -> v0.2.0
 #         changed  liba: def greeting : String
 #              now def greeting(name : String) : String
-#           main.iyi:1
-#           main.iyi:3
+#           main.ri:1
+#           main.ri:3
 #         gone     liba: def old : Int32 - used nowhere here
 #         and 1 new
 #

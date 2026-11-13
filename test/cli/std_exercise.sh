@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Standard library foundation, exercised and driven. Runs the std exercise
 # plain and optimised (--release), checks every section reported, proves the
-# checks can fail by patching copies of std via IYI_PATH, and discovers any
+# checks can fail by patching copies of std via RIS_PATH, and discovers any
 # sibling std exercises.
 #
 #     bash test/cli/std_exercise.sh
@@ -23,7 +23,7 @@ case "$(uname -s)" in
   *) PSEP=':' ;;
 esac
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -45,7 +45,7 @@ status=0
 run_case() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     sed -n '1,12p' "$WORK/$name.build.log"
@@ -96,8 +96,8 @@ prove_fails() {
   mkdir -p "$WORK/$dir/std"
   cp -R "$REPO/src/std/." "$WORK/$dir/std/"
   sed -e "$sed_script" "$REPO/src/std/$file" > "$WORK/$dir/std/$file"
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/std_exercise.iyi" \
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/std_exercise.ri" \
        >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched std library did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
@@ -118,40 +118,40 @@ prove_fails() {
     return
   fi
   printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" \
-    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
 }
 
 # 1. Comparable operator < inverted
-prove_fails "Comparable < inverted" no_lt "traits.iyi" "Comparable: <" \
+prove_fails "Comparable < inverted" no_lt "traits.ri" "Comparable: <" \
   's/(self <=> other) < 0/(self <=> other) > 0/'
 
 # 2. Comparable clamp broken (returns max instead of min when low)
-prove_fails "Comparable clamp broken" no_clamp "traits.iyi" "Comparable: clamp min" \
+prove_fails "Comparable clamp broken" no_clamp "traits.ri" "Comparable: clamp min" \
   's/return min if self < min/return max if self < min/'
 
 # 3. Enumerable present? inverted
-prove_fails "Enumerable present? inverted" no_present "enumerable.iyi" "enum: present? true" \
+prove_fails "Enumerable present? inverted" no_present "enumerable.ri" "enum: present? true" \
   's/!empty?/empty?/'
 
 # 4. Enumerable minmax inverted
-prove_fails "Enumerable minmax inverted" no_minmax "enumerable.iyi" "enum: minmax? min" \
+prove_fails "Enumerable minmax inverted" no_minmax "enumerable.ri" "enum: minmax? min" \
   's/{low, high}/{high, low}/'
 
 # 5. Enumerable each_cons_pair skips yields
-prove_fails "Enumerable each_cons_pair broken" no_cons_pair "enumerable.iyi" "enum: each_cons_pair" \
+prove_fails "Enumerable each_cons_pair broken" no_cons_pair "enumerable.ri" "enum: each_cons_pair" \
   's/yield previous\.as(Elem), e if started/previous = nil/'
 
 # 6. Enumerable to_h corrupted
-prove_fails "Enumerable to_h corrupted" no_to_h "enumerable.iyi" "enum: to_h" \
+prove_fails "Enumerable to_h corrupted" no_to_h "enumerable.ri" "enum: to_h" \
   's/result\[pair\[0\]\] = pair\[1\]/result[pair[0]] = 0/'
 
 # 6b. `take` pulling past the nth element again: with the guard for a
 #     zero count gone, `take(0)` pulls an element and keeps it.
-prove_fails "take(0) pulls an element" take_zero_pulls "enumerable.iyi" "enum: take pulls no element past the nth" \
+prove_fails "take(0) pulls an element" take_zero_pulls "enumerable.ri" "enum: take pulls no element past the nth" \
   's/^    return result if n == 0$/    result/'
 
 # 7. String hash_key is the length
-prove_fails "Hashable String hash_key is length" no_strhash "traits.iyi" "Hashable: String hash_key is the string" \
+prove_fails "Hashable String hash_key is length" no_strhash "traits.ri" "Hashable: String hash_key is the string" \
   's/hash # FNV, not the length/size/'
 
 # 8. The rest of the tower's `hash`, which `impl Hashable` promised and did
@@ -159,62 +159,62 @@ prove_fails "Hashable String hash_key is length" no_strhash "traits.iyi" "Hashab
 #    `Int8#hash` was `Object#hash` — the type's id, one slot for every value
 #    of the type. Renaming the definition puts the program back where it was,
 #    and `Int8` is the first of the six the exercise asks.
-prove_fails "the tower's hash falls back to the type id" no_inthash "int.iyi" "hash: Int8 values differ" \
+prove_fails "the tower's hash falls back to the type id" no_inthash "int.ri" "hash: Int8 values differ" \
   's/def hash : Int32/def hash_elsewhere : Int32/'
 
 # 9. The same for `Float32`, whose `hash` lives in `std/float`. `Float64`'s
 #    is the prelude's, as every prelude type's is, so a table of doubles
 #    spreads without an import.
-prove_fails "Float32 hash falls back to the type id" no_floathash "float.iyi" "hash: Float32 values differ" \
+prove_fails "Float32 hash falls back to the type id" no_floathash "float.ri" "hash: Float32 values differ" \
   's/def hash : Int32/def hash_elsewhere : Int32/'
 
 # 10. And the import itself is load-bearing, not decoration: `std/traits` is
 #     the only module this exercise imports for the scalars, so taking the
 #     `std/float` line out of it leaves `Float32` hashing to its type id
 #     however complete `std/float` is.
-prove_fails "traits without its std/float import" no_floatimport "traits.iyi" "hash: Float32 values differ" \
+prove_fails "traits without its std/float import" no_floatimport "traits.ri" "hash: Float32 values differ" \
   's|^import std/float$||'
 
 # 11. A list built by `appended` handed to the copying constructor, which is
 #     the second of the three copies an append used to make.
-prove_fails "an append that copies twice" no_owning "list.iyi" "list: an append copies the list once" \
+prove_fails "an append that copies twice" no_owning "list.ri" "list: an append copies the list once" \
   's/List(T).owning(copy)/List(T).new(copy)/'
 
 # 12. And the constructor that stops copying: the caller's array becomes the
 #     list's, and the caller's next push lands in the list.
-prove_fails "a list that keeps the caller's array" no_copy "list.iyi" "list: the caller's array is not the list's" \
+prove_fails "a list that keeps the caller's array" no_copy "list.ri" "list: the caller's array is not the list's" \
   's/@items = items.dup/@items = items/'
 
 # 12b. A list's iterator copied into the adaptor built on it (a struct again).
-prove_fails "a list iterator copied into its adaptor" copied_list_iter "list.iyi" "list: an adaptor shares its iterator" \
+prove_fails "a list iterator copied into its adaptor" copied_list_iter "list.ri" "list: an adaptor shares its iterator" \
   's/^pub class ListIterator(T)/pub struct ListIterator(T)/'
-prove_fails "a slice iterator copied into its adaptor" copied_slice_iter "slice.iyi" "slice: an adaptor shares its iterator" \
+prove_fails "a slice iterator copied into its adaptor" copied_slice_iter "slice.ri" "slice: an adaptor shares its iterator" \
   's/^pub class SliceIterator(T)/pub struct SliceIterator(T)/'
 
 # 13-15. A nil element read back as "no previous element": the nil test
 #     each of the three used before the flag, put back.
-prove_fails "each_cons_pair skips the pair after a nil" nil_cons_pair "enumerable.iyi" "enum: each_cons_pair after a nil element" \
+prove_fails "each_cons_pair skips the pair after a nil" nil_cons_pair "enumerable.ri" "enum: each_cons_pair after a nil element" \
   's/yield previous\.as(Elem), e if started/yield previous.as(Elem), e unless previous.nil?/'
-prove_fails "chunk_while joins the element after a nil" nil_chunk_while "enumerable.iyi" "enum: chunk_while after a nil element" \
+prove_fails "chunk_while joins the element after a nil" nil_chunk_while "enumerable.ri" "enum: chunk_while after a nil element" \
   's/if !started || (yield previous\.as(Elem), e)/if previous.nil? || (yield previous.as(Elem), e)/'
-prove_fails "reduce? restarts at a nil" nil_reduce "enumerable.iyi" "enum: reduce? from a nil element" \
+prove_fails "reduce? restarts at a nil" nil_reduce "enumerable.ri" "enum: reduce? from a nil element" \
   's/acc = found ? (yield acc\.as(Elem), e) : e/acc = acc.nil? ? e : (yield acc.as(Elem), e)/'
 
 # 16-18. The same nil test in `max_by`, `min_by` and `minmax_by`, put back:
 #     the element, not the key, deciding there was none. A panic has no
 #     assertion after it, so the proof is the sentence the check's call
 #     stops with.
-prove_fails "max_by refuses a nil answer" nil_max_by "enumerable.iyi" "panic: max_by of an empty collection" \
+prove_fails "max_by refuses a nil answer" nil_max_by "enumerable.ri" "panic: max_by of an empty collection" \
   's/raise "max_by of an empty collection" if entry\[1\]\.nil?/raise "max_by of an empty collection" if entry[0].nil?/'
-prove_fails "min_by refuses a nil answer" nil_min_by "enumerable.iyi" "panic: min_by of an empty collection" \
+prove_fails "min_by refuses a nil answer" nil_min_by "enumerable.ri" "panic: min_by of an empty collection" \
   's/raise "min_by of an empty collection" if entry\[1\]\.nil?/raise "min_by of an empty collection" if entry[0].nil?/'
-prove_fails "minmax_by refuses a nil answer" nil_minmax_by "enumerable.iyi" "panic: minmax_by of an empty collection" \
+prove_fails "minmax_by refuses a nil answer" nil_minmax_by "enumerable.ri" "panic: minmax_by of an empty collection" \
   's/raise "minmax_by of an empty collection" if entry\[2\]\.nil?/raise "minmax_by of an empty collection" if entry[0].nil?/'
 
 # 19. `includes?` asking anything but `==` again: a hash, which agrees for
 #     two NaNs. (`<=>`, which it asked once, no longer compiles here: the
 #     exercise asks it of a list of arrays now, and an array has no `<=>`.)
-prove_fails "includes? by hash" hash_includes "enumerable.iyi" "enum: includes? asks ==" \
+prove_fails "includes? by hash" hash_includes "enumerable.ri" "enum: includes? asks ==" \
   's/return true if e == value/return true if e.hash == value.hash/'
 
 echo
@@ -231,8 +231,8 @@ panics_with() { # panics_with <label> <name> <phrase> <expression>
     printf 'import std/enumerable::{Enumerable}\n'
     printf 'import std/iterator::{Iterator, ArrayIterator}\n\n'
     printf 'puts (%s).to_s\n' "$expression"
-  } > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  } > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -252,7 +252,7 @@ panics_with() { # panics_with <label> <name> <phrase> <expression>
     return
   fi
   printf '  %s: exits 1 at "%s"\n' "$label" \
-    "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+    "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 
 panics_with "first of an empty list" first_empty "first of an empty collection" \
@@ -369,8 +369,8 @@ PLATFORM_LIBS='LibC|LibSystem|LibKernel32|LibWasi|LibLLVMMath|LibAdvapi32|LibWs2
 PLATFORM_LINKS='@\[Link\(("(kernel32|advapi32|ws2_32|crypt32)"|framework: "(Security|CoreFoundation)")\)\]'
 reaching=""
 foreign=""
-for source in "$REPO"/src/std/*.iyi; do
-  name="$(basename "$source" .iyi)"
+for source in "$REPO"/src/std/*.ri; do
+  name="$(basename "$source" .ri)"
   case "$name" in
     # `std/path` folds a Windows name's case the way NTFS does, which is
     # the platform's own table (LCMapStringEx); ASCII alone called `C:\Ä`
@@ -418,8 +418,8 @@ echo "== every module has its own exercise"
 # A module `iyi check` accepts is not a module that works: a generic body
 # nobody instantiates is never typed. The exercise is what instantiates it.
 ungated=""
-for source in "$REPO"/src/std/*.iyi; do
-  name="$(basename "$source" .iyi)"
+for source in "$REPO"/src/std/*.ri; do
+  name="$(basename "$source" .ri)"
   case "$name" in traits|cmp|enumerable|list|derives) continue ;; esac # this file's own
   gate="$REPO/test/cli/std_${name}_exercise.sh"
   case "$name" in format|socket) gate="$REPO/test/cli/${name}_exercise.sh" ;; esac # named before the prefix
@@ -441,9 +441,9 @@ echo "== every std module compiles alone and writes its artifact"
 # Fifteen modules could not be packaged, and nothing here noticed, because
 # every gate compiles its module from source inside a program.
 unpackaged=""
-for source in "$REPO"/src/std/*.iyi; do
-  name="$(basename "$source" .iyi)"
-  if ! "$IYI" doc "$source" > "$WORK/doc_$name.txt" 2>&1; then
+for source in "$REPO"/src/std/*.ri; do
+  name="$(basename "$source" .ri)"
+  if ! "$RIS" doc "$source" > "$WORK/doc_$name.txt" 2>&1; then
     unpackaged="$unpackaged $name"
     echo "  $name: $(grep -m1 -E 'Error|BUG' "$WORK/doc_$name.txt" | cut -c1-140)"
   fi
@@ -459,8 +459,8 @@ echo
 echo "== every std module exercise runs from artifacts as it runs from source"
 # The other half of the question above. Writing an artifact is the
 # producer's side; this is R-1's consumer side, which nothing measured:
-# build each exercise with `--emit-iyimod`, build the same program again
-# with `--use-iyimod`, and compare what the two binaries print. Twenty-one
+# build each exercise with `--emit-rimod`, build the same program again
+# with `--use-rimod`, and compare what the two binaries print. Twenty-one
 # of the sixty did that when it was first asked, and the thirty-nine that
 # did not each named a different thing a module never carried — a class
 # hierarchy's `<`, a `@[Primitive]`, an enum's members, a body whose symbol
@@ -473,11 +473,11 @@ echo "== every std module exercise runs from artifacts as it runs from source"
 # links against the wrong body runs fine and answers differently, which is
 # the failure this is most worth catching.
 unconsumable=""
-for source in "$REPO"/test/cli/std_*_exercise.iyi; do
-  name="$(basename "$source" .iyi)"
+for source in "$REPO"/test/cli/std_*_exercise.ri; do
+  name="$(basename "$source" .ri)"
   work="$WORK/r1/$name"
   mkdir -p "$work/mods"
-  if ! (cd "$work" && "$IYI" build --emit-iyimod mods -o from-source "$source") \
+  if ! (cd "$work" && "$RIS" build --emit-rimod mods -o from-source "$source") \
        > "$work/emit.log" 2>&1; then
     unconsumable="$unconsumable $name"
     why="$(grep -m1 -E 'Error|BUG' "$work/emit.log" | cut -c1-140)"
@@ -487,7 +487,7 @@ for source in "$REPO"/test/cli/std_*_exercise.iyi; do
     echo "  $name: cannot write its artifacts: $why"
     continue
   fi
-  (cd "$work" && "$IYI" build --use-iyimod mods -o from-artifact "$source") \
+  (cd "$work" && "$RIS" build --use-rimod mods -o from-artifact "$source") \
     > "$work/use.log" 2>&1
   use_status=$?
   if [ "$use_status" -ne 0 ]; then
@@ -541,7 +541,7 @@ if [ -n "$unconsumable" ]; then
   echo "  FAIL: cannot be consumed as artifacts:$unconsumable"
   status=1
 else
-  echo "  all $(ls "$REPO"/test/cli/std_*_exercise.iyi | wc -l | tr -d ' ') exercises answer the same from source and from artifacts"
+  echo "  all $(ls "$REPO"/test/cli/std_*_exercise.ri | wc -l | tr -d ' ') exercises answer the same from source and from artifacts"
 fi
 
 echo
@@ -549,12 +549,12 @@ echo "== a panic std raises names no site from its artifact either"
 # A panic the library raises prints no site, the library's own line not
 # being where the bug is - but that test knew `src/std/` and not an
 # artifact's path, and from artifacts `Deque#pop` of an empty deque printed
-# `at mods\std\deque.iyimod:297`, which its build from source did not.
+# `at mods\std\deque.rimod:297`, which its build from source did not.
 site="$WORK/r1/panic_site"
 mkdir -p "$site/mods"
-printf 'import std/deque::{Deque}\n\nDeque(Int32).new.pop\n' > "$site/pop.iyi"
-if (cd "$site" && "$IYI" build --emit-iyimod mods -o from-source pop.iyi \
-      && "$IYI" build --use-iyimod mods -o from-artifact pop.iyi) > "$site/build.log" 2>&1; then
+printf 'import std/deque::{Deque}\n\nDeque(Int32).new.pop\n' > "$site/pop.ri"
+if (cd "$site" && "$RIS" build --emit-rimod mods -o from-source pop.ri \
+      && "$RIS" build --use-rimod mods -o from-artifact pop.ri) > "$site/build.log" 2>&1; then
   "$site/from-source" > "$site/source.out" 2>&1
   "$site/from-artifact" > "$site/artifact.out" 2>&1
   # The first line and the absence of a site, not the whole stream: darwin
@@ -583,18 +583,18 @@ echo "== and on the platforms this runner is not"
 # five: the whole sweep over four targets is a minute.
 unportable=""
 for target in aarch64-linux-gnu x86_64-linux-musl; do
-  for source in "$REPO"/test/cli/std_*_exercise.iyi; do
-    name="$(basename "$source" .iyi)"
+  for source in "$REPO"/test/cli/std_*_exercise.ri; do
+    name="$(basename "$source" .ri)"
     work="$WORK/cross/$target/$name"
     mkdir -p "$work/mods"
-    if ! (cd "$work" && "$IYI" build --no-codegen --target "$target" \
-            --emit-iyimod mods -o out "$source") > "$work/emit.log" 2>&1; then
+    if ! (cd "$work" && "$RIS" build --no-codegen --target "$target" \
+            --emit-rimod mods -o out "$source") > "$work/emit.log" 2>&1; then
       unportable="$unportable $target/$name"
       echo "  $target $name: cannot write its artifacts: $(grep -m1 -E 'Error|BUG' "$work/emit.log" | cut -c1-120)"
       continue
     fi
-    if ! (cd "$work" && "$IYI" build --no-codegen --target "$target" \
-            --use-iyimod mods -o out2 "$source") > "$work/use.log" 2>&1; then
+    if ! (cd "$work" && "$RIS" build --no-codegen --target "$target" \
+            --use-rimod mods -o out2 "$source") > "$work/use.log" 2>&1; then
       unportable="$unportable $target/$name"
       echo "  $target $name: $(grep -m1 -E 'Error|BUG' "$work/use.log" | cut -c1-120)"
     fi
@@ -617,11 +617,11 @@ echo "== every std module together, beside std/bool, on every platform"
 together="$WORK/together"
 mkdir -p "$together"
 {
-  for module in "$REPO"/src/std/*.iyi; do
-    echo "import std/$(basename "$module" .iyi)"
+  for module in "$REPO"/src/std/*.ri; do
+    echo "import std/$(basename "$module" .ri)"
   done
   echo 'puts 1'
-} > "$together/all.iyi"
+} > "$together/all.ri"
 apart=""
 for target in "" aarch64-linux-gnu x86_64-linux-musl; do
   if [ -n "$target" ]; then
@@ -629,7 +629,7 @@ for target in "" aarch64-linux-gnu x86_64-linux-musl; do
   else
     flags=(--no-codegen)
   fi
-  if ! (cd "$together" && "$IYI" build "${flags[@]}" -o all all.iyi) > "$together/${target:-host}.log" 2>&1; then
+  if ! (cd "$together" && "$RIS" build "${flags[@]}" -o all all.ri) > "$together/${target:-host}.log" 2>&1; then
     apart="$apart ${target:-host}"
     echo "  ${target:-host}: $(grep -m1 -E 'Error|BUG' "$together/${target:-host}.log" | cut -c1-160)"
   fi

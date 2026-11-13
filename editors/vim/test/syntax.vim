@@ -3,7 +3,7 @@ let s:runtime = fnamemodify(expand('<sfile>:p'), ':h:h')
 execute 'set runtimepath^=' . fnameescape(s:runtime)
 filetype plugin on
 syntax enable
-new fixture.iyi
+new fixture.ri
 call assert_equal('iyi', &filetype)
 call assert_equal(2, &l:shiftwidth)
 call assert_equal('# %s', &l:commentstring)

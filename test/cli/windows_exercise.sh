@@ -10,9 +10,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The compiler, overridable: `bin/iyi` is a POSIX shell wrapper, and on
+# The compiler, overridable: `bin/ris` is a POSIX shell wrapper, and on
 # Windows the caller is the only one who knows where the real binary is.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 # The search path is a list, and the byte between its entries is the
 # platform's: `;` where a drive letter already owns the colon.
 case "$(uname -s)" in
@@ -59,7 +59,7 @@ echo "== Stage 10: Windows x86_64 Collector Verification =="
 # 1. Host Native Run
 echo
 echo "== Host Run (Native) =="
-if "$IYI" run "$REPO/test/cli/windows_exercise.iyi" > "$WORK/host.out" 2>&1; then
+if "$RIS" run "$REPO/test/cli/windows_exercise.ri" > "$WORK/host.out" 2>&1; then
   echo "  host run succeeded"
 else
   echo "  host run failed"
@@ -79,7 +79,7 @@ done
 # 2. Windows x86_64 Cross-Compilation Verification
 echo
 echo "== Windows x86_64 Cross-Compilation Verification =="
-if "$IYI" build --cross-compile --target x86_64-windows-msvc "$REPO/test/cli/windows_exercise.iyi" -o "$WORK/windows_exercise.obj" > "$WORK/win_build.log" 2>&1; then
+if "$RIS" build --cross-compile --target x86_64-windows-msvc "$REPO/test/cli/windows_exercise.ri" -o "$WORK/windows_exercise.obj" > "$WORK/win_build.log" 2>&1; then
   echo "  cross-compilation to x86_64-windows-msvc succeeded"
   echo "  object file size: $(wc -c < "$WORK/windows_exercise.obj" | tr -d ' ') bytes"
 else
@@ -101,15 +101,15 @@ elif [ ! -f "$WORK/windows_exercise.obj" ]; then
   status=1
 elif stop_here_spills "$WORK/windows_exercise.obj"; then
   echo "  stop_here stores rdi and rsi into the spill"
-  mkdir -p "$WORK/norsi/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/norsi/iyi/"
+  mkdir -p "$WORK/norsi/ris"
+  cp -R "$REPO/src/ris/." "$WORK/norsi/ris/"
   awk '{ if ($0 ~ /^ +movq %rsi, 24\(\$0\)$/ && !done) { done = 1; next } print }' \
-    "$REPO/src/iyi/thread.iyi" > "$WORK/norsi/iyi/thread.iyi"
-  if cmp -s "$WORK/norsi/iyi/thread.iyi" "$REPO/src/iyi/thread.iyi"; then
+    "$REPO/src/ris/thread.ri" > "$WORK/norsi/ris/thread.ri"
+  if cmp -s "$WORK/norsi/ris/thread.ri" "$REPO/src/ris/thread.ri"; then
     echo "  the proof's awk found no rsi store to remove"
     status=1
-  elif ! IYI_PATH="$WORK/norsi${PSEP}$REPO/src" "$IYI" build --cross-compile --target x86_64-windows-msvc \
-       "$REPO/test/cli/windows_exercise.iyi" -o "$WORK/norsi/program.obj" > "$WORK/norsi/build.log" 2>&1; then
+  elif ! RIS_PATH="$WORK/norsi${PSEP}$REPO/src" "$RIS" build --cross-compile --target x86_64-windows-msvc \
+       "$REPO/test/cli/windows_exercise.ri" -o "$WORK/norsi/program.obj" > "$WORK/norsi/build.log" 2>&1; then
     echo "  the copy without the rsi store did not build"
     sed -n '1,12p' "$WORK/norsi/build.log"
     status=1
@@ -135,7 +135,7 @@ case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     echo
     echo "== A non-ASCII argument and variable survive =="
-    cat > "$WORK/told.iyi" <<'EOF'
+    cat > "$WORK/told.ri" <<'EOF'
 module told
 
 n = 0
@@ -147,7 +147,7 @@ end
 v = Program.env("IYI_TOLD")
 puts "env: " + (v ? v : "(none)") + " " + (v ? v.bytesize.to_s : "0")
 EOF
-    if ! "$IYI" build -o "$WORK/told.exe" "$WORK/told.iyi" > "$WORK/told.log" 2>&1; then
+    if ! "$RIS" build -o "$WORK/told.exe" "$WORK/told.ri" > "$WORK/told.log" 2>&1; then
       echo "  the argument probe did not build"
       tail -5 "$WORK/told.log"
       status=1
@@ -201,7 +201,7 @@ EOF
         # A program started without standard streams - detached, as a
         # service or a GUI program starts one - writes into nothing and
         # goes on: its first `puts` panicked "write failed" and ended it.
-        cat > "$WORK/detached.iyi" <<'EOF'
+        cat > "$WORK/detached.ri" <<'EOF'
 module detached
 
 import std/file::{File}
@@ -210,7 +210,7 @@ puts "into nothing"
 STDERR.puts "and nothing"
 File.write(Program.args[0], "went on\n")
 EOF
-        if ! "$IYI" build -o "$WORK/detached.exe" "$WORK/detached.iyi" > "$WORK/detached.log" 2>&1; then
+        if ! "$RIS" build -o "$WORK/detached.exe" "$WORK/detached.ri" > "$WORK/detached.log" 2>&1; then
           echo "  the detached probe did not build"; tail -5 "$WORK/detached.log"; status=1
         else
           code="$("$PY" -c 'import subprocess, sys; print(subprocess.run([sys.argv[1], sys.argv[2]], creationflags=subprocess.DETACHED_PROCESS).returncode)' "$(cygpath -w "$WORK/detached.exe")" "$(cygpath -w "$WORK/detached.txt")")"
@@ -234,7 +234,7 @@ EOF
     # that.
     echo
     echo "== Ten thousand parked tasks =="
-    cat > "$WORK/parked.iyi" <<'EOF'
+    cat > "$WORK/parked.ri" <<'EOF'
 module parked
 
 group do |g|
@@ -247,7 +247,7 @@ group do |g|
 end
 puts "parked and done"
 EOF
-    if ! "$IYI" build -o "$WORK/parked.exe" "$WORK/parked.iyi" > "$WORK/parked.log" 2>&1; then
+    if ! "$RIS" build -o "$WORK/parked.exe" "$WORK/parked.ri" > "$WORK/parked.log" 2>&1; then
       echo "  the parked-task probe did not build"
       tail -5 "$WORK/parked.log"
       status=1
@@ -313,7 +313,7 @@ except subprocess.TimeoutExpired:
 print("stdout: " + out.decode("utf-8", "replace").replace("\r", "").replace("\n", "|"))
 print("stderr: " + err.decode("utf-8", "replace").replace("\r", "").replace("\n", "|"))
 PY
-    cat > "$WORK/filler.iyi" <<'EOF'
+    cat > "$WORK/filler.ri" <<'EOF'
 module filler
 
 puts "filling"
@@ -324,7 +324,7 @@ end
 EOF
     if [ -z "$JOBPY" ]; then
       echo "  no python to make a job with, so the limit is unmeasured"
-    elif ! "$IYI" build -o "$WORK/filler.exe" "$WORK/filler.iyi" > "$WORK/filler.log" 2>&1; then
+    elif ! "$RIS" build -o "$WORK/filler.exe" "$WORK/filler.ri" > "$WORK/filler.log" 2>&1; then
       echo "  the filling probe did not build"
       tail -5 "$WORK/filler.log"
       status=1
@@ -348,7 +348,7 @@ EOF
     # under the same limit.
     echo
     echo "== A small program fits a 200 MB job =="
-    cat > "$WORK/classes.iyi" <<'EOF'
+    cat > "$WORK/classes.ri" <<'EOF'
 module classes
 
 threads = [] of IyiThread
@@ -364,7 +364,7 @@ puts "eight threads, thirty classes each"
 EOF
     if [ -z "$JOBPY" ]; then
       echo "  no python to make a job with, so the limit is unmeasured"
-    elif ! "$IYI" build -o "$WORK/classes.exe" "$WORK/classes.iyi" > "$WORK/classes.log" 2>&1; then
+    elif ! "$RIS" build -o "$WORK/classes.exe" "$WORK/classes.ri" > "$WORK/classes.log" 2>&1; then
       echo "  the size-class probe did not build"
       tail -5 "$WORK/classes.log"
       status=1
@@ -390,14 +390,14 @@ EOF
     # the timer would come in under the bar.
     echo
     echo "== A hundred one-millisecond sleeps =="
-    cat > "$WORK/naps.iyi" <<'EOF'
+    cat > "$WORK/naps.ri" <<'EOF'
 module naps
 
 start = __iyi_monotonic_ns
 100.times { sleep(1) }
 puts "took " + ((__iyi_monotonic_ns - start) // 1000000_i64).to_s + " ms"
 EOF
-    if ! "$IYI" build -o "$WORK/naps.exe" "$WORK/naps.iyi" > "$WORK/naps.log" 2>&1; then
+    if ! "$RIS" build -o "$WORK/naps.exe" "$WORK/naps.ri" > "$WORK/naps.log" 2>&1; then
       echo "  the sleep probe did not build"
       tail -5 "$WORK/naps.log"
       status=1
@@ -423,7 +423,7 @@ EOF
     # deadline comes next, which is the shape of the bug this would be.
     echo
     echo "== A completion under an armed deadline =="
-    cat > "$WORK/late.iyi" <<'EOF'
+    cat > "$WORK/late.ri" <<'EOF'
 module late
 
 import std/socket::{IyiSocket}
@@ -455,7 +455,7 @@ end
 
 server.close
 EOF
-    if ! "$IYI" build -o "$WORK/late.exe" "$WORK/late.iyi" > "$WORK/late.log" 2>&1; then
+    if ! "$RIS" build -o "$WORK/late.exe" "$WORK/late.ri" > "$WORK/late.log" 2>&1; then
       echo "  the completion probe did not build"
       tail -5 "$WORK/late.log"
       status=1
@@ -481,7 +481,7 @@ EOF
     # platform now: the process's own directory, and `GetTempPathW`.
     echo
     echo "== Without the variables a POSIX shell sets =="
-    cat > "$WORK/bare.iyi" <<'EOF'
+    cat > "$WORK/bare.ri" <<'EOF'
 module bare
 
 import std/dir::{Dir}
@@ -498,7 +498,7 @@ else
   File.delete(scratch)
 end
 EOF
-    if ! "$IYI" build -o "$WORK/bare.exe" "$WORK/bare.iyi" > "$WORK/bare.log" 2>&1; then
+    if ! "$RIS" build -o "$WORK/bare.exe" "$WORK/bare.ri" > "$WORK/bare.log" 2>&1; then
       echo "  the bare-environment probe did not build"
       tail -5 "$WORK/bare.log"
       status=1
@@ -526,7 +526,7 @@ EOF
     # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE now, so the kernel ends it.
     echo
     echo "== A killed runner takes its program with it =="
-    cat > "$WORK/holds.iyi" <<'EOF'
+    cat > "$WORK/holds.ri" <<'EOF'
 module holds
 
 import std/socket::{IyiSocket}
@@ -540,7 +540,7 @@ while slept < 600
 end
 server.close
 EOF
-    "$IYI" run "$WORK/holds.iyi" > "$WORK/holds.out" 2>&1 &
+    "$RIS" run "$WORK/holds.ri" > "$WORK/holds.out" 2>&1 &
     runner=$!
     held=""
     for _ in $(seq 1 90); do
@@ -575,8 +575,8 @@ EOF
     # serial port or a seventh printer port.
     echo
     echo "== A DOS device that is not there does not exist =="
-    printf 'module devices\n\nputs "COM9 " + File.exists?("COM9").to_s\nputs "LPT7 " + File.exists?("LPT7").to_s\nputs "NUL " + File.exists?("NUL").to_s\n' > "$WORK/devices.iyi"
-    if ! "$IYI" build -o "$WORK/devices.exe" "$WORK/devices.iyi" > "$WORK/devices.log" 2>&1; then
+    printf 'module devices\n\nputs "COM9 " + File.exists?("COM9").to_s\nputs "LPT7 " + File.exists?("LPT7").to_s\nputs "NUL " + File.exists?("NUL").to_s\n' > "$WORK/devices.ri"
+    if ! "$RIS" build -o "$WORK/devices.exe" "$WORK/devices.ri" > "$WORK/devices.log" 2>&1; then
       echo "  the device probe did not build"
       tail -5 "$WORK/devices.log"
       status=1
@@ -599,10 +599,10 @@ EOF
     # 2a'': a mapping larger than the limit, and arenas filled to it.
     echo
     echo "== The runtime's fatal sentences go to standard error =="
-    printf 'module bigmap\n\nputs "mapping"\nbig = Array(UInt8).new(400_000_000, 1_u8)\nputs big.size\n' > "$WORK/bigmap.iyi"
+    printf 'module bigmap\n\nputs "mapping"\nbig = Array(UInt8).new(400_000_000, 1_u8)\nputs big.size\n' > "$WORK/bigmap.ri"
     if [ -z "$JOBPY" ]; then
       echo "  no python to make a job with, so the streams are unmeasured"
-    elif ! "$IYI" build -o "$WORK/bigmap.exe" "$WORK/bigmap.iyi" > "$WORK/bigmap.log" 2>&1; then
+    elif ! "$RIS" build -o "$WORK/bigmap.exe" "$WORK/bigmap.ri" > "$WORK/bigmap.log" 2>&1; then
       echo "  the mapping probe did not build"
       tail -5 "$WORK/bigmap.log"
       status=1
@@ -633,18 +633,18 @@ prove_fails_host() {
   local dir="$2"
   local phrase="$3"
   local script="$4"
-  local file="${5:-prelude.iyi}"
+  local file="${5:-prelude.ri}"
 
-  mkdir -p "$WORK/$dir/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
-  awk "$script" "$REPO/src/iyi/$file" > "$WORK/$dir/iyi/$file"
-  if cmp -s "$REPO/src/iyi/$file" "$WORK/$dir/iyi/$file"; then
+  mkdir -p "$WORK/$dir/ris"
+  cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
+  awk "$script" "$REPO/src/ris/$file" > "$WORK/$dir/ris/$file"
+  if cmp -s "$REPO/src/ris/$file" "$WORK/$dir/ris/$file"; then
     echo "  $label: the patch changed nothing"
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/windows_exercise.iyi" \
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/windows_exercise.ri" \
        >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched prelude did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
@@ -662,7 +662,7 @@ prove_fails_host() {
   fi
   if grep -q "$phrase" "$WORK/$dir/out"; then
     printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" \
-      "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+      "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
     return
   fi
   # A break can also be too severe to narrate. Since the prelude allocates its
@@ -702,7 +702,7 @@ case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     prove_fails_host "a pooled stack's StackLimit" stalelimit "fibers: a stack back from the pool lost" \
       '{ sub(/Pointer\(UInt64\)\.new\(saved \+ 8_u64\)\.value = Pointer\(UInt64\)\.new\(top - 16_u64\)\.value/, "Pointer(UInt64).new(saved + 8_u64).value = top - INITIAL_COMMIT"); print }' \
-      concurrency.iyi ;;
+      concurrency.ri ;;
   *) echo "  a pooled stack's StackLimit: Windows' TEB and its __chkstk, proved there" ;;
 esac
 

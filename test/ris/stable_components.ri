@@ -26,5 +26,6 @@ def check_components
     padding << 1
   end
 end
+
 check_components
 puts "PASS: builder and tree stable before first growth"

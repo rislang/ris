@@ -16,6 +16,6 @@ raise "second field" unless values[1] == "b=2"
 cookies = Cookie.from_response(response)
 raise "cookies" unless cookies.size == 2 && cookies[0].name == "a"
 chunked = HTTP.parse_response("HTTP/1.1 200 OK\r\n" +
-  "Transfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n")
+                              "Transfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n")
 raise "body" unless chunked.body == "abc"
 raise "retained fields" unless response.header_values("Set-Cookie")[1] == "b=2"

@@ -27,15 +27,15 @@ AGENTS.md says measurement is off until later. Change AGENTS.md now to
 the baseline rule; defer only optimization work.
 M3. Bullet 2 (fast path for rounds that make something) has no perf
 number behind it; Goose 6.10's reason is C aliasing, not LLVM IR; "one
-store" skips __iyi_scope_reset's side check (tape.iyi:2387-2400).
+store" skips __iyi_scope_reset's side check (tape.ri:2387-2400).
 Make it conditional on perf after bullet 1, or drop it.
 
 ## Nit
 
-N1. iyi has the same FNV (../iyi/src/iyi/string.iyi:408-411): say
+N1. iyi has the same FNV (../iyi/src/ris/string.ri:408-411): say
 "list it in UPSTREAM.md" plainly.
 N2. Cite Goose's hash: doc/reference/goose/docs/stdlib.md, Hashing.
 The "multiply and rotate" detail is not in the snapshot.
 N3. Hash bullet is low-level but each detail maps to a gate; the
-low-bit spread is right (hash_tape.iyi:165-175 masks low bits).
+low-bit spread is right (hash_tape.ri:165-175 masks low bits).
 N4. Draft is already in TODO.md's working tree: commit after fixes.

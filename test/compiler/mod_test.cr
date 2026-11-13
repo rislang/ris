@@ -79,7 +79,7 @@ describe Iyi::Mod::Resolver do
 
     selections = Iyi::Mod::Resolver.resolve(root) do |path, ver|
       text = graph[{path, ver.to_s}]? || raise Iyi::Mod::ModError.new("unexpected fetch #{path} v#{ver}")
-      Iyi::Mod::ModFile.parse(text, "#{path}/iyi.mod")
+      Iyi::Mod::ModFile.parse(text, "#{path}/ris.mod")
     end
 
     selections.map(&.to_s).should eq ["dep/a v1.1.0", "dep/b v1.0.0"]
@@ -102,7 +102,7 @@ describe Iyi::Mod::Resolver do
 
     selections = Iyi::Mod::Resolver.resolve(root) do |path, ver|
       fetched << "#{path}@#{ver}"
-      Iyi::Mod::ModFile.parse(graph[{path, ver.to_s}], "#{path}/iyi.mod")
+      Iyi::Mod::ModFile.parse(graph[{path, ver.to_s}], "#{path}/ris.mod")
     end
 
     selections.map(&.to_s).should eq ["dep/a v1.2.0", "dep/b v1.0.0", "dep/c v1.0.0"]
@@ -113,7 +113,7 @@ describe Iyi::Mod::Resolver do
     root = manifest "module app/main\nrequire dep/a v1.0.0"
     expect_raises(Iyi::Mod::ModError, /identity is the path/) do
       Iyi::Mod::Resolver.resolve(root) do |path, ver|
-        Iyi::Mod::ModFile.parse("module dep/impostor", "#{path}/iyi.mod")
+        Iyi::Mod::ModFile.parse("module dep/impostor", "#{path}/ris.mod")
       end
     end
   end

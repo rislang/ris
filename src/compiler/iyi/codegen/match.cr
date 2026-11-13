@@ -24,7 +24,7 @@ class Iyi::CodeGenVisitor
   private def match_type_id_impl(type, restriction, type_id)
     # iyi: the restriction can be virtual while the value is not, which is a
     # shape a whole-program build never makes and a boundary does. A call to a
-    # method read from a `.iyimod` is keyed on the parameter *as declared* and
+    # method read from a `.rimod` is keyed on the parameter *as declared* and
     # the argument widened to it, so an `IO` parameter is matched against `IO+`
     # with a concrete `IO::FileDescriptor` in hand — and a single type id is
     # not what `IO+` is. It is a range, and the range is what answers.

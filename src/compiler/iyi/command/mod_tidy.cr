@@ -1,10 +1,10 @@
-# iyi: `iyi mod tidy` - `iyi.mod` and `iyi.sum` made to say what the
+# iyi: `iyi mod tidy` - `ris.mod` and `ris.sum` made to say what the
 # project's source asks for, and nothing else (iyi SPEC III.7).
 #
-# The source is every `.iyi` file under the manifest's directory - tests
+# The source is every `.ri` file under the manifest's directory - tests
 # included, since a test's imports are requirements too - except hidden
-# directories, `lib/` (Crystal shards behind boundaries, not iyi.mod's),
-# and any directory with an `iyi.mod` of its own, which is another module.
+# directories, `lib/` (Crystal shards behind boundaries, not ris.mod's),
+# and any directory with an `ris.mod` of its own, which is another module.
 #
 # Three changes, each a rule rather than a guess:
 #
@@ -18,7 +18,7 @@
 #   in at a lower version is the program raising it, and that is kept and
 #   said. Go spells that line `// indirect`; here it is decided by asking
 #   the resolver, so there is no second kind of line to keep in step.
-# - `iyi.sum` keeps an entry for each module that builds, and none for a
+# - `ris.sum` keeps an entry for each module that builds, and none for a
 #   version nothing builds.
 #
 # `--check` answers the same question and writes nothing: exit 1 when a
@@ -165,14 +165,14 @@ class Iyi::Command
     raise Mod::ModError.new("no module provides #{imported}: none of #{tried.join(", ")} is a repository")
   end
 
-  # The `.iyi` files that are this module's source.
+  # The `.ri` files that are this module's source.
   private def mod_tidy_sources(dir : String) : Array(String)
     found = [] of String
     Dir.each_child(dir) do |entry|
       full = File.join(dir, entry)
       # Asked of the entry, as `fix`'s walk asks it: `File.directory?`
       # follows a link, and a junction `src\loop` back to `src` was read
-      # until "src\loop\loop\...\x.iyi does not parse", exit 1.
+      # until "src\loop\loop\...\x.ri does not parse", exit 1.
       if File.info?(full, follow_symlinks: false).try(&.directory?)
         next if entry.starts_with?('.') || entry == "lib"
         next if Mod::Installer.manifest?(full)
@@ -194,7 +194,7 @@ class Iyi::Command
     nothing imports, unless the line raises a version another module pulls
     in, and no ris.sum entry for a version nothing builds.
 
-    The source is every .iyi file under this directory, tests included,
+    The source is every .ri file under this directory, tests included,
     except hidden directories, lib/, and directories with an ris.mod of
     their own. `--check` writes nothing and exits 1 when a change is due.
     USAGE

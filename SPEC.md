@@ -258,10 +258,10 @@ section; a removed one leaves its number unused.
   <!-- todo: Needs RIS_TAPE_STATS accounting and exit-path proofs -->
 * 6.7 `ris spec` links clauses to their proofs. Root clauses are
   `* N.M text` under `## N. Title` in SPEC.md or spec/*.md (both is an
-  error). The root is the nearest directory holding ris.mod or iyi.mod,
-  else the current one. Module clauses join this set: `# MODULE.N text`,
+  error). The root is the nearest directory holding ris.mod, else
+  the current one. Module clauses join this set: `# MODULE.N text`,
   continued by `#   text`, directly above their owning `spec MODULE.N`
-  block in ROOT/src. MODULE is the path without .ri or .iyi, dropping
+  block in ROOT/src. MODULE is the path without .ri, dropping
   a leading std/; each segment is `[a-z_][a-z0-9_]*`, joined by `/`.
   N is positive without leading zeros. The shared project walk excludes
   symlinks, lib/, mods/, dot directories and .ris-fixtures trees. Two
@@ -298,6 +298,15 @@ section; a removed one leaves its number unused.
   todo` lists them. `ris init` writes SPEC.md with one clause,
   CHANGELOG.md recording it, .spec.lock reviewing it and a spec
   block proving it at the end of the root module; no test/.
+* 6.10 A ris source file ends in `.ri`. A file ending in `.iyi`, in any
+  case, is refused before parsing wherever it is met: a verb's path
+  argument, the project walk (6.7), check's walk, doc, or an import only
+  it satisfies; the message names the rename to `.ri`. An `.iyimod`
+  artifact or its switch is refused: rebuild it as `.rimod`. `ris.mod`
+  is the one manifest name and `ris.sum` holds its pins; `iyi.mod` or
+  `iyi.sum` is refused, naming the rename. A set `IYI_X` variable is
+  not read: one stderr line "IYI_X is not read: set RIS_X", exit status
+  unchanged.
 
 ## 7. Types, memory and Ruby syntax (doc/TAPE_TYPES.md; Goose §1.2, §3.7)
 

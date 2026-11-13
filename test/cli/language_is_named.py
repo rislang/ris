@@ -4,12 +4,12 @@
     python3 test/cli/language_is_named.py
 
 Which language a source is written in is the one thing the lexer cannot
-read out of its text: `!` is not part of a name in a `.iyi` file (iyi SPEC
+read out of its text: `!` is not part of a name in a `.ri` file (iyi SPEC
 III.1.7) and is part of one in a `.cr` file, so the answer comes off the
 name. A `Parser` or `Lexer` built without one reads by the other
 language's rules, and that has been a defect four separate times:
 
-  * `iyi tool format -` read iyi source as Crystal, because stdin was
+  * `ris tool format -` read iyi source as Crystal, because stdin was
     named `STDIN`, which ends in neither extension;
   * the LSP's semantic-token scanner coloured every buffer by Crystal's
     rules, so `risky!` was one name and `end!` was not a keyword;

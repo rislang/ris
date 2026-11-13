@@ -65,7 +65,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -89,12 +89,12 @@ SERVER_PID=""
 trap '[ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null; rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_tls_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_tls_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -767,7 +767,7 @@ PY
     shift
     rm -rf "$WORK/$name" && mkdir -p "$WORK/$name/std"
     OLD="tls12 ? [4_u8, 3_u8, 4_u8, 3_u8, 3_u8]" NEW="tls12 ? [2_u8, 3_u8, 3_u8]" \
-      CHECK="${1:-}" "$PY" - "$REPO/src/std/tls.iyi" "$WORK/$name/std/tls.iyi" <<'PY'
+      CHECK="${1:-}" "$PY" - "$REPO/src/std/tls.ri" "$WORK/$name/std/tls.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 for old, new in [(os.environ["OLD"], os.environ["NEW"])] + ([(os.environ["CHECK"], "if false")] if os.environ["CHECK"] else []):
@@ -776,7 +776,7 @@ for old, new in [(os.environ["OLD"], os.environ["NEW"])] + ([(os.environ["CHECK"
     src = src.replace(old, new, 1)
 open(sys.argv[2], "w", encoding="utf-8").write(src)
 PY
-    IYI_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/$name/tlsx" "$REPO/test/cli/std_tls_exercise.iyi" >"$WORK/$name/build.log" 2>&1 ||
+    RIS_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/$name/tlsx" "$REPO/test/cli/std_tls_exercise.ri" >"$WORK/$name/build.log" 2>&1 ||
       { echo "build failed: $(grep -m1 Error "$WORK/$name/build.log")"; return; }
     local port pid
     port="$(free_port)"
@@ -2177,7 +2177,7 @@ echo "== an error value's sentence, through .or_panic"
 if [ "$scripted" = no ]; then
   echo "  no scripted server to refuse a handshake, so the sentence goes unshown"
 else
-  cat >"$WORK/refuse.iyi" <<'IYI'
+  cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/tls::{TlsClient, TlsConfig}
@@ -2188,8 +2188,8 @@ socket = IyiSocket.connect("127.0.0.1", ENV["TLS_PORT"].to_i)
 raise "no socket" unless socket.is_a?(IyiSocket)
 TlsClient.over(socket, "alert.tls.test").or_panic
 puts "accepted"
-IYI
-  if TLS_PORT="$(cat "$SERVER_DIR/port")" "$IYI" run "$WORK/refuse.iyi" >"$WORK/refuse.out" 2>&1; then
+RIS
+  if TLS_PORT="$(cat "$SERVER_DIR/port")" "$RIS" run "$WORK/refuse.ri" >"$WORK/refuse.out" 2>&1; then
     echo "  a server's handshake_failure was accepted"
     status=1
   elif ! grep -qF "tls: the server sent alert handshake_failure (40)" "$WORK/refuse.out"; then
@@ -2200,7 +2200,7 @@ IYI
   fi
   # A read of nothing would answer "", which is the peer's close: refused
   # as a mistake of the program's, by name.
-  cat >"$WORK/readzero.iyi" <<'IYI'
+  cat >"$WORK/readzero.ri" <<'RIS'
 module readzero
 
 import std/tls::{TlsClient, TlsConfig}
@@ -2216,8 +2216,8 @@ raise "no socket" unless socket.is_a?(IyiSocket)
 conn = TlsClient.over(socket, "ok.tls.test", config).or_panic
 conn.read(0)
 puts "read nothing"
-IYI
-  if TLS_DIR="$SERVER_DIR" "$IYI" run "$WORK/readzero.iyi" >"$WORK/readzero.out" 2>&1; then
+RIS
+  if TLS_DIR="$SERVER_DIR" "$RIS" run "$WORK/readzero.ri" >"$WORK/readzero.out" 2>&1; then
     echo "  a read of 0 bytes was taken"
     status=1
   elif ! grep -qF "a TLS read of 0 bytes: at least 1" "$WORK/readzero.out"; then
@@ -2230,13 +2230,13 @@ fi
 
 echo
 echo "== doc, format, other platforms and artifacts"
-if "$IYI" doc "$REPO/src/std/tls.iyi" >"$WORK/doc.txt" 2>&1 && grep -q "scheme_for" "$WORK/doc.txt"; then
+if "$RIS" doc "$REPO/src/std/tls.ri" >"$WORK/doc.txt" 2>&1 && grep -q "scheme_for" "$WORK/doc.txt"; then
   echo "  iyi doc reads std/tls, TlsIdentity's schemes included"
 else
   echo "  FAIL: iyi doc: $(grep -m1 -E 'Error|BUG' "$WORK/doc.txt")"
   status=1
 fi
-if "$IYI" check format "$REPO/src/std/tls.iyi" "$REPO/test/cli/std_tls_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$RIS" check format "$REPO/src/std/tls.ri" "$REPO/test/cli/std_tls_exercise.ri" >"$WORK/format.log" 2>&1; then
   echo "  the module and its exercise are formatted"
 else
   echo "  FAIL: not formatted: $(grep -m1 produced "$WORK/format.log")"
@@ -2244,7 +2244,7 @@ else
 fi
 apart=""
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_tls_exercise.iyi" >"$WORK/cross.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_tls_exercise.ri" >"$WORK/cross.log" 2>&1; then
     echo "  $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross.log")"
     apart="$apart $target"
   fi
@@ -2256,8 +2256,8 @@ else
   echo "  the exercise typechecks for x86_64-linux-gnu, aarch64-darwin, x86_64-windows-msvc, aarch64-linux-gnu, x86_64-linux-musl"
 fi
 mkdir -p "$WORK/r1"
-if (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_tls_exercise.iyi" &&
-  "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_tls_exercise.iyi") >"$WORK/r1/build.log" 2>&1; then
+if (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_tls_exercise.ri" &&
+  "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_tls_exercise.ri") >"$WORK/r1/build.log" 2>&1; then
   "$WORK/r1/from-source" >"$WORK/r1/source.out" 2>&1
   "$WORK/r1/from-artifact" >"$WORK/r1/artifact.out" 2>&1
   if cmp -s "$WORK/r1/source.out" "$WORK/r1/artifact.out" && grep -q "ALL CHECKS PASSED" "$WORK/r1/artifact.out"; then
@@ -2348,7 +2348,7 @@ mutation_failed() { # the same, and the gate does not hold
 prove_copy() {
   local n="$1" W="$2" label="$3" phrase="$4" mode="${7:-trace}" rc
   CW="$W"
-  export IYI_CACHE_DIR="$W/cache"
+  export RIS_CACHE_DIR="$W/cache"
   # A copy judged by one line of a round is asked that line alone, wherever
   # the round would have asked it; the others prove nothing about the
   # copy. A copy of the server judged by one scenario of the scripted
@@ -2370,8 +2370,8 @@ prove_copy() {
       ;;
     client12:"FAIL "*) export TLS12_ONLY="$only" ;;
   esac
-  if ! IYI_PATH="$W/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$W/tlsx" \
-       "$REPO/test/cli/std_tls_exercise.iyi" >"$W/build.log" 2>&1; then
+  if ! RIS_PATH="$W/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$W/tlsx" \
+       "$REPO/test/cli/std_tls_exercise.ri" >"$W/build.log" 2>&1; then
     mutation_failed "$n" "  the $label copy did not build:" "$(tail -3 "$W/build.log" | sed 's/^/    /')"
     return
   fi
@@ -2489,10 +2489,10 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/tls.iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/tls.ri").read_text(encoding="utf-8")
 if src.count(os.environ["OLD"]) != 1:
     raise SystemExit("patch site missing or not one")
-Path("$W/patched/std/tls.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
+Path("$W/patched/std/tls.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
 PY
   then
     mutation_failed "$n" "  the $1 patch did not apply"

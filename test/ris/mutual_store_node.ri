@@ -32,5 +32,6 @@ class P
     pipe(d)
   end
 end
+
 p = P.new
 puts p.pipe(0)

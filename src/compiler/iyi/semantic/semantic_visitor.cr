@@ -47,7 +47,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     filename = node.string
     relative_to = location.try &.original_filename
 
-    # iyi: `require "json"` in a `.iyi` file used to load Crystal's standard
+    # iyi: `require "json"` in a `.ri` file used to load Crystal's standard
     # library and fail somewhere inside it, on a syntax this parser does not
     # have — a syntax error in a file the author never opened, about a library
     # that is not part of this language. A relative require is left alone: it
@@ -57,10 +57,10 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       # `require "json"` was told to write `import json`, which reaches
       # Crystal's `src/json.cr` and fails inside it; iyi's own is std's.
       if iyi_std_module?("std/#{filename}")
-        node.raise "iyi has no `require`: iyi's own `#{filename}` is a module of its " \
+        node.raise "ris has no `require`: ris's own `#{filename}` is a module of its " \
                    "standard library, reached with `import std/#{filename}` (iyi SPEC R-1)."
       end
-      node.raise "iyi has no `require`. A module is reached with " \
+      node.raise "ris has no `require`. A module is reached with " \
                  "`import #{filename}`, and it is a path to a file rather than " \
                  "a library name (iyi SPEC R-1). There is no standard library " \
                  "to require: the prelude is what a program gets, and README.md " \
@@ -169,7 +169,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # asked first — longest prefix first, so `/v2` is a different module —
     # and a hit resolves inside that requirement's checkout. A dotted path
     # that no requirement covers is refused as what it is, because "can't
-    # find `github.com/user/lib.iyi`" would be technically true and useless.
+    # find `github.com/user/lib.ri`" would be technically true and useless.
     package = resolve_package(path)
     if package.nil? && path.includes?('.')
       # The repository is a prefix of the path, and which one only the
@@ -186,13 +186,13 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       end
       node.raise "no requirement covers '#{path}'. A dotted path is a " \
                  "package (iyi SPEC III.7); the file that declares one is " \
-                 "`iyi.mod`, at the root the entry's `module` header names or beside " \
+                 "`ris.mod`, at the root the entry's `module` header names or beside " \
                  "the entry, as `require #{repositories.first} v1.2.3`#{inside}" \
                  "#{iyi_header_root_hint}"
     end
 
     # iyi: the artifact, if there is one (iyi SPEC IV.1). This is R-1's contract
-    # arriving: a module that has a `.iyimod` is compiled against it, and its
+    # arriving: a module that has a `.rimod` is compiled against it, and its
     # source is not opened — not read, not parsed, not analysed. The source
     # need not even be there.
     # Source first for the language server, artifact first for everything
@@ -223,7 +223,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       # iyi: say where it looked. A module's path *is* its file's path (IV.6),
       # and somebody meeting that rule for the first time is owed the mapping
       # rather than left to infer it from a name in quotes. And the nearest
-      # file that is there: `import calc/ad` beside `calc/add.iyi` is a typo,
+      # file that is there: `import calc/ad` beside `calc/add.ri` is a typo,
       # and the sentence about the rule read as if the rule were the problem.
       hint = ""
       if iyi_std_module?("std/#{path}")
@@ -234,19 +234,19 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         hint = "\nDid you mean `#{similar}`?"
       end
       node.raise "can't find module '#{path}'. A module's path is its file's " \
-                 "path, so this one is `#{path}.ri` (or `.iyi`), resolved from the " \
-                 "directory of the file being built and then from `IYI_PATH`#{hint}" \
+                 "path, so this one is `#{path}.ri`, resolved from the " \
+                 "directory of the file being built and then from `RIS_PATH`#{hint}" \
                  "#{iyi_header_root_hint}"
     end
 
     # iyi: `import json` under iyi's own prelude found Crystal's
-    # `src/json.cr` on `IYI_PATH`, beside the prelude, and the build died
+    # `src/json.cr` on `RIS_PATH`, beside the prelude, and the build died
     # inside it - "undefined constant Deque" at src/json/from_json.cr:61,
     # then a hint to import `std/deque`, which mended nothing. That library
     # is written against the other prelude (the converse is refused below),
     # so it is refused at the line that reached it.
     if artifact_path.nil? && package.nil? && @program.iyi_prelude? && iyi_host_library_source?(path, filename)
-      own = iyi_std_module?("std/#{path}") ? "; iyi's own is `import std/#{path}`" : ""
+      own = iyi_std_module?("std/#{path}") ? "; ris's own is `import std/#{path}`" : ""
       node.raise "`#{path}` here is Crystal's library (#{filename}), which builds " \
                  "is unavailable to ris programs#{own}; use a ris module"
     end
@@ -268,7 +268,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     check_import_cycle(node, filename)
 
     # Only a module read from source: `iyi_module_paths` is the list
-    # `--emit-iyimod` writes from, and a module that arrived as an artifact
+    # `--emit-rimod` writes from, and a module that arrived as an artifact
     # already has one.
     #
     # The way back from a filename to a module path is still needed for both
@@ -348,7 +348,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   # standard library, which is nobody's module: a package's `import
   # std/file` answered "has no module 'std/file'", so a package could not
   # use the library it was written against. Answered nil here, it
-  # resolves the way a program's does, on `IYI_PATH` alone
+  # resolves the way a program's does, on `RIS_PATH` alone
   # (`resolve_import`). Importing a package's bare prefix means its root
   # module, the file named after the last segment.
   private def resolve_package(path : String) : {String, String, String, String}?
@@ -359,7 +359,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       end
       return nil if iyi_std_module?(path)
       raise_at_import "package '#{prefix}' has no module '#{path}': " \
-                      "neither `#{path}.ri` nor `#{path}.iyi` is in its " \
+                      "`#{path}.ri` is not in its " \
                       "checkout at #{checkout}"
     end
 
@@ -367,7 +367,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       inner =
         if path == prefix
           # The package's own name, which a `/vN` suffix is not: the root
-          # module of `example.com/lib/v2` is `lib.iyi`, as Go names it.
+          # module of `example.com/lib/v2` is `lib.ri`, as Go names it.
           Mod::ModFile.split_major(prefix)[0].rpartition('/')[2]
         elsif path.starts_with?("#{prefix}/")
           path[(prefix.size + 1)..]
@@ -378,18 +378,20 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         return {candidate, prefix, inner, checkout}
       end
       raise_at_import "requirement '#{prefix}' has no module '#{inner}': " \
-                      "neither `#{inner}.ri` nor `#{inner}.iyi` is in its " \
+                      "`#{inner}.ri` is not in its " \
                       "checkout at #{checkout}"
     end
     nil
   end
 
-  # ris: a package's module *inner* in *checkout*, its `.ri` file before
-  # its `.iyi` one, as `resolve_import` asks a program's roots.
+  # ris: a package's module *inner* in *checkout*, as `resolve_import`
+  # asks a program's roots; a `.iyi` file there is refused.
   private def package_module_file(checkout : String, inner : String) : String?
     {".ri", ".iyi"}.each do |ext|
       candidate = File.join(checkout, "#{inner}#{ext}")
-      return candidate if File.file?(candidate)
+      next unless File.file?(candidate)
+      raise_at_import Lexer.iyi_miscased_sentence(candidate) if ext == ".iyi"
+      return candidate
     end
     nil
   end
@@ -423,7 +425,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     return written if expanded == written
     if @iyi_package_stack.empty? && (local = resolve_import(written))
       name = written.partition('/')[0]
-      # ris: the manifest the short name is in, `ris.mod` or an `iyi.mod`.
+      # ris: the manifest the short name is in, `ris.mod` or an `ris.mod`.
       root = File.dirname(local)
       written.count('/').times { root = File.dirname(root) }
       manifest = File.basename(Mod::Installer.manifest_in(root))
@@ -449,12 +451,12 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   # The project root is the directory of the entry file until iyi has a
   # manifest to declare one.
   #
-  # `.iyi` wins over `.cr` so an iyi module can shadow a Crystal file of the
+  # `.ri` wins over `.cr` so an iyi module can shadow a Crystal file of the
   # same name during the transition.
   private def resolve_import(path : String) : String?
     candidates = [] of String
 
-    # Inside a package only `IYI_PATH` is asked: what reaches here from
+    # Inside a package only `RIS_PATH` is asked: what reaches here from
     # there is iyi's standard library (`resolve_package`), and a module of
     # the same name in the consuming project is not it.
     inside_package = !@iyi_package_stack.empty?
@@ -462,8 +464,8 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # Each in the platform's spelling (`Iyi.native_path`): the module path's
     # `/` went into the file name as it was, and on Windows every place an
     # imported file is named - a diagnostic, `check -f json`, `fix --json`
-    # - named `C:\proj\app/deep/util.iyi`, which a tool matching paths
-    # does not match to `C:\proj\app\deep\util.iyi`.
+    # - named `C:\proj\app/deep/util.ri`, which a tool matching paths
+    # does not match to `C:\proj\app\deep\util.ri`.
     if !inside_package && (root = project_root)
       candidates << Iyi.native_path(File.join(root, "#{path}.ri"))
       candidates << Iyi.native_path(File.join(root, "#{path}.iyi"))
@@ -471,7 +473,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     end
 
     # Then the root the entry's own header names, if its path ends with it
-    # (IV.6 read backwards): that is how `iyi check app/greeter.iyi` —
+    # (IV.6 read backwards): that is how `iyi check app/greeter.ri` —
     # or a migrated module built on its own — resolves `import app/formal`
     # the way a build from the project root would. After the entry's
     # directory, never instead of it.
@@ -487,9 +489,15 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       candidates << Iyi.native_path(File.join(entry, "#{path}.cr"))
     end
 
-    candidates.find do |candidate|
+    found = candidates.find do |candidate|
       !@program.iyi_file_override(candidate).nil? || File.file?(candidate)
     end
+    # ris: an import that only a `.iyi` file satisfies is refused and
+    # names the file (SPEC 6.10); an `X.ri` beside it is found first.
+    if found && Lexer.iyi_named?(found)
+      raise_at_import Lexer.iyi_miscased_sentence(found)
+    end
+    found
   end
 
   # ris: why a project's own `ris.mod` went unread. The entry's header
@@ -503,7 +511,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     entry_dir = File.dirname(entry)
     return "" if File.expand_path(entry_dir) == File.expand_path(header_root)
     return "" unless Mod::Installer.manifest?(entry_dir)
-    name = File.basename(entry).rchop(".ri").rchop(".iyi")
+    name = File.basename(entry).rchop(".ri")
     "\nThe entry's `module` header names #{header_root} as the project root, " \
     "and the build reads the manifest there, not the one beside the entry in " \
     "#{entry_dir}. To build from that one, write `module #{name}`"
@@ -513,30 +521,30 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   # file under a `std/` directory that sits beside the prelude those
   # modules are written against. Asked of the resolved path rather than of
   # the written one, because `std/json` is only iyi's when that is where
-  # it came from: a project with its own `std/` directory on `IYI_PATH`
+  # it came from: a project with its own `std/` directory on `RIS_PATH`
   # names its own modules and gets no sentence about preludes.
   private def iyi_std_source?(filename : String) : Bool
     posix = ::Path[filename].to_posix.to_s
     return false unless index = posix.rindex("/std/")
-    File.file?(File.join(posix[0, index], "iyi", "prelude.iyi"))
+    File.file?(File.join(posix[0, index], "ris", "prelude.ri"))
   end
 
   # iyi: whether *filename*, which *path* resolved to, is a `.cr` file of
-  # Crystal's library: one on an `IYI_PATH` entry that also holds iyi's
+  # Crystal's library: one on an `RIS_PATH` entry that also holds iyi's
   # prelude, which is where the two libraries ship side by side.
   private def iyi_host_library_source?(path : String, filename : String) : Bool
     return false unless filename.ends_with?(".cr")
     @program.iyi_path.entries.any? do |entry|
       Iyi.native_path(File.join(entry, "#{path}.cr")) == filename &&
-        File.file?(File.join(entry, "iyi", "prelude.iyi"))
+        File.file?(File.join(entry, "ris", "prelude.ri"))
     end
   end
 
   # iyi: whether *path* names a module of iyi's own standard library on
-  # `IYI_PATH` - `iyi_std_source?` asked of where it would resolve.
+  # `RIS_PATH` - `iyi_std_source?` asked of where it would resolve.
   private def iyi_std_module?(path : String) : Bool
     @program.iyi_path.entries.any? do |entry|
-      candidate = File.join(entry, "#{path}.iyi")
+      candidate = File.join(entry, "#{path}.ri")
       File.file?(candidate) && iyi_std_source?(candidate)
     end
   end
@@ -544,7 +552,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   # The module paths that exist in the directory a missing import named,
   # under the same roots `resolve_import` tries: what `Did you mean` is
   # chosen from. `calc/ad` looks in every root's `calc/` and answers
-  # `calc/add` for `calc/add.iyi`.
+  # `calc/add` for `calc/add.ri`.
   private def import_siblings(path : String) : Array(String)
     roots = [] of String
     if root = project_root
@@ -559,8 +567,8 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     prefix = dir == "." ? "" : "#{dir}/"
     siblings = [] of String
     roots.each do |root|
-      Dir.glob(Iyi.glob_root(root).join(dir, "*.iyi")) do |file|
-        siblings << prefix + File.basename(file, ".iyi")
+      Dir.glob(Iyi.glob_root(root).join(dir, "*.ri")) do |file|
+        siblings << prefix + File.basename(file, ".ri")
       end
     end
     siblings.uniq!
@@ -634,7 +642,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   # "x.cr\n" used to become "x\n", not "x"; kept that.
   private def strip_source_suffix(name : String) : String
     length = name.size - (name.ends_with?('\n') ? 1 : 0)
-    suffix_size = 4 if length >= 4 && name[length - 4, 4] == ".iyi"
+    suffix_size = 3 if length >= 3 && name[length - 3, 3] == ".ri"
     suffix_size ||= 3 if length >= 3 && name[length - 3, 3] == ".cr"
     suffix_size ? name[0, length - suffix_size] + name[length..] : name
   end
@@ -650,7 +658,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   # It compiled, which is why it lasted. The importing file finds the nested
   # module under the same name it would have found the real one under, so the
   # only visible effect was on anyone looking from outside — and the first to
-  # look was `--emit-iyimod`, which wrote `boot/registry.iyimod` with no
+  # look was `--emit-rimod`, which wrote `boot/registry.rimod` with no
   # exports at all, because there was no `Boot::Registry` at the top level to
   # read them off. III.5 had already made a module's initialiser independent of
   # where its `import` is written; this is its namespace catching up.
@@ -664,16 +672,22 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     end
   end
 
-  # iyi: where `import a/b` would find `a/b.iyimod` (iyi SPEC IV.1).
+  # iyi: where `import a/b` would find `a/b.rimod` (iyi SPEC IV.1).
   #
-  # Nowhere at all unless `--use-iyimod` named a directory, so an ordinary
+  # Nowhere at all unless `--use-rimod` named a directory, so an ordinary
   # build is the one that was there before this existed.
   private def iyi_artifact_path(node : ImportDecl, path : String) : String?
     dir = @program.iyi_module_dir
     return unless dir
 
-    candidate = Iyi.native_path(File.join(dir, "#{path}.iyimod"))
-    return unless File.file?(candidate)
+    candidate = Iyi.native_path(File.join(dir, "#{path}.rimod"))
+    unless File.file?(candidate)
+      # ris: an `.iyimod` where the `.rimod` would be was written by an
+      # older compiler; it is refused, not read (DRAFT ri-extension 7.2).
+      old = Iyi.native_path(File.join(dir, "#{path}.iyimod"))
+      node.raise Lexer.iyi_miscased_sentence(old) if File.file?(old)
+      return
+    end
 
     reason = iyi_artifact_stale(path, dir)
     return candidate unless reason
@@ -688,23 +702,23 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # X any more", which reads as staleness — and a truncated file is not
     # stale, it is broken, and the two want different things done about them.
     #
-    # And the remedy names the verb that wrote the file. `--emit-iyimod` has
+    # And the remedy names the verb that wrote the file. `--emit-rimod` has
     # nothing to do with a boundary: a reader told to rebuild with a switch
     # that does not write this artifact has been given a sentence it cannot
     # act on. Read defensively, because a damaged artifact is one of the
     # reasons to be here and its summary will not read twice.
     # iyi: both halves of the usual remedy compile the module from its source,
-    # and with the source gone neither can. Told to pass --emit-iyimod, a
+    # and with the source gone neither can. Told to pass --emit-rimod, a
     # build that had passed it was being handed the sentence it had already
     # acted on.
     remedy =
       if source.nil?
         "\"#{path}\" has no source here to compile in its place, so " \
-        "--emit-iyimod cannot rewrite it: put its source back, or rebuild " \
+        "--emit-rimod cannot rewrite it: put its source back, or rebuild " \
         "the artifact where its source is, with the artifacts it imports " \
         "beside it."
       else
-        "Rebuild it with --emit-iyimod, or pass --emit-iyimod to this build " \
+        "Rebuild it with --emit-rimod, or pass --emit-rimod to this build " \
         "and let it rewrite what has moved."
       end
 
@@ -744,7 +758,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   end
 
   private def iyi_compute_artifact_stale(module_path : String, dir : String) : String?
-    candidate = Iyi.native_path(File.join(dir, "#{module_path}.iyimod"))
+    candidate = Iyi.native_path(File.join(dir, "#{module_path}.rimod"))
     return "there is no artifact for it" unless File.file?(candidate)
 
     summary =
@@ -757,12 +771,12 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # iyi: the file is not this module's artifact at all (iyi SPEC IV.6). A
     # module's path is its file's path, so the name in the header and the path
     # the file was found at are the same fact written twice, and this reader
-    # had never compared them. Copy `m1/b.iyimod` onto `m1/a.iyimod` and the
+    # had never compared them. Copy `m1/b.rimod` onto `m1/a.rimod` and the
     # import took it: `m1/b`'s declarations were spliced in under `m1/b`, and
     # `m1/a`, asked for and found and read and checksummed, stayed undefined.
     # The first `using m1/a` (the keyword `import X::{...}` replaced) then
     # reported "can't find module 'm1/a'", which sends the reader off to
-    # write `m1/a.iyi`: the one action that cannot help, because the file
+    # write `m1/a.ri`: the one action that cannot help, because the file
     # was there and the compiler had already read it.
     #
     # Asked above the hashes, because identity does not need them. An artifact
@@ -798,10 +812,10 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     # taken above.
     if summary.inputs.empty? && (source = resolve_import(module_path))
       # iyi: a module path is a file path (iyi SPEC R-1), so the same name can
-      # come to mean a different file — delete a program's own `std/text.iyi`
+      # come to mean a different file — delete a program's own `std/text.ri`
       # and `import std/text` reaches the library's module of that path. The
       # artifact is then not stale, it is about a file nobody asked for, and
-      # "src/std/text.iyi has changed since it was written" named a library
+      # "src/std/text.ri has changed since it was written" named a library
       # file the author has never edited. Said as what happened: the name
       # moved.
       written = summary.source_path
@@ -822,7 +836,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       end
 
       # The names it was written under. A module of the program's own
-      # package lives under the package's name, which is iyi.mod's to say,
+      # package lives under the package's name, which is ris.mod's to say,
       # and a manifest that names another package - or one written beside
       # a module that had none - renames every type the artifact declares
       # without touching the file the hash above is of.
@@ -839,7 +853,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         return "\"#{edge.module_name}\", which it imports, has: #{reason}"
       end
 
-      dependency = IyiMod.read_summary(Iyi.native_path(File.join(dir, "#{edge.module_name}.iyimod")))
+      dependency = IyiMod.read_summary(Iyi.native_path(File.join(dir, "#{edge.module_name}.rimod")))
       next if edge.interface.empty? && edge.implementation.empty?
 
       unless dependency.hashes.interface == edge.interface
@@ -853,7 +867,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     nil
   end
 
-  # iyi: compiles an imported module from its `.iyimod` (iyi SPEC IV.1).
+  # iyi: compiles an imported module from its `.rimod` (iyi SPEC IV.1).
   #
   # The artifact is read, rendered back to the declarations it was built from,
   # and those are parsed and analysed in place of the module's source. What
@@ -874,15 +888,15 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       rescue ex : Iyi::Error
         raise ex
       rescue ex
-        # iyi: a `.iyimod` is the one input here that nobody typed, and the
+        # iyi: a `.rimod` is the one input here that nobody typed, and the
         # reader assumed it was one it had written. Truncate one and it left an
         # `IO::EOFError` and a stack trace; flip a byte inside a name and a
         # regex complained about UTF-8. Neither names the file, and both read
         # as a compiler bug rather than as a damaged file.
-        node.raise "#{artifact_path} is not a readable .iyimod: #{ex.message} " \
+        node.raise "#{artifact_path} is not a readable .rimod: #{ex.message} " \
                    "(#{ex.class}). It is damaged, truncated, or was written by " \
                    "something that is not this compiler. Rebuild it with " \
-                   "`--emit-iyimod`"
+                   "`--emit-rimod`"
       end
 
     check_artifact_matches node, artifact, artifact_path
@@ -895,7 +909,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     if artifact.has_initialiser && @program.iyi_wants_object_code
       node.raise <<-MESSAGE
         "#{artifact.module_name}" has code inside a type body that has to run,
-        and a .iyimod carries a module's own top level and no more (iyi SPEC
+        and a .rimod carries a module's own top level and no more (iyi SPEC
         III.5, IV.1g).
 
         A program built against this artifact would link and run with that part
@@ -905,8 +919,8 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     end
 
     # iyi: an artifact from a build that generated no code (iyi SPEC IV.1g),
-    # where this build links. `build --no-codegen --emit-iyimod` writes the
-    # declarations and nothing to link, and `iyi run --use-iyimod mods` on
+    # where this build links. `build --no-codegen --emit-rimod` writes the
+    # declarations and nothing to link, and `iyi run --use-rimod mods` on
     # one ended in 19 `LNK2019: unresolved external symbol` lines and
     # `LNK1120`, exit 1120, naming the artifact nowhere.
     if artifact.declarations_only && @program.iyi_wants_object_code
@@ -928,7 +942,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     parser = @program.new_parser(source)
     parser.filename = artifact_path
     # In the language of the module they came from, which the artifact's
-    # name does not say: `.iyimod` is no extension the lexer knows, so an
+    # name does not say: `.rimod` is no extension the lexer knows, so an
     # iyi module's declarations were read by the other language's rules,
     # and a `pub macro` whose body writes an `impl` - `std/json`'s
     # `serializable` - ended at that impl's `end`.
@@ -999,9 +1013,9 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
 
       iyi_at_top_level { parsed_nodes.accept self }
     rescue ex : CodeError
-      node.raise "while importing \"#{node.path.join('/')}\" from its .iyimod", ex
+      node.raise "while importing \"#{node.path.join('/')}\" from its .rimod", ex
     rescue ex
-      raise Error.new "while importing \"#{node.path.join('/')}\" from its .iyimod", ex
+      raise Error.new "while importing \"#{node.path.join('/')}\" from its .rimod", ex
     ensure
       @iyi_importing.pop
     end
@@ -1196,7 +1210,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   #
   # Done here, from the artifact's own list of exported types, rather than by
   # threading a flag through the type-creation path: this is the one place that
-  # knows both which module was read from a `.iyimod` and which names it
+  # knows both which module was read from a `.rimod` and which names it
   # exported, and it is a walk over a handful of names rather than a check on
   # every type a build makes.
   private def mark_iyi_artifact_types(artifact : IyiMod::Artifact) : Nil
@@ -1240,17 +1254,17 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
                                      artifact_path : String) : Nil
     expected = IyiMod.compiler_version
     unless artifact.compiler_version == expected
-      node.raise "#{artifact_path} was written by iyi #{artifact.compiler_version}, this is #{expected}. Artifacts are read by the release that wrote them: same version, same target, same flags. A .iyimod is rejected and rebuilt, never migrated (iyi SPEC IV.5) — rebuild it with --emit-iyimod"
+      node.raise "#{artifact_path} was written by iyi #{artifact.compiler_version}, this is #{expected}. Artifacts are read by the release that wrote them: same version, same target, same flags. A .rimod is rejected and rebuilt, never migrated (iyi SPEC IV.5) — rebuild it with --emit-rimod"
     end
 
     target = @program.codegen_target.to_s
     unless artifact.target_triple == target
-      node.raise "#{artifact_path} was built for #{artifact.target_triple}, this build targets #{target} — rebuild it with --emit-iyimod"
+      node.raise "#{artifact_path} was built for #{artifact.target_triple}, this build targets #{target} — rebuild it with --emit-rimod"
     end
 
     flags = @program.flags.to_a.sort!
     unless artifact.flags == flags
-      node.raise "#{artifact_path} was built with flags #{artifact.flags.join(", ")}, this build has #{flags.join(", ")}. Macros branch on flags, so an artifact built under one set cannot be adopted by a build under another — rebuild it with --emit-iyimod"
+      node.raise "#{artifact_path} was built with flags #{artifact.flags.join(", ")}, this build has #{flags.join(", ")}. Macros branch on flags, so an artifact built under one set cannot be adopted by a build under another — rebuild it with --emit-rimod"
     end
   end
 
@@ -1299,7 +1313,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
       # `Unexpected byte 0xff at position 39`, with no file or line, and as
       # text under `-f json` (`Command#json_report`). A module imported from
       # here answers at its own `import` line, so the byte is in this file.
-      node.raise "file '#{Iyi.relative_filename(filename)}' is not a valid iyi source file: #{ex.message}"
+      node.raise "file '#{Iyi.relative_filename(filename)}' is not a valid ris source file: #{ex.message}"
     rescue ex : CodeError
       node.raise "while importing \"#{node.path.join('/')}\"", ex
     rescue ex
@@ -1325,7 +1339,7 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
   # declaration counts as an initialiser. Answering "no" wrongly gives a build
   # that links and silently omits the module's setup, which is the worst
   # outcome available here; answering "yes" wrongly gives a refusal that says
-  # why. A `.iyimod` carries declarations only, so this is what a codegen build
+  # why. A `.rimod` carries declarations only, so this is what a codegen build
   # reading one has to be told (iyi SPEC IV.1g).
   # A type's body is walked rather than taken as a declaration, and that is
   # where the first version of this was wrong. `Parser#apply_module_header`
@@ -2127,9 +2141,9 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         ann.raise "TaskClosureUnsafe needs a reason naming the joined owner"
       end
       filename = ann.location.try(&.expanded_location).try(&.filename).to_s
-      # A .iyimod artifact of std or the runtime was checked when emitted.
-      artifact = filename.ends_with?(".iyimod") &&
-                 (filename.includes?("/std/") || filename.includes?("/iyi/"))
+      # A .rimod artifact of std or the runtime was checked when emitted.
+      artifact = filename.ends_with?(".rimod") &&
+                 (filename.includes?("/std/") || filename.includes?("/ris/"))
       unless TapeScopeRuntime.library_file?(filename) || artifact
         ann.raise "TaskClosureUnsafe is runtime-only; keep the ordinary closure"
       end
@@ -2187,7 +2201,8 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
 
     if scope.is_a?(Program)
       ris = program.tape_platform? &&
-            node.location.try(&.original_filename).try(&.ends_with?(".ri"))
+            node.location.try(&.original_filename).try(&.ends_with?(".ri")) &&
+            !TapePointerCheckerLibrary.library?(node.location)
       node.raise "can't use class variables at the top level" unless ris
     end
 

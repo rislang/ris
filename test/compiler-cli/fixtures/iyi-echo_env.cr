@@ -1,3 +1,3 @@
-puts "IYI_EXEC_PATH=#{ENV["IYI_EXEC_PATH"]?}"
+puts "RIS_EXEC_PATH=#{ENV["RIS_EXEC_PATH"]?}"
 puts "PROGRAM_NAME=#{PROGRAM_NAME}"
 puts "ARGV=#{ARGV}"

@@ -5,7 +5,7 @@ Developer & Agentic Experience, Portability, Performance, and Efficiency.
 (*iyi* is Turkish for "good".)
 
 The extension is the whole client: a manifest and thirty lines that spawn
-`iyi lsp` and hand it your `.iyi` files. Everything you see comes over the
+`iyi lsp` and hand it your `.ri` files. Everything you see comes over the
 protocol from the compiler itself, so the editor is never looking at a second,
 approximate model of your code.
 
@@ -53,7 +53,7 @@ If the binary lives somewhere the shell does not look, name it in
 **`spawn iyi ENOENT`**, nothing highlights, nothing completes: the editor
 could not find the binary. The extension looks on the `PATH` it was given
 and then where the installers put it — `%LOCALAPPDATA%\Programs\iyi\bin` on
-Windows, `~/.local/bin`, `/usr/local/bin`, `/usr/bin`, and `$IYI_PREFIX/bin`
+Windows, `~/.local/bin`, `/usr/local/bin`, `/usr/bin`, and `$RIS_PREFIX/bin`
 elsewhere — so this means iyi is not installed, or it is somewhere else.
 
 If you installed it while this window was open, reopen the window: a running

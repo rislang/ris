@@ -3,4 +3,5 @@ class Box
     @counts = Hash.new(0)
   end
 end
+
 Box.new

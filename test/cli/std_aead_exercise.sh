@@ -24,7 +24,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -42,12 +42,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_aead_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_aead_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -104,7 +104,7 @@ todo="std/aead"
 while [ -n "$todo" ]; do
   next=""
   for module in $todo; do
-    for imported in $(sed -n 's/^import \(std\/[a-z_]*\).*/\1/p' "$REPO/src/$module.iyi"); do
+    for imported in $(sed -n 's/^import \(std\/[a-z_]*\).*/\1/p' "$REPO/src/$module.ri"); do
       case " $reached " in
         *" $imported "*) ;;
         *) reached="$reached $imported"; next="$next $imported" ;;
@@ -115,7 +115,7 @@ while [ -n "$todo" ]; do
 done
 bound=""
 for module in $reached; do
-  if grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)|__iyi_' "$REPO/src/$module.iyi" \
+  if grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)|__iyi_' "$REPO/src/$module.ri" \
       | grep -qvE 'llvm\.(ctpop|ctlz|cttz)\.'; then
     bound="$bound $module"
   fi
@@ -145,7 +145,7 @@ echo "== against python's cryptography"
 if [ -z "$PY" ] || ! "$PY" -c 'from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305; from cryptography.hazmat.primitives.poly1305 import Poly1305' >/dev/null 2>&1; then
   echo "  python's cryptography package is not installed here, so std/aead goes uncompared with it"
 else
-  cat >"$WORK/oracle.iyi" <<'IYI'
+  cat >"$WORK/oracle.ri" <<'RIS'
 module oracle
 
 import std/int
@@ -226,7 +226,7 @@ while line = STDIN.read_line(chomp: true)
     puts "#{x(cipher.encrypt_block(b(f[2])))} #{x(cipher.decrypt_block(b(f[2])))}"
   end
 end
-IYI
+RIS
   if ! "$PY" - "$WORK" <<'PY'
 import os, random, sys
 from cryptography.exceptions import InvalidTag
@@ -325,7 +325,7 @@ PY
   then
     echo "  the cases were not written"
     status=1
-  elif ! "$IYI" build --release -o "$WORK/oracle" "$WORK/oracle.iyi" >"$WORK/oracle.log" 2>&1; then
+  elif ! "$RIS" build --release -o "$WORK/oracle" "$WORK/oracle.ri" >"$WORK/oracle.log" 2>&1; then
     echo "  the oracle program did not build"
     tail -12 "$WORK/oracle.log"
     status=1
@@ -392,7 +392,7 @@ echo "== what sealing takes"
 # Recorded, not held to a figure: the time is the machine's as much as the
 # code's. 16 MiB sealed, the best of three, --release, against Python's
 # cryptography (OpenSSL, AES-NI where the processor has it) when it is here.
-cat >"$WORK/speed.iyi" <<'IYI'
+cat >"$WORK/speed.ri" <<'RIS'
 module speed
 
 import std/aead::{AesGcm, ChaCha20Poly1305}
@@ -426,8 +426,8 @@ a = best { g128.seal(nonce, data) }
 c = best { g256.seal(nonce, data) }
 d = best { box.seal(nonce, data) }
 puts "iyi: AES-128-GCM #{size.to_i64 * 1000 // a} MB/s, AES-256-GCM #{size.to_i64 * 1000 // c} MB/s, ChaCha20-Poly1305 #{size.to_i64 * 1000 // d} MB/s"
-IYI
-if "$IYI" build --release -o "$WORK/speed" "$WORK/speed.iyi" >"$WORK/speed.log" 2>&1 && "$WORK/speed" >"$WORK/speed.out" 2>&1; then
+RIS
+if "$RIS" build --release -o "$WORK/speed" "$WORK/speed.ri" >"$WORK/speed.log" 2>&1 && "$WORK/speed" >"$WORK/speed.out" 2>&1; then
   echo "  $(cat "$WORK/speed.out")"
   if [ -n "$PY" ] && "$PY" -c 'from cryptography.hazmat.primitives.ciphers.aead import AESGCM' >/dev/null 2>&1; then
     "$PY" - <<'PY'
@@ -452,7 +452,7 @@ fi
 
 echo
 echo "== what aead refuses"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/aead::{AES, AesGcm, ChaCha20, Poly1305, ChaCha20Poly1305}
@@ -505,8 +505,8 @@ when "forged-or-panic"
   AesGcm.new(key16).open(nonce, "sixteen and more bytes").or_panic
 end
 puts "accepted"
-IYI
-if ! "$IYI" build -o "$WORK/refuse" "$WORK/refuse.iyi" >"$WORK/refuse.build.log" 2>&1; then
+RIS
+if ! "$RIS" build -o "$WORK/refuse" "$WORK/refuse.ri" >"$WORK/refuse.build.log" 2>&1; then
   echo "  the refusal program did not build"
   tail -12 "$WORK/refuse.build.log"
   status=1
@@ -557,15 +557,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/aead.iyi").read_text()
+src = Path("$REPO/src/std/aead.ri").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/aead.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/aead.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_aead_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_aead_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF "$2" "$WORK/mut.out"; then

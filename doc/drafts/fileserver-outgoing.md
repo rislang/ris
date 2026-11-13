@@ -17,16 +17,16 @@ server, against `make ris` at 5b74fe0ff.
   something that outlives the def (SPEC 1.1, 1.9, 3.6).
 * *View*: a `String` that points at bytes another value owns, nothing
   copied, valid only while that owner lives. `as_tape` on a `String`
-  is the identity (src/iyi/tape.iyi:214): it marks a view, it copies
+  is the identity (src/ris/tape.ri:214): it marks a view, it copies
   nothing.
 * `@[OnTape]`: a struct that lives on the tape and may hold views.
 * `Field`: std/http's name-and-value pair of views
-  (src/std/http_head.iyi:10).
+  (src/std/http_head.ri:10).
 * *Growth move*, *side region*: what `RIS_TAPE_STATS=1` counts when a
   growing value had to be moved or placed beside the tape. It prints
   counts, not times; both should be 0 (AGENTS.md "Fast on the tape").
-* *iyi*: the language ris grew from. `.iyi` files are std modules both
-  compilers read; `./bin/iyi` is iyi's compiler. ris programs are `.ri`.
+* *iyi*: the language ris grew from. `.ri` files are std modules both
+  compilers read; `./bin/ris` is iyi's compiler. ris programs are `.ri`.
 * *Gate*: a check in `test/ris/check.sh`; a change lands only with all
   gates passing.
 * *Now step*: the current section of TODO.md, "Now: code to the new
@@ -37,12 +37,12 @@ server, against `make ris` at 5b74fe0ff.
   `Server.serve`.
 * `Incoming`, `Outgoing`: the tape API. `Server.answer` reads each
   request into an `Incoming` (views into the received bytes,
-  http_head.iyi:195) and hands the block an empty `Outgoing`
-  (src/std/http.iyi:2219) that the block fills: status, lines, body.
+  http_head.ri:195) and hands the block an empty `Outgoing`
+  (src/std/http.ri:2219) that the block fills: status, lines, body.
 * *Answer*: one HTTP response; a *tape answer* is one built in an
   `Outgoing`.
 * `MAX_CONNECTIONS`: the default of `Server.answer`'s
-  `max_connections:` argument (http.iyi:2306, 2515-2517).
+  `max_connections:` argument (http.ri:2306, 2515-2517).
 * Three lengths, kept apart: *`res.length`* is the `Content-Length` the
   server writes; *count* is the number of bytes FileServer sends (the
   file, or the range); *size* is the file's size.
@@ -59,21 +59,21 @@ FileServer.serve(root : String, req : Request,
 It does not compile on ris. Any program that calls it fails with:
 
 ```
-src/std/fileserver.iyi:51: cannot return a value made in this def
+src/std/fileserver.ri:51: cannot return a value made in this def
 `serve`'s scratch: it would have to be copied out (SPEC 1.9).
 ```
 
 `Response` is a class. `serve` builds its header `Hash`, its texts and
 its `File` in its own scratch and returns them inside the class; SPEC
 1.9 lets only a String or a flat Array move down to the caller. No ris
-gate calls the def (`bench/std_fileserver_exercise.iyi` runs on iyi;
+gate calls the def (`bench/std_fileserver_exercise.ri` runs on iyi;
 `test/ris/std_text_plain.ri:41` only imports the module). ris-website's
 `serve.ri` serves files itself, without ranges or caching.
 
 The library rules (AGENTS.md "A library works on the caller's tape")
 ask for the other shape: write into what the caller owns. For an answer
 that is the `Outgoing`; its lines and body are on the request's tape and
-are freed once the answer is written (http.iyi:2451-2460).
+are freed once the answer is written (http.ri:2451-2460).
 
 Two more findings shape the change. std/time's date parser does not
 compile on ris either (Phase 1), and the compiler accepts a stored view
@@ -237,13 +237,13 @@ Checked by grepping `as_tape` and stored parameters in std/http,
 std/http_head and std/router:
 
 * `Outgoing#header`: the only std/http API that stores a caller's
-  value for later (http.iyi:2246-2256). This change copies it.
-* `Incoming.new` (http_head.iyi:202) stores its arguments as views.
-  std/http builds it from the request's own bytes (http.iyi:2368-2375,
+  value for later (http.ri:2246-2256). This change copies it.
+* `Incoming.new` (http_head.ri:202) stores its arguments as views.
+  std/http builds it from the request's own bytes (http.ri:2368-2375,
   2410); a program that calls it with an inline value is exposed to the
   hole. Not changed here; the compiler fix covers it.
-* `Router#handle` (src/std/router.iyi:550) keeps `Pattern.parse(text)`,
-  and `Pattern` holds views of *text* (router.iyi:160-176, 202-208). An
+* `Router#handle` (src/std/router.ri:550) keeps `Pattern.parse(text)`,
+  and `Pattern` holds views of *text* (router.ri:160-176, 202-208). An
   inline pattern string is exposed the same way. Router is on the old
   API and outside this change; the compiler fix covers it.
 
@@ -277,12 +277,12 @@ end
 ### Outgoing: header text lives in the answer
 
 Today `header(name, value)` stores views of *name* and *value*
-(http.iyi:2246-2256). A value the caller computes is refused when held
+(http.ri:2246-2256). A value the caller computes is refused when held
 in a local (P2) and dangles when written inline (P1). Every line is now
 copied into the answer's own text, and lines are spans of it.
 
 New state, replacing `@lines`. The Array fields follow `Outgoing`'s
-existing idiom (http.iyi:2223-2228): an `@[OnTape]` struct is passed by
+existing idiom (http.ri:2223-2228): an `@[OnTape]` struct is passed by
 value, so a field that a method changes is a slot in an Array the
 copies share. The set length is a fourth slot of `@state`, not a field
 of its own, so the change adds one growing value, not two (Memory).
@@ -297,8 +297,8 @@ of its own, so the change adds one growing value, not two (Memory).
 `@spans` is made at full size, `LINES * 2` (64) spans, and written by
 index, never pushed. `@text` is `String::Builder.new(1024)`.
 `String::Span` (a start and a size, a flat value),
-`String::Builder#append_span` (tape.iyi:919-924) and `String#[](span)`
-(tape.iyi:524) exist and are reused.
+`String::Builder#append_span` (tape.ri:919-924) and `String#[](span)`
+(tape.ri:524) exist and are reused.
 
 ```
 # A header line, copied into this answer's own text.
@@ -318,28 +318,28 @@ The rules of the block form, in the order it applies them:
    text, so a nested line would land inside the outer value.
 2. With 32 lines written it raises "HTTP: more than 32 header lines".
 3. `Content-Length`, `Connection` and `Transfer-Encoding` raise "is the
-   server's own line", as today (http.iyi:2249-2251).
+   server's own line", as today (http.ri:2249-2251).
 4. `@state[2]` is set to 1; the name is appended with `append_span`;
    the block writes the value; its span is the bytes written.
 5. The name must be a token, the value free of line breaks and control
    characters; otherwise it raises with `Server.check_line`'s messages
-   (http.iyi:2479-2483). A protected `Outgoing.refusal(text, name, value)`
+   (http.ri:2479-2483). A protected `Outgoing.refusal(text, name, value)`
    reads the two spans of `@text.to_s` and answers which rule failed;
    `header` raises the message. A refused line's bytes stay in `@text`,
    unreferenced, and `@state[2]` stays 1: the raise ends the request (a
    request panic closes the connection, per the comment at
-   http.iyi:2582-2584), and nothing in std/http rescues it, so nothing
+   http.ri:2582-2584), and nothing in std/http rescues it, so nothing
    reads either. Cutting `@text` back is refused by the compiler while
    the check's view is live (P3).
 6. The two spans are stored; the count goes up; `@state[2]` is 0.
 
-`each_line` (one caller, `format_head`, http.iyi:2428) yields
+`each_line` (one caller, `format_head`, http.ri:2428) yields
 `Field.new(text[name], text[value])` with `text = @text.to_s`.
 
 Spans are offsets, not views, so they stay right however `@text`
 grows. On Linux and macOS a builder's reservation never moves
-(src/iyi/region.iyi:523-525); on other targets `owned_resize` may move
-it (tape.iyi:902-917) and a span is still right. P4 counts 0 growth
+(src/ris/region.ri:523-525); on other targets `owned_resize` may move
+it (tape.ri:902-917) and a span is still right. P4 counts 0 growth
 moves.
 
 Cost: each value is copied once, at most 32 lines. It is not measured
@@ -362,12 +362,12 @@ must equal the body's bytes, or writing the head raises "HTTP: length=
 N with a body of M bytes; length= is for a HEAD answer" (P7). On an
 answer to HEAD no body is sent and `res.length` is the line. A
 bodiless status (1xx, 204, 304) writes neither line and is not checked
-(http.iyi:2434-2438). The length is kept as an Int32: a body is at most
-that (`read_str`, src/iyi/io.iyi:165).
+(http.ri:2434-2438). The length is kept as an Int32: a body is at most
+that (`read_str`, src/ris/io.ri:165).
 
 The check sits in `format_head`, which every tape answer goes through:
-`answered_on_tape?` (http.iyi:2455, the server's path, called from
-2376 and 2412) and the public `format_response` (http.iyi:2444-2447,
+`answered_on_tape?` (http.ri:2455, the server's path, called from
+2376 and 2412) and the public `format_response` (http.ri:2444-2447,
 called by test/ris/server_groups.ri:73-76 and
 samples/ris/serve.ri:69-72). `format_head` gains the method:
 
@@ -378,25 +378,25 @@ def self.format_head(res : Outgoing, close : Bool,
 
 `format_response` passes its `head`; `answered_on_tape?` passes
 `HTTP.same_name?(req.method, "HEAD")`. These are its only callers (the
-other `format_head` takes a `Response`, http.iyi:3296).
+other `format_head` takes a `Response`, http.ri:3296).
 
 ### std/time: the HTTP-date parser compiles on ris
 
 `Time::Format::HTTP_DATE.parse` is refused twice (P6): the parser's
 `fail` stores a `TimeParseError` with an interpolated message in
-`@error` (src/std/time.iyi:2774-2781), and each `parse` returns
+`@error` (src/std/time.ri:2774-2781), and each `parse` returns
 `finish`'s answer from a parser in its own scratch. There are seven
-such defs: `Format#parse` twice (time.iyi:2457, 2463) and the `parse`
+such defs: `Format#parse` twice (time.ri:2457, 2463) and the `parse`
 of HTTP_DATE (3635), RFC_2822 (3656), ISO_8601_DATE (3671),
 ISO_8601_DATE_TIME (3689) and ISO_8601_TIME (3704). The fix is about
-40 lines, all in time.iyi, and P9 compiles it:
+40 lines, all in time.ri, and P9 compiles it:
 
 * `Parser` keeps `@why : String::Builder` and `@failed : Int32` (-1
   until a step fails) instead of `@error`. `fail(what)` writes the
   sentence into `@why` once; `refuse(what)` clears `@why`, writes its
-  sentence and returns a `TimeParseError` viewing it (time.iyi:2785).
+  sentence and returns a `TimeParseError` viewing it (time.ri:2785).
 * `finish` builds the `TimeParseError` from `@why.to_s` when
-  `@failed >= 0` (time.iyi:3529-3532).
+  `@failed >= 0` (time.ri:3529-3532).
 * Each `parse` ends with one call, `Parser.new(string).<grammar>_answer`,
   where the new Parser method runs the grammar and ends with `finish`;
   SPEC 1.9 lets a def answer what the call it ends with answers. The six
@@ -411,8 +411,8 @@ is intact after other scratch text is written ("1994-11 has days 1
 to 30, not day 32 in ..."), `RFC_2822.parse` and `Format#parse` compile
 too, and test/ris/time_tape_offset.ri passes. The RFC 850 two-digit
 year follows §5.6.7's 50-year rule (`Parser.recent_year`,
-time.iyi:3281-3286). The parser also accepts `UT`, `UTC` and offsets
-where §5.6.7 says `GMT` (time.iyi:3056); that leniency is kept.
+time.ri:3281-3286). The parser also accepts `UT`, `UTC` and offsets
+where §5.6.7 says `GMT` (time.ri:3056); that leniency is kept.
 
 FileServer then reads `If-Modified-Since` with
 `Time::Format::HTTP_DATE.parse(since.strip)`: a `Time` at or after the
@@ -421,7 +421,7 @@ file's modification second is a 304; a `TimeParseError` is ignored, as
 
 ### Behaviour
 
-Unchanged from the module doc (fileserver.iyi:1-25): GET and HEAD
+Unchanged from the module doc (fileserver.ri:1-25): GET and HEAD
 only; the path percent-decoded and kept below *root*; a directory's
 *index*; a 301 to the trailing `/`, the query kept; the type from
 std/mime, `charset=utf-8` for text; `Last-Modified` and `ETag`; 304 on
@@ -463,7 +463,7 @@ returns; nothing after it runs.
 ### Each answer
 
 The lines are those FileServer writes; the server adds `Content-Length`
-(not on 304) and `Connection` (http.iyi:2419-2441).
+(not on 304) and `Connection` (http.ri:2419-2441).
 
 | Case | Status | FileServer's lines | Body |
 |------|--------|--------------------|------|
@@ -481,29 +481,29 @@ The lines are those FileServer writes; the server adds `Content-Length`
 
 A HEAD over *max* runs the GET's step: FileServer writes the same body,
 so `Content-Length` is its 24 bytes, and the server drops the body for
-HEAD (http.iyi:2446, 2458).
+HEAD (http.ri:2446, 2458).
 
-At most 5 lines, under `Outgoing::LINES` (32, http.iyi:2220). The 405,
-416 and 404 bodies are the old ones (fileserver.iyi:53, 104, 120).
+At most 5 lines, under `Outgoing::LINES` (32, http.ri:2220). The 405,
+416 and 404 bodies are the old ones (fileserver.ri:53, 104, 120).
 
 ### The cap, the read loop, a short read
 
 *Cap.* *count* above *max* is a 500, so a range inside a large file is
 still served. A *max* above `FileServer::MAX_BODY`, 120 MiB, is taken as
 `MAX_BODY`. The body is `Outgoing`'s builder, made before serve runs, so
-its reservation is the fixed 128 MiB (`SIDE_RESERVE`, region.iyi:529),
+its reservation is the fixed 128 MiB (`SIDE_RESERVE`, region.ri:529),
 and a `reserve` past it ends the program with "tape side reservation
-exhausted" (region.iyi:487-495) instead of answering. P14: with
+exhausted" (region.ri:487-495) instead of answering. P14: with
 `max:` 200 MiB, a 130 MiB file is a 500 and a log line, and a 100 MiB
 and a 120 MiB file are read whole; without the clamp the 130 MiB file
 ends the program with "tape side reservation exhausted: 268435456".
-Below that ceiling `read_str`'s Int32 count (src/iyi/io.iyi:165) never
+Below that ceiling `read_str`'s Int32 count (src/ris/io.ri:165) never
 binds.
 
 *Memory.* On Linux and macOS every growing tape value, a
 `String::Builder` or an `Array`, reserves 128 MiB of address space, or
-its first capacity if larger (region.iyi:367-370, 523-535;
-tape.iyi:628-630, 1163-1166). Counted per answer on the fast path,
+its first capacity if larger (region.ri:367-370, 523-535;
+tape.ri:628-630, 1163-1166). Counted per answer on the fast path,
 std/http's values and serve's own:
 
 | Growing value | Today | This change |
@@ -512,13 +512,13 @@ std/http's values and serve's own:
 | `Outgoing@lines` / `@spans` | 1 | 1 |
 | `Outgoing@text` | - | 1 (new) |
 | `Outgoing@body` | 1 | 1 |
-| `format_head`'s builder (http.iyi:2422) | 1 | 1 |
-| the request's `fields` (http.iyi:2366, 2395) | 1 | 1 |
-| serve's `to_rfc1123` (fileserver.iyi:103, time.iyi:2183) | - | 1 |
-| HTTP_DATE's `@why`, on If-Modified-Since (time.iyi:2726) | - | 1 |
+| `format_head`'s builder (http.ri:2422) | 1 | 1 |
+| the request's `fields` (http.ri:2366, 2395) | 1 | 1 |
+| serve's `to_rfc1123` (fileserver.ri:103, time.ri:2183) | - | 1 |
+| HTTP_DATE's `@why`, on If-Modified-Since (time.ri:2726) | - | 1 |
 | per answer | 5, 640 MiB | 6 to 8, up to 1 GiB |
 
-std/http's slow path (http.iyi:2408-2422) adds its own builder to
+std/http's slow path (http.ri:2408-2422) adds its own builder to
 either column. The two rows of serve's are short-lived, freed when
 serve returns, but they reserve while it runs. The cost is the
 runtime's, not this change's: even a 128-byte builder reserves
@@ -528,7 +528,7 @@ At `MAX_CONNECTIONS` (1024) answers in flight that is 640 GiB of
 address space today and up to 1 TiB after, whatever *max* is: this
 change adds `@text`'s 128 MiB per answer, serve its two dates'. The
 reservations are `MAP_NORESERVE` and
-pages commit as they are touched (region.iyi:526), so what *max* bounds
+pages commit as they are touched (region.ri:526), so what *max* bounds
 is touched memory: at most 16 MiB of body per answer by default,
 16 GiB at 1024 answers. With `vm.overcommit_memory=2` Linux ignores
 `MAP_NORESERVE` and charges every reservation, up to 1 GiB per answer, so
@@ -546,14 +546,14 @@ Log.warn("fileserver: file changed while read", path: path)
 
 The first prints `... WARN - fileserver: answer over max --
 path=/srv/big.bin bytes=2000 max=1000`. Logging is synchronous and an
-entry borrows its text from the caller (log.iyi:23, 112-113); a backend
+entry borrows its text from the caller (log.ri:23, 112-113); a backend
 that keeps entries copies them (`RisMemoryBackend#write`, `copy_to`,
-log.iyi:400-402), so a scratch-built *path* does not dangle (P10). The
+log.ri:400-402), so a scratch-built *path* does not dangle (P10). The
 block form `Log.warn { "...#{path}" }` is refused: its block becomes a
 proc that may outlive *path*.
 
 *Read loop.* `IyiIO#read_str(count, into)` returns after one buffer
-fill (io.iyi:165-181), so it loops:
+fill (io.ri:165-181), so it loops:
 
 ```
 private def self.read_into(res : Outgoing, path : String,
@@ -585,11 +585,11 @@ under the old size's ETag. Step 8 has not run, so the 500 carries no
 validator and no file type.
 
 *File close.* `File.open(path) do |file| ... end` closes the file in a
-`defer` when the block ends (src/iyi/file.iyi:32-38). `seek` is
-`File#seek(Int64)` (src/std/file.iyi:2150). A file removed
-between stat and open raises "cannot open" (src/iyi/file.iyi:28); the
+`defer` when the block ends (src/ris/file.ri:32-38). `seek` is
+`File#seek(Int64)` (src/std/file.ri:2150). A file removed
+between stat and open raises "cannot open" (src/ris/file.ri:28); the
 server's doc says a request panic closes the connection and replaces
-the worker (http.iyi:2582-2584). The old def raised there too.
+the worker (http.ri:2582-2584). The old def raised there too.
 
 ### Helper signatures
 
@@ -618,18 +618,18 @@ def self.byte_range(value : String, size : Int64)
 ```
 
 `tag_listed?` and `byte_range` are unchanged; `range_applies?` takes
-`Incoming` (same `method` and `header` calls, http_head.iyi:195-207).
+`Incoming` (same `method` and `header` calls, http_head.ri:195-207).
 `text` writes the plain-text type and appends to `res.body`. The
-`headers["Content-Length"]` line (fileserver.iyi:112) goes: the server
+`headers["Content-Length"]` line (fileserver.ri:112) goes: the server
 writes it and `header` refuses it. The ETag and the date stamp are
 built in serve's scratch and passed to `header`, which copies them. The
 type goes in as `res.header("Content-Type") { |w|
 MIME.with_charset(MIME.from_extension(path), w) }`, std/mime's writer
-form (src/std/mime.iyi:28).
+form (src/std/mime.ri:28).
 
 ### New doc comments
 
-Module doc, replacing fileserver.iyi:1-3 and 13-14:
+Module doc, replacing fileserver.ri:1-3 and 13-14:
 
 ```
 # Files served from a directory: what a `Server.answer` block writes
@@ -643,7 +643,7 @@ Module doc, replacing fileserver.iyi:1-3 and 13-14:
 # reads nothing and states the length.
 ```
 
-The def's doc, replacing fileserver.iyi:36-37 and 49-50:
+The def's doc, replacing fileserver.ri:36-37 and 49-50:
 
 ```
 # Answers *req* into *res* from the files under *root*: what a
@@ -653,7 +653,7 @@ The def's doc, replacing fileserver.iyi:36-37 and 49-50:
 # `MAX_BODY`, and a file larger than that is not served from memory.
 ```
 
-`Outgoing`'s doc (http.iyi:2213-2217) replaces "The lines go in slots
+`Outgoing`'s doc (http.ri:2213-2217) replaces "The lines go in slots
 made at their final size, so the body's writer is the one value that
 grows." with: "Each line is copied into the answer's own text, so a
 value made in the block's def need not outlive it; `header(name) { |w|
@@ -670,7 +670,7 @@ rules replace.
 A2. Stream first: a file body on `Outgoing`, e.g.
 `res.file(path, start, count)`, sent after the head with `sendfile`.
 It removes the cap and the memory peak. Not first: ris's std has no
-sendfile (none in src/std or src/iyi; src/socket.cr:372 is Crystal's
+sendfile (none in src/std or src/ris; src/socket.cr:372 is Crystal's
 inherited socket, which ris programs do not reach), and it changes the
 write path of `answered_on_tape?`. Callers would not change.
 
@@ -690,7 +690,7 @@ std/http's most used call.
 A7. A private three-form date parser in FileServer (the third draft).
 Dropped: P9 shows std/time's fix is about 40 lines of the same
 scratch-escape kind, and every std/time parser user gains it;
-src/std/mail.iyi:1052 already copies `days_from_civil` for the same
+src/std/mail.ri:1052 already copies `days_from_civil` for the same
 reason; a third copy is not wanted.
 
 ## Risks and mitigations
@@ -726,7 +726,7 @@ is committed. The five gate programs are not in the tree until the fix.
 
 Phase 1, std/time, one commit, gated on its own:
 
-* src/std/time.iyi: `@why`, `@failed`, `fail`, `refuse`, `finish`, the
+* src/std/time.ri: `@why`, `@failed`, `fail`, `refuse`, `finish`, the
   six `_answer` methods, and the seven `parse` defs ending in one.
 * test/ris/time_http_date.ri: new. The three forms of §5.6.7's example
   date parse to 784111777; `Sun, 32 Nov 1994 08:49:37 GMT` and
@@ -748,7 +748,7 @@ Phase 1, std/time, one commit, gated on its own:
 
 Phase 2, std/http, one commit, gated on its own:
 
-* src/std/http.iyi: `Outgoing` with `@spans`, `@text`, a four-slot
+* src/std/http.ri: `Outgoing` with `@spans`, `@text`, a four-slot
   `@state`, both `header` forms copying, `Outgoing.refusal`, `length=`,
   `length`, `each_line` from spans;
   `format_head(res, close, head)` with the length check; its two
@@ -789,15 +789,15 @@ Phase 2, std/http, one commit, gated on its own:
 
 Phase 3, std/fileserver, one commit, gated on its own:
 
-* src/std/fileserver.iyi: the new serve and helpers, new doc.
+* src/std/fileserver.ri: the new serve and helpers, new doc.
 * test/ris/fileserver.ri: new, see Tests; its check.sh block (Tests)
   follows `outgoing_refusals`'s.
-* bench/std_fileserver_exercise.iyi and .sh: removed. The .iyi drives
+* bench/std_fileserver_exercise.ri and .sh: removed. The .ri drives
   the old `Server.serve` with `call(req) : Response` (bench
-  .iyi:56-131) and runs on `./bin/iyi`; the .sh greps a literal source
+  .ri:56-131) and runs on `./bin/ris`; the .sh greps a literal source
   line (bench .sh:199). Its cases move to fileserver.ri.
   bench/std_siblings.sh:46 is a size table and keeps its line.
-* src/std/router.iyi:527: the example line becomes two comment lines,
+* src/std/router.ri:527: the example line becomes two comment lines,
   "# Files: call FileServer.serve(root, req, res) from a Server.answer
   # block; Router is not ported to Outgoing yet."
 * test/ris/std_text_plain.ri:41 keeps its import (it checks that std
@@ -813,11 +813,11 @@ pipelined on one connection, the last with `Connection: close`, the
 reply compared with one expected text, PASS line
 `PASS: files answered into Outgoing`. It imports std/socket, std/http,
 std/fileserver, std/file, std/dir (`Dir.tempdir`, `Dir.mkdir_p`,
-`Dir.delete`, src/std/dir.iyi:464, 590, 637), std/time, std/random and
+`Dir.delete`, src/std/dir.ri:464, 590, 637), std/time, std/random and
 std/log. The directory is `Dir.tempdir + "/ris_fileserver_"` plus
 `Random::Secure.hex(6)`, made at start and removed at the end file by
 file (`FileUtils.rm_rf` does not compile on ris: its recursion holds a
-growing temporary, file_utils.iyi:314). One more request with
+growing temporary, file_utils.ri:314). One more request with
 `Connection: close`, a GET of a.txt, ends the run. Files: `a.txt`
 (`hello world`), `sub/index.html`, `nodir/` (no index), `empty.txt`,
 `big.bin` (2000 bytes; the handler passes `max: 1000_i64`). The
@@ -891,7 +891,7 @@ written. No SPEC_CHANGELOG entry is needed.
 
 All on minitest at 5b74fe0ff. "Patched" means copies of std/http,
 std/time and std/fileserver in a scratch directory ahead of `src` on
-`IYI_PATH`; src/ was not changed. P13 ran on unpatched std; P14 on the
+`RIS_PATH`; src/ was not changed. P13 ran on unpatched std; P14 on the
 implemented tree.
 
 * P1, the hole, unpatched std. The `Keep` program above prints
@@ -911,9 +911,9 @@ implemented tree.
   test/ris/answer.ri and test/ris/server_groups.ri pass.
 * P5: `Log.warn(msg, path:, bytes:, max:)` in serve compiles and
   prints the line above; `Log.warn { ... }` is refused.
-* P6: unpatched `HTTP_DATE.parse`: refused at time.iyi:3635; with only
-  the message un-interpolated, refused at time.iyi:2776 and then at
-  each interpolated `fail` call (time.iyi:2938 first).
+* P6: unpatched `HTTP_DATE.parse`: refused at time.ri:3635; with only
+  the message un-interpolated, refused at time.ri:2776 and then at
+  each interpolated `fail` call (time.ri:2938 first).
 * P7: a 3-byte body with `length = 9`, through `format_head`: panics
   "HTTP: length= 9 with a body of 3 bytes; length= is for a HEAD
   answer". `length = -1`: panics "HTTP: not a length: -1".
@@ -943,7 +943,7 @@ implemented tree.
 * P14: the implemented serve, called with `max: 209_715_200_i64` on
   sparse files: 130 MiB is a 500 with the log line `bytes=136314880
   max=125829120`; 100 MiB and 120 MiB are 200s with the whole body.
-  With the clamp removed, 130 MiB ends the program: "iyi: tape side
+  With the clamp removed, 130 MiB ends the program: "ris: tape side
   reservation exhausted: 268435456".
 
 ## First review, items

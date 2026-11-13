@@ -1,12 +1,14 @@
 @[OnTape]
 struct Held
   getter text : String
+
   def initialize(@text)
   end
 end
 
 class State
   @@held : Held? = nil
+
   def self.keep(held : Held)
     @@held = held
   end

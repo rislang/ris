@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measures what `iyi lsp` claims: that a real compile per question fits
+"""Measures what `ris lsp` claims: that a real compile per question fits
 an editor's budget. The corpus is this repository's own samples — the
 calc language, the kemal port, the app/std modules — opened in one
 session, then asked the questions a person asks: a keystroke's verdict,
@@ -52,7 +52,7 @@ def percentile(samples, p):
 def main():
     root = os.path.abspath(CORPUS_ROOT)
     files = sorted(
-        f for f in glob.glob(os.path.join(root, "**", "*.iyi"), recursive=True)
+        f for f in glob.glob(os.path.join(root, "**", "*.ri"), recursive=True)
     )
     if not files:
         sys.exit(f"no corpus under {root}")
@@ -128,7 +128,7 @@ def main():
     c.send("shutdown", {})
     c.send("exit", {}, wait=False)
 
-    print(f"corpus: {len(files)} modules under samples/iyi, "
+    print(f"corpus: {len(files)} modules under samples/ris, "
           f"startup {startup * 1000:.0f} ms")
     print(f"{'verb':<12}{'n':>5}{'p50':>9}{'p95':>9}{'max':>9}")
     over = []

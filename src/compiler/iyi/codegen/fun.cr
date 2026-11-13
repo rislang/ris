@@ -43,7 +43,7 @@ class Iyi::CodeGenVisitor
       return check_mod_fun @llvm_mod, mangled_name, func
     end
 
-    # iyi: while emitting code for a module whose `.iyimod` is being written, a
+    # iyi: while emitting code for a module whose `.rimod` is being written, a
     # callee that module does not own is *copied* into the module's own unit
     # with internal linkage, rather than left as a reference to a unit the
     # artifact does not carry (iyi SPEC IV.1g).
@@ -67,7 +67,7 @@ class Iyi::CodeGenVisitor
     # home stays private: two modules each carrying a copy is the collision
     # IV.1g's internal linkage exists to prevent, and a home that defines the
     # symbol itself answers every other reference already.
-    if ENV["IYI_TDF"]? && mangled_name.includes?(ENV["IYI_TDF"].to_s)
+    if ENV["RIS_TDF"]? && mangled_name.includes?(ENV["RIS_TDF"].to_s)
       STDERR.puts "TDF #{mangled_name} host=#{!iyi_closure_host(self_type).nil?} typemod=#{type_module(self_type).mod.name}"
     end
     if host = iyi_closure_host(self_type)
@@ -102,7 +102,7 @@ class Iyi::CodeGenVisitor
     (@program.iyi_unit_libs[@llvm_mod.name] ||= Set(String).new) << owner.to_s
   end
 
-  # iyi: the receiver a def read from a `.iyimod` is keyed on (iyi SPEC IV.1g).
+  # iyi: the receiver a def read from a `.rimod` is keyed on (iyi SPEC IV.1g).
   #
   # The type that *defines* the method, not the one it was called through. A
   # method is instantiated per receiver in an ordinary build, so calling an
@@ -274,7 +274,7 @@ class Iyi::CodeGenVisitor
 
       args = codegen_fun_signature(mangled_name, target_def, self_type, is_fun_literal, is_closure)
 
-      # iyi: a def read from a `.iyimod` is declared, not defined (iyi SPEC
+      # iyi: a def read from a `.rimod` is declared, not defined (iyi SPEC
       # IV.1g). Its machine code is in the artifact's `ObjectCode` and reaches
       # the program through the linker, so what this build emits is the
       # signature and nothing under it — the same shape a `lib` function takes,
@@ -298,7 +298,7 @@ class Iyi::CodeGenVisitor
       # instance and was never marked. Both are this build's to compile.
       # iyi: an artifact says which symbols its units define, so this is a
       # lookup rather than a rule (iyi SPEC IV.1g). Everything the old rule got
-      # right it still gets right — a def read from a `.iyimod` whose type is
+      # right it still gets right — a def read from a `.rimod` whose type is
       # the artifact's is in the list — and the two it got wrong it no longer
       # guesses at.
       compiled_elsewhere = !is_fun_literal &&
@@ -324,7 +324,7 @@ class Iyi::CodeGenVisitor
       # build's module count. `codegen_fun_signature` internalises every def
       # of a single-module build, and a declaration left internal is invalid
       # IR - "Global is external, but doesn't have external or weak
-      # linkage!", from `--release --use-iyimod` and a cross-compile against
+      # linkage!", from `--release --use-rimod` and a cross-compile against
       # artifacts.
       if target_def.iyi_from_artifact? || compiled_elsewhere
         context.fun.linkage = LLVM::Linkage::External
@@ -337,7 +337,7 @@ class Iyi::CodeGenVisitor
       # units call `FilterHandler#next=` and `HTTP::Handler` is Crystal's — and
       # it defines less than its types suggest, because `Reference::new` is
       # instantiated per type and only where something reached it.
-      if ENV["IYI_SYM"]? && mangled_name.includes?(ENV["IYI_SYM"].to_s)
+      if ENV["RIS_SYM"]? && mangled_name.includes?(ENV["RIS_SYM"].to_s)
         STDERR.puts "SYM #{mangled_name} needs=#{needs_body} art=#{target_def.iyi_from_artifact?} elsewhere=#{compiled_elsewhere} internal=#{iyi_internal} mod=#{@llvm_mod.name}"
       end
       if needs_body && !iyi_internal && !@program.iyi_exported_owners.empty? && @llvm_mod != @main_mod
@@ -379,7 +379,7 @@ class Iyi::CodeGenVisitor
       # function is one whoever asks — `write` and `exit` do, from the
       # prelude's own `puts` — and the linker resolves it from libc for the
       # artifact as it does for anyone else. And a def read from another
-      # module's `.iyimod` is the other, which is what a build that reads one
+      # module's `.rimod` is the other, which is what a build that reads one
       # artifact while compiling another module from source hits: its machine
       # code is in *that* module's artifact, so this unit refers to it by name
       # and defines nothing.

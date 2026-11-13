@@ -21,14 +21,17 @@ class Holder
     borrowed.bytesize
   end
 end
+
 def put(holder : Holder) : Nil
   made = ""
   made << "made"
   holder.view = made
 end
+
 def run
   holder = Holder.new("h")
   put(holder)
   puts holder.view
 end
+
 run

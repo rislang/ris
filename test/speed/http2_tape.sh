@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Compare a baseline module tree (containing std/) with this checkout.
-# Usage: IYI=.build23/ris bash test/speed/http2_tape.sh [BASE_MODULE_TREE]
+# Usage: RIS=.build23/ris bash test/speed/http2_tape.sh [BASE_MODULE_TREE]
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 BASE=${1:-}
-IYI=${IYI:-$REPO/.build23/ris}
+RIS=${RIS:-$REPO/.build23/ris}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 if [ -z "$BASE" ]; then
   BASE=$WORK/original
   mkdir -p "$BASE/std"
-  for file in http.iyi hpack.iyi; do
+  for file in http.ri hpack.ri; do
     git -C "$REPO" show "HEAD:src/std/$file" > "$BASE/std/$file"
   done
 fi
@@ -20,7 +20,7 @@ import sys
 for label, source in zip(('base', 'tape'), sys.argv[1:3]):
     dest = Path(sys.argv[3], label, 'std')
     dest.mkdir(parents=True)
-    for name in ('http.iyi', 'hpack.iyi'):
+    for name in ('http.ri', 'hpack.ri'):
         text = Path(source, 'std', name).read_text()
         # Only the fixture copies expose internals. The transport is never
         # called; drain simulates a peer consuming output and opening its
@@ -56,8 +56,8 @@ pub class Conn
 PY
 for kind in codec response frames request; do
   case $kind in
-    codec) source=http2_tape.iyi ;;
-    *) source=http2_tape_$kind.iyi ;;
+    codec) source=http2_tape.ri ;;
+    *) source=http2_tape_$kind.ri ;;
   esac
   for variant in base tape; do
     flags=()
@@ -65,9 +65,9 @@ for kind in codec response frames request; do
        { [ "$kind" = codec ] || [ "$kind" = response ]; }; then
       flags=(-D h2_tape)
     fi
-    IYI_PATH="$WORK/$variant:$REPO/src" \
-      IYI_CACHE_DIR="$WORK/cache-$variant" \
-      "$IYI" build --release "${flags[@]}" \
+    RIS_PATH="$WORK/$variant:$REPO/src" \
+      RIS_CACHE_DIR="$WORK/cache-$variant" \
+      "$RIS" build --release "${flags[@]}" \
       -o "$WORK/$kind-$variant" "$REPO/test/cli/$source"
   done
   for run in 1 2 3 4 5 6 7; do

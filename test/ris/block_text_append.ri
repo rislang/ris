@@ -20,7 +20,6 @@ def a3(items : Array(String)) : Int32
   acc.size
 end
 
-
 def nested(items : Array(String)) : String
   acc = ""
   items.each do |item|

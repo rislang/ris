@@ -18,10 +18,10 @@ def exercise : Nil
   array[1, 4].copy_to_local(4, bytes, 0)
   unless Program.args.empty?
     case Program.args[0]
-    when "text" then text.copy_to_local(-1, bytes, 1)
+    when "text"  then text.copy_to_local(-1, bytes, 1)
     when "array" then array.copy_to_local(5, bytes, 2)
     when "store" then array.copy_from_local(0, bytes, -1)
-    when "view" then array[1, 4].copy_to_local(3, bytes, 2)
+    when "view"  then array[1, 4].copy_to_local(3, bytes, 2)
     end
     raise "missed range check"
   end

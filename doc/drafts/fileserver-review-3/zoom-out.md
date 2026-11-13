@@ -20,12 +20,12 @@ Ready from a simplicity and scope view, one Major, no Blockers.
 A three-form parser (IMF-fixdate, RFC 850, asctime) plus helpers,
 built only because std/time's parser does not compile on ris, and
 planned for deletion. The failure is located (P6): a scratch
-`TimeParseError` stored at time.iyi:2776; fixing it fixes
-`Time.parse_rfc1123` for all callers. mail.iyi:1780-1840 already
+`TimeParseError` stored at time.ri:2776; fixing it fixes
+`Time.parse_rfc1123` for all callers. mail.ri:1780-1840 already
 parses RFC 5322 dates, with its own `days_from_civil`
-(mail.iyi:1052 vs time.iyi:1784): duplication is spreading. A7
+(mail.ri:1052 vs time.ri:1784): duplication is spreading. A7
 (534-535) calls the fix "unrelated", but it is the same scratch-escape
-class. Fix time.iyi:2776 first, or ship fixdate-only and record the
+class. Fix time.ri:2776 first, or ship fixdate-only and record the
 RFC 9110 5.6.7 gap.
 
 ## Nits

@@ -8,6 +8,10 @@ back.
 
 ## To take to iyi
 
+* Formatter macro fragments retain their enclosing def and local-variable
+  scope. Regex literals beginning with `=` also retokenize `/=` as a
+  delimiter. Gates: test/compiler/formatter/iyi_formatter_test.cr.
+
 * Module clause tooling: MODULE.N ids from owning comments under src/,
   ordered trailing todo reasons, module review targets and lock ordering.
   This extends ris's spec blocks without depending on tape. Gate:
@@ -44,7 +48,7 @@ back.
 
 * String#hash: iyi's byte-wise FNV-32 now takes 8 bytes a step, reads only
   the String's own bytes and spreads into the low bits Hash masks (ris's
-  gates: test/ris/string_hash.ri, test/ris/src/iyi/string_hash_page.ri).
+  gates: test/ris/string_hash.ri, test/ris/src/ris/string_hash_page.ri).
 
 * std/tls: the Error implementation of TlsError.message recursed into
   itself, shadowing its formatter. Call the named formatter instead;
@@ -110,13 +114,13 @@ back.
 
 * Cleanup reads current receivers; recursive panic and task caps are fatal.
   Fault dispositions use stack storage; signal flags survive a full pipe.
-* CLI env tests: clear inherited `IYI_CACHE_DIR` when checking the Crystal
+* CLI env tests: clear inherited `RIS_CACHE_DIR` when checking the Crystal
   fallback, and check that iyi's variable wins when both are set.
 * Refuse integer `/` directly in interpolation or before `to_s`, naming
   `//` and `a.to_f / b`. Tape interpolation stays in ris.
 * Concurrent builds of one entry share mutable object-cache paths: one can
   replace or remove another's objects before artifact assembly (std/http
-  lost its TLS client unit in parallel gates; separate `IYI_CACHE_DIR`s
+  lost its TLS client unit in parallel gates; separate `RIS_CACHE_DIR`s
   pass). Make cache publication safe across builds in iyi.
 * `String#byte_at(i)`: a bounds-checked byte read, beside `[]`.
 * v0.18.0 integration: explicit std imports in new modules and exercises,
@@ -209,8 +213,8 @@ back.
   The normalizer checks source order; deferred semantic type slots keep
   block parameters in scope. This is a ris language change to take to iyi.
 * `Hash.new(default)` infers its key from the first index and answers a
-  Hash(K, V) that carries its default (src/iyi/hash_tape.iyi).
-  The inherited `src/iyi/` files and `.iyi` literal parsing stay unchanged.
+  Hash(K, V) that carries its default (src/ris/hash_tape.ri).
+  The inherited `src/ris/` files and `.ri` literal parsing stay unchanged.
 
 ## Suggested edits across lines
 

@@ -5,4 +5,5 @@ def descend(n : Int32) : Int32
   child = n > 0 ? descend(n - 1) : 0
   child + view.size
 end
+
 tape { descend(2) }

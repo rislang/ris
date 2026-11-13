@@ -27,7 +27,7 @@ private def iyi_compiler
   compiler = create_spec_compiler
   # Chosen by the entry file's extension in `iyi build`, which is the command
   # layer rather than the compiler, so a spec driving the compiler asks for it.
-  compiler.prelude = "iyi/prelude"
+  compiler.prelude = "ris/prelude"
   compiler
 end
 
@@ -198,12 +198,12 @@ describe "Compiler" do
   # compiler's own answer to "which libraries does this program need", and it is
   # the same answer on every platform. The output comparison is the other half:
   # a build that dropped the collector and no longer ran is not a fix.
-  # ris: Boehm is refused (src/iyi/heap.iyi), so -Dgc_boehm must fail to build.
+  # ris: Boehm is refused (src/ris/heap.ri), so -Dgc_boehm must fail to build.
   it "needs no collector by default, and refuses -Dgc_boehm" do
     with_tempdir("iyi-gc-default-link") do
-      File.write "allocating.iyi", IYI_ALLOCATING_PROGRAM
+      File.write "allocating.ri", IYI_ALLOCATING_PROGRAM
       source = Iyi::Compiler::Source.new(
-        File.expand_path("allocating.iyi"), File.read("allocating.iyi"))
+        File.expand_path("allocating.ri"), File.read("allocating.ri"))
 
       uncollected = iyi_compiler.compile(source, File.expand_path("uncollected"))
       linked_libraries(uncollected).should_not contain "gc"
@@ -223,9 +223,9 @@ describe "Compiler" do
   # selects the same allocator the default now uses.
   it "keeps -Dgc_none as an alias of the default" do
     with_tempdir("iyi-gc-none-alias") do
-      File.write "allocating.iyi", IYI_ALLOCATING_PROGRAM
+      File.write "allocating.ri", IYI_ALLOCATING_PROGRAM
       source = Iyi::Compiler::Source.new(
-        File.expand_path("allocating.iyi"), File.read("allocating.iyi"))
+        File.expand_path("allocating.ri"), File.read("allocating.ri"))
 
       aliased = iyi_compiler
       aliased.flags << "gc_none"
@@ -270,9 +270,9 @@ describe "Compiler" do
     pending! "nm is not available" unless nm_available?
 
     with_tempdir("iyi-gc-default-symbols") do
-      File.write "allocating.iyi", IYI_ALLOCATING_PROGRAM
+      File.write "allocating.ri", IYI_ALLOCATING_PROGRAM
       Iyi::Command.run ["build"].concat(program_flags_options)
-        .concat(["allocating.iyi", "-o", File.expand_path("uncollected")])
+        .concat(["allocating.ri", "-o", File.expand_path("uncollected")])
 
       symbols = undefined_symbols(File.expand_path("uncollected"))
       symbols.select(&.starts_with?("GC_")).should be_empty
@@ -290,7 +290,7 @@ describe "Compiler" do
         symbols.should_not contain "malloc"
         symbols.should_not contain "realloc"
         # ris: the tape maps its own address space with raw syscalls
-        # (src/iyi/region.iyi), so a plain build names no libc mmap.
+        # (src/ris/region.ri), so a plain build names no libc mmap.
         symbols.should_not contain "mmap"
         symbols.should_not contain "mprotect"
       {% end %}
@@ -325,34 +325,34 @@ describe "Compiler" do
   end
 
   # iyi: Crystal's own specs spawn this compiler with `CRYSTAL_PATH` set.
-  # Reading only `IYI_PATH` made every one of those fail to find `prelude`.
+  # Reading only `RIS_PATH` made every one of those fail to find `prelude`.
   describe "the names Crystal's specs still set" do
-    it "reads CRYSTAL_PATH when IYI_PATH is unset" do
-      old_iyi = ENV["IYI_PATH"]?
+    it "reads CRYSTAL_PATH when RIS_PATH is unset" do
+      old_iyi = ENV["RIS_PATH"]?
       old_crystal = ENV["CRYSTAL_PATH"]?
-      ENV.delete("IYI_PATH")
+      ENV.delete("RIS_PATH")
       ENV["CRYSTAL_PATH"] = "from-crystal"
       Iyi::IyiPath.default_paths.should eq(["from-crystal"])
     ensure
-      old_iyi ? (ENV["IYI_PATH"] = old_iyi) : ENV.delete("IYI_PATH")
+      old_iyi ? (ENV["RIS_PATH"] = old_iyi) : ENV.delete("RIS_PATH")
       old_crystal ? (ENV["CRYSTAL_PATH"] = old_crystal) : ENV.delete("CRYSTAL_PATH")
     end
 
-    it "prefers IYI_PATH when both are set" do
-      old_iyi = ENV["IYI_PATH"]?
+    it "prefers RIS_PATH when both are set" do
+      old_iyi = ENV["RIS_PATH"]?
       old_crystal = ENV["CRYSTAL_PATH"]?
-      ENV["IYI_PATH"] = "from-iyi"
+      ENV["RIS_PATH"] = "from-iyi"
       ENV["CRYSTAL_PATH"] = "from-crystal"
       Iyi::IyiPath.default_paths.should eq(["from-iyi"])
     ensure
-      old_iyi ? (ENV["IYI_PATH"] = old_iyi) : ENV.delete("IYI_PATH")
+      old_iyi ? (ENV["RIS_PATH"] = old_iyi) : ENV.delete("RIS_PATH")
       old_crystal ? (ENV["CRYSTAL_PATH"] = old_crystal) : ENV.delete("CRYSTAL_PATH")
     end
   end
 
   # `Object#to_s` answers with the type's name, so a type that never defined
   # `to_s` printed its own name instead of its value and nothing said a method
-  # was missing. `samples/iyi/calc` scans with `String#[]` and compares the
+  # was missing. `samples/ris/calc` scans with `String#[]` and compares the
   # result, so the sample that added `String#[]` could not catch it: comparison
   # was defined and printing was not.
   #
@@ -364,14 +364,14 @@ describe "Compiler" do
         # Quoted, so the interpolation below reaches iyi instead of being
         # expanded by the spec's own compiler.
         # ris: String#[] answers the byte (UInt8); `unsafe_chr` makes the Char.
-        File.write "char.iyi", <<-'IYI'
+        File.write "char.ri", <<-'IYI'
           s = "hello"
           puts s[1].unsafe_chr
           puts s[1].unsafe_chr.inspect
           puts "x#{s[4].unsafe_chr}y"
           IYI
         source = Iyi::Compiler::Source.new(
-          File.expand_path("char.iyi"), File.read("char.iyi"))
+          File.expand_path("char.ri"), File.read("char.ri"))
         iyi_compiler.compile(source, File.expand_path("char"))
 
         Process.capture(File.expand_path("char")).should eq("e\n'e'\nxoy\n")
@@ -388,7 +388,7 @@ describe "Compiler" do
   describe "negative indexing and formatting" do
     it "indexes from the end, writes bases, and pads" do
       with_tempdir("iyi-index-format") do
-        File.write "format.iyi", <<-'IYI'
+        File.write "format.ri", <<-'IYI'
           a = [10, 20, 30]
           puts a[-1]
           puts a[-a.size]
@@ -408,7 +408,7 @@ describe "Compiler" do
           puts "ab" * 3
           IYI
         source = Iyi::Compiler::Source.new(
-          File.expand_path("format.iyi"), File.read("format.iyi"))
+          File.expand_path("format.ri"), File.read("format.ri"))
         iyi_compiler.compile(source, File.expand_path("format"))
 
         Process.capture(File.expand_path("format")).should eq(
@@ -424,7 +424,7 @@ describe "Compiler" do
   describe "File" do
     it "round-trips and deletes a file and answers exists?" do
       with_tempdir("iyi-file-io") do
-        File.write "io.iyi", <<-'IYI'
+        File.write "io.ri", <<-'IYI'
           File.write("t.txt", "hello")
           puts File.read("t.txt")
           puts File.exists?("t.txt")
@@ -433,7 +433,7 @@ describe "Compiler" do
           puts File.exists?("t.txt")
           IYI
         source = Iyi::Compiler::Source.new(
-          File.expand_path("io.iyi"), File.read("io.iyi"))
+          File.expand_path("io.ri"), File.read("io.ri"))
         iyi_compiler.compile(source, File.expand_path("io"))
 
         Process.capture(File.expand_path("io")).should eq("hello\ntrue\nfalse\nfalse\n")
@@ -442,11 +442,11 @@ describe "Compiler" do
 
     it "names the path when the file is missing" do
       with_tempdir("iyi-file-missing") do
-        File.write "miss.iyi", <<-'IYI'
+        File.write "miss.ri", <<-'IYI'
           File.read("no-such-iyi-file.txt")
           IYI
         source = Iyi::Compiler::Source.new(
-          File.expand_path("miss.iyi"), File.read("miss.iyi"))
+          File.expand_path("miss.ri"), File.read("miss.ri"))
         iyi_compiler.compile(source, File.expand_path("miss"))
 
         exception = nil
@@ -464,11 +464,11 @@ describe "Compiler" do
     it "refuses to read a directory rather than answering an empty file" do
       with_tempdir("iyi-file-directory") do
         Dir.mkdir("adir")
-        File.write "dir.iyi", <<-'IYI'
+        File.write "dir.ri", <<-'IYI'
           puts File.read("adir").size
           IYI
         source = Iyi::Compiler::Source.new(
-          File.expand_path("dir.iyi"), File.read("dir.iyi"))
+          File.expand_path("dir.ri"), File.read("dir.ri"))
         iyi_compiler.compile(source, File.expand_path("dir"))
 
         error = IO::Memory.new
@@ -489,7 +489,7 @@ describe "Compiler" do
     describe "concurrency" do
       it "interleaves a group's tasks through RisBoard and joins" do
         with_tempdir("iyi-conc-pingpong") do
-          File.write "ping.iyi", <<-'IYI'
+          File.write "ping.ri", <<-'IYI'
             struct Ping
             end
             struct Pong
@@ -529,7 +529,7 @@ describe "Compiler" do
             puts order
             IYI
           source = Iyi::Compiler::Source.new(
-            File.expand_path("ping.iyi"), File.read("ping.iyi"))
+            File.expand_path("ping.ri"), File.read("ping.ri"))
           iyi_compiler.compile(source, File.expand_path("ping"))
 
           Process.capture(File.expand_path("ping")).should eq("baba\n")
@@ -538,7 +538,7 @@ describe "Compiler" do
 
       it "cancels a blocked sibling when a task fails, and a timed take finds posted mail" do
         with_tempdir("iyi-conc-cancel-select") do
-          File.write "cs.iyi", <<-'IYI'
+          File.write "cs.ri", <<-'IYI'
             pub struct Boom
               def initialize
               end
@@ -588,7 +588,7 @@ describe "Compiler" do
             end
             IYI
           source = Iyi::Compiler::Source.new(
-            File.expand_path("cs.iyi"), File.read("cs.iyi"))
+            File.expand_path("cs.ri"), File.read("cs.ri"))
           iyi_compiler.compile(source, File.expand_path("cs"))
 
           Process.capture(File.expand_path("cs")).should eq("cancelled\n10\n")
@@ -598,7 +598,7 @@ describe "Compiler" do
       it "adds no undefined symbol for the runtime" do
         pending! "nm is unavailable" unless nm_available?
         with_tempdir("iyi-conc-floor") do
-          File.write "floor.iyi", <<-'IYI'
+          File.write "floor.ri", <<-'IYI'
             struct Done
             end
             group do |g|
@@ -614,7 +614,7 @@ describe "Compiler" do
             puts "ok"
             IYI
           Iyi::Command.run ["build"].concat(program_flags_options)
-            .concat(["floor.iyi", "-o", File.expand_path("floor")])
+            .concat(["floor.ri", "-o", File.expand_path("floor")])
 
           # The C runtime template's six, and nothing of the runtime's own:
           # the scheduler, the poller and the switch are raw syscalls and asm.
@@ -636,7 +636,7 @@ describe "Compiler" do
           # marker, not a dynamic import (UPSTREAM.md).
           template << "PROCEDURE_LINKAGE_TABLE_"
           # ris: the tape reserves its address space through libc's mmap and
-          # guards it with mprotect (src/iyi/region.iyi).
+          # guards it with mprotect (src/ris/region.ri).
           template.concat ["mmap", "mprotect"]
           (symbols - template).should be_empty
         end

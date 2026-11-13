@@ -5,13 +5,13 @@ handle; amended after a second EGM review of the changed sections
 ([consolidated_review_report.md](consolidated_review_report.md));
 section 10 says what changed.
 
-ROOT is the nearest directory up holding `ris.mod` or `iyi.mod`
+ROOT is the nearest directory up holding `ris.mod` or `ris.mod`
 (spec-cli 4.1).
 
 Context: ris is iyi plus Goose's tape memory (AGENTS.md). Today a test
 is a whole program, `*_test.ri` under test/, that exits 0 to pass, 1 to
-fail, 77 for todo (iyi SPEC's `go test` row: "every `*_test.iyi` is a
-program"). Inside one, `test "name" do ... end` (src/iyi/testing.iyi)
+fail, 77 for todo (iyi SPEC's `go test` row: "every `*_test.ri` is a
+program"). Inside one, `test "name" do ... end` (src/ris/testing.ri)
 runs a named case. `ris spec` ties SPEC clauses to tests by a
 `# spec: N.M@VERSION` tag in a test file's leading comments
 (doc/drafts/spec-cli/spec-cli.md). Koja's `test` declaration
@@ -387,7 +387,7 @@ panic.
 
 As built (step 3): the parser lowers the section before typing, since a
 pass after typing would need a second typing of the rewritten lines.
-Each candidate line becomes a call to `RisSpecRun` (testing.iyi, in the
+Each candidate line becomes a call to `RisSpecRun` (testing.ri, in the
 prelude; unused code is not linked) whose overloads check only a Bool;
 a generic def per block receives `Tuple(typeof(line)...)` and its macro
 raises the `Bool?` and "checks nothing" refusals. Same rules, same
@@ -403,8 +403,8 @@ block").
 
 The block's verdict: broken if a line before `todo` failed or
 panicked, else todo. todo ends only its block. Today `todo` is a
-prelude def (src/iyi/prelude.iyi:2442) that exits 77 and ends the
-program, and IyiTestCases.verdict (testing.iyi:201) knows only 0 and
+prelude def (src/ris/prelude.ri:2442) that exits 77 and ends the
+program, and IyiTestCases.verdict (testing.ri:201) knows only 0 and
 1. In a spec block `todo` is lowered to a test-only call that records
 the reason and returns from the block; the verdict gains a todo
 count.
@@ -566,7 +566,7 @@ std/ris_spec (built on std/process, std/dir, std/file). `ris build
 --spec` (`ris_lower_spec`) inserts `import std/ris_spec::{...}` after
 the module header; nothing else imports it, so a `ris build` binary
 has none of them. RisSpecRun, the assertion runtime of 5.2, stays in
-the prelude (testing.iyi), where unused code is not linked.
+the prelude (testing.ri), where unused code is not linked.
 
 The check of 5.5 for a dropped name matters for computed constants
 (`CONFIG = load`): a kept def that reads a top-level local does not
@@ -578,7 +578,7 @@ build's error first.
 For module M, `ris test` builds one program: M's scope with its spec
 section, M's imports without theirs, and a generated `main` that runs
 the blocks one after another in file order, each in a task of its own
-that `main` awaits before the next (as testing.iyi runs a named case:
+that `main` awaits before the next (as testing.ri runs a named case:
 a panic ends only its block). Failed lines and todo are recorded per
 block on every target. On wasm32 (no tasks) only a panic differs: it
 ends the program and is reported against its block. Program verdict:
@@ -607,12 +607,12 @@ module; it sums: `3 modules, 8 blocks: 6 ok, 1 broken, 1 todo`.
 
 One function walks ROOT and returns two lists:
 
-- modules with blocks: `.ri` / `.iyi` files whose parse holds a spec
+- modules with blocks: `.ri` / `.ri` files whose parse holds a spec
   section (a scan for a line starting `spec ` picks candidates; the
   parse decides);
 - old files under ROOT/test/: today's spec_walk set (any `.ri`,
-  `.iyi`, `.cr`, `.sh`, `.py`) for `ris spec`, and of those the
-  `*_test.ri` / `*_test.iyi` programs for `ris test`.
+  `.ri`, `.cr`, `.sh`, `.py`) for `ris spec`, and of those the
+  `*_test.ri` / `*_test.ri` programs for `ris test`.
 
 It skips `lib/`, `mods/`, every directory whose name starts with a
 dot, fixture trees (a directory holding a `.ris-fixtures` marker) and
@@ -778,10 +778,10 @@ web through site. Step 6 builds it.
 5. Test-only imports (5.6). Gate: a block importing std/dir runs; the
    binary names no std/dir symbol; a cyclic test import is refused.
    Done (test/cli/spec_blocks_imports.sh). Steps 2-4 already dropped
-   the section from build, .iyimod and doc. `ris test` refuses the
+   the section from build, .rimod and doc. `ris test` refuses the
    cycle before the build, which would only say "import cycle".
    `--affected` did not count the section: the closure parse dropped
-   it, and it probed only `.iyi`, so no `.ri` module was reached at
+   it, and it probed only `.ri`, so no `.ri` module was reached at
    all; the entry is now parsed with its section and `.ri` comes first.
 6. `ris spec` on blocks, spec.lock, B2 (5.10, 5.14); AGENTS.md and
    spec-cli text. Gate: a block covers its clause; editing the clause
@@ -812,7 +812,7 @@ web through site. Step 6 builds it.
    suites compiler/, compiler-cli/, debug/, llvm-ir/, manual/,
    primitives/, std/ and support/ until the compiler is written in ris.
    Done (test/cli/spec_blocks_old_test.sh): `test "x"` at a top-level
-   line start is refused in every .ri/.iyi file with the 5.1 message;
+   line start is refused in every .ri file with the 5.1 message;
    the prelude's `test` and IyiTestCases are gone; a fresh project's
    `ris check` is green with no test/. No ris test used `test "x" do`;
    the abi `test` in test/compiler is a local Crystal helper.
@@ -887,7 +887,7 @@ Second review (2026-11-11, D16-D18 and the sections they touch):
 - M-3: a section import is file-wide (4.4).
 - M-4, m-7: std/ris_spec and how it is imported (5.7).
 - M-5: RisRun's `==` and `=~`; `match` labels by the side that is not
-  the text (5.7; testing.iyi fixed).
+  the text (5.7; testing.ri fixed).
 - M-6, M-7: status is std/process's exit code; waits poll; output goes
   to files; Linux and darwin only (5.7).
 - M-8: the child's environment (5.7).

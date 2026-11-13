@@ -30,7 +30,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -45,23 +45,23 @@ case "$(uname -s)" in
     ;;
 esac
 
-ORIG_IYI_PATH="${IYI_PATH:-}"
+ORIG_IYI_PATH="${RIS_PATH:-}"
 cleanup() {
   rm -rf "$WORK"
   if [ -n "$ORIG_IYI_PATH" ]; then
-    export IYI_PATH="$ORIG_IYI_PATH"
+    export RIS_PATH="$ORIG_IYI_PATH"
   else
-    unset IYI_PATH
+    unset RIS_PATH
   fi
 }
 trap cleanup EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_env_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_env_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -111,16 +111,16 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the broken-module proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/env.iyi").read_text()
+src = Path("$REPO/src/std/env.ri").read_text()
 old = 'self[key]? != nil'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/env.iyi").write_text(src.replace(old, 'false', 1))
+Path("$WORK/patched/std/env.ri").write_text(src.replace(old, 'false', 1))
 PY
 then
   echo "  the patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_env_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_env_exercise.ri" >"$WORK/mut.out" 2>&1; then
   echo "  the exercise PASSED on a broken module"
   status=1
 else
@@ -138,17 +138,17 @@ case "$(uname -s)" in
       echo "  no python3 on this machine, so the first-entry-only proof is unmeasured"
     elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/env.iyi").read_text()
+src = Path("$REPO/src/std/env.ri").read_text()
 old = '        unless offset == k_len && entry[k_len] == 61_u8\n          ptr[kept] = entry\n'
 if src.count(old) != 1:
     raise SystemExit("patch site missing")
 new = old.replace('== 61_u8', '== 61_u8 && kept == index', 1)
-Path("$WORK/firstonly/std/env.iyi").write_text(src.replace(old, new, 1))
+Path("$WORK/firstonly/std/env.ri").write_text(src.replace(old, new, 1))
 PY
     then
       echo "  the first-entry-only patch did not apply"
       status=1
-    elif IYI_PATH="$WORK/firstonly${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_env_exercise.iyi" >"$WORK/firstonly.out" 2>&1; then
+    elif RIS_PATH="$WORK/firstonly${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_env_exercise.ri" >"$WORK/firstonly.out" 2>&1; then
       echo "  the exercise PASSED with delete removing the first entry only"
       status=1
     elif ! grep -q "ASSERTION FAILED: no entry of a deleted name is left" "$WORK/firstonly.out"; then
@@ -172,7 +172,7 @@ case "$(uname -s)" in
       echo "  no python3 on this machine, so the live-table each proof is unmeasured"
     elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/env.iyi").read_text()
+src = Path("$REPO/src/std/env.ri").read_text()
 old = '''          names << String.new(eq_pos) { |t| t.copy_from(entry, eq_pos) }
           v_len = len - eq_pos - 1
           values << String.new(v_len) { |t| t.copy_from(entry + (eq_pos + 1), v_len) }
@@ -182,12 +182,12 @@ if src.count(old) != 1:
 new = '''          v_len = len - eq_pos - 1
           yield String.new(eq_pos) { |t| t.copy_from(entry, eq_pos) }, String.new(v_len) { |t| t.copy_from(entry + (eq_pos + 1), v_len) }
 '''
-Path("$WORK/liveeach/std/env.iyi").write_text(src.replace(old, new, 1))
+Path("$WORK/liveeach/std/env.ri").write_text(src.replace(old, new, 1))
 PY
     then
       echo "  the live-table each patch did not apply"
       status=1
-    elif IYI_PATH="$WORK/liveeach${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_env_exercise.iyi" >"$WORK/liveeach.out" 2>&1; then
+    elif RIS_PATH="$WORK/liveeach${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_env_exercise.ri" >"$WORK/liveeach.out" 2>&1; then
       echo "  the exercise PASSED with each yielding from the live table"
       status=1
     elif ! grep -q "ASSERTION FAILED: each visits every variable while its block deletes" "$WORK/liveeach.out"; then
@@ -208,23 +208,23 @@ esac
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT) ;;
   *)
-    mkdir -p "$WORK/unheld/iyi"
-    cp "$REPO"/src/iyi/*.iyi "$WORK/unheld/iyi/"
+    mkdir -p "$WORK/unheld/ris"
+    cp "$REPO"/src/ris/*.ri "$WORK/unheld/ris/"
     if [ -z "$PY" ]; then
       echo "  no python3 on this machine, so the unheld-table proof is unmeasured"
     elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/iyi/prelude.iyi").read_text()
+src = Path("$REPO/src/ris/prelude.ri").read_text()
 old = '    IyiEnvironTable.hold(entries)\n'
 if src.count(old) != 1:
     raise SystemExit("patch site missing")
-Path("$WORK/unheld/iyi/prelude.iyi").write_text(src.replace(old, '', 1))
+Path("$WORK/unheld/ris/prelude.ri").write_text(src.replace(old, '', 1))
 PY
     then
       echo "  the unheld-table patch did not apply"
       status=1
     else
-      IYI_PATH="$WORK/unheld${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_env_exercise.iyi" >"$WORK/unheld.out" 2>&1
+      RIS_PATH="$WORK/unheld${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_env_exercise.ri" >"$WORK/unheld.out" 2>&1
       code=$?
       if grep -q "ALL CHECKS PASSED" "$WORK/unheld.out"; then
         echo "  the exercise PASSED with the table held nowhere"
@@ -240,13 +240,13 @@ echo
 echo "== what env refuses"
 refuses() { # refuses <label> <name> <phrase> <snippet>
   local label="$1" name="$2" phrase="$3" snippet="$4"
-  cat <<IYI >"$WORK/$name.iyi"
+  cat <<RIS >"$WORK/$name.ri"
 module bench/refusal_$name
 import std/env::{ENV}
 
 $snippet
-IYI
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" >"$WORK/$name.build.log" 2>&1; then
+RIS
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" >"$WORK/$name.build.log" 2>&1; then
     echo "  $label: the program did not build"
     status=1
     return

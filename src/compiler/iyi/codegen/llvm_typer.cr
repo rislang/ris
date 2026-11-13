@@ -526,7 +526,7 @@ module Iyi
     # fifteen), and 51,821 at 128: unchanged. Issue #130's program, debug,
     # in a task on Linux x86_64, ran 120 frames deep with the line at 64 and
     # 119 at 128, where it ran 47 before. It is a constant rather than a
-    # choice per build, because a `.iyimod`'s object code and its consumer
+    # choice per build, because a `.rimod`'s object code and its consumer
     # must agree on it whichever way each was built.
     INDIRECT_ABOVE = 128_u64
 

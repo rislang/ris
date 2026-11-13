@@ -1,5 +1,6 @@
 class State
   @@log = Array(String).new
+
   def self.log
     @@log
   end
@@ -8,4 +9,5 @@ end
 def append(log : Array(String), text : String)
   log << text
 end
+
 append(State.log, String.new("request"))

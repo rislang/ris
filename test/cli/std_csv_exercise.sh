@@ -24,7 +24,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -42,12 +42,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_csv_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_csv_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -95,7 +95,7 @@ fi
 # The oracle: the reader and the writer driven from the command line, a
 # row a line and a field `x` and its bytes in hex, so Python's rows and
 # these are compared byte for byte, a row of no fields an empty line.
-cat >"$WORK/oracle.iyi" <<'IYI'
+cat >"$WORK/oracle.ri" <<'RIS'
 module oracle
 
 import std/int
@@ -161,7 +161,7 @@ else
   end
   sink.close
 end
-IYI
+RIS
 
 echo
 echo "== Python's csv module, both ways"
@@ -171,7 +171,7 @@ echo "== Python's csv module, both ways"
 # and four bytes; rows of none and of one empty field among them.
 if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the comparison with Python's csv is unmeasured"
-elif ! "$IYI" build -o "$WORK/oracle" "$WORK/oracle.iyi" >"$WORK/oracle.build.log" 2>&1; then
+elif ! "$RIS" build -o "$WORK/oracle" "$WORK/oracle.ri" >"$WORK/oracle.build.log" 2>&1; then
   echo "  the oracle did not build"
   sed -n '1,8p' "$WORK/oracle.build.log"
   status=1
@@ -272,12 +272,12 @@ with open(f"{work}/dict.csv", newline="", encoding="utf-8") as f:
 with open(f"{work}/dict.dump", "w", newline="", encoding="utf-8") as f:
     f.write("\n".join(out) + "\n")
 PY
-  if ! "$WORK/oracle" read "$WORK/dict.csv" "," '"' headers >"$WORK/dict.iyi" 2>"$WORK/oracle.err"; then
+  if ! "$WORK/oracle" read "$WORK/dict.csv" "," '"' headers >"$WORK/dict.ri" 2>"$WORK/oracle.err"; then
     echo "  the header file was refused: $(head -1 "$WORK/oracle.err")"
     status=1
-  elif ! cmp -s "$WORK/dict.dump" "$WORK/dict.iyi"; then
+  elif ! cmp -s "$WORK/dict.dump" "$WORK/dict.ri"; then
     echo "  rows by header name differ from DictReader's"
-    diff "$WORK/dict.dump" "$WORK/dict.iyi" | head -4
+    diff "$WORK/dict.dump" "$WORK/dict.ri" | head -4
     status=1
   else
     echo "  $(($(wc -l <"$WORK/dict.dump") - 1)) rows by header name, as DictReader gives them"
@@ -288,7 +288,7 @@ echo
 echo "== what the reader and writer refuse"
 # The program's mistakes panic, each with its sentence; a document's are
 # values, and `.or_panic` turns one into its message.
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/csv::{CSVReader, CSVWriter}
@@ -312,9 +312,9 @@ when "malformed-or-panic"
   CSVReader.new("a,b\nc\"d\n").each { |row| puts row.size }.or_panic
 end
 puts "accepted"
-IYI
+RIS
 refuse() { # refuse <case> <phrase>
-  if "$IYI" run "$WORK/refuse.iyi" -- "$1" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
   elif ! grep -qF -- "$2" "$WORK/refuse.out"; then
@@ -339,16 +339,16 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the broken-module proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/csv.iyi").read_text()
+src = Path("$REPO/src/std/csv.ri").read_text()
 old = 'quoted ? take(field.finish, size) : text[start, size]'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/csv.iyi").write_text(src.replace(old, 'text[start, 0]', 1))
+Path("$WORK/patched/std/csv.ri").write_text(src.replace(old, 'text[start, 0]', 1))
 PY
 then
   echo "  the patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_csv_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_csv_exercise.ri" >"$WORK/mut.out" 2>&1; then
   echo "  the exercise PASSED on a broken module"
   status=1
 else
@@ -373,16 +373,16 @@ broken() { # broken <label> <old> <new> <phrase>
   if ! OLD="$2" NEW="$3" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/csv.iyi").read_text()
+src = Path("$REPO/src/std/csv.ri").read_text()
 old = os.environ["OLD"]
 if src.count(old) != 1:
     raise SystemExit("patch site missing or not unique")
-Path("$WORK/patched/std/csv.iyi").write_text(src.replace(old, os.environ["NEW"], 1))
+Path("$WORK/patched/std/csv.ri").write_text(src.replace(old, os.environ["NEW"], 1))
 PY
   then
     echo "  $label: the patch did not apply"
     status=1
-  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_csv_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_csv_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the broken copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1

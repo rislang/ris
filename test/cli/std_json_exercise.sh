@@ -13,9 +13,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -51,12 +51,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_json_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_json_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -94,14 +94,14 @@ done
 
 echo
 echo "== compact corpus against python3 json"
-grep -a '^oracle json' "$WORK/json-plain.out" | cut -f2- > "$WORK/compact.iyi.txt"
-if [ "$(wc -l < "$WORK/compact.iyi.txt")" -lt 20 ]; then
-  echo "  the corpus shrank ($(wc -l < "$WORK/compact.iyi.txt") compact lines)"
+grep -a '^oracle json' "$WORK/json-plain.out" | cut -f2- > "$WORK/compact.ri.txt"
+if [ "$(wc -l < "$WORK/compact.ri.txt")" -lt 20 ]; then
+  echo "  the corpus shrank ($(wc -l < "$WORK/compact.ri.txt") compact lines)"
   status=1
 elif [ -z "$PY" ]; then
   echo "  skipped: no working python3, so the compact corpus was not read back as JSON"
 else
-  "$PY" - "$WORK/compact.iyi.txt" <<'PY'
+  "$PY" - "$WORK/compact.ri.txt" <<'PY'
 import json, sys
 n = 0
 for i, line in enumerate(open(sys.argv[1]), 1):
@@ -135,8 +135,8 @@ echo "== what the pull parser, the builder and from_json refuse, by name"
 refuses() { # refuses <label> <name> <phrase> <statements>
   local label="$1" name="$2" phrase="$3" statements="$4"
   printf 'module main\n\nimport std/json::{JSON, Any, PullParser, Builder}\n\n\n%s\n' \
-    "$statements" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$statements" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -198,8 +198,8 @@ echo "== what derive serializable refuses when the type is compiled, by name"
 compile_refuses() { # compile_refuses <label> <name> <phrase> <fields>
   local label="$1" name="$2" phrase="$3" fields="$4"
   printf 'module main\n\nimport std/json::{JSON, serializable}\n\nstruct Typed\n%s\n  derive serializable\nend\n\nputs Typed.from_json(%%({"a": 1, "b": 2})).to_json\n' \
-    "$fields" > "$WORK/$name.iyi"
-  if "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$fields" > "$WORK/$name.ri"
+  if "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: it built"
     status=1
   elif ! grep -q "$phrase" "$WORK/$name.build"; then
@@ -232,16 +232,16 @@ if [ -z "$PY" ]; then
 else
   mkdir -p "$WORK/patched_dup/std"
   "$PY" - <<PY
-src = open("$REPO/src/std/json.iyi").read()
+src = open("$REPO/src/std/json.ri").read()
 old = 'fail("duplicate key \\'#{key_s(name_at, name_size, name_flags)}\\'")'
 if src.count(old) != 2:
     raise SystemExit("patch site missing")
-open("$WORK/patched_dup/std/json.iyi", "w").write(src.replace(old, "nil"))
+open("$WORK/patched_dup/std/json.ri", "w").write(src.replace(old, "nil"))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched_dup${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_json_exercise.iyi" >"$WORK/dup.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched_dup${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_json_exercise.ri" >"$WORK/dup.out" 2>&1; then
     echo "  the exercise PASSED with duplicate keys accepted"
     status=1
   elif ! grep -aq "duplicate key" "$WORK/dup.out"; then
@@ -260,17 +260,17 @@ if [ -z "$PY" ]; then
 else
   mkdir -p "$WORK/patched_pull/std"
   "$PY" - <<PY
-src = open("$REPO/src/std/json.iyi").read()
+src = open("$REPO/src/std/json.ri").read()
 for old in ["parse_error(\\"duplicate key '#{key}'\\") if @keys[i] == key"]:
     if src.count(old) != 1:
         raise SystemExit("patch site missing: " + old)
     src = src.replace(old, "nil", 1)
-open("$WORK/patched_pull/std/json.iyi", "w").write(src)
+open("$WORK/patched_pull/std/json.ri", "w").write(src)
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif ! IYI_PATH="$WORK/patched_pull${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$WORK/pull_dup.iyi" >"$WORK/pull_dup.patched.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched_pull${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$WORK/pull_dup.ri" >"$WORK/pull_dup.patched.out" 2>&1; then
     echo "  read_object still refused the repeated key with its check removed:"
     grep -m1 panic "$WORK/pull_dup.patched.out" || sed -n '1,4p' "$WORK/pull_dup.patched.out"
     status=1
@@ -290,15 +290,15 @@ broken() { # broken <label> <phrase> <old> <new>
   mkdir -p "$WORK/broken/std"
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
-src = open("$REPO/src/std/json.iyi").read()
+src = open("$REPO/src/std/json.ri").read()
 if src.count(os.environ["OLD"]) < 1:
     raise SystemExit("patch site missing")
-open("$WORK/broken/std/json.iyi", "w").write(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+open("$WORK/broken/std/json.ri", "w").write(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  $1: the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/broken${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_json_exercise.iyi" >"$WORK/broken.out" 2>&1; then
+  elif RIS_PATH="$WORK/broken${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_json_exercise.ri" >"$WORK/broken.out" 2>&1; then
     echo "  $1: the exercise PASSED on a broken module"
     status=1
   elif ! grep -aq "$2" "$WORK/broken.out"; then

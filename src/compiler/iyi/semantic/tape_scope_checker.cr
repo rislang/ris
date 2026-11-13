@@ -381,7 +381,7 @@ end
 # pointer into a tape in a heap object.
 module Iyi::TapeScopeRuntime
   # The loaded prelude's directory, "/"-terminated: a test's patched copy
-  # of `src/iyi/` (test/cli/*.sh mutation proofs) is the runtime as much as
+  # of `src/ris/` (test/cli/*.sh mutation proofs) is the runtime as much as
   # the original, so the rules that exempt the runtime exempt it too.
   class_property prelude_dir : String? = nil
   @@expanded = {} of String => String
@@ -390,7 +390,7 @@ module Iyi::TapeScopeRuntime
     file = location.try(&.original_filename)
     return true unless file
     file = file.gsub('\\', '/')
-    return true if crystal?(location) || file.includes?("/src/iyi/") || file.includes?("/src/compiler/")
+    return true if crystal?(location) || file.includes?("/src/ris/") || file.includes?("/src/compiler/")
     return false unless dir = prelude_dir
     return true if file.starts_with?(dir)
     return false if file.starts_with?('/')
@@ -399,25 +399,25 @@ module Iyi::TapeScopeRuntime
   end
 
   # A file of the runtime or std, where a checkout or a search-path entry
-  # keeps them: `src/iyi/`, `src/std/`, or `iyi/` and `std/` under an
-  # `IYI_PATH` entry, as a bench's patched copy of either is.
+  # keeps them: `src/ris/`, `src/std/`, or `ris/` and `std/` under an
+  # `RIS_PATH` entry, as a bench's patched copy of either is.
   def self.library_file?(filename : String) : Bool
     filename = filename.gsub('\\', '/')
-    return true if filename.includes?("/src/iyi/") || filename.includes?("/src/std/")
+    return true if filename.includes?("/src/ris/") || filename.includes?("/src/std/")
     @@library_roots ||= IyiPath.default_paths.compact_map do |entry|
       next if entry.empty? || entry == "lib"
       File.expand_path(entry).gsub('\\', '/').rstrip('/') + "/"
     end
     full = filename.starts_with?('/') ? filename : File.expand_path(filename).gsub('\\', '/')
     @@library_roots.not_nil!.any? do |root|
-      full.starts_with?(root + "iyi/") || full.starts_with?(root + "std/")
+      full.starts_with?(root + "ris/") || full.starts_with?(root + "std/")
     end
   end
 
   @@library_roots : Array(String)? = nil
 
   # The prelude where it was loaded from, which a test may copy out of
-  # `src/iyi/` to change it.
+  # `src/ris/` to change it.
   def self.prelude?(program : Program, location : Location?) : Bool
     return false unless directory = program.iyi_prelude_dir
     file = location.try(&.original_filename)
@@ -440,7 +440,7 @@ module Iyi::TapePointerCheckerLibrary
     file = location.try(&.original_filename)
     return true unless file
     file = file.gsub('\\', '/')
-    file.includes?("/std/") || file.includes?("/src/iyi/") ||
+    file.includes?("/std/") || file.includes?("/src/ris/") ||
       file.includes?("/src/compiler/") || file.ends_with?(".cr") ||
       TapeScopeRuntime.runtime?(location)
   end

@@ -24,12 +24,15 @@ sink.close
 
 struct Listening
 end
+
 struct Handler
   def initialize(config : Int32)
   end
+
   def listening(port : Int32) : Nil
     RisBoard.post(Listening.new)
   end
+
   def call(req : Incoming, res : Outgoing) : Nil
     res.body << "ok"
   end

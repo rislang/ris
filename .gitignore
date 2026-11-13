@@ -48,8 +48,8 @@ __pycache__/
 /.vscode/
 
 
-# The compiler's local cache when IYI_CACHE_DIR is unset.
-/.iyi/
+# The compiler's local cache when RIS_CACHE_DIR is unset.
+/.ri/
 
 # ris: scripts/test-par.sh
 /test-out/

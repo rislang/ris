@@ -154,7 +154,7 @@ class Iyi::TapeChecker
     false
   end
 
-  # ris: a runtime class (src/iyi/, so not itself a tape type) may hold
+  # ris: a runtime class (src/ris/, so not itself a tape type) may hold
   # one of the runtime's own streams (`IyiIO`), which a pool keeps in
   # program storage: `RisPipeSlot` holds a pooled pipe end. Any other
   # tape type, or any class outside the runtime, is still refused.

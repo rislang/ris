@@ -30,7 +30,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/ris}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -48,12 +48,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build --spec "$@" -o "$WORK/$name" "$REPO/src/std/base64.iyi" \
+  if ! "$RIS" build --spec "$@" -o "$WORK/$name" "$REPO/src/std/base64.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -74,7 +74,7 @@ build_and_run() {
     status=1
     return 1
   fi
-  if ! "$IYI" run "$REPO/test/cli/std_base64_exercise.iyi" \
+  if ! "$RIS" run "$REPO/test/cli/std_base64_exercise.ri" \
        >>"$WORK/$name.out" 2>&1; then
     status=1
     return 1
@@ -127,18 +127,18 @@ broken() { # broken <label> <old> <new> [<phrase>]
   if ! OLD="$2" NEW="$3" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/base64.iyi").read_text()
+src = Path("$REPO/src/std/base64.ri").read_text()
 old = os.environ["OLD"]
 if src.count(old) != 1:
     raise SystemExit("patch site missing or not unique")
-Path("$WORK/patched/std/base64.iyi").write_text(src.replace(old, os.environ["NEW"], 1))
+Path("$WORK/patched/std/base64.ri").write_text(src.replace(old, os.environ["NEW"], 1))
 PY
   then
     echo "  $label: the patch did not apply"
     status=1
   # Build first, then run: a patch that does not compile would also "fail",
   # and that proves nothing about whether the exercise catches the break.
-  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build --spec -o "$WORK/mut-$mutations.bin" "$WORK/patched/std/base64.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build --spec -o "$WORK/mut-$mutations.bin" "$WORK/patched/std/base64.ri" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the broken copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1
@@ -184,8 +184,8 @@ echo
 echo "== what decode refuses"
 refuses() { # refuses <label> <name> <phrase> <text>
   local label="$1" name="$2" phrase="$3" text="$4"
-  printf 'module main\n\nimport std/base64::{Base64}\n\nputs Base64.decode(%s).inspect\n' "$text" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/base64::{Base64}\n\nputs Base64.decode(%s).inspect\n' "$text" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -204,7 +204,7 @@ refuses() { # refuses <label> <name> <phrase> <text>
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 refuses "a byte outside the alphabet" bad_byte "base64: invalid byte 42" '"QU*JD"'
 refuses "data after the padding" after_pad "base64: data after padding" '"QQ==QQ=="'

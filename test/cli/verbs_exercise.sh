@@ -2,9 +2,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The compiler, overridable: `bin/iyi` is a POSIX shell wrapper, and on
+# The compiler, overridable: `bin/ris` is a POSIX shell wrapper, and on
 # Windows the caller is the only one who knows where the real binary is.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -67,36 +67,36 @@ refuses() { # refuses <label> <phrase> -- <command...>
 }
 
 cd "$WORK"
-printf 'module main\n\nputs "ok"\n' > good.iyi
-printf 'module main\n\nmodule second\n\nputs "two"\n' > twoheaders.iyi
+printf 'module main\n\nputs "ok"\n' > good.ri
+printf 'module main\n\nmodule second\n\nputs "two"\n' > twoheaders.ri
 # Bytes that are not UTF-8 at all, rather than a random draw that might be.
-printf '\377\376\377\376' > binary.iyi
+printf '\377\376\377\376' > binary.ri
 mkdir -p app mods
-printf 'module app/lib\n\npub def value : Int32\n  7\nend\n' > app/lib.iyi
-printf 'module main\n\nimport app/lib::{value}\n\nputs value\n' > user.iyi
-printf '# A comment, and then nothing that declares a module.\nputs "hi"\n' > nomodule.iyi
+printf 'module app/lib\n\npub def value : Int32\n  7\nend\n' > app/lib.ri
+printf 'module main\n\nimport app/lib::{value}\n\nputs value\n' > user.ri
+printf '# A comment, and then nothing that declares a module.\nputs "hi"\n' > nomodule.ri
 mkdir -p tree
 printf 'class Ok\nend\n' > tree/ok.cr
 printf 'class X\n\377\376\377\376\nend\n' > tree/bad.cr
 
 echo "== the good path, first"
-if "$IYI" build --emit-iyimod mods -o user user.iyi > build.log 2>&1 && [ "$(./user)" = "7" ]; then
+if "$RIS" build --emit-rimod mods -o user user.ri > build.log 2>&1 && [ "$(./user)" = "7" ]; then
   echo "  a program builds, writes its artifact, and runs"
 else
   echo "  the good path does not hold"
   sed -n '1,8p' build.log
   status=1
 fi
-cp mods/app/lib.iyimod lib.good
+cp mods/app/lib.rimod lib.good
 # A setter that writes no return (R-2 lets it: it answers what it was
 # handed) answers through its module's artifact what it answers from
 # source. It was carried as a header the consumer typed `Nil`, and the
 # link asked for `n=<Int32>:Nil` where the module had emitted `:Int32`.
 mkdir -p "$WORK/setter/app"
-printf 'module app/s\n\npub class Box\n  @n : Int32\n\n  def initialize(@n : Int32)\n  end\n\n  def n=(v : Int32)\n    @n = v\n  end\n\n  def n : Int32\n    @n\n  end\nend\n' > "$WORK/setter/app/s.iyi"
-printf 'import app/s::{Box}\n\nb = Box.new(1)\nb.n = 5\nputs b.n\n' > "$WORK/setter/m.iyi"
-(cd "$WORK/setter" && "$IYI" build --emit-iyimod mods -o from-source m.iyi && mv app/s.iyi s.source &&
-  "$IYI" build --use-iyimod mods -o from-artifact m.iyi) > "$WORK/setter.log" 2>&1
+printf 'module app/s\n\npub class Box\n  @n : Int32\n\n  def initialize(@n : Int32)\n  end\n\n  def n=(v : Int32)\n    @n = v\n  end\n\n  def n : Int32\n    @n\n  end\nend\n' > "$WORK/setter/app/s.ri"
+printf 'import app/s::{Box}\n\nb = Box.new(1)\nb.n = 5\nputs b.n\n' > "$WORK/setter/m.ri"
+(cd "$WORK/setter" && "$RIS" build --emit-rimod mods -o from-source m.ri && mv app/s.ri s.source &&
+  "$RIS" build --use-rimod mods -o from-artifact m.ri) > "$WORK/setter.log" 2>&1
 if [ "$(cd "$WORK/setter" && ./from-artifact 2>&1)" = "5" ]; then
   echo "  a setter with no written return, through its artifact: 5, as from source"
 else
@@ -109,10 +109,10 @@ fi
 # propagate", and a program without the `!` built from source and failed
 # to link through the artifact, on `never_fails:(Int32 | ...LibErr)`.
 mkdir -p "$WORK/declared/app"
-printf 'module app/e\n\npub class LibErr\n  def initialize\n  end\nend\n\nimpl Error for LibErr\n  def message : String\n    "liberr"\n  end\nend\n\npub def never_fails : Int32 | LibErr\n  1\nend\n' > "$WORK/declared/app/e.iyi"
-printf 'import app/e::*\n\ndef g : Int32 | LibErr\n  never_fails()! + 1\nend\n\nputs typeof(never_fails)\ncase g\nin Int32 then puts it\nin LibErr then puts it.message\nend\n' > "$WORK/declared/m.iyi"
-(cd "$WORK/declared" && "$IYI" build --emit-iyimod mods -o from-source m.iyi && mv app/e.iyi e.source &&
-  "$IYI" build --use-iyimod mods -o from-artifact m.iyi) > "$WORK/declared.log" 2>&1
+printf 'module app/e\n\npub class LibErr\n  def initialize\n  end\nend\n\nimpl Error for LibErr\n  def message : String\n    "liberr"\n  end\nend\n\npub def never_fails : Int32 | LibErr\n  1\nend\n' > "$WORK/declared/app/e.ri"
+printf 'import app/e::*\n\ndef g : Int32 | LibErr\n  never_fails()! + 1\nend\n\nputs typeof(never_fails)\ncase g\nin Int32 then puts it\nin LibErr then puts it.message\nend\n' > "$WORK/declared/m.ri"
+(cd "$WORK/declared" && "$RIS" build --emit-rimod mods -o from-source m.ri && mv app/e.ri e.source &&
+  "$RIS" build --use-rimod mods -o from-artifact m.ri) > "$WORK/declared.log" 2>&1
 declared_expected="$(printf '(App::E::LibErr | Int32)\n2')"
 if [ "$(cd "$WORK/declared" && ./from-source 2>&1 | tr -d '\r')" = "$declared_expected" ] &&
    [ "$(cd "$WORK/declared" && ./from-artifact 2>&1 | tr -d '\r')" = "$declared_expected" ]; then
@@ -126,12 +126,12 @@ fi
 # `unreachable`: from source it was "iyi: out of memory", a memory fault or
 # a breakpoint, by build, while `App::Ov.show(v)` answered.
 mkdir -p "$WORK/ovl/app"
-printf 'module app/ov\n\npub def show(x : Int32) : String\n  "int"\nend\n\npub def show(x : String) : String\n  "str"\nend\n' > "$WORK/ovl/app/ov.iyi"
-printf 'module app/relay\n\nimport app/ov::*\n\npub def relay(v : Int32 | String) : String\n  show(v)\nend\n\npub class C\n  def go(v : Int32 | String) : String\n    show(v)\n  end\nend\n' > "$WORK/ovl/app/relay.iyi"
-printf 'module main\n\nimport app/ov::{show}\nimport app/relay::*\n\ndef own(x : Int32) : String\n  "own int"\nend\n\ndef own(x : String) : String\n  "own str"\nend\n\nclass D\n  def go(v : Int32 | String) : String\n    own(v)\n  end\nend\n\nv : Int32 | String = "abc".size > 0 ? "s" : 1\nw : Int32 | String = "abc".size > 0 ? 1 : "s"\nputs show(v), show(w), relay(v), C.new.go(w), D.new.go(v)\n' > "$WORK/ovl/m.iyi"
+printf 'module app/ov\n\npub def show(x : Int32) : String\n  "int"\nend\n\npub def show(x : String) : String\n  "str"\nend\n' > "$WORK/ovl/app/ov.ri"
+printf 'module app/relay\n\nimport app/ov::*\n\npub def relay(v : Int32 | String) : String\n  show(v)\nend\n\npub class C\n  def go(v : Int32 | String) : String\n    show(v)\n  end\nend\n' > "$WORK/ovl/app/relay.ri"
+printf 'module main\n\nimport app/ov::{show}\nimport app/relay::*\n\ndef own(x : Int32) : String\n  "own int"\nend\n\ndef own(x : String) : String\n  "own str"\nend\n\nclass D\n  def go(v : Int32 | String) : String\n    own(v)\n  end\nend\n\nv : Int32 | String = "abc".size > 0 ? "s" : 1\nw : Int32 | String = "abc".size > 0 ? 1 : "s"\nputs show(v), show(w), relay(v), C.new.go(w), D.new.go(v)\n' > "$WORK/ovl/m.ri"
 for mode in plain release; do
   flag=""; [ "$mode" = release ] && flag="--release"
-  (cd "$WORK/ovl" && "$IYI" build $flag -o "ovl-$mode" m.iyi && "./ovl-$mode") > "$WORK/ovl-$mode.out" 2>&1
+  (cd "$WORK/ovl" && "$RIS" build $flag -o "ovl-$mode" m.ri && "./ovl-$mode") > "$WORK/ovl-$mode.out" 2>&1
   if [ "$(tr -d '\r' < "$WORK/ovl-$mode.out" | tr '\n' ' ')" = "str int str int own str " ]; then
     echo "  a module's overloads called unqualified with a union, $mode: each arm answers"
   else
@@ -152,9 +152,9 @@ done
 # for ...`, which does not parse.
 mkdir -p "$WORK/shadow/app"
 for sibling in tuple std reference; do
-  printf 'module app/%s\n\npub def %s_here : Int32\n  1\nend\n' "$sibling" "$sibling" > "$WORK/shadow/app/$sibling.iyi"
+  printf 'module app/%s\n\npub def %s_here : Int32\n  1\nend\n' "$sibling" "$sibling" > "$WORK/shadow/app/$sibling.ri"
 done
-cat > "$WORK/shadow/app/lib.iyi" << 'IYI'
+cat > "$WORK/shadow/app/lib.ri" << 'RIS'
 module app/lib
 
 import app/tuple
@@ -220,10 +220,10 @@ impl Into(String) for Item
     "item"
   end
 end
-IYI
-printf 'import app/lib::{Item, Oops}\n\nitem = Item.new({3, 4})\nputs({1, "x"}.show)\nputs Oops.new.note\nputs item.hash_key\nputs item.key\nputs item.into\nputs Item.last_sum\n' > "$WORK/shadow/m.iyi"
-(cd "$WORK/shadow" && "$IYI" build --emit-iyimod mods -o from-source m.iyi && mv app/lib.iyi lib.source &&
-  "$IYI" build --use-iyimod mods -o from-artifact m.iyi) > "$WORK/shadow.log" 2>&1
+RIS
+printf 'import app/lib::{Item, Oops}\n\nitem = Item.new({3, 4})\nputs({1, "x"}.show)\nputs Oops.new.note\nputs item.hash_key\nputs item.key\nputs item.into\nputs Item.last_sum\n' > "$WORK/shadow/m.ri"
+(cd "$WORK/shadow" && "$RIS" build --emit-rimod mods -o from-source m.ri && mv app/lib.ri lib.source &&
+  "$RIS" build --use-rimod mods -o from-artifact m.ri) > "$WORK/shadow.log" 2>&1
 shadow_expected="$(printf 'a tuple\noops\n7\n70\nitem\n7')"
 if [ "$(cd "$WORK/shadow" && ./from-source 2>&1)" = "$shadow_expected" ] &&
   [ "$(cd "$WORK/shadow" && ./from-artifact 2>&1)" = "$shadow_expected" ]; then
@@ -234,7 +234,7 @@ fi
 
 echo
 echo "== what the command line refuses"
-refuses "an unknown verb" "unknown command" -- "$IYI" frobnicate
+refuses "an unknown verb" "unknown command" -- "$RIS" frobnicate
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     # An extension written as a batch file, the shape npm's shims take on
@@ -244,15 +244,15 @@ case "$(uname -s)" in
     mkdir -p extbin
     printf '@echo batonly %%*\r\n' > extbin/iyi-batonly.cmd
     refuses "an extension that is a batch file" "iyi-batonly.cmd is a batch file" -- \
-      env PATH="$(cygpath -u "$WORK/extbin"):$PATH" "$IYI" batonly x
+      env PATH="$(cygpath -u "$WORK/extbin"):$PATH" "$RIS" batonly x
     ;;
 esac
 # `help nonesuch` printed the whole usage and exited 0 - "yes, that is a
 # command" - and `help build` did the same, as if the verb had no help of
 # its own. `version extra` dropped the word.
-refuses "help for a verb that is not one" "there is no" -- "$IYI" help nonesuch
-refuses "version with an argument" "takes no arguments" -- "$IYI" version extra
-if "$IYI" help build 2>/dev/null | head -1 | grep -qE '^Usage: (iyi|ris) build'; then
+refuses "help for a verb that is not one" "there is no" -- "$RIS" help nonesuch
+refuses "version with an argument" "takes no arguments" -- "$RIS" version extra
+if "$RIS" help build 2>/dev/null | head -1 | grep -qE '^Usage: (iyi|ris) build'; then
   echo "  help for a verb is the verb's own"
 else
   echo "  help for a verb printed the general usage"; status=1
@@ -263,19 +263,19 @@ fi
 # AI_FIRST.md §2b hands `mod context --budget N` to agents as one of the
 # loop's seven verbs. `mod diff` and `mod dump` answered the same way.
 for sub in context diff dump; do
-  if "$IYI" mod "$sub" --help 2>/dev/null | head -1 | grep -q "^Usage: .* mod $sub"; then
+  if "$RIS" mod "$sub" --help 2>/dev/null | head -1 | grep -q "^Usage: .* mod $sub"; then
     echo "  mod $sub --help is mod $sub's own usage"
   else
     echo "  mod $sub --help did not print its usage:"
-    "$IYI" mod "$sub" --help 2>&1 | head -1 | sed 's/^/    /'
+    "$RIS" mod "$sub" --help 2>&1 | head -1 | sed 's/^/    /'
     status=1
   fi
 done
 # The flags each usage names are the flags each one takes: a usage that
 # forgets a switch is a switch nobody finds.
-if "$IYI" mod context --help 2>/dev/null | grep -q -- "--budget" &&
-   "$IYI" mod diff --help 2>/dev/null | grep -q -- "--exit-code" &&
-   "$IYI" mod dump --help 2>/dev/null | grep -q -- "--declarations"; then
+if "$RIS" mod context --help 2>/dev/null | grep -q -- "--budget" &&
+   "$RIS" mod diff --help 2>/dev/null | grep -q -- "--exit-code" &&
+   "$RIS" mod dump --help 2>/dev/null | grep -q -- "--declarations"; then
   echo "  each mod usage names the switches that verb reads"
 else
   echo "  a mod usage does not name its own switches"; status=1
@@ -285,65 +285,65 @@ fi
 # "Negative argument" where this compiler says "negative count: -3". One
 # name, two semantics. It was removed rather than taught the prelude, and
 # this line is what keeps it removed.
-refuses "the session that was removed" "unknown command" -- "$IYI" repl
+refuses "the session that was removed" "unknown command" -- "$RIS" repl
 # The two verbs that are Crystal's and not this language's. The refusal
 # used to end with "run it with the `crystal` binary in this checkout",
 # which is true of a developer's tree and false of the tarball and the
 # zip; it names what stands in for each now. `init` was the third of
 # these until it became a verb (`test/cli/init_project.sh`).
-refuses "spec, which is iyi test here" "\`iyi test\` runs them" -- "$IYI" spec
-refuses "eval, which has no evaluator here" "\`iyi run\` it" -- "$IYI" eval "puts 1"
-refuses "an unknown flag" "Invalid option" -- "$IYI" build --nonesuch good.iyi
+refuses "spec, which is iyi test here" "\`ris test\` runs them" -- "$RIS" spec
+refuses "eval, which has no evaluator here" "\`ris run\` it" -- "$RIS" eval "puts 1"
+refuses "an unknown flag" "Invalid option" -- "$RIS" build --nonesuch good.ri
 # `--mcpu` was handed to LLVM unchecked: an unknown name was warned about
 # once per codegen thread, the lines running into each other, and the
 # build died in LLVM's `abort()` - "64-bit code requested on a subtarget
 # that doesn't support it!", exit 0xC0000409 on Windows. A name it knows
 # is still taken.
 refuses "an --mcpu LLVM does not know" "is not a CPU LLVM knows" -- \
-  "$IYI" build --mcpu nonesuch -o "$WORK/mcpu_bad" good.iyi
+  "$RIS" build --mcpu nonesuch -o "$WORK/mcpu_bad" good.ri
 case "$(uname -m)" in
   x86_64 | amd64)
-    if "$IYI" build --mcpu x86-64 -o mcpu_ok good.iyi > mcpu.log 2>&1 && [ "$(./mcpu_ok | tr -d '\r')" = "ok" ]; then
+    if "$RIS" build --mcpu x86-64 -o mcpu_ok good.ri > mcpu.log 2>&1 && [ "$(./mcpu_ok | tr -d '\r')" = "ok" ]; then
       echo "  an --mcpu LLVM knows: builds and runs"
     else
       echo "  an --mcpu LLVM knows did not build:"; sed -n '1,3p' mcpu.log; status=1
     fi
     ;;
 esac
-refuses "a file that is not there" "no such file" -- "$IYI" run "$WORK/nope.iyi"
+refuses "a file that is not there" "no such file" -- "$RIS" run "$WORK/nope.ri"
 # One sentence for one mistake, from every verb that takes a file: this was
 # "no such file" about a path that is right there, so the reader ran `ls`,
 # found it, and learned nothing. `gather_sources` is the one place they all
 # come through, so `run`, `build`, `check` and `vet` answer alike.
-refuses "a directory as the entry" "is a directory, not a source file" -- "$IYI" run "$WORK"
-refuses "two module headers in one file" "a file declares one module" -- "$IYI" run twoheaders.iyi
+refuses "a directory as the entry" "is a directory, not a source file" -- "$RIS" run "$WORK"
+refuses "two module headers in one file" "a file declares one module" -- "$RIS" run twoheaders.ri
 # An impl for a module that is not a trait gave every type including the
 # module the trait, with no impl of its own for R-3 to check: `struct Y;
 # include M` answered `is_a?(Show)` true and ran M's `show`.
-printf 'trait Show\n  abstract def show : String\nend\n\nmodule M\nend\n\nimpl Show for M\n  def show : String\n    "via M"\n  end\nend\n\nstruct Y\n  include M\nend\n\nputs Y.new.show\n' > implmodule.iyi
+printf 'trait Show\n  abstract def show : String\nend\n\nmodule M\nend\n\nimpl Show for M\n  def show : String\n    "via M"\n  end\nend\n\nstruct Y\n  include M\nend\n\nputs Y.new.show\n' > implmodule.ri
 refuses "an impl for a module" "can't implement Show for M, it's a module" -- \
-  "$IYI" check types implmodule.iyi
+  "$RIS" check types implmodule.ri
 # A header after an `import` is the file's only header in the wrong place.
 # It was told the file "already declares `no module`" and that
-# `latehead` belongs in `latehead.iyi` - said to `latehead.iyi`.
-printf 'import app/lib\nmodule latehead\n\nputs 1\n' > latehead.iyi
+# `latehead` belongs in `latehead.ri` - said to `latehead.ri`.
+printf 'import app/lib\nmodule latehead\n\nputs 1\n' > latehead.ri
 refuses "a module header after an import" 'the `module` header comes first in a file' -- \
-  "$IYI" check types latehead.iyi
+  "$RIS" check types latehead.ri
 # A file imported without a module header. The refusal was "`bare` is not
 # imported here: ... write `import bare::{name}`", under the very import
 # it described.
-printf 'pub def twice(x : Int32) : Int32\n  x * 2\nend\n' > bare.iyi
-printf 'import bare::{twice}\n\nputs twice(3)\n' > usesbare.iyi
+printf 'pub def twice(x : Int32) : Int32\n  x * 2\nend\n' > bare.ri
+printf 'import bare::{twice}\n\nputs twice(3)\n' > usesbare.ri
 refuses "an import of a file with no module header" 'has no `module bare` header' -- \
-  "$IYI" run usesbare.iyi
+  "$RIS" run usesbare.ri
 # A splat generic is bound the way it was declared. `impl Show for
 # Proc(Int32)` was told to write `Proc(T) forall T`, which was refused for
 # its arity, and `Tuple(*T) forall T` as if T were not a `forall` name.
-printf 'trait Show\n  abstract def show : String\nend\n\nimpl Show for Proc(Int32)\n  def show : String\n    "proc"\n  end\nend\n' > implproc.iyi
+printf 'trait Show\n  abstract def show : String\nend\n\nimpl Show for Proc(Int32)\n  def show : String\n    "proc"\n  end\nend\n' > implproc.ri
 refuses "a specialised impl of a splat generic" 'Write `impl Show for Proc(*T, R) forall T, R`' -- \
-  "$IYI" check types implproc.iyi
-printf 'trait Show\n  abstract def show : String\nend\n\nimpl Show for Proc(*T, R) forall T, R\n  def show : String\n    "proc"\n  end\nend\n\nimpl Show for Tuple(*T) forall T\n  def show : String\n    "tuple of #{size}"\n  end\nend\n\nputs(->{ 1 }.show)\nputs({1, "a"}.show)\n' > implsplat.iyi
-splat_out=$("$IYI" run implsplat.iyi 2>&1 | tr -d '\r')
+  "$RIS" check types implproc.ri
+printf 'trait Show\n  abstract def show : String\nend\n\nimpl Show for Proc(*T, R) forall T, R\n  def show : String\n    "proc"\n  end\nend\n\nimpl Show for Tuple(*T) forall T\n  def show : String\n    "tuple of #{size}"\n  end\nend\n\nputs(->{ 1 }.show)\nputs({1, "a"}.show)\n' > implsplat.ri
+splat_out=$("$RIS" run implsplat.ri 2>&1 | tr -d '\r')
 if [ "$splat_out" = "$(printf 'proc\ntuple of 2')" ]; then
   echo "  the spelling it suggests, and Tuple(*T) forall T: both bind and run"
 else
@@ -352,73 +352,73 @@ fi
 # A macro the module declares and did not mark `pub`, imported by name, was
 # told "nothing by that name is declared in `app/macros`, `pub` or not" -
 # the answer for a typo, because only defs and types were looked in.
-printf 'module app/macros\n\nmacro hidden_m\n  1\nend\n' > app/macros.iyi
-printf 'module usesmacro\n\nimport app/macros::{hidden_m}\n\nhidden_m\n' > usesmacro.iyi
+printf 'module app/macros\n\nmacro hidden_m\n  1\nend\n' > app/macros.ri
+printf 'module usesmacro\n\nimport app/macros::{hidden_m}\n\nhidden_m\n' > usesmacro.ri
 refuses "a macro not marked pub, imported by name" 'does not export `hidden_m`' -- \
-  "$IYI" check types usesmacro.iyi
-refuses "bytes that are not text" "not a valid iyi source file" -- "$IYI" run binary.iyi
-# A program that ran out of stack says so itself now - `iyi: panic: stack
+  "$RIS" check types usesmacro.ri
+refuses "bytes that are not text" "not a valid ris source file" -- "$RIS" run binary.ri
+# A program that ran out of stack says so itself now - `ris: panic: stack
 # overflow`, from a handler on an alternate stack (test/cli/panics.sh holds
 # it on every stack). What the kernel still kills, `iyi run` explains in
 # iyi's words rather than relaying "Process terminated because of an
 # invalid memory access" about a language with no null to dereference.
-printf 'module deep\n\ndef down(n : Int32) : Int32\n  down(n + 1) + 1\nend\n\nputs down(0)\n' > deep.iyi
-refuses "a program that ran out of stack" "stack overflow" -- "$IYI" run deep.iyi
-printf 'module wild\n\np = Pointer(Int32).new(16_u64)\nputs p.value\n' > wild.iyi
-refuses "a program the kernel killed" "died of a memory fault" -- "$IYI" run wild.iyi
+printf 'module deep\n\ndef down(n : Int32) : Int32\n  down(n + 1) + 1\nend\n\nputs down(0)\n' > deep.ri
+refuses "a program that ran out of stack" "stack overflow" -- "$RIS" run deep.ri
+printf 'module wild\n\np = Pointer(Int32).new(16_u64)\nputs p.value\n' > wild.ri
+refuses "a program the kernel killed" "died of a memory fault" -- "$RIS" run wild.ri
 # A generic struct holding a trait it implements, `Box(Show)` beside `impl
 # Show for Box(T) forall T`: the recursive-struct check never met
 # `Box(Show)`, and the compiler overflowed its stack laying it out.
-printf 'trait Show\n  abstract def show : String\nend\n\nimpl Show for Int32\n  def show : String\n    "i"\n  end\nend\n\nstruct Box(T)\n  def initialize(@value : T)\n  end\nend\n\nimpl Show for Box(T) forall T\n  def show : String\n    "B"\n  end\nend\n\nputs Box(Show).new(1).show\n' > recbox.iyi
-refuses "a generic struct holding a trait it implements" "recursive struct Box(Show) detected" -- "$IYI" run recbox.iyi
+printf 'trait Show\n  abstract def show : String\nend\n\nimpl Show for Int32\n  def show : String\n    "i"\n  end\nend\n\nstruct Box(T)\n  def initialize(@value : T)\n  end\nend\n\nimpl Show for Box(T) forall T\n  def show : String\n    "B"\n  end\nend\n\nputs Box(Show).new(1).show\n' > recbox.ri
+refuses "a generic struct holding a trait it implements" "recursive struct Box(Show) detected" -- "$RIS" run recbox.ri
 # `name!(1)`: the `!` is a propagation, and an argument list was told it
 # "takes no block".
-printf 'module bangargs\n\nnomacro!(1)\n' > bangargs.iyi
+printf 'module bangargs\n\nnomacro!(1)\n' > bangargs.ri
 refuses "a call spelled with ! and arguments" 'propagates an error, and takes no arguments' -- \
-  "$IYI" check types bangargs.iyi
+  "$RIS" check types bangargs.ri
 # A `!` whose error the enclosing signature does not list is refused at the
 # `!`, naming it. It was the other library's "method Wrongerr.g must return
 # (Int32 | Wrongerr::ParseErr) but it is returning Wrongerr::IOErr", at the
 # signature.
-printf 'module wrongerr\n\nclass IOErr\n  def initialize\n  end\nend\n\nimpl Error for IOErr\n  def message : String\n    "io"\n  end\nend\n\nclass ParseErr\n  def initialize\n  end\nend\n\nimpl Error for ParseErr\n  def message : String\n    "parse"\n  end\nend\n\ndef read(s : String) : String | IOErr\n  return IOErr.new if s == "x"\n  s\nend\n\ndef g : Int32 | ParseErr\n  read("x")!.size\nend\n\nputs g\n' > wrongerr.iyi
-refuses "a ! whose error the signature does not list" 'wrongerr.iyi:31:3' -- "$IYI" check types wrongerr.iyi
-refuses "a ! whose error the signature does not list" 'which does not include it' -- "$IYI" check types wrongerr.iyi
+printf 'module wrongerr\n\nclass IOErr\n  def initialize\n  end\nend\n\nimpl Error for IOErr\n  def message : String\n    "io"\n  end\nend\n\nclass ParseErr\n  def initialize\n  end\nend\n\nimpl Error for ParseErr\n  def message : String\n    "parse"\n  end\nend\n\ndef read(s : String) : String | IOErr\n  return IOErr.new if s == "x"\n  s\nend\n\ndef g : Int32 | ParseErr\n  read("x")!.size\nend\n\nputs g\n' > wrongerr.ri
+refuses "a ! whose error the signature does not list" 'wrongerr.ri:31:3' -- "$RIS" check types wrongerr.ri
+refuses "a ! whose error the signature does not list" 'which does not include it' -- "$RIS" check types wrongerr.ri
 # A detached `!` after a call: `v = g(-1) !` propagated, because the
 # argument list swallows the space after its `)`. Only `g(-1)!` does
 # (iyi SPEC III.1.2); `f !x` is still `f(!x)`.
-printf 'module detached\n\ndef g(x : Int32) : Int32\n  x\nend\n\nv = g(-1) !\nputs v\n' > detached.iyi
+printf 'module detached\n\ndef g(x : Int32) : Int32\n  x\nend\n\nv = g(-1) !\nputs v\n' > detached.ri
 refuses "a detached ! after a call" 'write it attached, `g(-1)!`' -- \
-  "$IYI" check types detached.iyi
-printf 'module unary\n\ndef f(b : Bool) : Bool\n  b\nend\n\nx = true\nputs f !x\n' > unary.iyi
-if [ "$("$IYI" run unary.iyi 2>&1 | tr -d '\r')" = "false" ]; then
+  "$RIS" check types detached.ri
+printf 'module unary\n\ndef f(b : Bool) : Bool\n  b\nend\n\nx = true\nputs f !x\n' > unary.ri
+if [ "$("$RIS" run unary.ri 2>&1 | tr -d '\r')" = "false" ]; then
   echo "  f !x is still f(!x)"
 else
-  echo "  f !x no longer reads as f(!x):"; "$IYI" run unary.iyi 2>&1 | sed -n '1,3p'; status=1
+  echo "  f !x no longer reads as f(!x):"; "$RIS" run unary.ri 2>&1 | sed -n '1,3p'; status=1
 fi
 # `new` answers the object whatever `initialize` returns, so a `!` in
 # initialize dropped its error and left the fields after it unassigned:
 # `C.new("x").name.size` died of a memory fault. A `return` that leaves a
 # field unassigned did the same.
-printf 'module initbang\n\nclass ParseErr\n  def initialize\n  end\nend\n\nimpl Error for ParseErr\n  def message : String\n    "bad"\n  end\nend\n\ndef parse(s : String) : Int32 | ParseErr\n  return ParseErr.new if s == "x"\n  1\nend\n\nclass C\n  getter v : Int32\n  getter name : String\n\n  def initialize(s : String)\n    @v = parse(s)!\n    @name = "named"\n  end\nend\n\nputs C.new("x").name.size\n' > initbang.iyi
-refuses "a ! in initialize" "can't propagate out of \`initialize\`" -- "$IYI" check types initbang.iyi
-printf 'module initreturn\n\nclass C\n  getter v : Int32\n  getter name : String\n\n  def initialize(early : Bool)\n    @v = 1\n    return if early\n    @name = "named"\n  end\nend\n\nputs C.new(true).name.size\n' > initreturn.iyi
+printf 'module initbang\n\nclass ParseErr\n  def initialize\n  end\nend\n\nimpl Error for ParseErr\n  def message : String\n    "bad"\n  end\nend\n\ndef parse(s : String) : Int32 | ParseErr\n  return ParseErr.new if s == "x"\n  1\nend\n\nclass C\n  getter v : Int32\n  getter name : String\n\n  def initialize(s : String)\n    @v = parse(s)!\n    @name = "named"\n  end\nend\n\nputs C.new("x").name.size\n' > initbang.ri
+refuses "a ! in initialize" "can't propagate out of \`initialize\`" -- "$RIS" check types initbang.ri
+printf 'module initreturn\n\nclass C\n  getter v : Int32\n  getter name : String\n\n  def initialize(early : Bool)\n    @v = 1\n    return if early\n    @name = "named"\n  end\nend\n\nputs C.new(true).name.size\n' > initreturn.ri
 refuses "a return in initialize before a field is assigned" "can't leave \`initialize\` before @name is assigned" -- \
-  "$IYI" check types initreturn.iyi
+  "$RIS" check types initreturn.ri
 # A parameterised trait as a bound, `forall T : Into(String)`, lost its
 # arguments: a type with only `impl Into(Int32)` met it and printed 2.
-printf 'trait Into(T)\n  abstract def into : T\nend\n\nstruct B\nend\n\nimpl Into(Int32) for B\n  def into : Int32\n    2\n  end\nend\n\ndef as_s(x : T) : String forall T : Into(String)\n  x.into.to_s\nend\n\nputs as_s(B.new)\n' > intobound.iyi
+printf 'trait Into(T)\n  abstract def into : T\nend\n\nstruct B\nend\n\nimpl Into(Int32) for B\n  def into : Int32\n    2\n  end\nend\n\ndef as_s(x : T) : String forall T : Into(String)\n  x.into.to_s\nend\n\nputs as_s(B.new)\n' > intobound.ri
 refuses "a parameterised bound its argument does not meet" 'B does not implement Into(String), required by `T` in `as_s`' -- \
-  "$IYI" check types intobound.iyi
+  "$RIS" check types intobound.ri
 # A program's own exit status is `iyi run`'s, a negative one too. On
 # Windows `exit(-1)` is 0xFFFFFFFF, which the runner took for an abnormal
 # end: "terminated abnormally, the cause is unknown", and exit 1.
 # Compared with the program's own status as this shell reads it, which
 # is not 255 everywhere: Git's shell on Windows reads 0xFFFFFFFF as 127.
-printf 'module neg\n\nexit(-1)\n' > neg.iyi
-"$IYI" build -o neg neg.iyi > neg.build 2>&1
+printf 'module neg\n\nexit(-1)\n' > neg.ri
+"$RIS" build -o neg neg.ri > neg.build 2>&1
 ./neg > /dev/null 2>&1
 own_code=$?
-"$IYI" run neg.iyi > neg.out 2>&1
+"$RIS" run neg.ri > neg.out 2>&1
 neg_code=$?
 if [ "$neg_code" -eq "$own_code" ] && [ ! -s neg.out ]; then
   echo "  a program's exit(-1): the runner exits with its status ($own_code here), and says nothing"
@@ -431,7 +431,7 @@ fi
 # refused with "Access is denied" (error 5) under `iyi run` alone.
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
-    away=$("$IYI" run "$REPO/test/cli/std_process_exercise.iyi" -- breakaway 2>&1 | tail -1)
+    away=$("$RIS" run "$REPO/test/cli/std_process_exercise.ri" -- breakaway 2>&1 | tail -1)
     if [ "$away" = "started" ]; then
       echo "  a program under iyi run starts a child that breaks away from the runner's job"
     else
@@ -441,25 +441,25 @@ case "$(uname -s)" in
     ;;
 esac
 refuses "an output directory that is not there" "there is no" -- \
-  "$IYI" build -o "$WORK/nodir/prog" good.iyi
+  "$RIS" build -o "$WORK/nodir/prog" good.ri
 # A block whose return type nothing says was sent to the other language's
 # reference: "See: https://crystal-lang.org/reference/...".
-printf 'module recblock\n\ndef rec(n : Int32)\n  capture { rec(n - 1) }\nend\n\ndef capture(&block : -> T) forall T\n  block.call\nend\n\nputs rec(3)\n' > recblock.iyi
+printf 'module recblock\n\ndef rec(n : Int32)\n  capture { rec(n - 1) }\nend\n\ndef capture(&block : -> T) forall T\n  block.call\nend\n\nputs rec(3)\n' > recblock.ri
 refuses "a block whose return type nothing says" \
   'cast the block body with `as`: `{ value.as(Int32) }` writes down the type' -- \
-  "$IYI" check types recblock.iyi
+  "$RIS" check types recblock.ri
 # The refusal of an `--x86-asm-syntax` wrote over the value it refused
 # before printing it: "Invalid value `` for x86-asm-syntax".
 refuses "an --x86-asm-syntax that is neither" "Invalid value \`x\` for x86-asm-syntax" -- \
-  "$IYI" build --x86-asm-syntax x -o "$WORK/asm" good.iyi
+  "$RIS" build --x86-asm-syntax x -o "$WORK/asm" good.ri
 # A requirement answered with other parameters was reported by the other
 # library's abstract-def pass at the struct, naming no impl, and `self`
 # answered with the implementing type was refused the same way.
-printf 'trait Show\n  abstract def show(n : Int32) : String\nend\n\nstruct X\nend\n\nimpl Show for X\n  def show(n : String) : String\n    n\n  end\nend\n\nputs 1\n' > implparams.iyi
+printf 'trait Show\n  abstract def show(n : Int32) : String\nend\n\nstruct X\nend\n\nimpl Show for X\n  def show(n : String) : String\n    n\n  end\nend\n\nputs 1\n' > implparams.ri
 refuses "an impl method of the required name with other parameters" 'impl Show for X does not answer Show#show(n : Int32)' -- \
-  "$IYI" check types implparams.iyi
-printf 'import std/traits::{Comparable}\n\nstruct V\n  getter v : Int32\n\n  def initialize(@v : Int32)\n  end\nend\n\nimpl Comparable for V\n  def <=>(other : V) : Int32\n    v <=> other.v\n  end\nend\n\nputs V.new(2) > V.new(1)\n' > implself.iyi
-self_out=$("$IYI" run implself.iyi 2>&1 | tr -d '\r')
+  "$RIS" check types implparams.ri
+printf 'import std/traits::{Comparable}\n\nstruct V\n  getter v : Int32\n\n  def initialize(@v : Int32)\n  end\nend\n\nimpl Comparable for V\n  def <=>(other : V) : Int32\n    v <=> other.v\n  end\nend\n\nputs V.new(2) > V.new(1)\n' > implself.ri
+self_out=$("$RIS" run implself.ri 2>&1 | tr -d '\r')
 if [ "$self_out" = "true" ]; then
   echo "  an impl answering a requirement's self with its own type: runs"
 else
@@ -469,8 +469,8 @@ fi
 # implements the trait: the union was laid out with the generic `Gen(T)`
 # among its members, and the build ended in "BUG: called create_llvm_type
 # for T".
-printf 'trait Show\n  abstract def show : String\nend\n\nimpl Show for Int32\n  def show : String\n    "i"\n  end\nend\n\nstruct Gen(T)\n  def initialize(@v : T)\n  end\nend\n\nimpl Show for Gen(T) forall T\n  def show : String\n    "G"\n  end\nend\n\nclass Holder\n  def initialize(@s : Show?)\n  end\n\n  def s : Show?\n    @s\n  end\nend\n\nputs Holder.new(nil).s.nil?\na = [nil, 1, Gen.new(2)] of Show?\na.each { |e| puts e.show if e }\n' > traitunion.iyi
-union_out=$("$IYI" run traitunion.iyi 2>&1 | tr -d '\r')
+printf 'trait Show\n  abstract def show : String\nend\n\nimpl Show for Int32\n  def show : String\n    "i"\n  end\nend\n\nstruct Gen(T)\n  def initialize(@v : T)\n  end\nend\n\nimpl Show for Gen(T) forall T\n  def show : String\n    "G"\n  end\nend\n\nclass Holder\n  def initialize(@s : Show?)\n  end\n\n  def s : Show?\n    @s\n  end\nend\n\nputs Holder.new(nil).s.nil?\na = [nil, 1, Gen.new(2)] of Show?\na.each { |e| puts e.show if e }\n' > traitunion.ri
+union_out=$("$RIS" run traitunion.ri 2>&1 | tr -d '\r')
 if [ "$union_out" = "$(printf 'true\ni\nG')" ]; then
   echo "  a nilable trait in a field and an array, a generic type implementing it: runs"
 else
@@ -483,13 +483,13 @@ fi
 mkdir -p twin_a twin_b
 # The first holds its executable open until the second has run: it says
 # it started, and waits (a minute at most) for the second to be done.
-printf 'module main\n\nFile.write("twin_a.started", "1")\ni = 0\nwhile i < 600 && !File.exists?("twin_b.done")\n  sleep(100)\n  i = i + 1\nend\nputs "a"\n' > twin_a/main.iyi
-printf 'module main\n\nputs "b"\n' > twin_b/main.iyi
-"$IYI" run twin_a/main.iyi > twin_a.out 2>&1 &
+printf 'module main\n\nFile.write("twin_a.started", "1")\ni = 0\nwhile i < 600 && !File.exists?("twin_b.done")\n  sleep(100)\n  i = i + 1\nend\nputs "a"\n' > twin_a/main.ri
+printf 'module main\n\nputs "b"\n' > twin_b/main.ri
+"$RIS" run twin_a/main.ri > twin_a.out 2>&1 &
 twin_a=$!
 i=0
 while [ ! -f twin_a.started ] && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
-if "$IYI" run twin_b/main.iyi > twin_b.out 2>&1 && grep -qx b twin_b.out; then
+if "$RIS" run twin_b/main.ri > twin_b.out 2>&1 && grep -qx b twin_b.out; then
   echo "  a run beside a running program of the same name: runs"
 else
   echo "  a run beside a running program of the same name did not run:"
@@ -503,46 +503,46 @@ grep -qx a twin_a.out || { echo "  the first of two same-named runs did not fini
 # was guarded, and the rest answered `Error: while importing "app/lib"` and
 # `Unexpected byte 0xff at position 39`, naming no file and no line.
 mkdir -p badbyte/app
-printf 'module app/lib\n\npub def hi : String\n  "\377"\nend\n' > badbyte/app/lib.iyi
-printf 'module app/main\n\nimport app/lib::*\nputs hi\n' > badbyte/app/main.iyi
+printf 'module app/lib\n\npub def hi : String\n  "\377"\nend\n' > badbyte/app/lib.ri
+printf 'module app/main\n\nimport app/lib::*\nputs hi\n' > badbyte/app/main.ri
 refuses "a module with a byte that is not text on line 4" \
-  "main.iyi:3:1" -- "$IYI" check types badbyte/app/main.iyi
+  "main.ri:3:1" -- "$RIS" check types badbyte/app/main.ri
 refuses "and the sentence names the module" \
-  "lib.iyi' is not a valid iyi source file: Unexpected byte 0xff at position 39" -- \
-  "$IYI" check types badbyte/app/main.iyi
+  "lib.ri' is not a valid ris source file: Unexpected byte 0xff at position 39" -- \
+  "$RIS" check types badbyte/app/main.ri
 # And a byte that is not UTF-8 in a macro's expansion, which is read back
 # as source: `check` ended in "Unexpected byte 0xff at position 0, malformed
 # UTF-8 (InvalidByteSequenceError)" and a stack trace.
-printf 'puts {{ "\\xff".id }}\n' > macrobyte.iyi
+printf 'puts {{ "\\xff".id }}\n' > macrobyte.ri
 refuses "a macro that writes out a byte that is not text" "macro expansion is not UTF-8 text" -- \
-  "$IYI" check types macrobyte.iyi
-refuses "and the refusal is at the macro" "macrobyte.iyi:1:6" -- "$IYI" check types macrobyte.iyi
+  "$RIS" check types macrobyte.ri
+refuses "and the refusal is at the macro" "macrobyte.ri:1:6" -- "$RIS" check types macrobyte.ri
 # Two traits that require the same method, both implemented for one type:
 # the second impl's method replaced the first one's, so a call through the
 # first trait ran it - in one file, and across two libraries whose impls
 # R-3 allows one at a time.
-printf 'trait A\n  abstract def name : String\nend\n\ntrait B\n  abstract def name : String\nend\n\nstruct Y\nend\n\nimpl A for Y\n  def name : String\n    "from A"\n  end\nend\n\nimpl B for Y\n  def name : String\n    "from B"\n  end\nend\n\ndef via_a(x : A) : String\n  x.name\nend\n\nputs via_a(Y.new)\n' > implclash.iyi
+printf 'trait A\n  abstract def name : String\nend\n\ntrait B\n  abstract def name : String\nend\n\nstruct Y\nend\n\nimpl A for Y\n  def name : String\n    "from A"\n  end\nend\n\nimpl B for Y\n  def name : String\n    "from B"\n  end\nend\n\ndef via_a(x : A) : String\n  x.name\nend\n\nputs via_a(Y.new)\n' > implclash.ri
 refuses "two traits' impls answering one method" 'Y#name is what impl A for Y answers' -- \
-  "$IYI" check types implclash.iyi
+  "$RIS" check types implclash.ri
 mkdir -p clash/lib
-printf 'module lib/tx\n\npub trait Tagged\n  abstract def tag : String\nend\n\nimpl Tagged for String\n  def tag : String\n    "tx"\n  end\nend\n\npub def show(x : Tagged) : String\n  "tx sees " + x.tag\nend\n' > clash/lib/tx.iyi
-printf 'module lib/ty\n\npub trait Marked\n  abstract def tag : String\nend\n\nimpl Marked for String\n  def tag : String\n    "ty"\n  end\nend\n\npub def mark(x : Marked) : String\n  "ty sees " + x.tag\nend\n' > clash/lib/ty.iyi
-printf 'module main\n\nimport lib/tx::{show}\nimport lib/ty::{mark}\n\nputs show("s")\nputs mark("s")\n' > clash/main.iyi
+printf 'module lib/tx\n\npub trait Tagged\n  abstract def tag : String\nend\n\nimpl Tagged for String\n  def tag : String\n    "tx"\n  end\nend\n\npub def show(x : Tagged) : String\n  "tx sees " + x.tag\nend\n' > clash/lib/tx.ri
+printf 'module lib/ty\n\npub trait Marked\n  abstract def tag : String\nend\n\nimpl Marked for String\n  def tag : String\n    "ty"\n  end\nend\n\npub def mark(x : Marked) : String\n  "ty sees " + x.tag\nend\n' > clash/lib/ty.ri
+printf 'module main\n\nimport lib/tx::{show}\nimport lib/ty::{mark}\n\nputs show("s")\nputs mark("s")\n' > clash/main.ri
 refuses "two libraries' impls answering one method" 'String#tag is what impl Lib::Tx::Tagged for String answers' -- \
-  "$IYI" check types clash/main.iyi
+  "$RIS" check types clash/main.ri
 # And met through default methods, which reach the type by the impl's
 # include: `Named` and `Column` each defaulting `label` had a call through
 # `Named` print Column's.
-printf 'trait Named\n  def label : String\n    "named"\n  end\nend\n\ntrait Column\n  def label : String\n    "column"\n  end\nend\n\nstruct User\nend\n\nimpl Named for User\nend\n\nimpl Column for User\nend\n\ndef via_named(x : Named) : String\n  x.label\nend\n\nputs via_named(User.new)\n' > defaultclash.iyi
+printf 'trait Named\n  def label : String\n    "named"\n  end\nend\n\ntrait Column\n  def label : String\n    "column"\n  end\nend\n\nstruct User\nend\n\nimpl Named for User\nend\n\nimpl Column for User\nend\n\ndef via_named(x : Named) : String\n  x.label\nend\n\nputs via_named(User.new)\n' > defaultclash.ri
 refuses "two traits' defaults answering one method" "and impl Column for User answers it again with Column's default" -- \
-  "$IYI" check types defaultclash.iyi
+  "$RIS" check types defaultclash.ri
 # A `def initialize` in a trait, or in an impl for a lib struct, is in a
 # type no `class` or `struct` declared: `check`, `build` and `vet` ended in
 # "Missing hash key: Wt (KeyError)" and a stack trace. A trait's
 # `initialize` is a default method like any other now, and an implementer
 # is made with it.
-printf 'pub trait Wt\n  def initialize(x : Int32)\n  end\nend\n\nstruct B\n  getter v : Int32 = 3\nend\n\nimpl Wt for B\nend\n\nlib LibQ\n  struct CS\n    a : Int32\n  end\nend\n\npub trait Tq\nend\n\nimpl Tq for LibQ::CS\n  def initialize\n  end\nend\n\nputs B.new(1).v\nputs LibQ::CS.new.a\n' > traitinit.iyi
-if "$IYI" run traitinit.iyi > traitinit.out 2>&1 && [ "$(tr -d '\r' < traitinit.out)" = "$(printf '3\n0')" ]; then
+printf 'pub trait Wt\n  def initialize(x : Int32)\n  end\nend\n\nstruct B\n  getter v : Int32 = 3\nend\n\nimpl Wt for B\nend\n\nlib LibQ\n  struct CS\n    a : Int32\n  end\nend\n\npub trait Tq\nend\n\nimpl Tq for LibQ::CS\n  def initialize\n  end\nend\n\nputs B.new(1).v\nputs LibQ::CS.new.a\n' > traitinit.ri
+if "$RIS" run traitinit.ri > traitinit.out 2>&1 && [ "$(tr -d '\r' < traitinit.out)" = "$(printf '3\n0')" ]; then
   echo "  an initialize in a trait and in an impl for a lib struct makes the value"
 else
   echo "  an initialize in a trait or in an impl for a lib struct:"; sed -n '1,3p' traitinit.out; status=1
@@ -555,7 +555,7 @@ mkdir -p "$WORK/runcache"
 : > "$WORK/runcache/ris-run-main-99999.tmp.exe"
 : > "$WORK/runcache/ris-run-main-99998.tmp.exe"
 touch -d '2 hours ago' "$WORK/runcache/ris-run-main-99999.tmp.exe"
-IYI_CACHE_DIR="$WORK/runcache" "$IYI" run twin_b/main.iyi > sweep.out 2>&1
+RIS_CACHE_DIR="$WORK/runcache" "$RIS" run twin_b/main.ri > sweep.out 2>&1
 if [ -e "$WORK/runcache/ris-run-main-99999.tmp.exe" ]; then
   echo "  a runner's leftover from two hours ago is still in the cache"; status=1
 elif [ ! -e "$WORK/runcache/ris-run-main-99998.tmp.exe" ]; then
@@ -564,10 +564,10 @@ else
   echo "  an old runner's leftover is taken, a fresh one kept"
 fi
 mkdir -p hdr/app
-printf 'module app/util\n\npub def answer : Int32\n  42\nend\n' > hdr/app/util.iyi
-printf 'module app/main\n\nimport app/util::{answer}\n\nputs answer\n' > hdr/app/main.iyi
-if [ HDR/APP/MAIN.IYI -ef hdr/app/main.iyi ]; then
-  if "$IYI" run HDR/APP/MAIN.IYI > hdr_case.out 2>&1 && grep -qx 42 hdr_case.out; then
+printf 'module app/util\n\npub def answer : Int32\n  42\nend\n' > hdr/app/util.ri
+printf 'module app/main\n\nimport app/util::{answer}\n\nputs answer\n' > hdr/app/main.ri
+if [ HDR/APP/MAIN.IYI -ef hdr/app/main.ri ]; then
+  if "$RIS" run HDR/APP/MAIN.IYI > hdr_case.out 2>&1 && grep -qx 42 hdr_case.out; then
     echo "  a module run by its path in another case: resolves its imports"
   else
     echo "  a module run by its path in another case did not run:"
@@ -578,9 +578,9 @@ fi
 # The front end alone reads the same root (`Compiler#adopt_header_root`).
 # `tool dependencies` and `tool hierarchy` never asked the header, and of
 # the file `run` builds just above both said "can't find module 'app/util'".
-"$IYI" tool dependencies hdr/app/main.iyi > hdr_deps.out 2>&1; deps_code=$?
-"$IYI" tool hierarchy hdr/app/main.iyi > hdr_hier.out 2>&1; hier_code=$?
-if [ "$deps_code" -eq 0 ] && grep -q 'util\.iyi' hdr_deps.out && [ "$hier_code" -eq 0 ]; then
+"$RIS" tool dependencies hdr/app/main.ri > hdr_deps.out 2>&1; deps_code=$?
+"$RIS" tool hierarchy hdr/app/main.ri > hdr_hier.out 2>&1; hier_code=$?
+if [ "$deps_code" -eq 0 ] && grep -q 'util\.ri' hdr_deps.out && [ "$hier_code" -eq 0 ]; then
   echo "  tool dependencies and tool hierarchy of a module: resolve its imports"
 else
   echo "  tool dependencies and tool hierarchy of a module: exit $deps_code and $hier_code"
@@ -589,8 +589,8 @@ else
 fi
 # A requirement whose return names its own `forall` variable was "can't
 # resolve return type Array(U)", however the impl answered it.
-printf 'trait Ident\n  abstract def ident(x : U) : Array(U) forall U\nend\n\nstruct A\nend\n\nimpl Ident for A\n  def ident(x : V) : Array(V) forall V\n    [x]\n  end\nend\n\nputs A.new.ident(3)\n' > forallret.iyi
-ret_out=$("$IYI" run forallret.iyi 2>&1 | tr -d '\r')
+printf 'trait Ident\n  abstract def ident(x : U) : Array(U) forall U\nend\n\nstruct A\nend\n\nimpl Ident for A\n  def ident(x : V) : Array(V) forall V\n    [x]\n  end\nend\n\nputs A.new.ident(3)\n' > forallret.ri
+ret_out=$("$RIS" run forallret.ri 2>&1 | tr -d '\r')
 if [ "$ret_out" = "[3]" ]; then
   echo "  a requirement returning its own forall variable, answered by the impl's: runs"
 else
@@ -600,9 +600,9 @@ fi
 # case is the file its directory stores, and a module that writes `!` - a
 # token in iyi and part of a name in the other language - ran on iyi's
 # prelude and was lexed as the other language: `unexpected token: "!"`.
-printf 'module app/bang\n\nstruct Neg\nend\n\nimpl Error for Neg\n  def message : String\n    "neg"\n  end\nend\n\ndef g(x : Int32) : Int32 | Neg\n  return Neg.new if x < 0\n  x\nend\n\ndef h : Int32 | Neg\n  v = g(1)!\n  v + 1\nend\n\nputs h.or(0)\n' > hdr/app/bang.iyi
-if [ HDR/APP/BANG.IYI -ef hdr/app/bang.iyi ]; then
-  if "$IYI" run HDR/APP/BANG.IYI > hdr_bang.out 2>&1 && grep -qx 2 hdr_bang.out; then
+printf 'module app/bang\n\nstruct Neg\nend\n\nimpl Error for Neg\n  def message : String\n    "neg"\n  end\nend\n\ndef g(x : Int32) : Int32 | Neg\n  return Neg.new if x < 0\n  x\nend\n\ndef h : Int32 | Neg\n  v = g(1)!\n  v + 1\nend\n\nputs h.or(0)\n' > hdr/app/bang.ri
+if [ HDR/APP/BANG.IYI -ef hdr/app/bang.ri ]; then
+  if "$RIS" run HDR/APP/BANG.IYI > hdr_bang.out 2>&1 && grep -qx 2 hdr_bang.out; then
     echo "  a module with \`!\` run by its path in another case: lexed as iyi"
   else
     echo "  a module with \`!\` run by its path in another case did not run:"
@@ -615,31 +615,31 @@ fi
 # one: `run` folded the case for the prelude and the lexer did not, and
 # `fmt DIR` and `test DIR` walked past it at exit 0.
 mkdir -p upcase/tests
-cp hdr/app/bang.iyi upcase/UP.IYI
-cp hdr/app/bang.iyi upcase/tests/up_test.IYI
-refuses "a file stored as .IYI, run" 'ends in `.IYI`' -- "$IYI" run upcase/UP.IYI
-refuses "a file stored as .IYI, checked" 'ends in `.IYI`' -- "$IYI" check types upcase/UP.IYI
-refuses "a file stored as .IYI, formatted" 'ends in `.IYI`' -- "$IYI" check format upcase/UP.IYI
-refuses "a directory holding a _test.IYI, tested" 'ends in `.IYI`' -- "$IYI" test upcase/tests
+cp hdr/app/bang.ri upcase/UP.IYI
+cp hdr/app/bang.ri upcase/tests/up_test.IYI
+refuses "a file stored as .IYI, run" 'ends in `.IYI`' -- "$RIS" run upcase/UP.IYI
+refuses "a file stored as .IYI, checked" 'ends in `.IYI`' -- "$RIS" check types upcase/UP.IYI
+refuses "a file stored as .IYI, formatted" 'ends in `.IYI`' -- "$RIS" check format upcase/UP.IYI
+refuses "a directory holding a _test.IYI, tested" 'ends in `.IYI`' -- "$RIS" test upcase/tests
 # `where` on an `abstract def` bounds nothing - every impl answers a
 # requirement - and was dropped: `Elem = Float64` met `where Elem : Show`.
-printf 'trait Show\n  abstract def show : String\nend\n\ntrait Bag\n  type Elem\n  abstract def first : Elem where Elem : Show\nend\n' > wherereq.iyi
-refuses "a where bound on a requirement" "\`where\` can't bound a requirement" -- "$IYI" check types wherereq.iyi
+printf 'trait Show\n  abstract def show : String\nend\n\ntrait Bag\n  type Elem\n  abstract def first : Elem where Elem : Show\nend\n' > wherereq.ri
+refuses "a where bound on a requirement" "\`where\` can't bound a requirement" -- "$RIS" check types wherereq.ri
 # A reopen replacing a method another module wrote: two modules each
 # reopening `::String` with a `tag` had the first one's code run the
 # second's.
 mkdir -p reopen/lib
-printf 'module lib/x\n\nclass ::String\n  def tag : String\n    "x"\n  end\nend\n\npub def via_x(s : String) : String\n  s.tag\nend\n' > reopen/lib/x.iyi
-printf 'module lib/y\n\nclass ::String\n  def tag : String\n    "y"\n  end\nend\n' > reopen/lib/y.iyi
-printf 'module main\n\nimport lib/x\nimport lib/y\n\nputs Lib::X.via_x("s")\n' > reopen/main.iyi
+printf 'module lib/x\n\nclass ::String\n  def tag : String\n    "x"\n  end\nend\n\npub def via_x(s : String) : String\n  s.tag\nend\n' > reopen/lib/x.ri
+printf 'module lib/y\n\nclass ::String\n  def tag : String\n    "y"\n  end\nend\n' > reopen/lib/y.ri
+printf 'module main\n\nimport lib/x\nimport lib/y\n\nputs Lib::X.via_x("s")\n' > reopen/main.ri
 refuses "a reopen replacing another module's method" "String#tag is lib/x's method, and this replaces it" -- \
-  "$IYI" check types reopen/main.iyi
+  "$RIS" check types reopen/main.ri
 # A parameterised supertrait, `trait Ord(T) : Cmp(T)`, was "expecting any
 # of these tokens: ;, NEWLINE, SPACE (not '(')"; it is read at each impl's
 # arguments, and `impl Cmp(String)` does not give `impl Ord(N)` its `Cmp(N)`.
-printf 'trait Cmp(T)\n  abstract def cmp(other : T) : Int32\nend\n\ntrait Ord(T) : Cmp(T)\n  def gt(other : T) : Bool\n    cmp(other) > 0\n  end\nend\n\nstruct N\nend\n\nimpl Cmp(String) for N\n  def cmp(other : String) : Int32\n    1\n  end\nend\n\nimpl Ord(N) for N\nend\n' > supargs.iyi
+printf 'trait Cmp(T)\n  abstract def cmp(other : T) : Int32\nend\n\ntrait Ord(T) : Cmp(T)\n  def gt(other : T) : Bool\n    cmp(other) > 0\n  end\nend\n\nstruct N\nend\n\nimpl Cmp(String) for N\n  def cmp(other : String) : Int32\n    1\n  end\nend\n\nimpl Ord(N) for N\nend\n' > supargs.ri
 refuses "a parameterised supertrait not implemented at the impl's arguments" 'needs an impl of Cmp(N) for N first' -- \
-  "$IYI" check types supargs.iyi
+  "$RIS" check types supargs.ri
 # A byte order mark, which a Windows editor may put at the front of a
 # file. The lexer skips it; the three readings of a header did not, so a
 # module saved with one ran as a script and its import beside the header
@@ -647,33 +647,33 @@ refuses "a parameterised supertrait not implemented at the impl's arguments" 'ne
 # `fmt` wrote the file back without the mark and `--check` called a
 # formatted file unformatted.
 mkdir -p bom/app
-printf '\357\273\277module app/util\n\npub def answer : Int32\n  42\nend\n' > bom/app/util.iyi
-printf '\357\273\277module app/main\n\nimport app/util::{answer}\n\nputs answer\n' > bom/app/main.iyi
-cp bom/app/util.iyi bom/util.keep
-if "$IYI" run bom/app/main.iyi > bom_run.out 2>&1 && grep -qx 42 bom_run.out; then
+printf '\357\273\277module app/util\n\npub def answer : Int32\n  42\nend\n' > bom/app/util.ri
+printf '\357\273\277module app/main\n\nimport app/util::{answer}\n\nputs answer\n' > bom/app/main.ri
+cp bom/app/util.ri bom/util.keep
+if "$RIS" run bom/app/main.ri > bom_run.out 2>&1 && grep -qx 42 bom_run.out; then
   echo "  a module saved with a byte order mark: resolves its imports"
 else
   echo "  a module saved with a byte order mark did not run:"; sed -n '1,3p' bom_run.out; status=1
 fi
-if "$IYI" doc bom/app/util.iyi > bom_doc.out 2>&1 && grep -q 'answer' bom_doc.out; then
+if "$RIS" doc bom/app/util.ri > bom_doc.out 2>&1 && grep -q 'answer' bom_doc.out; then
   echo "  iyi doc of a module saved with a byte order mark: its surface"
 else
   echo "  iyi doc of a module saved with a byte order mark:"; sed -n '1,3p' bom_doc.out; status=1
 fi
-if "$IYI" check format bom/app/util.iyi > bom_fmt.out 2>&1; then
+if "$RIS" check format bom/app/util.ri > bom_fmt.out 2>&1; then
   echo "  fmt --check of a formatted file with a byte order mark: clean"
 else
   echo "  fmt --check of a formatted file with a byte order mark:"; sed -n '1,3p' bom_fmt.out; status=1
 fi
-"$IYI" check format --fix bom/app/util.iyi > /dev/null 2>&1
-cmp -s bom/app/util.iyi bom/util.keep || { echo "  fmt rewrote a formatted file with a byte order mark"; status=1; }
+"$RIS" check format --fix bom/app/util.ri > /dev/null 2>&1
+cmp -s bom/app/util.ri bom/util.keep || { echo "  fmt rewrote a formatted file with a byte order mark"; status=1; }
 # And a byte order mark on line 1, which the lexer drops before it counts
 # a column: the line was shown with the mark, ` 1 | \uFEFFputs 1.nope`, and
 # the caret, placed by the mark-free column, stood under `.nop` wherever
 # a terminal gave the mark a cell. The line is read as the lexer counted
 # it now (`source_file_lines`).
-printf '\357\273\277puts 1.nope\n' > marked1.iyi
-"$IYI" check types marked1.iyi > marked1.out 2>&1
+printf '\357\273\277puts 1.nope\n' > marked1.ri
+"$RIS" check types marked1.ri > marked1.out 2>&1
 if grep -qx ' 1 | puts 1.nope' marked1.out &&
    [ "$(grep -A1 '^ 1 | ' marked1.out | sed -n '2p')" = "$(printf '%12s^---' '')" ]; then
   echo "  line 1 behind a byte order mark is shown without it, the caret under the column"
@@ -685,8 +685,8 @@ fi
 # A subtrait's default naming its supertrait's associated type, `def
 # smallest : Elem` in `trait Sorted : Bag`, was "undefined constant Elem",
 # though its body could call `Bag`'s `items`.
-printf 'trait Bag\n  type Elem\n  abstract def items : Array(Elem)\nend\n\ntrait Sorted : Bag\n  def smallest : Elem\n    items.first.as(Elem)\n  end\nend\n\nstruct S\nend\n\nimpl Bag for S\n  type Elem = Int32\n\n  def items : Array(Int32)\n    [3, 1]\n  end\nend\n\nimpl Sorted for S\nend\n\nputs S.new.smallest\n' > subassoc.iyi
-sub_out=$("$IYI" run subassoc.iyi 2>&1 | tr -d '\r')
+printf 'trait Bag\n  type Elem\n  abstract def items : Array(Elem)\nend\n\ntrait Sorted : Bag\n  def smallest : Elem\n    items.first.as(Elem)\n  end\nend\n\nstruct S\nend\n\nimpl Bag for S\n  type Elem = Int32\n\n  def items : Array(Int32)\n    [3, 1]\n  end\nend\n\nimpl Sorted for S\nend\n\nputs S.new.smallest\n' > subassoc.ri
+sub_out=$("$RIS" run subassoc.ri 2>&1 | tr -d '\r')
 if [ "$sub_out" = "3" ]; then
   echo "  a subtrait's default naming its supertrait's associated type: runs"
 else
@@ -697,16 +697,16 @@ case "$(uname -s)" in
     # The entry spelled verbatim, `\\?\C:\...` or `\\.\C:\...`, or with the
     # trailing space Win32 drops: the cache directory was named after the
     # path's parts, `\-C:-...` - refused for its colon, "The directory name
-    # is invalid" - and `...-good.iyi `, made without its space and then
+    # is invalid" - and `...-good.ri `, made without its space and then
     # written into with it, "The system cannot find the path specified".
     for prefix in '\\?\' '\\.\'; do
-      if "$IYI" run "$prefix$(cygpath -w "$WORK/hdr/app/main.iyi")" > hdr_verbatim.out 2>&1 && grep -qx 42 hdr_verbatim.out; then
+      if "$RIS" run "$prefix$(cygpath -w "$WORK/hdr/app/main.ri")" > hdr_verbatim.out 2>&1 && grep -qx 42 hdr_verbatim.out; then
         echo "  a module run by its path spelled $prefix: builds and runs"
       else
         echo "  a module run by its path spelled $prefix did not run:"; sed -n '1,3p' hdr_verbatim.out; status=1
       fi
     done
-    if "$IYI" run "good.iyi " > space_run.out 2>&1 && grep -qx ok space_run.out; then
+    if "$RIS" run "good.ri " > space_run.out 2>&1 && grep -qx ok space_run.out; then
       echo "  a program run by its name with a trailing space: builds and runs"
     else
       echo "  a program run by its name with a trailing space did not run:"; sed -n '1,3p' space_run.out; status=1
@@ -721,17 +721,17 @@ esac
 # macro text, a macro's body or a `{% if %}`'s, which the parser keeps as
 # text: its literals went unseen and `"a` / `b"` there gained the `\r`.
 mkdir -p crlf
-printf 'module m\r\n\r\ns = "one\ntwo"\r\nputs s.bytesize\r\n' > crlf/lit.iyi
-printf 'module h\r\n\r\ntext = <<-EOS\r\n  hello\r\n  world\r\n  EOS\r\nputs text.bytesize\r\n' > crlf/here.iyi
-printf 'module p\r\n\r\ndef f(x : Int32) : Int32\r\n  x + 1\r\nend\r\n\r\nputs "a#{f(1)}b\r\nc"\r\n' > crlf/interp.iyi
-printf 'module q\r\n\r\nmacro m\r\n  puts "a\nb".bytesize\r\nend\r\n\r\nm\r\n{%% if true %%}\r\n  puts "c\nd".bytesize\r\n{%% end %%}\r\n' > crlf/macro.iyi
+printf 'module m\r\n\r\ns = "one\ntwo"\r\nputs s.bytesize\r\n' > crlf/lit.ri
+printf 'module h\r\n\r\ntext = <<-EOS\r\n  hello\r\n  world\r\n  EOS\r\nputs text.bytesize\r\n' > crlf/here.ri
+printf 'module p\r\n\r\ndef f(x : Int32) : Int32\r\n  x + 1\r\nend\r\n\r\nputs "a#{f(1)}b\r\nc"\r\n' > crlf/interp.ri
+printf 'module q\r\n\r\nmacro m\r\n  puts "a\nb".bytesize\r\nend\r\n\r\nm\r\n{%% if true %%}\r\n  puts "c\nd".bytesize\r\n{%% end %%}\r\n' > crlf/macro.ri
 for f in lit here interp macro; do
-  cp "crlf/$f.iyi" "crlf/$f.keep"
-  "$IYI" check format --fix "crlf/$f.iyi" > /dev/null 2>&1
-  if cmp -s "crlf/$f.iyi" "crlf/$f.keep"; then
+  cp "crlf/$f.ri" "crlf/$f.keep"
+  "$RIS" check format --fix "crlf/$f.ri" > /dev/null 2>&1
+  if cmp -s "crlf/$f.ri" "crlf/$f.keep"; then
     echo "  fmt of a formatted CRLF file with line breaks in a literal ($f): unchanged"
   else
-    echo "  fmt changed a formatted CRLF file ($f):"; od -c "crlf/$f.iyi" | sed -n '1,6p'; status=1
+    echo "  fmt changed a formatted CRLF file ($f):"; od -c "crlf/$f.ri" | sed -n '1,6p'; status=1
   fi
 done
 # What `fmt` writes is what was written - the same program - and is its
@@ -739,17 +739,17 @@ done
 # text formats to itself.
 fmt_gives() { # fmt_gives <label> <input> [<want>]; <want> defaults to <input>
   local label="$1" input="$2" want="${3-$2}" code
-  printf '%s' "$input" > fmt_in.iyi
-  printf '%s' "$want" > fmt_want.iyi
-  cp fmt_in.iyi fmt_got.iyi
-  cp fmt_want.iyi fmt_again.iyi
-  "$IYI" check format --fix fmt_got.iyi > /dev/null 2> fmt_err.out
+  printf '%s' "$input" > fmt_in.ri
+  printf '%s' "$want" > fmt_want.ri
+  cp fmt_in.ri fmt_got.ri
+  cp fmt_want.ri fmt_again.ri
+  "$RIS" check format --fix fmt_got.ri > /dev/null 2> fmt_err.out
   code=$?
-  "$IYI" check format --fix fmt_again.iyi > /dev/null 2>> fmt_err.out
-  if [ "$code" -eq 0 ] && cmp -s fmt_got.iyi fmt_want.iyi && cmp -s fmt_again.iyi fmt_want.iyi; then
+  "$RIS" check format --fix fmt_again.ri > /dev/null 2>> fmt_err.out
+  if [ "$code" -eq 0 ] && cmp -s fmt_got.ri fmt_want.ri && cmp -s fmt_again.ri fmt_want.ri; then
     echo "  fmt $label"
   else
-    echo "  fmt $label: exit $code, and wrote:"; sed -n '1,8p' fmt_got.iyi fmt_err.out; status=1
+    echo "  fmt $label: exit $code, and wrote:"; sed -n '1,8p' fmt_got.ri fmt_err.out; status=1
   fi
 }
 # A comment after a block's `{` or `do`, or a proc literal's: the `}` or
@@ -775,19 +775,19 @@ fmt_gives "keeps the blanks a line inside a literal in a macro ends with" \
 # `check` exited 0 - and `fmt` wrote back the part before the NUL: a
 # UTF-16 file without its byte order mark became `p`. (`check` quotes the
 # line, NUL and all, so its answer is read as text: `grep -a`.)
-printf 'module main\n\nputs 1\000\nputs 2\n' > nul.iyi
-cp nul.iyi nul.keep
-refuses "a NUL byte in a file, formatted" "unexpected NUL byte" -- "$IYI" check format --fix nul.iyi
-cmp -s nul.iyi nul.keep || { echo "  fmt wrote back a file with a NUL byte in it"; status=1; }
-"$IYI" check types nul.iyi > nul_check.out 2>&1
+printf 'module main\n\nputs 1\000\nputs 2\n' > nul.ri
+cp nul.ri nul.keep
+refuses "a NUL byte in a file, formatted" "unexpected NUL byte" -- "$RIS" check format --fix nul.ri
+cmp -s nul.ri nul.keep || { echo "  fmt wrote back a file with a NUL byte in it"; status=1; }
+"$RIS" check types nul.ri > nul_check.out 2>&1
 nul_code=$?
 if [ "$nul_code" -ne 0 ] && grep -aq "unexpected NUL byte" nul_check.out && ! has_trace nul_check.out; then
   echo "  a NUL byte in a file, checked: exits $nul_code, \"unexpected NUL byte\""
 else
   echo "  a NUL byte in a file, checked: exit $nul_code"; sed -n '1,3p' nul_check.out | tr -d '\000'; status=1
 fi
-printf 'p\000u\000t\000s\000 \0001\000\n\000' > utf16.iyi
-refuses "a UTF-16 file without its mark, formatted" "unexpected NUL byte" -- "$IYI" check format utf16.iyi
+printf 'p\000u\000t\000s\000 \0001\000\n\000' > utf16.ri
+refuses "a UTF-16 file without its mark, formatted" "unexpected NUL byte" -- "$RIS" check format utf16.ri
 # `.or(...)` and `.or_panic` on the line under their value: "expecting .,
 # not `NEWLINE`", and "there's a bug formatting".
 fmt_gives "takes .or and .or_panic on the line under their value" \
@@ -795,16 +795,16 @@ fmt_gives "takes .or and .or_panic on the line under their value" \
 # `.or` is recognised by name at the call site, so `def or` compiled and
 # every call to it was refused as a recovery with "no member of
 # App::Main::A implements `Error`". The def is refused now.
-printf 'module ordef\n\nclass A\n  def or(x : Int32) : Int32\n    x\n  end\nend\n\nputs A.new.or(5)\n' > ordef.iyi
-refuses "a method named or" '`or` is a reserved name in iyi' -- "$IYI" check types ordef.iyi
-printf 'module orpanicdef\n\nclass A\n  def self.or_panic : Int32\n    1\n  end\nend\n' > orpanicdef.iyi
+printf 'module ordef\n\nclass A\n  def or(x : Int32) : Int32\n    x\n  end\nend\n\nputs A.new.or(5)\n' > ordef.ri
+refuses "a method named or" '`or` is a reserved name in iyi' -- "$RIS" check types ordef.ri
+printf 'module orpanicdef\n\nclass A\n  def self.or_panic : Int32\n    1\n  end\nend\n' > orpanicdef.ri
 refuses "a class method named or_panic" '`or_panic` is a reserved name in iyi' -- \
-  "$IYI" check types orpanicdef.iyi
+  "$RIS" check types orpanicdef.ri
 # `group do ... end` is the task group by name (iyi SPEC III.4.9), so a
 # class's own `def group` compiled and its call was lowered as a group:
 # "undefined method 'join' for Spawner". The def is refused now.
-printf 'module groupdef\n\nclass Pool\n  def group(& : Int32 -> Int32) : Int32\n    yield 1\n  end\nend\n' > groupdef.iyi
-refuses "a method named group" '`group` is a reserved name in iyi' -- "$IYI" check types groupdef.iyi
+printf 'module groupdef\n\nclass Pool\n  def group(& : Int32 -> Int32) : Int32\n    yield 1\n  end\nend\n' > groupdef.ri
+refuses "a method named group" '`group` is a reserved name in iyi' -- "$RIS" check types groupdef.ri
 # Under a comment on an `if` or `while` line, `/=` was read as a regex.
 fmt_gives "takes x /= y and x //= y under a comment on an if or while line" \
   $'a = 8\nif a > 1 # c\n  a /= 2\nend\nwhile a > 1 # c\n  a //= 2\nend\n'
@@ -814,9 +814,9 @@ fmt_gives "keeps a comment in an import's name list on its own line" \
   $'import std/json::{JSON,\n  # more\n  Builder}\n'
 fmt_gives "keeps a comment between x = or type X = and the value on its own line" \
   $'escape =\n  # note\n  if b\n    "one"\n  else\n    "other"\n  end\ntype X =\n  # c\n  Int32\nx = 1\nx += # c\n  2\n'
-# A ```crystal fence in a `.iyi` doc comment lost its tag, which made the
+# A ```crystal fence in a `.ri` doc comment lost its tag, which made the
 # other language's example iyi.
-fmt_gives "keeps a doc comment's \`\`\`crystal fence tagged in an iyi file" \
+fmt_gives "keeps a doc comment's \`\`\`crystal fence tagged in a ris file" \
   $'# The original:\n#\n# ```crystal\n# def save!\n#   @x  =  1\n# end\n# ```\ndef add(a, b)\n  a + b\nend\n'
 # A `"a" \` continued by a comment line, where the parser ends the literal:
 # the formatter took the next line's literal into it, and gave up.
@@ -826,15 +826,15 @@ fmt_gives "sets traits and impls apart by a blank line, as classes are" \
   $'trait A\nend\nimpl A for B\nend\n' $'trait A\nend\n\nimpl A for B\nend\n'
 # The parser's spacing warning named `crystal tool format`, and `iyi fmt`
 # printed it while rewriting exactly that spacing.
-printf 'module colon\n\ndef f(x : Int32): Int32\n  x\nend\n\nputs f(1)\n' > colon.iyi
-cp colon.iyi colonfmt.iyi
-"$IYI" check types colon.iyi > colon.out 2>&1
-"$IYI" check format --fix colonfmt.iyi > colonfmt.out 2>&1
+printf 'module colon\n\ndef f(x : Int32): Int32\n  x\nend\n\nputs f(1)\n' > colon.ri
+cp colon.ri colonfmt.ri
+"$RIS" check types colon.ri > colon.out 2>&1
+"$RIS" check format --fix colonfmt.ri > colonfmt.out 2>&1
 if ! grep -qF 'space required before colon in return type restriction (run `ris check format --fix` to fix this)' colon.out ||
   grep -qi crystal colon.out; then
   echo "  a spacing warning from check does not name iyi fmt:"; sed -n '1,6p' colon.out
   status=1
-elif grep -q 'Warning' colonfmt.out || ! grep -qF 'def f(x : Int32) : Int32' colonfmt.iyi; then
+elif grep -q 'Warning' colonfmt.out || ! grep -qF 'def f(x : Int32) : Int32' colonfmt.ri; then
   echo "  fmt on a spacing warning warned about it, or did not fix it:"; sed -n '1,6p' colonfmt.out
   status=1
 else
@@ -843,17 +843,17 @@ fi
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     # A module reached through an 8.3 short name, which only the file
-    # system can spell out: `APPLIC~1\main.iyi` never ended with its
-    # header's `applications_dir/main.iyi`, so it found no root, and `run`,
+    # system can spell out: `APPLIC~1\main.ri` never ended with its
+    # header's `applications_dir/main.ri`, so it found no root, and `run`,
     # `check` and `test` of it said "can't find module
     # 'applications_dir/util'".
     mkdir -p short/applications_dir
-    printf 'module applications_dir/util\n\npub def answer : Int32\n  42\nend\n' > short/applications_dir/util.iyi
-    printf 'module applications_dir/main\n\nimport applications_dir/util::{answer}\n\nputs answer\n' > short/applications_dir/main.iyi
-    spelled="$(cygpath -d "$WORK/short/applications_dir/main.iyi")"
-    if [ "$spelled" = "$(cygpath -w "$WORK/short/applications_dir/main.iyi")" ]; then
+    printf 'module applications_dir/util\n\npub def answer : Int32\n  42\nend\n' > short/applications_dir/util.ri
+    printf 'module applications_dir/main\n\nimport applications_dir/util::{answer}\n\nputs answer\n' > short/applications_dir/main.ri
+    spelled="$(cygpath -d "$WORK/short/applications_dir/main.ri")"
+    if [ "$spelled" = "$(cygpath -w "$WORK/short/applications_dir/main.ri")" ]; then
       echo "  a module reached through an 8.3 name: this volume makes none, unmeasured"
-    elif "$IYI" run "$spelled" > short.out 2>&1 && grep -qx 42 short.out; then
+    elif "$RIS" run "$spelled" > short.out 2>&1 && grep -qx 42 short.out; then
       echo "  a module reached through an 8.3 name: resolves its imports"
     else
       echo "  a module reached through an 8.3 name did not run:"; grep -m1 "^Error" short.out || sed -n '1,3p' short.out; status=1
@@ -865,14 +865,14 @@ esac
 # extracted archive - was reported as "there's a bug formatting", with a
 # request to file one.
 mkdir -p locked
-printf 'module locked\n\nputs(  1 )\n' > locked/sloppy.iyi
+printf 'module locked\n\nputs(  1 )\n' > locked/sloppy.ri
 case "$(uname -s)" in
-  MINGW* | MSYS* | CYGWIN* | Windows_NT) MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" attrib +R "$(cygpath -w locked/sloppy.iyi)" ;;
-  *) chmod a-w locked/sloppy.iyi ;;
+  MINGW* | MSYS* | CYGWIN* | Windows_NT) MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" attrib +R "$(cygpath -w locked/sloppy.ri)" ;;
+  *) chmod a-w locked/sloppy.ri ;;
 esac
-if [ -w locked/sloppy.iyi ] && [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" = "0" ]; then
+if [ -w locked/sloppy.ri ] && [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" = "0" ]; then
   echo "  fmt of a read-only file: root writes anything, unmeasured"
-elif "$IYI" check format --fix locked/sloppy.iyi > locked.out 2>&1; then
+elif "$RIS" check format --fix locked/sloppy.ri > locked.out 2>&1; then
   echo "  fmt of a read-only file answered success:"; sed -n '1,3p' locked.out; status=1
 elif grep -q "cannot write" locked.out && ! grep -q "bug" locked.out; then
   echo "  fmt of a read-only file: $(tr -d '\r' < locked.out | head -1)"
@@ -880,8 +880,8 @@ else
   echo "  fmt of a read-only file:"; sed -n '1,3p' locked.out; status=1
 fi
 case "$(uname -s)" in
-  MINGW* | MSYS* | CYGWIN* | Windows_NT) MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" attrib -R "$(cygpath -w locked/sloppy.iyi)" ;;
-  *) chmod u+w locked/sloppy.iyi ;;
+  MINGW* | MSYS* | CYGWIN* | Windows_NT) MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" attrib -R "$(cygpath -w locked/sloppy.ri)" ;;
+  *) chmod u+w locked/sloppy.ri ;;
 esac
 # A directory given to `test` and `fmt` is a name, not a pattern: `proj
 # [v2]` and `x{a,b}` were read as a character class and a brace, and on
@@ -891,8 +891,8 @@ esac
 # walked through, until the path was too long to open.
 for dir in "proj [v2]" "x{a,b}"; do
   mkdir -p "rooted/$dir"
-  printf 'module messy\n\nx=1\n' > "rooted/$dir/messy.iyi"
-  printf 'module fails_test\n\nexit(1)\n' > "rooted/$dir/fails_test.iyi"
+  printf 'module messy\n\nx=1\n' > "rooted/$dir/messy.ri"
+  printf 'module fails_test\n\nexit(1)\n' > "rooted/$dir/fails_test.ri"
 done
 roots=("rooted/proj [v2]" "rooted/x{a,b}")
 case "$(uname -s)" in
@@ -903,15 +903,15 @@ case "$(uname -s)" in
     # And spelled verbatim, `\\?\C:\...` and `\\?\UNC\server\share\...`,
     # the form Rust's `fs::canonicalize` hands over: the `?` went into the
     # pattern as a pattern character, nothing matched, and `fmt --check`
-    # exited 0 while `test` said "no *_test.iyi found".
+    # exited 0 while `test` said "no *_test.ri found".
     roots+=("\\\\?\\$(cygpath -w "$WORK/rooted/proj [v2]")")
     [ -d "$share" ] && roots+=("\\\\?\\UNC\\${share:2}")
     MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" cmd /c mklink /J "$(cygpath -w "$WORK/rooted/x{a,b}/loop")" "$(cygpath -w "$WORK/rooted/x{a,b}")" > /dev/null
     ;;
 esac
 for root in "${roots[@]}"; do
-  "$IYI" check format "$root" > rooted.fmt 2>&1; fmt_code=$?
-  "$IYI" test "$root" > rooted.test 2>&1; test_code=$?
+  "$RIS" check format "$root" > rooted.fmt 2>&1; fmt_code=$?
+  "$RIS" test "$root" > rooted.test 2>&1; test_code=$?
   if [ "$fmt_code" -eq 1 ] && [ "$(grep -c 'produced changes' rooted.fmt)" = "1" ] &&
      [ "$test_code" -eq 1 ] && grep -q "0 passed, 1 failed" rooted.test; then
     echo "  fmt --check and test of $root: the one messy file and the one failing test"
@@ -926,16 +926,16 @@ done
 # system cannot find the path specified", `mod tidy` on a file down there
 # that "does not parse".
 mkdir -p tidyloop/src
-printf 'module example.test/tidyloop\n' > tidyloop/iyi.mod
-printf 'module x\n\nputs 1\n' > tidyloop/src/x.iyi
+printf 'module example.test/tidyloop\n' > tidyloop/ris.mod
+printf 'module x\n\nputs 1\n' > tidyloop/src/x.ri
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" cmd /c mklink /J "$(cygpath -w "$WORK/tidyloop/src/loop")" "$(cygpath -w "$WORK/tidyloop/src")" > /dev/null
     ;;
   *) ln -s "$WORK/tidyloop/src" tidyloop/src/loop ;;
 esac
-"$IYI" check types --fix tidyloop/src > tidyloop.fix 2>&1; fix_code=$?
-(cd tidyloop && "$IYI" check deps) > tidyloop.tidy 2>&1; tidy_code=$?
+"$RIS" check types --fix tidyloop/src > tidyloop.fix 2>&1; fix_code=$?
+(cd tidyloop && "$RIS" check deps) > tidyloop.tidy 2>&1; tidy_code=$?
 if [ "$fix_code" -eq 0 ] && grep -q "already clean" tidyloop.fix &&
    [ "$tidy_code" -eq 0 ] && grep -q "say what the source imports" tidyloop.tidy; then
   echo "  fix and mod tidy of a tree with a link back into it: the link is not walked"
@@ -947,26 +947,26 @@ case "$(uname -s)" in
   *) rm tidyloop/src/loop ;;
 esac
 # `lib` is left alone however the directory is named: the exclude was
-# compared as a string prefix, and `fmt --check .` walked to `./lib/x.iyi`,
+# compared as a string prefix, and `fmt --check .` walked to `./lib/x.ri`,
 # which never starts with `lib`, and checked what a bare `fmt --check`
 # leaves alone.
 mkdir -p excl/lib excl/src
-printf 'module messy\n\nx=1\n' > excl/lib/messy.iyi
-printf 'module messy\n\nx=1\n' > excl/src/messy.iyi
-(cd excl && "$IYI" check format . > ../excl.out 2>&1)
-if grep -q 'src.messy.iyi' excl.out && ! grep -q 'lib.messy.iyi' excl.out; then
+printf 'module messy\n\nx=1\n' > excl/lib/messy.ri
+printf 'module messy\n\nx=1\n' > excl/src/messy.ri
+(cd excl && "$RIS" check format . > ../excl.out 2>&1)
+if grep -q 'src.messy.ri' excl.out && ! grep -q 'lib.messy.ri' excl.out; then
   echo "  fmt --check . leaves lib alone, as fmt --check does"
 else
   echo "  fmt --check . and lib:"; sed -n '1,3p' excl.out; status=1
 fi
 # But a path named on the command line is formatted, whatever the excludes
-# say, which is Black's rule: `fmt --check lib/messy.iyi` and `fmt --check
+# say, which is Black's rule: `fmt --check lib/messy.ri` and `fmt --check
 # lib` exited 0 having checked nothing - the default exclude took back
 # what was named.
-for named in lib/messy.iyi lib; do
-  (cd excl && "$IYI" check format "$named" > ../excl_named.out 2>&1)
+for named in lib/messy.ri lib; do
+  (cd excl && "$RIS" check format "$named" > ../excl_named.out 2>&1)
   named_code=$?
-  if [ "$named_code" -eq 1 ] && grep -q 'lib.messy.iyi. produced changes' excl_named.out; then
+  if [ "$named_code" -eq 1 ] && grep -q 'lib.messy.ri. produced changes' excl_named.out; then
     echo "  fmt --check $named, named on the command line: checked"
   else
     echo "  fmt --check $named, named on the command line: exit $named_code"; sed -n '1,3p' excl_named.out; status=1
@@ -977,22 +977,22 @@ done
 # ended `fmt DIR` with "Error: ...: Access is denied." and the files after
 # it were never looked at.
 mkdir -p noread
-printf 'module a\n\nx=1\n' > noread/a_noread.iyi
-printf 'module z\n\nx=1\n' > noread/z_messy.iyi
+printf 'module a\n\nx=1\n' > noread/a_noread.ri
+printf 'module z\n\nx=1\n' > noread/z_messy.ri
 case "$(uname -s)" in
-  MINGW* | MSYS* | CYGWIN* | Windows_NT) MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" icacls "$(cygpath -w noread/a_noread.iyi)" /deny "$USERNAME:(R)" > /dev/null ;;
-  *) chmod a-r noread/a_noread.iyi ;;
+  MINGW* | MSYS* | CYGWIN* | Windows_NT) MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" icacls "$(cygpath -w noread/a_noread.ri)" /deny "$USERNAME:(R)" > /dev/null ;;
+  *) chmod a-r noread/a_noread.ri ;;
 esac
-"$IYI" check format noread > noread.out 2>&1
+"$RIS" check format noread > noread.out 2>&1
 noread_code=$?
 case "$(uname -s)" in
-  MINGW* | MSYS* | CYGWIN* | Windows_NT) MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" icacls "$(cygpath -w noread/a_noread.iyi)" /remove:d "$USERNAME" > /dev/null ;;
-  *) chmod u+r noread/a_noread.iyi ;;
+  MINGW* | MSYS* | CYGWIN* | Windows_NT) MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" icacls "$(cygpath -w noread/a_noread.ri)" /remove:d "$USERNAME" > /dev/null ;;
+  *) chmod u+r noread/a_noread.ri ;;
 esac
 if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" = "0" ]; then
   echo "  fmt --check of a directory holding a file it may not read: root reads anything, unmeasured"
-elif [ "$noread_code" -eq 1 ] && grep -q "cannot read '.*a_noread.iyi'" noread.out &&
-     grep -q "z_messy.iyi' produced changes" noread.out && ! has_trace noread.out; then
+elif [ "$noread_code" -eq 1 ] && grep -q "cannot read '.*a_noread.ri'" noread.out &&
+     grep -q "z_messy.ri' produced changes" noread.out && ! has_trace noread.out; then
   echo "  fmt --check of a directory holding a file it may not read: says so, and checks the rest"
 else
   echo "  fmt --check of a directory holding a file it may not read: exit $noread_code"; sed -n '1,3p' noread.out; status=1
@@ -1004,13 +1004,13 @@ fi
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     mkdir -p busy
-    printf 'module busy\n\nsleep(8000)\n' > busy/slow.iyi
-    printf 'module busy\n\nputs "second"\n' > busy/quick.iyi
-    if "$IYI" build -o busy/prog.exe busy/slow.iyi > busy.log 2>&1; then
+    printf 'module busy\n\nsleep(8000)\n' > busy/slow.ri
+    printf 'module busy\n\nputs "second"\n' > busy/quick.ri
+    if "$RIS" build -o busy/prog.exe busy/slow.ri > busy.log 2>&1; then
       busy/prog.exe &
       running=$!
       sleep 1
-      "$IYI" build -o busy/prog.exe busy/quick.iyi > busy.log 2>&1; rebuilt=$?
+      "$RIS" build -o busy/prog.exe busy/quick.ri > busy.log 2>&1; rebuilt=$?
       said="$(busy/prog.exe 2>&1 | tr -d '\r')"
       if [ "$rebuilt" -eq 0 ] && [ "$said" = "second" ]; then
         echo "  a program rebuilt while it runs: the running one moved aside, the new one runs"
@@ -1028,10 +1028,10 @@ case "$(uname -s)" in
     # deleted the program on its way out. It is moved aside like the
     # program; one held open, which cannot be moved, is refused before
     # anything is compiled, and the program is left as it was.
-    printf 'module busy\n\nputs "third"\n' > busy/third.iyi
-    if "$IYI" build -o busy/db.exe busy/quick.iyi > pdb.log 2>&1 && [ -f busy/db.pdb ]; then
+    printf 'module busy\n\nputs "third"\n' > busy/third.ri
+    if "$RIS" build -o busy/db.exe busy/quick.ri > pdb.log 2>&1 && [ -f busy/db.pdb ]; then
       MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" attrib +R "$(cygpath -w busy/db.pdb)"
-      "$IYI" build -o busy/db.exe busy/third.iyi > pdb.log 2>&1; rebuilt=$?
+      "$RIS" build -o busy/db.exe busy/third.ri > pdb.log 2>&1; rebuilt=$?
       said="$(busy/db.exe 2>&1 | tr -d '\r')"
       if [ "$rebuilt" -eq 0 ] && [ "$said" = "third" ]; then
         echo "  a program whose .pdb is read-only: the .pdb moved aside, the new program runs"
@@ -1047,7 +1047,7 @@ case "$(uname -s)" in
       i=0
       while [ ! -f busy/held ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
       refuses "a program whose .pdb is held open" "db.pdb is in use and cannot be replaced or moved aside" -- \
-        "$IYI" build -o busy/db.exe busy/quick.iyi
+        "$RIS" build -o busy/db.exe busy/quick.ri
       said="$(busy/db.exe 2>&1 | tr -d '\r')"
       [ "$said" = "third" ] || { echo "  the refused build lost the program: it said '$said'"; status=1; }
       touch busy/release; wait "$holder" 2>/dev/null
@@ -1055,15 +1055,15 @@ case "$(uname -s)" in
       echo "  the program with a .pdb did not build:"; sed -n '1,3p' pdb.log; status=1
     fi
     # A directory the program fits in and the write probe does not: the
-    # probe's name, `.iyi-write-probe-<pid>`, is longer than `m.exe`, and
+    # probe's name, `.ri-write-probe-<pid>`, is longer than `m.exe`, and
     # near MAX_PATH the probe failed and was told as "no permission to
     # write there" - for five-digit process ids only. 245 characters: the
     # probe does not fit whatever the pid, the program does.
     deep="$WORK"
     while [ ${#deep} -lt 233 ]; do deep="$deep/dddddddddd"; done
     deep="$deep/$(printf '%*s' $((245 - ${#deep} - 1)) '' | tr ' ' 'e')"
-    mkdir -p "$deep" && printf 'module m\n\nputs "deep"\n' > "$deep/m.iyi"
-    (cd "$deep" && "$IYI" build m.iyi > "$WORK/deep.log" 2>&1); deep_code=$?
+    mkdir -p "$deep" && printf 'module m\n\nputs "deep"\n' > "$deep/m.ri"
+    (cd "$deep" && "$RIS" build m.ri > "$WORK/deep.log" 2>&1); deep_code=$?
     if [ "$deep_code" -eq 0 ] && [ -f "$deep/m.exe" ]; then
       echo "  a build in a ${#deep}-character directory writes its program there"
     else
@@ -1071,19 +1071,19 @@ case "$(uname -s)" in
     fi
     # And under a cache root of the author's choosing. The program's cache
     # name was bounded at a fixed 100 characters, which assumed a short
-    # root: under a 120-character IYI_CACHE_DIR this program's objects
+    # root: under a 120-character RIS_CACHE_DIR this program's objects
     # passed MAX_PATH, "a codegen thread failed: Error opening file with
     # mode 'w': ...o0.bc: The system cannot find the path specified". A
     # root no build fits under is refused by name.
     longroot="$WORK/$(printf 'r%.0s' $(seq 1 $((120 - ${#WORK} - 1))))"
-    (cd "$deep" && IYI_CACHE_DIR="$longroot" "$IYI" run m.iyi > "$WORK/longroot.log" 2>&1); longroot_code=$?
+    (cd "$deep" && RIS_CACHE_DIR="$longroot" "$RIS" run m.ri > "$WORK/longroot.log" 2>&1); longroot_code=$?
     if [ "$longroot_code" -eq 0 ] && grep -qx deep "$WORK/longroot.log"; then
       echo "  a program in a ${#deep}-character directory runs under a ${#longroot}-character cache root"
     else
       echo "  a program under a ${#longroot}-character cache root: exit $longroot_code"; sed -n '1,3p' "$WORK/longroot.log"; status=1
     fi
     refuses "a cache root no build fits under" "would pass Windows' 260-character path limit" -- \
-      env IYI_CACHE_DIR="$WORK/$(printf 't%.0s' $(seq 1 $((170 - ${#WORK} - 1))))" "$IYI" build -o "$WORK/toolong" good.iyi
+      env RIS_CACHE_DIR="$WORK/$(printf 't%.0s' $(seq 1 $((170 - ${#WORK} - 1))))" "$RIS" build -o "$WORK/toolong" good.ri
     ;;
 esac
 # A target whose back end the compiler's LLVM does not carry. Windows' is
@@ -1095,21 +1095,21 @@ esac
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     refuses "a target this compiler's LLVM cannot build for" "needs LLVM's WebAssembly back end" -- \
-      "$IYI" build --cross-compile --target wasm32-wasi -o "$WORK/towasm" good.iyi
+      "$RIS" build --cross-compile --target wasm32-wasi -o "$WORK/towasm" good.ri
     ;;
 esac
-# `run --sandbox` names the variable it was given. IYI_WASI_CC pointed at
+# `run --sandbox` names the variable it was given. RIS_WASI_CC pointed at
 # nothing was skipped in silence and the refusal said to set it; and under
 # `$WASI_SDK` clang is `clang.exe` on Windows, where a bare `clang` was
 # looked for, so an installed wasi-sdk was "install wasi-sdk". Found, the
 # next tool is the one named.
-refuses "an IYI_WASI_CC that points at nothing" "IYI_WASI_CC is" -- \
-  env IYI_WASI_CC="$WORK/no-clang" "$IYI" run --sandbox good.iyi
+refuses "an RIS_WASI_CC that points at nothing" "RIS_WASI_CC is" -- \
+  env RIS_WASI_CC="$WORK/no-clang" "$RIS" run --sandbox good.ri
 mkdir -p "$WORK/wasisdk/bin"
 : > "$WORK/wasisdk/bin/clang"
 : > "$WORK/wasisdk/bin/clang.exe"
-refuses "a wasi-sdk clang under WASI_SDK" "IYI_WASMTIME is" -- \
-  env -u IYI_WASI_CC WASI_SDK="$WORK/wasisdk" IYI_WASMTIME="$WORK/no-wasmtime" "$IYI" run --sandbox good.iyi
+refuses "a wasi-sdk clang under WASI_SDK" "RIS_WASMTIME is" -- \
+  env -u RIS_WASI_CC WASI_SDK="$WORK/wasisdk" RIS_WASMTIME="$WORK/no-wasmtime" "$RIS" run --sandbox good.ri
 
 echo
 echo "== what the verbs that were never here refuse"
@@ -1123,42 +1123,42 @@ echo "== what the verbs that were never here refuse"
 # blank line at exit 0, which reads as "set, and empty"; `clear_cache` and
 # `mcp` swallowed whatever they were handed, `mcp` by starting a server the
 # caller had not configured.
-refuses "fix on bytes that are not text" "not a valid iyi source file" -- \
-  "$IYI" check types --fix binary.iyi
+refuses "fix on bytes that are not text" "not a valid ris source file" -- \
+  "$RIS" check types --fix binary.ri
 mkdir -p "$WORK/nofix"
-refuses "fix on a directory with no source" "with no .iyi file under it" -- "$IYI" check types --fix "$WORK/nofix"
-refuses "an unknown flag to fix" "unknown flag" -- "$IYI" check types --fix --nonesuch good.iyi
-refuses "a second file that is not there" "no such file or directory: extra.iyi" -- "$IYI" check types --fix good.iyi extra.iyi
+refuses "fix on a directory with no source" "with no .ri file under it" -- "$RIS" check types --fix "$WORK/nofix"
+refuses "an unknown flag to fix" "unknown flag" -- "$RIS" check types --fix --nonesuch good.ri
+refuses "a second file that is not there" "no such file or directory: extra.ri" -- "$RIS" check types --fix good.ri extra.ri
 # `.exe` off the end: the usage line names the command, and the command is
 # the compiler's name without the suffix Windows puts on the file.
-refuses "vet, removed" "unknown command" -- "$IYI" vet
-refuses "a variable env does not have" "no such variable" -- "$IYI" env NOPE
-refuses "an argument to clear_cache" "takes no arguments" -- "$IYI" clear_cache extra
-refuses "an argument to the mcp server" "takes no arguments" -- "$IYI" mcp --nonesuch
-# `iyi env -- IYI_PATH` read the names before `--` only, and printed every
+refuses "vet, removed" "unknown command" -- "$RIS" vet
+refuses "a variable env does not have" "no such variable" -- "$RIS" env NOPE
+refuses "an argument to clear_cache" "takes no arguments" -- "$RIS" clear_cache extra
+refuses "an argument to the mcp server" "takes no arguments" -- "$RIS" mcp --nonesuch
+# `iyi env -- RIS_PATH` read the names before `--` only, and printed every
 # variable as a shell script, exit 0, for one value.
-env_dashed=$("$IYI" env -- IYI_PATH 2>&1)
-if [ "$env_dashed" = "$("$IYI" env IYI_PATH 2>&1)" ] && [ "$(printf '%s\n' "$env_dashed" | wc -l)" -eq 1 ]; then
+env_dashed=$("$RIS" env -- RIS_PATH 2>&1)
+if [ "$env_dashed" = "$("$RIS" env RIS_PATH 2>&1)" ] && [ "$(printf '%s\n' "$env_dashed" | wc -l)" -eq 1 ]; then
   echo "  env reads the names after --, too"
 else
-  echo "  env -- IYI_PATH printed: $(printf '%s' "$env_dashed" | head -2)"
+  echo "  env -- RIS_PATH printed: $(printf '%s' "$env_dashed" | head -2)"
   status=1
 fi
 # A directory is one run: every `using` in every file is rewritten before
 # any file compiles, because `a` compiles the module it imports - and the
 # second run changes nothing.
 mkdir -p "$WORK/mig/app"
-printf 'module app/dep\n\npub def value : Int32\n  2\nend\n' > "$WORK/mig/app/dep.iyi"
-printf 'module app/mid\n\nimport app/dep\nusing app/dep::{value}\n\npub def twice : Int32\n  value * 2\nend\n' > "$WORK/mig/app/mid.iyi"
-printf 'using app/mid\n\nputs twice\n' > "$WORK/mig/main.iyi"
-if ! (cd "$WORK/mig" && "$IYI" check types --fix .) > "$WORK/mig.txt" 2>&1 ||
+printf 'module app/dep\n\npub def value : Int32\n  2\nend\n' > "$WORK/mig/app/dep.ri"
+printf 'module app/mid\n\nimport app/dep\nusing app/dep::{value}\n\npub def twice : Int32\n  value * 2\nend\n' > "$WORK/mig/app/mid.ri"
+printf 'using app/mid\n\nputs twice\n' > "$WORK/mig/main.ri"
+if ! (cd "$WORK/mig" && "$RIS" check types --fix .) > "$WORK/mig.txt" 2>&1 ||
    ! grep -q "3 files: 2 rewritten, every one clean" "$WORK/mig.txt" ||
-   grep -q "using" "$WORK/mig/main.iyi" "$WORK/mig/app/mid.iyi" ||
-   [ "$("$IYI" run "$WORK/mig/main.iyi" 2>&1)" != "4" ]; then
+   grep -q "using" "$WORK/mig/main.ri" "$WORK/mig/app/mid.ri" ||
+   [ "$("$RIS" run "$WORK/mig/main.ri" 2>&1)" != "4" ]; then
   echo "  fix over a directory: did not rewrite the tree into a program that runs"
   sed 's/^/    /' "$WORK/mig.txt"
   status=1
-elif ! (cd "$WORK/mig" && "$IYI" check types --fix .) 2>&1 | grep -q "3 files: 0 rewritten, every one clean"; then
+elif ! (cd "$WORK/mig" && "$RIS" check types --fix .) 2>&1 | grep -q "3 files: 0 rewritten, every one clean"; then
   echo "  fix over a directory: a second run changed something"
   status=1
 else
@@ -1168,11 +1168,11 @@ fi
 # where the LF file is left one - only `\n` was a blank line's ending - and
 # `fmt --check` then refused the file the rewrite had written.
 mkdir -p "$WORK/crlfusing/app"
-printf 'module app/greeter\n\npub def polite : String\n  "hi"\nend\n' > "$WORK/crlfusing/app/greeter.iyi"
-printf 'module app/main\r\n\r\nimport app/greeter\r\n\r\nusing app/greeter::{polite}\r\n\r\nputs polite\r\n' > "$WORK/crlfusing/app/main.iyi"
+printf 'module app/greeter\n\npub def polite : String\n  "hi"\nend\n' > "$WORK/crlfusing/app/greeter.ri"
+printf 'module app/main\r\n\r\nimport app/greeter\r\n\r\nusing app/greeter::{polite}\r\n\r\nputs polite\r\n' > "$WORK/crlfusing/app/main.ri"
 printf 'module app/main\r\n\r\nimport app/greeter::{polite}\r\n\r\nputs polite\r\n' > "$WORK/crlfusing/main.want"
-(cd "$WORK/crlfusing" && "$IYI" check types --fix app/main.iyi && "$IYI" check format app/main.iyi) > "$WORK/crlfusing.txt" 2>&1; crlf_code=$?
-if [ "$crlf_code" -eq 0 ] && cmp -s "$WORK/crlfusing/app/main.iyi" "$WORK/crlfusing/main.want"; then
+(cd "$WORK/crlfusing" && "$RIS" check types --fix app/main.ri && "$RIS" check format app/main.ri) > "$WORK/crlfusing.txt" 2>&1; crlf_code=$?
+if [ "$crlf_code" -eq 0 ] && cmp -s "$WORK/crlfusing/app/main.ri" "$WORK/crlfusing/main.want"; then
   echo "  fix folds a using in a CRLF file as in an LF one, and fmt --check agrees"
 else
   echo "  fix of a using in a CRLF file (exit $crlf_code):"; sed 's/^/    /' "$WORK/crlfusing.txt" | head -3; status=1
@@ -1182,55 +1182,55 @@ fi
 # `-5abss`, which does not parse, and a `using` there lost its mark and
 # became `import app/greeter::{polite}}`.
 mkdir -p "$WORK/marked/app"
-printf 'module app/greeter\n\npub def polite : String\n  "hi"\nend\n' > "$WORK/marked/app/greeter.iyi"
-printf '\357\273\277x = -5.abss\nputs x\n' > "$WORK/marked/typo.iyi"
-printf '\357\273\277using app/greeter::{polite}\n\nputs polite\n' > "$WORK/marked/using.iyi"
+printf 'module app/greeter\n\npub def polite : String\n  "hi"\nend\n' > "$WORK/marked/app/greeter.ri"
+printf '\357\273\277x = -5.abss\nputs x\n' > "$WORK/marked/typo.ri"
+printf '\357\273\277using app/greeter::{polite}\n\nputs polite\n' > "$WORK/marked/using.ri"
 printf '\357\273\277x = -5.abs\nputs x\n' > "$WORK/marked/typo.want"
 printf '\357\273\277import app/greeter::{polite}\n\nputs polite\n' > "$WORK/marked/using.want"
-(cd "$WORK/marked" && "$IYI" check types --fix typo.iyi && "$IYI" check types --fix using.iyi) > "$WORK/marked.txt" 2>&1; marked_code=$?
-if [ "$marked_code" -eq 0 ] && cmp -s "$WORK/marked/typo.iyi" "$WORK/marked/typo.want" &&
-   cmp -s "$WORK/marked/using.iyi" "$WORK/marked/using.want"; then
+(cd "$WORK/marked" && "$RIS" check types --fix typo.ri && "$RIS" check types --fix using.ri) > "$WORK/marked.txt" 2>&1; marked_code=$?
+if [ "$marked_code" -eq 0 ] && cmp -s "$WORK/marked/typo.ri" "$WORK/marked/typo.want" &&
+   cmp -s "$WORK/marked/using.ri" "$WORK/marked/using.want"; then
   echo "  fix on line 1 behind a byte order mark: the edit and the using rewrite land where they are"
 else
   echo "  fix behind a byte order mark (exit $marked_code):"; sed 's/^/    /' "$WORK/marked.txt" | head -3; status=1
 fi
 # The edit is printed in backticks, the way messages write code. In single
 # quotes the Char an edit writes was quoted a second time: `fixed
-# split.iyi:4:14: '" "' -> '' ''`, which reads as two empty strings.
+# split.ri:4:14: '" "' -> '' ''`, which reads as two empty strings.
 mkdir -p "$WORK/splitfix"
-printf 'module t\n\ns = "a b"\nputs s.split(" ").size\n' > "$WORK/splitfix/split.iyi"
-(cd "$WORK/splitfix" && "$IYI" check types --fix split.iyi) > "$WORK/splitfix.txt" 2>&1
-if grep -qF "fixed split.iyi:4:14: \`\" \"\` -> \`' '\`" "$WORK/splitfix.txt"; then
+printf 'module t\n\ns = "a b"\nputs s.split(" ").size\n' > "$WORK/splitfix/split.ri"
+(cd "$WORK/splitfix" && "$RIS" check types --fix split.ri) > "$WORK/splitfix.txt" 2>&1
+if grep -qF "fixed split.ri:4:14: \`\" \"\` -> \`' '\`" "$WORK/splitfix.txt"; then
   echo "  fix prints a string-to-char edit as \`\" \"\` -> \`' '\`"
 else
   echo "  fix printed its edit as:"; sed 's/^/    /' "$WORK/splitfix.txt" | head -3; status=1
 fi
 echo
 echo "== what a damaged artifact says"
-head -c 40 lib.good > mods/app/lib.iyimod
-refuses "a truncated artifact, dumped" "is truncated" -- "$IYI" mod dump mods/app/lib.iyimod
+head -c 40 lib.good > mods/app/lib.rimod
+refuses "a truncated artifact, dumped" "is truncated" -- "$RIS" mod dump mods/app/lib.rimod
 refuses "a truncated artifact, imported" "cannot be read as" -- \
-  "$IYI" build --use-iyimod mods -o u2 user.iyi
-cp lib.good mods/app/lib.iyimod
-printf 'X' | dd of=mods/app/lib.iyimod bs=1 seek=60 conv=notrunc status=none
-refuses "a flipped byte, dumped" "checksum does not match" -- "$IYI" mod dump mods/app/lib.iyimod
-cp lib.good mods/app/lib.iyimod
-refuses "a source file dumped as an artifact" "is not a .iyimod" -- "$IYI" mod dump user.iyi
-refuses "an artifact directory that is not there" "needs a directory of .iyimod files" -- \
-  "$IYI" build --use-iyimod "$WORK/nodir" -o u3 user.iyi
+  "$RIS" build --use-rimod mods -o u2 user.ri
+cp lib.good mods/app/lib.rimod
+printf 'X' | dd of=mods/app/lib.rimod bs=1 seek=60 conv=notrunc status=none
+refuses "a flipped byte, dumped" "checksum does not match" -- "$RIS" mod dump mods/app/lib.rimod
+cp lib.good mods/app/lib.rimod
+refuses "a source file dumped as an artifact" "is not a .rimod" -- "$RIS" mod dump user.ri
+refuses "an artifact directory that is not there" "needs a directory of .rimod files" -- \
+  "$RIS" build --use-rimod "$WORK/nodir" -o u3 user.ri
 # The artifact itself, where its directory goes: "there is no
-# mods/app/lib.iyimod", about the file the author had just been looking at.
-refuses "an artifact where --use-iyimod's directory goes" "is a file" -- \
-  "$IYI" build --use-iyimod mods/app/lib.iyimod -o u4 user.iyi
+# mods/app/lib.rimod", about the file the author had just been looking at.
+refuses "an artifact where --use-rimod's directory goes" "is a file" -- \
+  "$RIS" build --use-rimod mods/app/lib.rimod -o u4 user.ri
 # An artifact a `--no-codegen` build wrote carries declarations and nothing
 # to link. A build against one went to the linker, which said `LNK2019:
 # unresolved external symbol` 19 times and named the artifact nowhere. A
 # front-end build against it is what it is for, and still takes it.
-"$IYI" build --no-codegen --emit-iyimod nocg user.iyi > nocg.log 2>&1 ||
+"$RIS" build --no-codegen --emit-rimod nocg user.ri > nocg.log 2>&1 ||
   { echo "  a --no-codegen build wrote no artifact:"; sed -n '1,3p' nocg.log; status=1; }
 refuses "a --no-codegen artifact, linked against" "holds declarations only" -- \
-  "$IYI" build --use-iyimod nocg -o u5 user.iyi
-if "$IYI" build --no-codegen --use-iyimod nocg user.iyi > nocg2.log 2>&1; then
+  "$RIS" build --use-rimod nocg -o u5 user.ri
+if "$RIS" build --no-codegen --use-rimod nocg user.ri > nocg2.log 2>&1; then
   echo "  a --no-codegen artifact, typechecked against: taken"
 else
   echo "  a --no-codegen artifact, typechecked against:"; sed -n '1,3p' nocg2.log; status=1
@@ -1240,54 +1240,54 @@ echo
 echo "== what the daemon refuses"
 long="$WORK/$(printf 'd%.0s' $(seq 1 130))/iyi.sock"
 refuses "a socket path past the kernel's limit, starting" "the socket path is" -- \
-  "$IYI" daemon start --socket "$long"
+  "$RIS" daemon start --socket "$long"
 # The same path, on a machine with no server binary to exec. `daemon start`
 # on a multi-threaded compiler hands its arguments to the single-threaded
 # one, and it used to go looking for that binary before it read them: a CI
 # runner without `iyi-daemon` got a page about `make iyi-daemon` and no
-# mention of the socket it had been given. IYI_DAEMON pointed at nothing
+# mention of the socket it had been given. RIS_DAEMON pointed at nothing
 # stands in for that machine.
 refuses "a socket path past the kernel's limit, with no server to exec" "the socket path is" -- \
-  env IYI_DAEMON="$WORK/absent-daemon" "$IYI" daemon start --socket "$long"
+  env RIS_DAEMON="$WORK/absent-daemon" "$RIS" daemon start --socket "$long"
 # And the missing server is still named when the path is one the kernel
 # takes, so the case above is an ordering rather than a blanket refusal.
-refuses "a server binary that is not there" "IYI_DAEMON points at" -- \
-  env IYI_DAEMON="$WORK/absent-daemon" "$IYI" daemon start --socket "$WORK/short.sock"
+refuses "a server binary that is not there" "RIS_DAEMON points at" -- \
+  env RIS_DAEMON="$WORK/absent-daemon" "$RIS" daemon start --socket "$WORK/short.sock"
 # Windows has no fork, so no daemon: it was told to `make iyi-daemon`, a
 # target Makefile.win does not have.
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     refuses "a daemon on Windows" "there is no daemon on Windows" -- \
-      "$IYI" daemon start --socket "$WORK/short.sock"
+      "$RIS" daemon start --socket "$WORK/short.sock"
     ;;
 esac
 refuses "a socket path past the kernel's limit, building" "the socket path is" -- \
-  "$IYI" daemon build --socket "$long" -o d1 good.iyi
+  "$RIS" daemon build --socket "$long" -o d1 good.ri
 refuses "no daemon on a socket that is there to take" "no daemon listening on" -- \
-  "$IYI" daemon build --socket "$WORK/absent.sock" -o d2 good.iyi
+  "$RIS" daemon build --socket "$WORK/absent.sock" -o d2 good.ri
 # A flag with nothing behind it used to fall through to the default
 # socket, so `iyi daemon build --socket` talked to whatever daemon was
 # running in ~/.cache rather than the one the author meant to name. The
 # three shapes below are the ones a shell produces: no value, the next
 # flag read as a value, and a directory.
 refuses "a --socket with no path, building" "--socket takes a path" -- \
-  "$IYI" daemon build --socket
+  "$RIS" daemon build --socket
 refuses "a --socket with no path, starting" "--socket takes a path" -- \
-  "$IYI" daemon start --socket
+  "$RIS" daemon start --socket
 refuses "the next flag read as a socket path" "is a flag" -- \
-  "$IYI" daemon build --socket -o d3 good.iyi
+  "$RIS" daemon build --socket -o d3 good.ri
 mkdir -p "$WORK/sockdir"
 refuses "a directory named as a socket, building" "is a directory, not a socket" -- \
-  "$IYI" daemon build --socket "$WORK/sockdir" -o d4 good.iyi
+  "$RIS" daemon build --socket "$WORK/sockdir" -o d4 good.ri
 refuses "a directory named as a socket, starting" "is a directory, not a socket" -- \
-  "$IYI" daemon start --socket "$WORK/sockdir"
+  "$RIS" daemon start --socket "$WORK/sockdir"
 # A daemon that was killed leaves its socket file behind. "no daemon
 # listening" is true and useless: a new daemon on that path answers
 # "Address already in use" until the file goes, so the file is the thing
 # to say.
 : > "$WORK/stale.sock"
 refuses "a stale socket file left by a dead daemon" "is a file, not a socket" -- \
-  "$IYI" daemon build --socket "$WORK/stale.sock" -o d5 good.iyi
+  "$RIS" daemon build --socket "$WORK/stale.sock" -o d5 good.ri
 # The remedies are ones that can work. The long-path refusal said to set
 # TMPDIR, which moves the default socket on no system - it is
 # `daemon.sock` in the cache directory - and on Windows, where there is no
@@ -1296,15 +1296,15 @@ refuses "a stale socket file left by a dead daemon" "is a file, not a socket" --
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     refuses "no daemon on a socket, on Windows" "there is no daemon on Windows" -- \
-      "$IYI" daemon build --socket "$WORK/absent.sock" -o d6 good.iyi
+      "$RIS" daemon build --socket "$WORK/absent.sock" -o d6 good.ri
     refuses "a stale socket file, on Windows" "there is no daemon on Windows" -- \
-      "$IYI" daemon build --socket "$WORK/stale.sock" -o d7 good.iyi
+      "$RIS" daemon build --socket "$WORK/stale.sock" -o d7 good.ri
     refuses "a socket path past the kernel's limit, on Windows" "there is no daemon on Windows" -- \
-      "$IYI" daemon build --socket "$long" -o d8 good.iyi
+      "$RIS" daemon build --socket "$long" -o d8 good.ri
     ;;
   *)
     refuses "a default socket past the kernel's limit" "CACHE_DIR to a shorter directory" -- \
-      env IYI_CACHE_DIR="$WORK/$(printf 'c%.0s' $(seq 1 120))" "$IYI" daemon build -o d6 good.iyi
+      env RIS_CACHE_DIR="$WORK/$(printf 'c%.0s' $(seq 1 120))" "$RIS" daemon build -o d6 good.ri
     ;;
 esac
 
@@ -1316,14 +1316,14 @@ echo "== what an artifact keeps to a type"
 # called". And `mod dump` writes a method's visibility, which it left off
 # `private def hidden` too.
 mkdir -p "$WORK/vis/app"
-printf 'module app/vis\n\npub class Box\n  @n : Int32\n\n  def initialize(@n : Int32)\n  end\n\n  def value : Int32\n    @n\n  end\n\n  protected def secret : Int32\n    @n * 2\n  end\n\n  private def hidden : Int32\n    @n * 3\n  end\nend\n' > "$WORK/vis/app/vis.iyi"
-printf 'import app/vis::{Box}\n\nputs Box.new(4).value\n' > "$WORK/vis/ok.iyi"
-printf 'import app/vis::{Box}\n\nputs Box.new(4).secret\n' > "$WORK/vis/secret.iyi"
-(cd "$WORK/vis" && "$IYI" build --emit-iyimod mods -o ok ok.iyi && mv app/vis.iyi vis.source) > "$WORK/vis.log" 2>&1 ||
+printf 'module app/vis\n\npub class Box\n  @n : Int32\n\n  def initialize(@n : Int32)\n  end\n\n  def value : Int32\n    @n\n  end\n\n  protected def secret : Int32\n    @n * 2\n  end\n\n  private def hidden : Int32\n    @n * 3\n  end\nend\n' > "$WORK/vis/app/vis.ri"
+printf 'import app/vis::{Box}\n\nputs Box.new(4).value\n' > "$WORK/vis/ok.ri"
+printf 'import app/vis::{Box}\n\nputs Box.new(4).secret\n' > "$WORK/vis/secret.ri"
+(cd "$WORK/vis" && "$RIS" build --emit-rimod mods -o ok ok.ri && mv app/vis.ri vis.source) > "$WORK/vis.log" 2>&1 ||
   { echo "  the protected module does not build:"; sed -n '1,3p' "$WORK/vis.log"; status=1; }
 refuses "a protected method, through its artifact" "protected method 'secret' called" -- \
-  "$IYI" build --use-iyimod "$WORK/vis/mods" -o "$WORK/vis/u" "$WORK/vis/secret.iyi"
-"$IYI" mod dump "$WORK/vis/mods/app/vis.iyimod" > "$WORK/visdump.log" 2>&1
+  "$RIS" build --use-rimod "$WORK/vis/mods" -o "$WORK/vis/u" "$WORK/vis/secret.ri"
+"$RIS" mod dump "$WORK/vis/mods/app/vis.rimod" > "$WORK/visdump.log" 2>&1
 if grep -qF "protected def secret : Int32" "$WORK/visdump.log" && grep -qF "private def hidden : Int32" "$WORK/visdump.log"; then
   echo "  mod dump writes protected and private as the module did"
 else
@@ -1336,27 +1336,27 @@ echo "== where a program is written, and where its library is looked for"
 # the current directory: the program landed beside its source under a
 # name nobody typed, or the linker answered "cannot open output file
 # <cwd>: Is a directory" - after a whole compilation had been paid for.
-refuses "an empty -o" "-o takes a path" -- "$IYI" build -o "" good.iyi
+refuses "an empty -o" "-o takes a path" -- "$RIS" build -o "" good.ri
 # And every other place `"$VAR"` with `VAR` unset can land. Each answered
 # with a hole where the name goes - `no such file: `, `no daemon listening
 # on `, `Error:  is a directory` - or worse: `tool format ""` normalised to
 # `./` and rewrote every source under the working directory, in place, and
 # `check --affected ""` took the working directory as the changed file.
-refuses "an empty file name" "the file name is empty" -- "$IYI" run ""
-refuses "an empty --emit-iyimod" "--emit-iyimod takes a directory" -- \
-  "$IYI" build --emit-iyimod "" -o p good.iyi
-refuses "an empty --use-iyimod" "--use-iyimod takes a directory" -- \
-  "$IYI" build --use-iyimod "" -o p good.iyi
+refuses "an empty file name" "the file name is empty" -- "$RIS" run ""
+refuses "an empty --emit-rimod" "--emit-rimod takes a directory" -- \
+  "$RIS" build --emit-rimod "" -o p good.ri
+refuses "an empty --use-rimod" "--use-rimod takes a directory" -- \
+  "$RIS" build --use-rimod "" -o p good.ri
 refuses "an empty --affected, checking" "--affected takes a changed file" -- \
-  "$IYI" check types --affected ""
+  "$RIS" check types --affected ""
 refuses "an empty --affected, testing" "--affected takes a changed file" -- \
-  "$IYI" test --affected "" .
+  "$RIS" test --affected "" .
 # Colour only where somebody sees it. The compiler's colour was on unless
 # `--no-color` said otherwise, and the messages carry it in their text, so
 # `iyi check` written into a file had `\033[33;1m (compile-time type is
 # (String | Nil))\033[39;22m` in it.
-printf 'module nilsize\n\nx = Program.args.size > 0 ? "a" : nil\nputs x.size\n' > nilsize.iyi
-"$IYI" check types nilsize.iyi > nilsize.out 2>&1
+printf 'module nilsize\n\nx = Program.args.size > 0 ? "a" : nil\nputs x.size\n' > nilsize.ri
+"$RIS" check types nilsize.ri > nilsize.out 2>&1
 if grep -qF '(compile-time type is (String | Nil))' nilsize.out && ! grep -q $'\033' nilsize.out; then
   echo "  an error written into a file carries no colour"
 else
@@ -1365,31 +1365,31 @@ fi
 # `check --affected` refused the switch every other verb takes, as "takes
 # only changed files; unexpected '--no-color'".
 mkdir -p affcolor/app
-printf 'module app/lib\n\npub def value : Int32\n  7\nend\n' > affcolor/app/lib.iyi
-printf 'module app/user\n\nimport app/lib::{value}\n\nputs value\n' > affcolor/app/user.iyi
-(cd affcolor && "$IYI" check types --affected app/lib.iyi --no-color) > affcolor.out 2>&1
+printf 'module app/lib\n\npub def value : Int32\n  7\nend\n' > affcolor/app/lib.ri
+printf 'module app/user\n\nimport app/lib::{value}\n\nputs value\n' > affcolor/app/user.ri
+(cd affcolor && "$RIS" check types --affected app/lib.ri --no-color) > affcolor.out 2>&1
 if [ $? -eq 0 ] && grep -qF "2 consumer(s) checked, all compile" affcolor.out; then
   echo "  check --affected takes --no-color"
 else
   echo "  check --affected --no-color:"; sed -n '1,3p' affcolor.out; status=1
 fi
-refuses "an empty test path" "'' is not one" -- "$IYI" test ""
-refuses "an empty file for fix" "no such file" -- "$IYI" check types --fix ""
-refuses "an empty .iyimod path" "expected a .iyimod path" -- "$IYI" mod dump ""
+refuses "an empty test path" "'' is not one" -- "$RIS" test ""
+refuses "an empty file for fix" "no such file" -- "$RIS" check types --fix ""
+refuses "an empty .rimod path" "expected a .rimod path" -- "$RIS" mod dump ""
 refuses "an empty --socket" "--socket takes a path" -- \
-  "$IYI" daemon build --socket "" -o p good.iyi
+  "$RIS" daemon build --socket "" -o p good.ri
 mkdir -p "$WORK/tree"
 printf 'x=1\n' > "$WORK/tree/messy.cr"
 cp "$WORK/tree/messy.cr" "$WORK/tree.keep"
 cd "$WORK/tree"
-refuses "an empty path for format" "no such file" -- "$IYI" check format --fix ""
+refuses "an empty path for format" "no such file" -- "$RIS" check format --fix ""
 cd "$WORK"
 cmp -s "$WORK/tree/messy.cr" "$WORK/tree.keep" ||
   { echo "  format \"\" rewrote the working directory"; status=1; }
-# And the search path itself. `IYI_PATH=""` is a list with nothing in it,
+# And the search path itself. `RIS_PATH=""` is a list with nothing in it,
 # and the note read "Searched, in order:" followed by nothing.
-env IYI_PATH="" "$IYI" build -o lost good.iyi > "$WORK/emptypath.txt" 2>&1
-if grep -q "IYI_PATH is set and empty" "$WORK/emptypath.txt"; then
+env RIS_PATH="" "$RIS" build -o lost good.ri > "$WORK/emptypath.txt" 2>&1
+if grep -q "RIS_PATH is set and empty" "$WORK/emptypath.txt"; then
   echo "  an empty search path: says so"
 else
   echo "  an empty search path: a list of nothing, printed as nothing"
@@ -1398,13 +1398,13 @@ else
 fi
 # `$ORIGIN` on its own, the compiler's directory: the expansion read the
 # character after the name without asking whether there was one, and an
-# `IYI_PATH` holding it died of "Index out of bounds (IndexError)" and
+# `RIS_PATH` holding it died of "Index out of bounds (IndexError)" and
 # "you've found a bug in the iyi compiler".
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT) sep=';' ;;
   *) sep=':' ;;
 esac
-env IYI_PATH="$REPO/src$sep\$ORIGIN" "$IYI" build -o origin good.iyi > "$WORK/origin.txt" 2>&1
+env RIS_PATH="$REPO/src$sep\$ORIGIN" "$RIS" build -o origin good.ri > "$WORK/origin.txt" 2>&1
 if [ "$(./origin 2>&1 | tr -d '\r')" = "ok" ] && ! has_trace "$WORK/origin.txt"; then
   echo "  a search path holding \$ORIGIN alone: builds"
 else
@@ -1414,31 +1414,31 @@ fi
 # source, built it, and linked the executable over it: the program's only
 # copy was 12 KB of ELF, exit 0. The module a program imports is the same
 # mistake one step removed, refused once the build knows what it read.
-cp good.iyi good.keep
+cp good.ri good.keep
 refuses "an output that is the source" "the source it would build from" -- \
-  "$IYI" build -o good.iyi good.iyi
-cmp -s good.iyi good.keep || { echo "  the refusal came after the source was replaced"; status=1; }
-cp app/lib.iyi lib.keep
+  "$RIS" build -o good.ri good.ri
+cmp -s good.ri good.keep || { echo "  the refusal came after the source was replaced"; status=1; }
+cp app/lib.ri lib.keep
 refuses "an output that is an imported module" "a file this build read" -- \
-  "$IYI" build -o app/lib.iyi user.iyi
-cmp -s app/lib.iyi lib.keep || { echo "  the refusal came after the module was replaced"; status=1; }
+  "$RIS" build -o app/lib.ri user.ri
+cmp -s app/lib.ri lib.keep || { echo "  the refusal came after the module was replaced"; status=1; }
 # The same file under another spelling. NTFS and APFS ignore case, and
 # Win32 drops a trailing space, and the refusal compared strings:
-# `-o GOOD.iyi good.iyi` on Windows linked the program over its source,
+# `-o GOOD.ri good.ri` on Windows linked the program over its source,
 # exit 0. Asked only where the file system says the two names are one.
-if [ GOOD.iyi -ef good.iyi ]; then
+if [ GOOD.ri -ef good.ri ]; then
   refuses "an output that is the source in another case" "the source it would build from" -- \
-    "$IYI" build -o GOOD.iyi good.iyi
-  cmp -s good.iyi good.keep || { echo "  GOOD.iyi replaced good.iyi"; cp good.keep good.iyi; status=1; }
+    "$RIS" build -o GOOD.ri good.ri
+  cmp -s good.ri good.keep || { echo "  GOOD.ri replaced good.ri"; cp good.keep good.ri; status=1; }
   refuses "an output that is an imported module in another case" "a file this build read" -- \
-    "$IYI" build -o app/LIB.iyi user.iyi
-  cmp -s app/lib.iyi lib.keep || { echo "  app/LIB.iyi replaced app/lib.iyi"; cp lib.keep app/lib.iyi; status=1; }
+    "$RIS" build -o app/LIB.ri user.ri
+  cmp -s app/lib.ri lib.keep || { echo "  app/LIB.ri replaced app/lib.ri"; cp lib.keep app/lib.ri; status=1; }
 fi
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     refuses "an output that is the source with a trailing space" "the source it would build from" -- \
-      "$IYI" build -o "good.iyi " good.iyi
-    cmp -s good.iyi good.keep || { echo "  \"good.iyi \" replaced good.iyi"; cp good.keep good.iyi; status=1; }
+      "$RIS" build -o "good.ri " good.ri
+    cmp -s good.ri good.keep || { echo "  \"good.ri \" replaced good.ri"; cp good.keep good.ri; status=1; }
     ;;
 esac
 mkdir -p "$WORK/readonly"
@@ -1478,7 +1478,7 @@ for candidate in $candidates; do
 done
 if [ -n "$unwritable" ]; then
   refuses "an output directory that will not take the file ($unwritable)" \
-    "no permission to write there" -- "$IYI" build -o "$unwritable/prog" good.iyi
+    "no permission to write there" -- "$RIS" build -o "$unwritable/prog" good.ri
 else
   echo "  an output directory that will not take the file: nothing here refuses"
   echo "  this process, so this case had nothing to drive"
@@ -1488,18 +1488,18 @@ case "$(uname -s)" in
     MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" icacls "$(cygpath -w "$WORK/readonly")" /remove:d "$USERNAME" > /dev/null ;;
   *) chmod 700 "$WORK/readonly" ;;
 esac
-# And the library the program compiles against. With IYI_PATH pointed
+# And the library the program compiles against. With RIS_PATH pointed
 # somewhere empty, the prelude is not found - and the answer was Crystal's
 # advice about `shards install` and `shard.yml`, to an author whose
 # language has neither and whose `require` is refused two lines earlier in
 # the same file. What is wrong is the search path, so the search path is
 # what it prints.
-env IYI_PATH="$WORK/nowhere" "$IYI" build -o lost good.iyi > "$WORK/lost.txt" 2>&1
+env RIS_PATH="$WORK/nowhere" "$RIS" build -o lost good.ri > "$WORK/lost.txt" 2>&1
 if grep -q 'shards install' "$WORK/lost.txt"; then
   echo "  a missing prelude: answered with the other language's advice"
   sed -n '1,8p' "$WORK/lost.txt"
   status=1
-elif grep -q "iyi's prelude and \`std\` ship beside the compiler" "$WORK/lost.txt" &&
+elif grep -q "ris's prelude and \`std\` ship beside the compiler" "$WORK/lost.txt" &&
      grep -q "$WORK/nowhere" "$WORK/lost.txt"; then
   echo "  a missing prelude: names the search path it looked down"
 else
@@ -1512,7 +1512,7 @@ fi
 # reads `iyi tool format --check "$FILE"` passed on a path with a typo -
 # the one case where the check certainly did not happen.
 refuses "a format check on a path that is not there" "no such file or directory" -- \
-  "$IYI" check format nosuch.iyi
+  "$RIS" check format nosuch.ri
 # And the formatter on a file that imports a package, which is the ordinary
 # shape of III.7. A host segment — `example.test` — is one segment to the
 # parser, which reads its dots off the characters, and three tokens to the
@@ -1521,17 +1521,17 @@ refuses "a format check on a path that is not there" "no such file or directory"
 # formatting '<file>', to show more information, please run..." — a bug
 # report request about valid source. Every file importing a package was
 # unformattable. The tree-wide `--check` never saw it because this
-# repository's own `.iyi` files import local modules.
-printf 'import   example.test/user/lib::{value}\n\nx=value\n' > "$WORK/pkg.iyi"
-if ! "$IYI" check format --fix "$WORK/pkg.iyi" > "$WORK/pkg.txt" 2>&1; then
+# repository's own `.ri` files import local modules.
+printf 'import   example.test/user/lib::{value}\n\nx=value\n' > "$WORK/pkg.ri"
+if ! "$RIS" check format --fix "$WORK/pkg.ri" > "$WORK/pkg.txt" 2>&1; then
   echo "  a package import: the formatter would not format it"
   sed -n '1,4p' "$WORK/pkg.txt"
   status=1
-elif [ "$(cat "$WORK/pkg.iyi")" != "$(printf 'import example.test/user/lib::{value}\n\nx = value')" ]; then
+elif [ "$(cat "$WORK/pkg.ri")" != "$(printf 'import example.test/user/lib::{value}\n\nx = value')" ]; then
   echo "  a package import: the formatter rewrote the path"
-  cat "$WORK/pkg.iyi"
+  cat "$WORK/pkg.ri"
   status=1
-elif ! "$IYI" check format "$WORK/pkg.iyi" > "$WORK/pkg2.txt" 2>&1; then
+elif ! "$RIS" check format "$WORK/pkg.ri" > "$WORK/pkg2.txt" 2>&1; then
   echo "  a package import: formatting it twice produced changes"
   sed -n '1,4p' "$WORK/pkg2.txt"
   status=1
@@ -1541,7 +1541,7 @@ fi
 
 # Formatting a pipe (`tool format -`, `--stdin-filename`) went with
 # `ris tool format`, now an unknown tool: `ris check format` reads files.
-refuses "tool format, removed" "unknown tool" -- "$IYI" tool format -
+refuses "tool format, removed" "unknown tool" -- "$RIS" tool format -
 
 # The same question a third time, and this one is not a tool's: a macro
 # expansion is named by a `VirtualFile`, which ends in neither extension, so
@@ -1550,7 +1550,7 @@ refuses "tool format, removed" "unknown tool" -- "$IYI" tool format -
 # source and not in what a macro wrote — which is how the prelude came to
 # declare `to_i!` and six siblings on five structs. Code a macro generates
 # is in the language of the file it expands in, so the rule reaches it.
-cat > "$WORK/macro_name.iyi" <<'IYI'
+cat > "$WORK/macro_name.ri" <<'RIS'
 macro declare
   def value! : Int32
     1
@@ -1559,20 +1559,20 @@ end
 
 declare
 puts value
-IYI
+RIS
 refuses "a macro that declares a name ending in !" "part of a name in iyi" -- \
-  "$IYI" build -o "$WORK/macro_name" "$WORK/macro_name.iyi"
+  "$RIS" build -o "$WORK/macro_name" "$WORK/macro_name.ri"
 # A derive may read its declaration only (iyi SPEC II.4). Its `macro
 # finished` ran after it, and an escaped `all_subclasses` in one answered
 # `A,B` beside a `B` declared below the derived struct; its `run` ran the
 # script and the method answered what the script printed.
-printf 'class Base\nend\n\nclass A < Base\nend\n\nmacro fin_in(declaration)\n  macro finished\n    def all_subs : String\n      \\{{ Base.all_subclasses.map(&.name.stringify).join(",") }}\n    end\n  end\nend\n\nstruct X\n  def initialize\n  end\n\n  derive fin_in\nend\n\nclass B < Base\nend\n\nputs X.new.all_subs\n' > "$WORK/derivehook.iyi"
+printf 'class Base\nend\n\nclass A < Base\nend\n\nmacro fin_in(declaration)\n  macro finished\n    def all_subs : String\n      \\{{ Base.all_subclasses.map(&.name.stringify).join(",") }}\n    end\n  end\nend\n\nstruct X\n  def initialize\n  end\n\n  derive fin_in\nend\n\nclass B < Base\nend\n\nputs X.new.all_subs\n' > "$WORK/derivehook.ri"
 refuses "a macro finished inside a derive" '`macro finished` is not available to a derive' -- \
-  "$IYI" run "$WORK/derivehook.iyi"
+  "$RIS" run "$WORK/derivehook.ri"
 printf 'puts "\\"generated\\""\n' > "$WORK/gen.cr"
-printf 'macro r(declaration)\n  def got : String\n    {{ run("./gen.cr").stringify }}\n  end\nend\n\nstruct X\n  def initialize\n  end\n\n  derive r\nend\n\nputs X.new.got\n' > "$WORK/deriverun.iyi"
+printf 'macro r(declaration)\n  def got : String\n    {{ run("./gen.cr").stringify }}\n  end\nend\n\nstruct X\n  def initialize\n  end\n\n  derive r\nend\n\nputs X.new.got\n' > "$WORK/deriverun.ri"
 refuses "a run inside a derive" '`run` is not available to a derive' -- \
-  "$IYI" run "$WORK/deriverun.iyi"
+  "$RIS" run "$WORK/deriverun.ri"
 
 # And the other direction, which is the one that cost something: `!` is the
 # operator a caller's signature is written for, and no macro could produce
@@ -1581,7 +1581,7 @@ refuses "a run inside a derive" '`run` is not available to a derive' -- \
 # token". Code a macro writes is iyi now, so it propagates the way code a
 # person writes does — both branches, because a propagation that never
 # carries an error proves half of it.
-cat > "$WORK/macro_bang.iyi" <<'IYI'
+cat > "$WORK/macro_bang.ri" <<'RIS'
 struct ParseError
   getter text : String
 
@@ -1614,8 +1614,8 @@ end
   in ParseError then puts it.message
   end
 end
-IYI
-if ! "$IYI" build -o "$WORK/macro_bang" "$WORK/macro_bang.iyi" > "$WORK/macro_bang.log" 2>&1; then
+RIS
+if ! "$RIS" build -o "$WORK/macro_bang" "$WORK/macro_bang.ri" > "$WORK/macro_bang.log" 2>&1; then
   echo "  a macro that writes !: the program did not build"
   sed -n '1,6p' "$WORK/macro_bang.log"
   status=1
@@ -1632,25 +1632,25 @@ else
 fi
 
 # The cache, which is the one thing here a build trusts without asking.
-# `IYI_CACHE_DIR` pointed at something that cannot be a directory was
+# `RIS_CACHE_DIR` pointed at something that cannot be a directory was
 # skipped in silence - it is the first of a list of candidates, and the
 # list falls through - so the build wrote its megabytes into
 # `~/.cache/iyi`, which is the whole thing the variable was set to stop.
-refuses "a cache directory that cannot be one" "IYI_CACHE_DIR is" -- \
-  env IYI_CACHE_DIR="$WORK/good.iyi" "$IYI" build -o cached good.iyi
-# And an empty one, which is what a shell makes of `IYI_CACHE_DIR="$DIR"`
+refuses "a cache directory that cannot be one" "RIS_CACHE_DIR is" -- \
+  env RIS_CACHE_DIR="$WORK/good.ri" "$RIS" build -o cached good.ri
+# And an empty one, which is what a shell makes of `RIS_CACHE_DIR="$DIR"`
 # with `DIR` unset: `File.expand_path("")` is the working directory, so a
 # build dropped its `.bc` and `.o` files, its linker probe and its link
 # templates beside the source - and `clear_cache`, which is `rm -rf` on
 # that answer, deleted the project. The file left in the directory below
 # is what says so: it was gone, at exit 0.
-refuses "an empty cache directory, building" 'IYI_CACHE_DIR is "" and that names no' -- \
-  env IYI_CACHE_DIR="" "$IYI" build -o cached good.iyi
+refuses "an empty cache directory, building" 'RIS_CACHE_DIR is "" and that names no' -- \
+  env RIS_CACHE_DIR="" "$RIS" build -o cached good.ri
 mkdir -p "$WORK/keep"
 printf 'notes\n' > "$WORK/keep/NOTES.md"
 cd "$WORK/keep"
-refuses "an empty cache directory, clearing" 'IYI_CACHE_DIR is "" and that names no' -- \
-  env IYI_CACHE_DIR="" "$IYI" clear_cache
+refuses "an empty cache directory, clearing" 'RIS_CACHE_DIR is "" and that names no' -- \
+  env RIS_CACHE_DIR="" "$RIS" clear_cache
 cd "$WORK"
 if [ -f "$WORK/keep/NOTES.md" ]; then
   echo "  clear_cache left the working directory where it stood"
@@ -1673,7 +1673,7 @@ case "$(uname -s)" in
   *) OBJ_GLOB='*.o' ;;
 esac
 mkdir -p "$WORK/cache"
-env IYI_CACHE_DIR="$WORK/cache" "$IYI" build -o cached1 good.iyi > cache1.txt 2>&1 ||
+env RIS_CACHE_DIR="$WORK/cache" "$RIS" build -o cached1 good.ri > cache1.txt 2>&1 ||
   { echo "  a build with its own cache directory failed:"; cat cache1.txt; status=1; }
 corrupted=0
 for object in $(find "$WORK/cache" -name "$OBJ_GLOB" | head -3); do
@@ -1684,7 +1684,7 @@ truncate -s 2 "$(find "$WORK/cache" -name "$OBJ_GLOB" | tail -1)" 2>/dev/null
 if [ "$corrupted" -eq 0 ]; then
   echo "  the cache held no objects to corrupt, so this case checked nothing"
   status=1
-elif env IYI_CACHE_DIR="$WORK/cache" "$IYI" build -o cached2 good.iyi > cache2.txt 2>&1 &&
+elif env RIS_CACHE_DIR="$WORK/cache" "$RIS" build -o cached2 good.ri > cache2.txt 2>&1 &&
      [ "$(./cached2)" = "ok" ]; then
   if grep -q 'is not an object file; compiling it again' cache2.txt; then
     echo "  a corrupted cached object: recompiled, and said so"
@@ -1702,7 +1702,7 @@ fi
 # case above and recompile the world on every build. `--stats` is where
 # the cache answers for itself, and it has to say all of them, which is
 # also what says the build above repaired what it refused.
-if env IYI_CACHE_DIR="$WORK/cache" "$IYI" build -s -o cached3 good.iyi > cache3.txt 2>&1 &&
+if env RIS_CACHE_DIR="$WORK/cache" "$RIS" build -s -o cached3 good.ri > cache3.txt 2>&1 &&
    grep -q 'all previous .o files were reused' cache3.txt &&
    ! grep -q 'is not an object file' cache3.txt; then
   echo "  an intact cache: every object reused, none refused"
@@ -1717,42 +1717,42 @@ echo
 # source: the declarations wrote it `pub macro`, so `App::Mac.inner` ran
 # and printed 1 where the source says "does not export 'inner'".
 mkdir -p "$WORK/mac/app"
-printf 'module app/mac\n\nmacro inner\n  1\nend\n\npub macro outer\n  2\nend\n' > "$WORK/mac/app/mac.iyi"
-printf 'import app/mac\n\nputs App::Mac.outer\n' > "$WORK/mac/ok.iyi"
-printf 'import app/mac\n\nputs App::Mac.inner\n' > "$WORK/mac/inner.iyi"
-(cd "$WORK/mac" && "$IYI" build --emit-iyimod mods -o ok ok.iyi && mv app/mac.iyi mac.source) > "$WORK/mac.log" 2>&1 ||
+printf 'module app/mac\n\nmacro inner\n  1\nend\n\npub macro outer\n  2\nend\n' > "$WORK/mac/app/mac.ri"
+printf 'import app/mac\n\nputs App::Mac.outer\n' > "$WORK/mac/ok.ri"
+printf 'import app/mac\n\nputs App::Mac.inner\n' > "$WORK/mac/inner.ri"
+(cd "$WORK/mac" && "$RIS" build --emit-rimod mods -o ok ok.ri && mv app/mac.ri mac.source) > "$WORK/mac.log" 2>&1 ||
   { echo "  the macro module does not build:"; sed -n '1,3p' "$WORK/mac.log"; status=1; }
 refuses "an unmarked macro, through its artifact" "does not export 'inner'" -- \
-  "$IYI" build --use-iyimod "$WORK/mac/mods" -o "$WORK/mac/u" "$WORK/mac/inner.iyi"
+  "$RIS" build --use-rimod "$WORK/mac/mods" -o "$WORK/mac/u" "$WORK/mac/inner.ri"
 
 echo "== what the other verbs refuse, and what one of them prints"
 mkdir -p deep/inner
 printf 'module deep/inner/thing\n\n# A thing.\npub def thing_value : Int32\n  5\nend\n' \
-  > deep/inner/thing.iyi
-printf 'module deep/inner/two\n\nmodule second\n\nputs "two"\n' > deep/inner/two.iyi
-if [ "$("$IYI" doc deep/inner/thing.iyi | head -1)" = "module deep/inner/thing" ] &&
-   "$IYI" doc deep/inner/thing.iyi | grep -q 'pub def thing_value : Int32'; then
+  > deep/inner/thing.ri
+printf 'module deep/inner/two\n\nmodule second\n\nputs "two"\n' > deep/inner/two.ri
+if [ "$("$RIS" doc deep/inner/thing.ri | head -1)" = "module deep/inner/thing" ] &&
+   "$RIS" doc deep/inner/thing.ri | grep -q 'pub def thing_value : Int32'; then
   echo "  a module below the root documents itself, by the name it declares"
 else
   echo "  doc answered with the wrong module, or with nothing:"
-  "$IYI" doc deep/inner/thing.iyi | sed -n '1,3p'
+  "$RIS" doc deep/inner/thing.ri | sed -n '1,3p'
   status=1
 fi
-if "$IYI" mod dump lib.good --json | head -1 | grep -q '^{'; then
+if "$RIS" mod dump lib.good --json | head -1 | grep -q '^{'; then
   echo "  a flag after the path is read, not discarded"
 else
   echo "  mod dump --json after the path did not print JSON:"
-  "$IYI" mod dump lib.good --json | sed -n '1,2p'
+  "$RIS" mod dump lib.good --json | sed -n '1,2p'
   status=1
 fi
 # `mod context` read its flags only before the path too, and it is the verb
-# a model calls: `mod context file.iyi --json` printed the text pack and
+# a model calls: `mod context file.ri --json` printed the text pack and
 # exited 0, so whatever was reading the JSON found out somewhere else.
-if "$IYI" mod context user.iyi --json | head -1 | grep -q '^{'; then
+if "$RIS" mod context user.ri --json | head -1 | grep -q '^{'; then
   echo "  the context pack's flag is read from either side of the path"
 else
   echo "  mod context --json after the path did not print JSON:"
-  "$IYI" mod context user.iyi --json | sed -n '1,2p'
+  "$RIS" mod context user.ri --json | sed -n '1,2p'
   status=1
 fi
 # The caret in a macro's expanded text, under a `{{x}}` that starts a
@@ -1761,8 +1761,8 @@ fi
 # and not the location pragmas it had fired (the lexer's location_pragma
 # cursor is rewound now): `nope` in `  {{x}}.nope` was at column 8, and
 # the caret stood under its `e`.
-printf 'module interp\n\nmacro m(x)\n  a = 1\n  {{x}}.nope\nend\nm(1)\n' > interp.iyi
-"$IYI" check types interp.iyi > interp.out 2>&1
+printf 'module interp\n\nmacro m(x)\n  a = 1\n  {{x}}.nope\nend\nm(1)\n' > interp.ri
+"$RIS" check types interp.ri > interp.out 2>&1
 if [ "$(grep -A1 '^ > 2 | 1.nope$' interp.out | sed -n '2p')" = "$(printf '%9s^---' '')" ]; then
   echo "  the caret after an interpolation that starts a line of macro text is under the column"
 else
@@ -1775,25 +1775,25 @@ fi
 # seconds, for a macro calling itself, two calling each other, and an
 # `inherited` hook whose subclass sets it off again. Refused 64 levels
 # deep, and a recursion that ends short of that still runs.
-printf 'macro m(x)\n  m({{ x }})\nend\n\nm(1)\n' > macroself.iyi
-refuses "a macro that calls itself" "macro expansion nested more than 64 deep" -- "$IYI" check types macroself.iyi
-printf 'macro a\n  b\nend\n\nmacro b\n  a\nend\n\na\n' > macropair.iyi
-refuses "two macros that call each other" "macro expansion nested more than 64 deep" -- "$IYI" check types macropair.iyi
-printf 'class Base\n  macro inherited\n    class Sub < {{ @type }}\n    end\n  end\nend\n\nclass A < Base\nend\n' > macrohook.iyi
+printf 'macro m(x)\n  m({{ x }})\nend\n\nm(1)\n' > macroself.ri
+refuses "a macro that calls itself" "macro expansion nested more than 64 deep" -- "$RIS" check types macroself.ri
+printf 'macro a\n  b\nend\n\nmacro b\n  a\nend\n\na\n' > macropair.ri
+refuses "two macros that call each other" "macro expansion nested more than 64 deep" -- "$RIS" check types macropair.ri
+printf 'class Base\n  macro inherited\n    class Sub < {{ @type }}\n    end\n  end\nend\n\nclass A < Base\nend\n' > macrohook.ri
 refuses "an inherited hook its subclass sets off" "macro expansion nested more than 64 deep" -- \
-  "$IYI" check types macrohook.iyi
-printf 'macro down(n)\n  {%% if n > 0 %%}\n    down({{ n - 1 }})\n  {%% else %%}\n    puts "bottom"\n  {%% end %%}\nend\n\ndown(60)\n' > macrodown.iyi
-if [ "$("$IYI" run macrodown.iyi 2>&1 | tr -d '\r')" = "bottom" ]; then
+  "$RIS" check types macrohook.ri
+printf 'macro down(n)\n  {%% if n > 0 %%}\n    down({{ n - 1 }})\n  {%% else %%}\n    puts "bottom"\n  {%% end %%}\nend\n\ndown(60)\n' > macrodown.ri
+if [ "$("$RIS" run macrodown.ri 2>&1 | tr -d '\r')" = "bottom" ]; then
   echo "  a macro recursion 61 levels deep that ends still runs"
 else
-  echo "  a macro recursion 61 levels deep that ends:"; "$IYI" run macrodown.iyi 2>&1 | sed -n '1,3p'; status=1
+  echo "  a macro recursion 61 levels deep that ends:"; "$RIS" run macrodown.ri 2>&1 | sed -n '1,3p'; status=1
 fi
 # The caret under a line with tabs inside it: every character before the
 # column was counted as one space, so two tabs that pushed `nope` to
 # column 34 left the caret at 17. The caret line carries the shown line's
 # tabs now, and a terminal expands both the same way.
-printf 'module tabbed\n\nx = 1\nputs(\tx,\t\tx.nope)\n' > tabbed.iyi
-"$IYI" check types tabbed.iyi > tabbed.out 2>&1
+printf 'module tabbed\n\nx = 1\nputs(\tx,\t\tx.nope)\n' > tabbed.ri
+"$RIS" check types tabbed.ri > tabbed.out 2>&1
 caret_line="$(grep -A1 '^ 4 | ' tabbed.out | sed -n '2p')"
 if [ "$caret_line" = "$(printf '          \t  \t\t  ^---')" ]; then
   echo "  the caret under a line with tabs carries the line's tabs"
@@ -1806,8 +1806,8 @@ fi
 # counted each as one, so seven CJK characters in front of `nope` left it
 # seven cells short. It is padded by the cells each character takes now
 # (`caret_padding`).
-printf 'module wide\n\ns = "\346\227\245\346\234\254\350\252\236\343\203\206\343\202\255\343\202\271\343\203\210"; puts s.nope\n' > wide.iyi
-"$IYI" check types wide.iyi > wide.out 2>&1
+printf 'module wide\n\ns = "\346\227\245\346\234\254\350\252\236\343\203\206\343\202\255\343\202\271\343\203\210"; puts s.nope\n' > wide.ri
+"$RIS" check types wide.ri > wide.out 2>&1
 caret_line="$(grep -A1 '^ 3 | ' wide.out | sed -n '2p')"
 if [ "$caret_line" = "$(printf '%34s^---' '')" ]; then
   echo "  the caret after wide characters is under the column a terminal draws"
@@ -1819,10 +1819,10 @@ fi
 # And an abstract class instantiated, which was reported at the prelude's
 # `class Reference`, where a generated `new` and its `allocate` are made;
 # `-f json`'s deepest frame had file "" and line null.
-printf 'module absnew\n\nabstract class A\nend\nA.new\n' > absnew.iyi
-"$IYI" check types absnew.iyi > absnew.out 2>&1
-"$IYI" check types --json absnew.iyi > absnew.json 2>&1
-if grep -q '^In absnew.iyi:5:3' absnew.out && grep -q "can't instantiate abstract class" absnew.out &&
+printf 'module absnew\n\nabstract class A\nend\nA.new\n' > absnew.ri
+"$RIS" check types absnew.ri > absnew.out 2>&1
+"$RIS" check types --json absnew.ri > absnew.json 2>&1
+if grep -q '^In absnew.ri:5:3' absnew.out && grep -q "can't instantiate abstract class" absnew.out &&
    grep -q "\"line\":5,\"column\":3,\"size\":3,\"message\":\"can't instantiate abstract class" absnew.json; then
   echo "  an abstract class instantiated is refused at the call"
 else
@@ -1834,36 +1834,36 @@ fi
 # deeper made instances until the stack ran out, used or not, and so did
 # an associated type wrapping its receiver: "Stack overflow" after 6 to 19
 # seconds. Refused as a call that builds such a type already was.
-printf 'struct S(T)\n  @x : S(Array(T))?\nend\n' > genivar.iyi
+printf 'struct S(T)\n  @x : S(Array(T))?\nend\n' > genivar.ri
 refuses "a generic holding itself one level deeper" "generic type too nested: S(Array(Array(" -- \
-  "$IYI" check types genivar.iyi
-refuses "and the refusal is at the generic" "genivar.iyi:1:1" -- "$IYI" check types genivar.iyi
-printf 'pub trait C\n  type Elem\n  abstract def first : Elem\nend\n\npub struct Box(T)\n  def initialize(@v : T)\n  end\nend\n\nimpl C for Box(T) forall T\n  type Elem = Box(Array(T))\n\n  def first : Box(Array(T))\n    Box.new([@v])\n  end\nend\n\nputs Box.new(1).first\n' > genassoc.iyi
+  "$RIS" check types genivar.ri
+refuses "and the refusal is at the generic" "genivar.ri:1:1" -- "$RIS" check types genivar.ri
+printf 'pub trait C\n  type Elem\n  abstract def first : Elem\nend\n\npub struct Box(T)\n  def initialize(@v : T)\n  end\nend\n\nimpl C for Box(T) forall T\n  type Elem = Box(Array(T))\n\n  def first : Box(Array(T))\n    Box.new([@v])\n  end\nend\n\nputs Box.new(1).first\n' > genassoc.ri
 refuses "an associated type wrapping its receiver" "generic type too nested: Box(Array(Array(" -- \
-  "$IYI" check types genassoc.iyi
-refuses "doc on bytes that are not text" "not a valid iyi source file" -- \
-  "$IYI" doc binary.iyi
+  "$RIS" check types genassoc.ri
+refuses "doc on bytes that are not text" "not a valid ris source file" -- \
+  "$RIS" doc binary.ri
 refuses "doc on a file that declares no module" "declares no module" -- \
-  "$IYI" doc nomodule.iyi
+  "$RIS" doc nomodule.ri
 refuses "doc on a module that is not at its own path" "is read from" -- \
-  "$IYI" doc twoheaders.iyi
+  "$RIS" doc twoheaders.ri
 refuses "doc on a module that does not compile" "a file declares one module" -- \
-  "$IYI" doc deep/inner/two.iyi
-mkdir -p adir.iyimod
-refuses "doc on a directory" "is a directory" -- "$IYI" doc adir.iyimod
+  "$RIS" doc deep/inner/two.ri
+mkdir -p adir.rimod
+refuses "doc on a directory" "is a directory" -- "$RIS" doc adir.rimod
 refuses "a second path after the artifact" "unexpected" -- \
-  "$IYI" mod dump lib.good extra.iyimod
+  "$RIS" mod dump lib.good extra.rimod
 refuses "both of mod dump's outputs at once" "two different outputs" -- \
-  "$IYI" mod dump --declarations --json lib.good
-refuses "mod dump on a directory" "is a directory" -- "$IYI" mod dump adir.iyimod
-mkdir -p adir.iyi
+  "$RIS" mod dump --declarations --json lib.good
+refuses "mod dump on a directory" "is a directory" -- "$RIS" mod dump adir.rimod
+mkdir -p adir.ri
 refuses "a second path after the module" "unexpected" -- \
-  "$IYI" mod context user.iyi extra.iyi
+  "$RIS" mod context user.ri extra.ri
 refuses "an unknown flag to the context pack" "unknown flag" -- \
-  "$IYI" mod context --nonesuch user.iyi
-refuses "mod context on a directory" "is a directory" -- "$IYI" mod context adir.iyi
-refuses "a flag lsp does not have" "lsp: unknown flag --bogus" -- "$IYI" lsp --bogus extra
-refuses "an argument lsp does not take" "lsp takes no arguments, and 'extra' is one" -- "$IYI" lsp extra
+  "$RIS" mod context --nonesuch user.ri
+refuses "mod context on a directory" "is a directory" -- "$RIS" mod context adir.ri
+refuses "a flag lsp does not have" "lsp: unknown flag --bogus" -- "$RIS" lsp --bogus extra
+refuses "an argument lsp does not take" "lsp takes no arguments, and 'extra' is one" -- "$RIS" lsp extra
 # A file the process cannot read. `chmod 000` does not bite as root, which
 # is what CI runs as, so the unreadable file here is the kernel's own:
 # `/proc/self/mem` refuses a read at offset 0 for everybody. It is this
@@ -1874,9 +1874,9 @@ case "$(uname -s)" in
   *) kernel_file="/proc/self/mem" ;;
 esac
 if [ -n "$kernel_file" ] && [ -r "$kernel_file" ]; then
-  ln -sf "$kernel_file" unreadable.iyi
+  ln -sf "$kernel_file" unreadable.ri
   refuses "a module the kernel will not hand over" "cannot be read" -- \
-    "$IYI" doc unreadable.iyi
+    "$RIS" doc unreadable.ri
 else
   echo "  a module the kernel will not hand over: no /proc here, nothing to drive"
 fi
@@ -1885,15 +1885,15 @@ fi
 # deep recursion)" and pages of frames on 1,200 nested `(`, on 300 calls left
 # open with a named argument each, and on a chain of 4,000 `+`; the language
 # server died with it. A file deeper than any in the repository still reads.
-printf 'module deep\n\nputs %s1%s\n' "$(printf '(%.0s' $(seq 1200))" "$(printf ')%.0s' $(seq 1200))" > deep.iyi
-refuses "1,200 nested parentheses" "nesting deeper than 128 levels" -- "$IYI" check types deep.iyi
-printf 'module deepopen\n\ndef f(x)\n  x\nend\n\nputs %s\n' "$(printf 'f(x: %.0s' $(seq 300))" > deepopen.iyi
-refuses "300 calls left open" "nesting deeper than 128 levels" -- "$IYI" check types deepopen.iyi
-printf 'module chain\n\nx = 1\nputs x%s\n' "$(printf ' + x%.0s' $(seq 4000))" > chain.iyi
-refuses "a chain of 4,000 +" "nested deeper than 1000 levels" -- "$IYI" check types chain.iyi
+printf 'module deep\n\nputs %s1%s\n' "$(printf '(%.0s' $(seq 1200))" "$(printf ')%.0s' $(seq 1200))" > deep.ri
+refuses "1,200 nested parentheses" "nesting deeper than 128 levels" -- "$RIS" check types deep.ri
+printf 'module deepopen\n\ndef f(x)\n  x\nend\n\nputs %s\n' "$(printf 'f(x: %.0s' $(seq 300))" > deepopen.ri
+refuses "300 calls left open" "nesting deeper than 128 levels" -- "$RIS" check types deepopen.ri
+printf 'module chain\n\nx = 1\nputs x%s\n' "$(printf ' + x%.0s' $(seq 4000))" > chain.ri
+refuses "a chain of 4,000 +" "nested deeper than 1000 levels" -- "$RIS" check types chain.ri
 printf 'module shallow\n\nx = 1\nputs %s1%s%s\n' "$(printf '(%.0s' $(seq 100))" "$(printf ')%.0s' $(seq 100))" \
-  "$(printf ' + x%.0s' $(seq 800))" > shallow.iyi
-if "$IYI" check types shallow.iyi > shallow.log 2>&1; then
+  "$(printf ' + x%.0s' $(seq 800))" > shallow.ri
+if "$RIS" check types shallow.ri > shallow.log 2>&1; then
   echo "  100 nested parentheses and a chain of 800 + read"
 else
   echo "  100 nested parentheses and a chain of 800 +:"; sed -n '1,3p' shallow.log; status=1
@@ -1906,7 +1906,7 @@ echo "== proving the trace detector can fail"
 cat > recorded.txt <<'CRASH'
 Path size exceeds the maximum size of 107 bytes (ArgumentError)
   from ?? in 'initialize'
-  from /home/x/playground/iyi/src/socket/address.cr:839:5 in 'new'
+  from /home/x/playground/ris/src/socket/address.cr:839:5 in 'new'
 CRASH
 if has_trace recorded.txt; then
   echo "  the recorded crash is recognised as a trace"

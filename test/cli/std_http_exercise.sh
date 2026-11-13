@@ -5,9 +5,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -43,12 +43,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_http_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_http_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -108,7 +108,7 @@ echo "== what the module reaches"
 # std/dns - the HTTPS records a client may connect by - std/socket's. No
 # std/env: a proxy the environment names is std/http_proxy's to read.
 # The extension modules are pure, and sorting must ignore the locale.
-imports=$(grep -oE '^import std/[a-z_0-9]+' "$REPO/src/std/http.iyi" | sed 's/^import //' | LC_ALL=C sort | tr '\n' ' ')
+imports=$(grep -oE '^import std/[a-z_0-9]+' "$REPO/src/std/http.ri" | sed 's/^import //' | LC_ALL=C sort | tr '\n' ' ')
 if [ "$imports" = "std/base64 std/compress std/digest std/dns std/hpack std/indexable std/int std/mime std/slice std/socket std/text std/time std/tls std/unicode std/uri std/x509 std/zstd " ]; then
   echo "  std/socket, std/time and std/tls (std/x509 its own, std/dns std/socket's), and std/base64, std/compress, std/digest, std/hpack, std/mime, std/slice, std/unicode, std/uri and std/zstd, which reach nothing"
 else
@@ -121,8 +121,8 @@ echo "== what a request refuses before it is written"
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
   printf 'module main\n\nimport std/http::{HTTP}\n\n\nputs (%s).to_s\n' \
-    "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -188,7 +188,7 @@ await_port() { # await_port <output file> <pid>
 
 echo
 echo "== Python's http.client against the server"
-if "$IYI" build -o "$WORK/server" "$REPO/test/cli/std_http_server.iyi" >"$WORK/server.build.log" 2>&1; then
+if "$RIS" build -o "$WORK/server" "$REPO/test/cli/std_http_server.ri" >"$WORK/server.build.log" 2>&1; then
   "$WORK/server" > "$WORK/server.out" 2>&1 &
   server_pid=$!
   port=$(await_port "$WORK/server.out" "$server_pid")
@@ -300,7 +300,7 @@ echo "== the client against a server that resets the connection after a whole an
 if [ -z "$PY" ]; then
   echo "  skipped: no working python3 to reset the connection with"
 else
-  cat > "$WORK/reset_client.iyi" <<'IYI'
+  cat > "$WORK/reset_client.ri" <<'RIS'
 module main
 
 import std/http::{HTTP, Response, HTTPError}
@@ -316,8 +316,8 @@ in HTTPError
 in Cancelled
   puts "Cancelled"
 end
-IYI
-  if ! "$IYI" build -o "$WORK/reset_client" "$WORK/reset_client.iyi" > "$WORK/reset_client.build" 2>&1; then
+RIS
+  if ! "$RIS" build -o "$WORK/reset_client" "$WORK/reset_client.ri" > "$WORK/reset_client.build" 2>&1; then
     echo "  the client did not build"
     sed -n '1,8p' "$WORK/reset_client.build"
     status=1
@@ -364,7 +364,7 @@ if [ -z "$PY" ]; then
   echo "  skipped: no working python3 to serve with"
 else
   printf 'one line of the upload\n%.0s' $(seq 1 4000) > "$WORK/upload.txt"
-  cat > "$WORK/py_client.iyi" <<'IYI'
+  cat > "$WORK/py_client.ri" <<'RIS'
 module main
 
 import std/http::{HTTP, HTTPError, MultipartBuilder}
@@ -391,8 +391,8 @@ puts "parts #{parts.body}"
 up = HTTP.put(base + "/upload", File.open(Program.args[1])).or_panic
 puts "upload #{up.body}"
 HTTP.get(base + "/stop")
-IYI
-  if ! "$IYI" build -o "$WORK/py_client" "$WORK/py_client.iyi" > "$WORK/py_client.build" 2>&1; then
+RIS
+  if ! "$RIS" build -o "$WORK/py_client" "$WORK/py_client.ri" > "$WORK/py_client.build" 2>&1; then
     echo "  the client did not build"
     sed -n '1,8p' "$WORK/py_client.build"
     status=1
@@ -580,7 +580,7 @@ other = (x509.CertificateBuilder().subject_name(name("http gate other root")).is
          .sign(other_key, hashes.SHA256()))
 open(f"{out}/other.pem", "wb").write(other.public_bytes(serialization.Encoding.PEM))
 PY
-  cat > "$WORK/tls_client.iyi" <<'IYI'
+  cat > "$WORK/tls_client.ri" <<'RIS'
 module main
 
 import std/http::{HTTP, HTTPClient, HTTPError}
@@ -617,7 +617,7 @@ puts "other #{other.is_a?(HTTPError) ? other.message : other.inspect}"
 up = HTTP.upgrade(base + "/", "websocket")
 puts "upgrade #{up.is_a?(HTTPError) ? up.message : up.inspect}"
 HTTP.get(base + "/stop")
-IYI
+RIS
   serve_tls() {
     "$PY" - "$WORK/tls" > "$WORK/tls_server.out" 2>&1 <<'PY' &
 import gzip, socket, ssl, sys
@@ -678,7 +678,7 @@ while not s.done:
 PY
     tls_pid=$!
   }
-  if ! "$IYI" build -o "$WORK/tls_client" "$WORK/tls_client.iyi" > "$WORK/tls_client.build" 2>&1; then
+  if ! "$RIS" build -o "$WORK/tls_client" "$WORK/tls_client.ri" > "$WORK/tls_client.build" 2>&1; then
     echo "  the client did not build"
     sed -n '1,8p' "$WORK/tls_client.build"
     status=1
@@ -724,7 +724,7 @@ PY
         status=1
         return
       fi
-      if ! IYI_PATH="$WORK/tlsbreak${PSEP}$IYI_PATH" "$IYI" build -o "$WORK/tls_broken" "$WORK/tls_client.iyi" > "$WORK/tls_broken.build" 2>&1; then
+      if ! RIS_PATH="$WORK/tlsbreak${PSEP}$RIS_PATH" "$RIS" build -o "$WORK/tls_broken" "$WORK/tls_client.ri" > "$WORK/tls_broken.build" 2>&1; then
         echo "  $label: the broken copy did not build"
         status=1
         return
@@ -743,19 +743,19 @@ PY
         status=1
       fi
     }
-    tls_breaks "a kept connection handed out under another configuration" http.iyi \
+    tls_breaks "a kept connection handed out under another configuration" http.ri \
       '        if tls && !(under && under.same?(tls))' '        if false' "other roots"
-    tls_breaks "a credential carried from https:// to http:// at one host and port" http.iyi \
+    tls_breaks "a credential carried from https:// to http:// at one host and port" http.ri \
       '    return false unless sa == sb' '    nil' "downgrade"
-    tls_breaks "a Secure cookie sent over http://" cookie.iyi \
+    tls_breaks "a Secure cookie sent over http://" cookie.ri \
       '      next if cookie.secure && !secure' '      nil' "downgrade"
     # And the proof: https:// written in the clear does not answer so.
     mkdir -p "$WORK/clear/std"
-    sed 's/^          if secure$/          if false/' "$REPO/src/std/http.iyi" > "$WORK/clear/std/http.iyi"
-    if cmp -s "$REPO/src/std/http.iyi" "$WORK/clear/std/http.iyi"; then
+    sed 's/^          if secure$/          if false/' "$REPO/src/std/http.ri" > "$WORK/clear/std/http.ri"
+    if cmp -s "$REPO/src/std/http.ri" "$WORK/clear/std/http.ri"; then
       echo "  the patch that sends https:// in the clear changed nothing, so it proves nothing"
       status=1
-    elif ! IYI_PATH="$WORK/clear${PSEP}$IYI_PATH" "$IYI" build -o "$WORK/tls_clear" "$WORK/tls_client.iyi" > "$WORK/tls_clear.build" 2>&1; then
+    elif ! RIS_PATH="$WORK/clear${PSEP}$RIS_PATH" "$RIS" build -o "$WORK/tls_clear" "$WORK/tls_client.ri" > "$WORK/tls_clear.build" 2>&1; then
       echo "  the client over the clear-text copy did not build"
       status=1
     else
@@ -775,7 +775,7 @@ PY
 fi
 
 echo
-echo "== latency on loopback: Nagle off, and a flight in one write (test/cli/std_http_latency.iyi)"
+echo "== latency on loopback: Nagle off, and a flight in one write (test/cli/std_http_latency.ri)"
 # Nagle's algorithm holds a small write back while an earlier one is
 # unacknowledged, and a peer's delayed ACK holds the acknowledgement 40 ms
 # at least on Linux: std/socket now sets TCP_NODELAY on every connected
@@ -891,8 +891,8 @@ latency_held() {
 }
 if [ ! -s "$WORK/tls/root.pem" ]; then
   echo "  skipped: the https:// section above made no certificates (no python3 with ssl and cryptography)"
-elif ! "$IYI" build --release -o "$WORK/latency" "$REPO/test/cli/std_http_latency.iyi" >"$WORK/latency.build" 2>&1; then
-  echo "  test/cli/std_http_latency.iyi did not build"
+elif ! "$RIS" build --release -o "$WORK/latency" "$REPO/test/cli/std_http_latency.ri" >"$WORK/latency.build" 2>&1; then
+  echo "  test/cli/std_http_latency.ri did not build"
   sed -n '1,8p' "$WORK/latency.build"
   status=1
 else
@@ -949,7 +949,7 @@ PY
       status=1
       return
     fi
-    if ! IYI_PATH="$WORK/latencybreak${PSEP}$IYI_PATH" "$IYI" build --release -o "$WORK/latency-broken" "$REPO/test/cli/std_http_latency.iyi" >"$WORK/latency-broken.build" 2>&1; then
+    if ! RIS_PATH="$WORK/latencybreak${PSEP}$RIS_PATH" "$RIS" build --release -o "$WORK/latency-broken" "$REPO/test/cli/std_http_latency.ri" >"$WORK/latency-broken.build" 2>&1; then
       echo "  $label: the broken copy did not build"
       sed -n '1,6p' "$WORK/latency-broken.build" | sed 's/^/    /'
       status=1
@@ -969,30 +969,30 @@ PY
         echo "  $label: not caught with no arguments"
         status=1
       else
-        echo "  $label: caught with no arguments: $(grep -m1 'panic' "$WORK/latency-broken-alone.out" | sed 's/^iyi: panic: //' | cut -c1-110)"
+        echo "  $label: caught with no arguments: $(grep -m1 'panic' "$WORK/latency-broken-alone.out" | sed 's/^ris: panic: //' | cut -c1-110)"
       fi
     fi
   }
-  latency_breaks "TCP sockets left with Nagle on" socket.iyi \
+  latency_breaks "TCP sockets left with Nagle on" socket.ri \
     '    __sys_set_nodelay(fd, true) unless family == AF_UNIX
   end' '    nil
   end' "plain http://, a kept connection, an answer the server streams" alone
-  latency_breaks "the client's ChangeCipherSpec and Finished in two writes" tls.iyi \
+  latency_breaks "the client's ChangeCipherSpec and Finished in two writes" tls.ri \
     '    sent = send_protected(TlsRecords::HANDSHAKE, finished)
     return sent if sent
     sent = release' '    sent = release
     return sent if sent
     sent = send_protected(TlsRecords::HANDSHAKE, finished)' "https://, Nagle on at the client, its handshake and a GET"
-  latency_breaks "the server's ServerHello and flight in separate writes" tls.iyi \
+  latency_breaks "the server's ServerHello and flight in separate writes" tls.ri \
     '    # write.
     hold' '    # write.
     nil' "$LATENCY_ALONE"
 fi
 
 echo
-echo "== a server stopped while clients hold connections (test/cli/std_http_stop.iyi)"
+echo "== a server stopped while clients hold connections (test/cli/std_http_stop.ri)"
 # `serve` closes the connections it waits on when its listener closes. A
-# kept-alive TLS client while the server stopped printed "iyi: panic:
+# kept-alive TLS client while the server stopped printed "ris: panic:
 # socket is closed" - the connection's own task then sent close_notify on
 # the socket the stop had closed - and the program went on to exit 0, so
 # only its output said so; a TLS upgrade's protocol that wrote its goodbye
@@ -1074,8 +1074,8 @@ PY
 }
 if [ ! -s "$WORK/tls/root.pem" ]; then
   echo "  skipped: the https:// section above made no certificates (no python3 with ssl and cryptography)"
-elif ! "$IYI" build -o "$WORK/stop" "$REPO/test/cli/std_http_stop.iyi" >"$WORK/stop.build" 2>&1; then
-  echo "  test/cli/std_http_stop.iyi did not build"
+elif ! "$RIS" build -o "$WORK/stop" "$REPO/test/cli/std_http_stop.ri" >"$WORK/stop.build" 2>&1; then
+  echo "  test/cli/std_http_stop.ri did not build"
   sed -n '1,8p' "$WORK/stop.build"
   status=1
 else
@@ -1111,7 +1111,7 @@ PY
       status=1
       return
     fi
-    if ! IYI_PATH="$WORK/stopbreak${PSEP}$IYI_PATH" "$IYI" build -o "$WORK/stop-broken" "$REPO/test/cli/std_http_stop.iyi" >"$WORK/stop-broken.build" 2>&1; then
+    if ! RIS_PATH="$WORK/stopbreak${PSEP}$RIS_PATH" "$RIS" build -o "$WORK/stop-broken" "$REPO/test/cli/std_http_stop.ri" >"$WORK/stop-broken.build" 2>&1; then
       echo "  $label: the broken copy did not build"
       sed -n '1,6p' "$WORK/stop-broken.build" | sed 's/^/    /'
       status=1
@@ -1130,18 +1130,18 @@ PY
       status=1
     fi
   }
-  stop_breaks "a record written on a socket closed under the connection" tls.iyi \
+  stop_breaks "a record written on a socket closed under the connection" tls.ri \
     '    return TlsError.new("the socket under the connection is closed") if @socket.closed?
     sent = @socket.write' '    sent = @socket.write' "panics printed"
-  stop_breaks "closed? blind to the socket under the connection" tls.iyi \
+  stop_breaks "closed? blind to the socket under the connection" tls.ri \
     '    @closed || @socket.closed?' '    @closed' "the upgrades' last writes"
-  stop_breaks "a stop that sends no close_notify" http.iyi \
+  stop_breaks "a stop that sends no close_notify" http.ri \
     '      stream.close_write
     end
     @socket.close' '      nil
     end
     @socket.close' "kept connection"
-  stop_breaks "a stop that sends no close_notify, as a std/tls client reads it" http.iyi \
+  stop_breaks "a stop that sends no close_notify, as a std/tls client reads it" http.ri \
     '      stream.close_write
     end
     @socket.close' '      nil
@@ -1150,7 +1150,7 @@ PY
 fi
 
 echo
-echo "== TLS resumption: an HTTPClient's tickets (test/cli/std_http_resume.iyi)"
+echo "== TLS resumption: an HTTPClient's tickets (test/cli/std_http_resume.ri)"
 # A second connection to an origin resumes by a ticket the first was sent:
 # std/http's own server says so (`Incoming#tls_resumed?`), and so does
 # OpenSSL's s_server, whose -www page reads "Reused, TLSv1.3" as the tls
@@ -1277,8 +1277,8 @@ PY
 }
 if [ ! -s "$WORK/tls/root.pem" ]; then
   echo "  skipped: the https:// section above made no certificates (no python3 with ssl and cryptography)"
-elif ! "$IYI" build -o "$WORK/resume" "$REPO/test/cli/std_http_resume.iyi" >"$WORK/resume.build" 2>&1; then
-  echo "  test/cli/std_http_resume.iyi did not build"
+elif ! "$RIS" build -o "$WORK/resume" "$REPO/test/cli/std_http_resume.ri" >"$WORK/resume.build" 2>&1; then
+  echo "  test/cli/std_http_resume.ri did not build"
   sed -n '1,8p' "$WORK/resume.build"
   status=1
 else
@@ -1318,7 +1318,7 @@ else
         ;;
     esac
     rm -rf "$WORK/resumebreak" && mkdir -p "$WORK/resumebreak/std"
-    if ! OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/$module.iyi" "$WORK/resumebreak/std/$module.iyi" <<'PY'
+    if ! OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/$module.ri" "$WORK/resumebreak/std/$module.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 if src.count(os.environ["OLD"]) != 1:
@@ -1330,7 +1330,7 @@ PY
       status=1
       return
     fi
-    if ! IYI_PATH="$WORK/resumebreak${PSEP}$IYI_PATH" "$IYI" build -o "$WORK/resume-broken" "$REPO/test/cli/std_http_resume.iyi" >"$WORK/resume-broken.build" 2>&1; then
+    if ! RIS_PATH="$WORK/resumebreak${PSEP}$RIS_PATH" "$RIS" build -o "$WORK/resume-broken" "$REPO/test/cli/std_http_resume.ri" >"$WORK/resume-broken.build" 2>&1; then
       echo "  $label: the broken copy did not build"
       sed -n '1,6p' "$WORK/resume-broken.build" | sed 's/^/    /'
       status=1
@@ -1373,7 +1373,7 @@ PY
 fi
 
 echo
-echo "== HTTPS records: an HTTPClient connecting by them (test/cli/std_http_https_records.iyi)"
+echo "== HTTPS records: an HTTPClient connecting by them (test/cli/std_http_https_records.ri)"
 # A name server and a TLS server holding ECH keys, both in the program,
 # and a client with `use_https_records`: the record's ech taken as the
 # connection's ECH configuration - the server opens the ClientHelloInner
@@ -1390,8 +1390,8 @@ echo "== HTTPS records: an HTTPClient connecting by them (test/cli/std_http_http
 # line that is not so says "FAIL <line>:". Then copies of std/http, and of
 # std/tls's `TlsMadeUnder`, with one rule taken out, each caught at the
 # line that names it.
-if ! "$IYI" build -o "$WORK/records" "$REPO/test/cli/std_http_https_records.iyi" >"$WORK/records.build" 2>&1; then
-  echo "  test/cli/std_http_https_records.iyi did not build"
+if ! "$RIS" build -o "$WORK/records" "$REPO/test/cli/std_http_https_records.ri" >"$WORK/records.build" 2>&1; then
+  echo "  test/cli/std_http_https_records.ri did not build"
   sed -n '1,8p' "$WORK/records.build"
   status=1
 else
@@ -1409,7 +1409,7 @@ else
   records_breaks() {
     local label="$1" old="$2" new="$3" line="$4" module="${5:-http}" got
     rm -rf "$WORK/recordsbreak" && mkdir -p "$WORK/recordsbreak/std"
-    if ! OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/$module.iyi" "$WORK/recordsbreak/std/$module.iyi" <<'PY'
+    if ! OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/$module.ri" "$WORK/recordsbreak/std/$module.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 if src.count(os.environ["OLD"]) != 1:
@@ -1421,7 +1421,7 @@ PY
       status=1
       return
     fi
-    if ! IYI_PATH="$WORK/recordsbreak${PSEP}$IYI_PATH" "$IYI" build -o "$WORK/records-broken" "$REPO/test/cli/std_http_https_records.iyi" >"$WORK/records-broken.build" 2>&1; then
+    if ! RIS_PATH="$WORK/recordsbreak${PSEP}$RIS_PATH" "$RIS" build -o "$WORK/records-broken" "$REPO/test/cli/std_http_https_records.ri" >"$WORK/records-broken.build" 2>&1; then
       echo "  $label: the broken copy did not build"
       sed -n '1,6p' "$WORK/records-broken.build" | sed 's/^/    /'
       status=1
@@ -1462,13 +1462,13 @@ PY
 fi
 
 echo
-echo "== HTTP/2: the server and the client together (test/cli/http2_exercise.iyi)"
+echo "== HTTP/2: the server and the client together (test/cli/http2_exercise.ri)"
 # h2c with prior knowledge both ways: every shape of body through the
 # windows, gzip, cookies, a redirect, 200 requests on one connection, and
 # what HTTP/2 refuses. Plain and --release.
 H2BIN="$WORK/h2"
 h2_built=0
-if ! "$IYI" build -o "$H2BIN" "$REPO/test/cli/http2_exercise.iyi" >"$WORK/h2.build.log" 2>&1; then
+if ! "$RIS" build -o "$H2BIN" "$REPO/test/cli/http2_exercise.ri" >"$WORK/h2.build.log" 2>&1; then
   echo "  build failed"
   tail -12 "$WORK/h2.build.log"
   status=1
@@ -1481,7 +1481,7 @@ else
     echo "  the HTTP/2 exercise did not hold (exit $code)"
     status=1
   fi
-  if ! "$IYI" build --release -o "$WORK/h2-release" "$REPO/test/cli/http2_exercise.iyi" >"$WORK/h2r.build.log" 2>&1; then
+  if ! "$RIS" build --release -o "$WORK/h2-release" "$REPO/test/cli/http2_exercise.ri" >"$WORK/h2r.build.log" 2>&1; then
     echo "  --release: build failed"
     tail -8 "$WORK/h2r.build.log"
     status=1
@@ -2772,7 +2772,7 @@ while True:
     peer, _ = server.accept()
     threading.Thread(target=handle, args=(peer,), daemon=True).start()
 PY
-cat > "$WORK/proxy_origin.iyi" <<'IYI'
+cat > "$WORK/proxy_origin.ri" <<'RIS'
 module main
 
 import std/http::{HTTP, Server, Incoming, Outgoing, TlsStream}
@@ -2864,8 +2864,8 @@ group do |g|
   File.write(Program.args[0], "#{plain} #{secure}")
   0
 end
-IYI
-cat > "$WORK/proxy_client.iyi" <<'IYI'
+RIS
+cat > "$WORK/proxy_client.ri" <<'RIS'
 module main
 
 import std/http::{HTTP, HTTPClient, HTTPError, Response}
@@ -2931,7 +2931,7 @@ puts "https, a wrong credential: " + through("http://gate:wrong@127.0.0.1:#{args
 puts "ws: " + talked(WebSocket.connect("ws://127.0.0.1:#{args[1]}/ws", proxy: proxy))
 puts "wss: " + talked(WebSocket.connect("wss://localhost:#{args[2]}/ws", proxy: proxy))
 puts "ws, no credential: " + talked(WebSocket.connect("ws://127.0.0.1:#{args[1]}/ws", proxy: bare))
-IYI
+RIS
 # proxy_up / proxy_down: the proxy and the origin started and stopped,
 # their ports in PPORT, HPORT and SPORT, the proxy's log emptied.
 proxy_up() {
@@ -3004,8 +3004,8 @@ proxy_round() {
 proxy_ready=0
 if [ -z "$PY" ] || [ ! -s "$WORK/tls/p256.pem" ]; then
   echo "  skipped: no python3, or no certificate from the https:// section above"
-elif ! "$IYI" build -o "$WORK/proxy_origin" "$WORK/proxy_origin.iyi" > "$WORK/proxy_origin.build" 2>&1 ||
-     ! "$IYI" build -o "$WORK/proxy_client" "$WORK/proxy_client.iyi" > "$WORK/proxy_client.build" 2>&1; then
+elif ! "$RIS" build -o "$WORK/proxy_origin" "$WORK/proxy_origin.ri" > "$WORK/proxy_origin.build" 2>&1 ||
+     ! "$RIS" build -o "$WORK/proxy_client" "$WORK/proxy_client.ri" > "$WORK/proxy_client.build" 2>&1; then
   echo "  the proxy's origin or client did not build"
   sed -n '1,8p' "$WORK/proxy_origin.build" "$WORK/proxy_client.build"
   status=1
@@ -3051,7 +3051,7 @@ fi
 # golang.org/x/net/http/httpproxy: one process per environment (Go reads
 # its environment once), each URL's proxy printed beside `proxy_for`'s.
 GO="${GO:-go}"
-cat > "$WORK/proxy_table.iyi" <<'IYI'
+cat > "$WORK/proxy_table.ri" <<'RIS'
 module main
 
 import std/http::{HTTP}
@@ -3060,7 +3060,7 @@ args = Program.args
 args[3, args.size - 3].each do |url|
   puts "#{url} #{HTTP.proxy_for(url, args[0].empty? ? nil : args[0], args[1].empty? ? nil : args[1], args[2]) || "direct"}"
 end
-IYI
+RIS
 mkdir -p "$WORK/goproxy"
 cat > "$WORK/goproxy/main.go" <<'GO'
 package main
@@ -3100,7 +3100,7 @@ proxy||bücher.example, .xn--caf-dma.example|http://xn--bcher-kva.example/ http:
 if ! { command -v "$GO" >/dev/null 2>&1 && "$GO" version >/dev/null 2>&1; }; then
   echo "  NO_PROXY against Go: skipped, no Go toolchain (GO=$GO)"
 elif ! (cd "$WORK/goproxy" && GO111MODULE=off GOFLAGS= "$GO" build -o "$WORK/goproxy/px" main.go) > "$WORK/goproxy.build" 2>&1 ||
-     ! "$IYI" build -o "$WORK/proxy_table" "$WORK/proxy_table.iyi" > "$WORK/proxy_table.build" 2>&1; then
+     ! "$RIS" build -o "$WORK/proxy_table" "$WORK/proxy_table.ri" > "$WORK/proxy_table.build" 2>&1; then
   echo "  NO_PROXY against Go: a program did not build"
   sed -n '1,8p' "$WORK/goproxy.build" "$WORK/proxy_table.build"
   status=1
@@ -3131,7 +3131,7 @@ fi
 echo
 echo "== the server under load"
 if command -v wrk >/dev/null 2>&1; then
-  "$IYI" build --release -o "$WORK/server-release" "$REPO/test/cli/std_http_server.iyi" >"$WORK/server-release.build.log" 2>&1
+  "$RIS" build --release -o "$WORK/server-release" "$REPO/test/cli/std_http_server.ri" >"$WORK/server-release.build.log" 2>&1
   "$WORK/server-release" > "$WORK/load.out" 2>&1 &
   load_pid=$!
   lport=$(await_port "$WORK/load.out" "$load_pid")
@@ -3190,12 +3190,12 @@ mutation_said() { # mutation_said <n> <line>...: the n-th mutation's answer
   shift
   printf '%s\n' "$@" > "$WORK/mutres/$n"
 }
-mutate() { # mutate <label> <old> <new> [module, http.iyi by default]
+mutate() { # mutate <label> <old> <new> [module, http.ri by default]
   # A binary of its own each: on Windows the last one's file can still be
   # held a moment after it ended, and the next link over it failed with
   # LNK1104 - three of thirty mutations here, whichever came after.
   mutations=$((mutations + 1))
-  local label="$1" old="$2" new="$3" module="${4:-http.iyi}" n="$mutations"
+  local label="$1" old="$2" new="$3" module="${4:-http.ri}" n="$mutations"
   local P="$WORK/patched-$n"
   if [ -z "$PY" ]; then
     mutation_said "$n" "  $label: skipped, no working python3 to make the broken copy with"
@@ -3220,7 +3220,7 @@ PY
     # Build first, then run: a patch that does not compile would also
     # "fail", and that proves nothing about whether the exercise catches
     # the break.
-    if ! IYI_CACHE_DIR="$P/cache" IYI_PATH="$P${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" timeout 300 "$IYI" build -o "$WORK/mut-$n.bin" "$REPO/test/cli/std_http_exercise.iyi" >"$P/build.log" 2>&1; then
+    if ! RIS_CACHE_DIR="$P/cache" RIS_PATH="$P${PSEP}$REPO/src${PSEP}$REPO/samples/ris" timeout 300 "$RIS" build -o "$WORK/mut-$n.bin" "$REPO/test/cli/std_http_exercise.ri" >"$P/build.log" 2>&1; then
       mutation_said "$n" "  $label: the broken copy did not compile" "$(sed -n '1,6p' "$P/build.log")"
       touch "$WORK/mutres/failed"
     elif timeout -k 5 60 "$WORK/mut-$n.bin" >"$WORK/mut-$n.out" 2>&1; then
@@ -3450,8 +3450,8 @@ if src.count(old) != 1:
 open(sys.argv[2], "w", encoding="utf-8", newline="\n").write(src.replace(old, os.environ["NEW"], 1))
 PY
     then
-      IYI_CACHE_DIR="$WORK/$name/cache" IYI_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" \
-        timeout 300 "$IYI" build -o "$WORK/$name.bin" "$program" >"$WORK/$name.log" 2>&1
+      RIS_CACHE_DIR="$WORK/$name/cache" RIS_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/ris" \
+        timeout 300 "$RIS" build -o "$WORK/$name.bin" "$program" >"$WORK/$name.log" 2>&1
     else
       false
     fi
@@ -3520,7 +3520,7 @@ judge_later() { # every call later kept, made and answered as above
   return 0
 }
 h2_breaks() { # h2_breaks <label> <name> <old> <new> <check>
-  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.iyi" http.iyi "$3" "$4" h2_breaks "$@"; return; }
+  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.ri" http.ri "$3" "$4" h2_breaks "$@"; return; }
   local label="$1" name="$2" old="$3" new="$4" check="$5"
   if [ "$h2_built" -ne 1 ] || [ -z "$PY" ]; then
     echo "  $label: skipped, no HTTP/2 exercise or no python3"
@@ -3545,7 +3545,7 @@ h2_breaks() { # h2_breaks <label> <name> <old> <new> <check>
 # h2_node_breaks <label> <name> <old> <new>: Node's client, which holds a
 # server to the 1000-byte windows it advertises, fails on the broken one.
 h2_node_breaks() {
-  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.iyi" http.iyi "$3" "$4" h2_node_breaks "$@"; return; }
+  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.ri" http.ri "$3" "$4" h2_node_breaks "$@"; return; }
   local label="$1" name="$2" old="$3" new="$4"
   if [ "$h2_built" -ne 1 ] || [ -z "$PY" ] || [ -z "$NODE" ] || [ ! -s "$WORK/h2-client.js" ]; then
     echo "  $label: skipped, no HTTP/2 server, python3 or node"
@@ -3570,7 +3570,7 @@ h2_node_breaks() {
   fi
 }
 h2_frames_breaks() { # h2_frames_breaks <label> <name> <old> <new> <case>
-  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.iyi" http.iyi "$3" "$4" h2_frames_breaks "$@"; return; }
+  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.ri" http.ri "$3" "$4" h2_frames_breaks "$@"; return; }
   local label="$1" name="$2" old="$3" new="$4" case_name="$5"
   if [ "$h2_built" -ne 1 ] || [ -z "$PY" ] || [ ! -s "$WORK/h2frames.py" ]; then
     echo "  $label: skipped, no HTTP/2 server, python3 or frames to send it"
@@ -3705,7 +3705,7 @@ close_judged() { # close_judged <n> <label> <name> <plain|tls|-> <case> <client|
   printf '%s\n' "$said" >"$WORK/closeres/$n"
 }
 close_breaks() { # close_breaks <label> <name> <module> <old> <new> <plain|tls|-> <case> [client|client-tls]
-  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.iyi" "$3" "$4" "$5" close_breaks "$@"; return; }
+  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.ri" "$3" "$4" "$5" close_breaks "$@"; return; }
   local label="$1" name="$2" module="$3" old="$4" new="$5" over="$6" case_name="$7" client="${8:--}" pid running
   close_n=$((close_n + 1))
   if [ "$close_ready" -ne 1 ] || { case "$over$client" in *tls*) true ;; *) false ;; esac && [ ! -s "$WORK/tls/p256.pem" ]; }; then
@@ -3740,22 +3740,22 @@ close_breaks_report() {
   [ -e "$WORK/closeres/failed" ] && status=1
   return 0
 }
-close_breaks "the linger removed: a close at once" close_nolinger http.iyi \
+close_breaks "the linger removed: a close at once" close_nolinger http.ri \
   '    else
       linger
     end' '    else
       @socket.close
     end' plain 'http.client, Connection: close' client
-close_breaks "close_write skipped: the sending half never shut" close_nohalf http.iyi \
+close_breaks "close_write skipped: the sending half never shut" close_nohalf http.ri \
   '    socket.close_write
 ' '' plain 'Python reading as it sends, Connection: close'
-close_breaks "TLS: the drain removed" close_nodrain tls.iyi \
+close_breaks "TLS: the drain removed" close_nodrain tls.ri \
   '    drain unless @eof
 ' '' tls 'http.client, Connection: close'
-close_breaks "TLS: close_write skipped by close, so no close_notify" close_notify tls.iyi \
+close_breaks "TLS: close_write skipped by close, so no close_notify" close_notify tls.ri \
   '    close_write
     drain unless @eof' '    drain unless @eof' tls 'Python reading as it sends, Connection: close'
-close_breaks "TLS: the client closing at once" close_client_tls http.iyi \
+close_breaks "TLS: the client closing at once" close_client_tls http.ri \
   '    elsif stream = @stream
       stream.close
     else' '    elsif stream = @stream
@@ -3767,7 +3767,7 @@ h2_frames_breaks "HEADERS on a closed stream passed over" h2_stale \
 # The HTTPS server broken, the checks above run against it with the good
 # client: each must fail somewhere.
 https_breaks() { # https_breaks <label> <name> <old> <new>
-  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.iyi" http.iyi "$3" "$4" https_breaks "$@"; return; }
+  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.ri" http.ri "$3" "$4" https_breaks "$@"; return; }
   local label="$1" name="$2" old="$3" new="$4"
   if [ "$https_ready" -ne 1 ] || [ -z "$PY" ]; then
     echo "  $label: skipped, no HTTPS server to break"
@@ -3794,7 +3794,7 @@ https_breaks "no close_notify at the end" https_notify \
 # The cap and the request deadline broken, the slow clients run against
 # the copy: each must fail at the case that names it.
 guard_breaks() { # guard_breaks <label> <name> <old> <new> <case> <phrase>
-  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.iyi" http.iyi "$3" "$4" guard_breaks "$@"; return; }
+  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.ri" http.ri "$3" "$4" guard_breaks "$@"; return; }
   local label="$1" name="$2" old="$3" new="$4" case_name="$5" phrase="$6"
   if [ "${guard_ready:-0}" -ne 1 ]; then
     echo "  $label: skipped with the slow clients' section"
@@ -3831,7 +3831,7 @@ guard_breaks "a head held to the whole request's deadline alone" guard_head \
 # The client's certificate, lost on the way to the handler or the server:
 # the mTLS checks must fail.
 mtls_breaks() { # mtls_breaks <label> <name> <old> <new>
-  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.iyi" http.iyi "$3" "$4" mtls_breaks "$@"; return; }
+  [ -n "$judging" ] || { later "$2" "$REPO/test/cli/http2_exercise.ri" http.ri "$3" "$4" mtls_breaks "$@"; return; }
   local label="$1" name="$2" old="$3" new="$4"
   if [ "$https_ready" -ne 1 ] || [ -z "$PY" ]; then
     echo "  $label: skipped, no HTTPS server to break"
@@ -3858,7 +3858,7 @@ mtls_breaks "an upgrade's handshake presenting no certificate" mtls_upgrade \
 # The client through a proxy, broken in a copy: the round against the
 # Python proxy and the iyi server above must fail.
 proxy_breaks() { # proxy_breaks <label> <name> <old> <new>
-  [ -n "$judging" ] || { later "$2" "$WORK/proxy_client.iyi" http.iyi "$3" "$4" proxy_breaks "$@"; return; }
+  [ -n "$judging" ] || { later "$2" "$WORK/proxy_client.ri" http.ri "$3" "$4" proxy_breaks "$@"; return; }
   local label="$1" name="$2" old="$3" new="$4"
   if [ "$proxy_ready" -ne 1 ]; then
     echo "  $label: skipped, no proxy round to break"

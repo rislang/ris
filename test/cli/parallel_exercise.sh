@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives test/cli/parallel_exercise.iyi: tasks across cores (iyi SPEC III.4.13).
+# Drives test/cli/parallel_exercise.ri: tasks across cores (iyi SPEC III.4.13).
 #
 #     bash test/cli/parallel_exercise.sh
 #
@@ -15,7 +15,7 @@
 #      task's boundary, idle workers steal, collections keep the workers'
 #      lists, and the typed group answers.
 #   2. The binary keeps the dependency floor the concurrency gate holds,
-#      plus `environ`, the C runtime's table `IYI_WORKERS` is read from.
+#      plus `environ`, the C runtime's table `RIS_WORKERS` is read from.
 #   3. The speedup, measured: CPU-bound tasks on one worker and on several,
 #      release build, best of three, and the ratio held to a floor of 0.6
 #      per worker - a pool that is parallel only in name cannot pass it.
@@ -39,7 +39,7 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 
@@ -76,7 +76,7 @@ for build in plain release; do
   step "every property, $build build"
   flag=""
   [ "$build" = release ] && flag="--release"
-  if ! "$IYI" build $flag "$REPO/test/cli/parallel_exercise.iyi" -o "exercise-$build" > "build-$build.log" 2>&1; then
+  if ! "$RIS" build $flag "$REPO/test/cli/parallel_exercise.ri" -o "exercise-$build" > "build-$build.log" 2>&1; then
     echo "build failed:"; tail -20 "build-$build.log"; exit 1
   fi
   timeout -k 5 600 "./exercise-$build" > "answers-$build.txt" 2>&1
@@ -87,7 +87,7 @@ for build in plain release; do
   if grep -q 'a done fiber was scheduled' "answers-$build.txt"; then
     echo "the exercise scheduled a finished fiber:"; cat "answers-$build.txt"; exit 1
   fi
-  grep -v '^iyi: panic: parallel boom' "answers-$build.txt" | sed 's/^/  /'
+  grep -v '^ris: panic: parallel boom' "answers-$build.txt" | sed 's/^/  /'
 done
 
 # ── 2. The floor ──────────────────────────────────────────────────────────
@@ -98,21 +98,21 @@ done
 #            is glibc's (`pthread_create`, the retired GC gates), the
 #            stop by `tgkill`, the doorbell by `eventfd2`, both syscalls.
 #            `environ` is the one name, the C runtime's table
-#            `IYI_WORKERS` is read from through `Program.env`.
+#            `RIS_WORKERS` is read from through `Program.env`.
 #   darwin   the runtime's list (the retired GC gates spells it out),
 #            the thread floor's names a started thread costs -
 #            `pthread_create`, `pthread_kill` and `sigaction` for the
 #            thread and the stop, `pipe`/`read`/`write` for the stop's
 #            park, and `close` for a retiring thread's kqueue
 #            (`IyiScheduler.retire_thread`, linked with every thread
-#            body) - and `_environ` for `IYI_WORKERS`. The doorbell is an
+#            body) - and `_environ` for `RIS_WORKERS`. The doorbell is an
 #            `EVFILT_USER` change through `kevent`, already on the list,
 #            and the core count is `sysctlbyname("hw.ncpu")`, also already
 #            there for the marker. No `pthread_join`: nothing joins a
 #            worker.
 #   Windows  kernel32 and the C runtime's DLLs; the doorbell is
 #            `PostQueuedCompletionStatus`, kernel32's.
-step "dependency floor: the pool costs what a thread costs, and the environment it reads IYI_WORKERS from"
+step "dependency floor: the pool costs what a thread costs, and the environment it reads RIS_WORKERS from"
 NM=""
 command -v nm >/dev/null 2>&1 && NM=nm
 case "$(uname -s)" in
@@ -159,7 +159,7 @@ case "$(uname -s)" in
         echo "the pool put $added undefined symbols on $bin's link line:"; "$NM" -u "$bin"; exit 1
       fi
     done
-    echo "  the C runtime template's names, glibc's thread and environ, which IYI_WORKERS is read through, plain and release: the pool itself is raw syscalls"
+    echo "  the C runtime template's names, glibc's thread and environ, which RIS_WORKERS is read through, plain and release: the pool itself is raw syscalls"
     ;;
 esac
 
@@ -208,7 +208,7 @@ fi
 
 # ── 4. A deadlock across threads is named ────────────────────────────────
 step "a deadlock across threads is a diagnosis, not a hang"
-cat > paralleldeadlock.iyi <<'IYI'
+cat > paralleldeadlock.ri <<'RIS'
 module paralleldeadlock
 
 record Never, n : Int32
@@ -220,8 +220,8 @@ group do |g|
   end
 end
 puts "the group ended"
-IYI
-if ! "$IYI" build paralleldeadlock.iyi -o paralleldeadlock > build-deadlock.log 2>&1; then
+RIS
+if ! "$RIS" build paralleldeadlock.ri -o paralleldeadlock > build-deadlock.log 2>&1; then
   echo "the deadlock program failed to build:"; tail -20 build-deadlock.log; exit 1
 fi
 timeout -k 5 30 ./paralleldeadlock > deadlock.txt 2>&1
@@ -234,9 +234,9 @@ echo "  exits 1: $(grep -m1 'deadlock' deadlock.txt)"
 # ── 5. Share gates the parallel block ─────────────────────────────────────
 step "Share gates what a parallel task's block captures"
 refused() { # name, expected text, program body
-  printf 'module %s\n\n%s\n' "$1" "$3" > "$1.iyi"
-  if "$IYI" build "$1.iyi" -o "$1" > "$1.log" 2>&1; then
-    echo "a program that must not compile compiled: $1"; cat "$1.iyi"; exit 1
+  printf 'module %s\n\n%s\n' "$1" "$3" > "$1.ri"
+  if "$RIS" build "$1.ri" -o "$1" > "$1.log" 2>&1; then
+    echo "a program that must not compile compiled: $1"; cat "$1.ri"; exit 1
   fi
   if ! grep -qF "$2" "$1.log"; then
     echo "$1 was refused, but not for the reason:"; cat "$1.log"; exit 1
@@ -269,16 +269,16 @@ group do |g|
 end'
 
 # ── 6. Failure proofs: broken copies of the runtime ──────────────────────
-# Each a copy of src/iyi with one line of concurrency.iyi changed, built
-# against through IYI_PATH; nothing in the tree is touched.
+# Each a copy of src/ris with one line of concurrency.ri changed, built
+# against through RIS_PATH; nothing in the tree is touched.
 broken() { # name, awk program
-  mkdir -p "$1/iyi"
-  cp "$REPO"/src/iyi/*.iyi "$1/iyi/"
-  awk "$2" "$REPO/src/iyi/concurrency.iyi" > "$1/iyi/concurrency.iyi"
-  if cmp -s "$1/iyi/concurrency.iyi" "$REPO/src/iyi/concurrency.iyi"; then
+  mkdir -p "$1/ris"
+  cp "$REPO"/src/ris/*.ri "$1/ris/"
+  awk "$2" "$REPO/src/ris/concurrency.ri" > "$1/ris/concurrency.ri"
+  if cmp -s "$1/ris/concurrency.ri" "$REPO/src/ris/concurrency.ri"; then
     echo "the awk for $1 found nothing to change"; exit 1
   fi
-  if ! IYI_PATH="$WORK/$1${PSEP}$REPO/src" "$IYI" build "$REPO/test/cli/parallel_exercise.iyi" -o "$1-run" > "build-$1.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$1${PSEP}$REPO/src" "$RIS" build "$REPO/test/cli/parallel_exercise.ri" -o "$1-run" > "build-$1.log" 2>&1; then
     echo "the broken copy $1 failed to build:"; tail -20 "build-$1.log"; exit 1
   fi
 }
@@ -290,7 +290,7 @@ caught() { # name, expected FAIL text, step arguments...
   if [ "$code" -ne 1 ] || ! grep -qF "$want" "$name.txt"; then
     echo "the broken copy $name was not caught at \"$want\" (exit $code):"; tail -20 "$name.txt"; exit 1
   fi
-  echo "  exits 1 at \"$(grep -m1 -F "$want" "$name.txt" | sed 's/^FAIL: //; s/^iyi: panic: //')\""
+  echo "  exits 1 at \"$(grep -m1 -F "$want" "$name.txt" | sed 's/^FAIL: //; s/^ris: panic: //')\""
 }
 
 step "failure proof: a cross-thread wake that does not ring is a lost wakeup"
@@ -313,7 +313,7 @@ step "failure proof: a plain add loses counts when tasks run at the same instant
 if [ "$CORES" -lt 2 ]; then
   echo "  one core here: two tasks cannot be at the same instant, so the proof is not run"
 else
-  if ! "$IYI" build --release -Dparallel_plain_add "$REPO/test/cli/parallel_exercise.iyi" -o plainadd > build-plainadd.log 2>&1; then
+  if ! "$RIS" build --release -Dparallel_plain_add "$REPO/test/cli/parallel_exercise.ri" -o plainadd > build-plainadd.log 2>&1; then
     echo "the plain-add build failed:"; tail -20 build-plainadd.log; exit 1
   fi
   timeout -k 5 120 ./plainadd race > plainadd.txt 2>&1
@@ -330,11 +330,11 @@ if [ "$CORES" -lt 2 ]; then
   echo "  one core here: the floor is not held, so there is nothing to fail"
 else
   mkdir -p oneworker/iyi
-  cp "$REPO"/src/iyi/*.iyi oneworker/iyi/
+  cp "$REPO"/src/ris/*.ri oneworker/ris/
   awk '/^      workers = resolved$/ { print "      workers = 1"; next } { print }' \
-    "$REPO/src/iyi/concurrency.iyi" > oneworker/iyi/concurrency.iyi
-  cmp -s oneworker/iyi/concurrency.iyi "$REPO/src/iyi/concurrency.iyi" && { echo "the awk for oneworker found nothing to change"; exit 1; }
-  if ! IYI_PATH="$WORK/oneworker${PSEP}$REPO/src" "$IYI" build --release "$REPO/test/cli/parallel_exercise.iyi" -o oneworker-run > build-oneworker.log 2>&1; then
+    "$REPO/src/ris/concurrency.ri" > oneworker/ris/concurrency.ri
+  cmp -s oneworker/ris/concurrency.ri "$REPO/src/ris/concurrency.ri" && { echo "the awk for oneworker found nothing to change"; exit 1; }
+  if ! RIS_PATH="$WORK/oneworker${PSEP}$REPO/src" "$RIS" build --release "$REPO/test/cli/parallel_exercise.ri" -o oneworker-run > build-oneworker.log 2>&1; then
     echo "the one-worker copy failed to build:"; tail -20 build-oneworker.log; exit 1
   fi
   SLOW="$(best_ms "$K" oneworker-run)" || exit 1

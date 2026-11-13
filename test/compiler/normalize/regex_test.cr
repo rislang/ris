@@ -63,15 +63,15 @@ describe "Normalize: regex literal" do
     end
   end
 
-  # iyi: a `.iyi` program's literal is `std/regex`'s `Regex.compile`, and
+  # iyi: a `.ri` program's literal is `std/regex`'s `Regex.compile`, and
   # iyi's prelude has no other runtime Regex: without the import the expander
   # says so at the literal rather than emitting `::Regex.new` into a program
   # whose Regex is the empty class the compiler pre-declares (iyi SPEC III.10,
   # Appendix B #17).
-  describe "in an .iyi file" do
+  describe "in an .ri file" do
     it "names the import it is missing" do
       expect_raises(Iyi::TypeException, "import std/regex::{Regex}") do
-        LiteralExpander.new(Program.new).expand(parse(%q(/foo/), filename: "foo.iyi"))
+        LiteralExpander.new(Program.new).expand(parse(%q(/foo/), filename: "foo.ri"))
       end
     end
 
@@ -82,9 +82,9 @@ describe "Normalize: regex literal" do
     it "carries a literal's flags to Regex.compile as Options" do
       program = iyi_regex_program
       expander = LiteralExpander.new(program)
-      plain = expander.expand(parse(%q(/foo/), filename: "foo.iyi"))
-      folded = expander.expand(parse(%q(/foo/i), filename: "foo.iyi"))
-      all = expander.expand(parse(%q(/foo/imx), filename: "foo.iyi"))
+      plain = expander.expand(parse(%q(/foo/), filename: "foo.ri"))
+      folded = expander.expand(parse(%q(/foo/i), filename: "foo.ri"))
+      all = expander.expand(parse(%q(/foo/imx), filename: "foo.ri"))
 
       plain.to_s.should eq(Program.iyi_regex_const_name("foo"))
       folded.to_s.should eq(Program.iyi_regex_const_name("foo", Iyi::RegexOptions::IGNORE_CASE))
@@ -106,13 +106,13 @@ describe "Normalize: regex literal" do
     # `#{"f"}` would be folded into the text and cached like any literal, so
     # the interpolation names a call, which is only known when it runs.
     it "carries the flags of an interpolated literal, which is no constant" do
-      node = LiteralExpander.new(iyi_regex_program).expand(parse(%q(/#{prefix}oo/m), filename: "foo.iyi"))
+      node = LiteralExpander.new(iyi_regex_program).expand(parse(%q(/#{prefix}oo/m), filename: "foo.ri"))
       node.to_s.should eq(%q(::Std::Regex::Regex.compile("#{prefix}oo", ::Std::Regex::Regex::Options.new(6))))
     end
 
     it "refuses a flag std/regex has no option for" do
       literal = Iyi::RegexLiteral.new(Iyi::StringLiteral.new("foo"), Iyi::RegexOptions::Reserved)
-      literal.location = Iyi::Location.new("foo.iyi", 1, 1)
+      literal.location = Iyi::Location.new("foo.ri", 1, 1)
       expect_raises(Iyi::TypeException, "`std/regex` has no flag for Reserved") do
         LiteralExpander.new(iyi_regex_program).expand(literal)
       end

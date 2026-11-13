@@ -2,10 +2,10 @@ require "./codegen"
 
 # iyi: GC_DESIGN.md Stage 5 embeds the program's pointer maps into the binary
 # itself, as the prelude's mark loop reads them. Stage 1 carried them in
-# `.iyimod`'s `Layouts` section; that section travels between builds, but the
+# `.rimod`'s `Layouts` section; that section travels between builds, but the
 # collector that runs inside one program needs its own table in that
 # program's own image, because two programs number their types differently and
-# a `.iyimod` is not present at run time.
+# a `.rimod` is not present at run time.
 #
 # The prelude holds an external global, `__iyi_gc_layouts`, and takes its
 # address rather than its value. This file gives the symbol its one real
@@ -18,7 +18,7 @@ require "./codegen"
 # The prelude's allocator selection has its twin here: `iyi_gc_arena?` is
 # the compiler's answer to "does this build's prelude allocate through the
 # owned collector's arena", and it must equal the macro condition at the
-# top of `src/iyi/prelude.iyi`'s allocator seam. It gates two emissions —
+# top of `src/ris/prelude.ri`'s allocator seam. It gates two emissions —
 # the type id stored into the object header at every class allocation, and
 # the layout table below — and the two sides disagreeing is not a
 # degradation in one direction: a compiler that writes ids into a header
@@ -70,13 +70,13 @@ class Iyi::CodeGenVisitor
   def iyi_define_gc_layouts : Nil
     entries = collect_gc_layout_entries
     iyi_define_headed_bytes
-    iyi_header_census(entries) if ENV["IYI_HEADER_CENSUS"]?
+    iyi_header_census(entries) if ENV["RIS_HEADER_CENSUS"]?
 
     # The marker reads the layout table for every object it touches, and a
     # missing entry means a conservative word-scan, never a crash. Sorting by
     # type id lets that lookup be a binary search in the prelude, and lets
     # this method keep the same determinism `collect_iyi_layouts` keeps for
-    # the `.iyimod` section: the same program yields the same table.
+    # the `.rimod` section: the same program yields the same table.
     entries.sort_by! { |_, layout| layout.type_id }
 
     # The prelude's `IyiMark` reads the table by walking a base pointer
@@ -150,7 +150,7 @@ class Iyi::CodeGenVisitor
   # (`iyi_define_all_type_ids`), the way it reads `:type_id`, because a
   # class one module never dispatches on is in a union the next one makes.
   # `String` is headed by rule: the prelude builds one from bytes
-  # (`string.iyi`, `String.new`) and stores the id under it itself, and
+  # (`string.ri`, `String.new`) and stores the id under it itself, and
   # the prelude cannot read the byte this decision becomes.
   def iyi_headed?(type : Type) : Bool
     return true if type == @program.string
@@ -208,7 +208,7 @@ class Iyi::CodeGenVisitor
     type.is_a?(NonGenericClassType) || type.is_a?(GenericClassInstanceType)
   end
 
-  # The census, on `IYI_HEADER_CENSUS=1`: the decision above printed to
+  # The census, on `RIS_HEADER_CENSUS=1`: the decision above printed to
   # stderr, one line a class, then the count.
   private def iyi_header_census(entries : Array({Type, IyiMod::TypeLayout})) : Nil
     with_header = 0

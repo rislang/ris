@@ -60,7 +60,7 @@ exit 11 unless parsed && parsed.to_set_cookie == kept
 first = Hash(String, String).new
 Cookie.parse_header("a=1; a=2", first)
 exit 12 unless first ==
-  {"a" => "1"}
+                 {"a" => "1"}
 exit 20 unless owned
 exit 21 unless owned.to_set_cookie == kept
 puts "PASS: cookie views and explicit retained copy"

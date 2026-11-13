@@ -8,7 +8,7 @@ module samples/escape_bench
 
 import std/html::{HTML}
 
-N = 10000000
+N     = 10000000
 TEXTS = Array(String){
   "Mari Maasikas, Tallinn",
   "Tom & Jerry <cartoon>",

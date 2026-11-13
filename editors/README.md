@@ -5,7 +5,7 @@ nothing to configure: point a client at the command and every capability
 arrives through the protocol — diagnostics on each keystroke from a real
 compile, completion that writes the `import X::{name}` line for you,
 hover with docs, rename that follows the names on `import` lines, and highlighting as
-semantic tokens, so no editor *needs* a grammar file for `.iyi`. The VS
+semantic tokens, so no editor *needs* a grammar file for `.ri`. The VS
 Code extension still carries a deliberately minimal one: a TextMate
 pass is synchronous with the first frame and a language server is not,
 so the grammar paints instantly and the server's tokens — the truth —
@@ -19,9 +19,9 @@ also works without the compiler or a language server.
 ## VS Code
 
 The extension in [`vscode/`](vscode/) is the whole client — a manifest
-and thirty lines that spawn `iyi lsp`. It is published as `iyilang.iyi`
+and thirty lines that spawn `iyi lsp`. It is published as `iyilang.ri`
 to both registries a VS Code-shaped editor reads — the
-[Marketplace](https://marketplace.visualstudio.com/items?itemName=iyilang.iyi)
+[Marketplace](https://marketplace.visualstudio.com/items?itemName=iyilang.ri)
 for VS Code, [Open VSX](https://open-vsx.org/extension/iyilang/iyi) for
 Cursor, Windsurf, VSCodium, Gitpod and Theia, which cannot use the
 Marketplace because Microsoft's terms scope it to Microsoft's own
@@ -70,7 +70,7 @@ only changes the badge on the listing, not the install.
 
 ## Vim and Neovim syntax
 
-The plugin in [`vim/`](vim/) detects `.iyi` files, highlights syntax, and
+The plugin in [`vim/`](vim/) detects `.ri` files, highlights syntax, and
 sets comment formatting and two-space indentation. See its
 [installation instructions](vim/README.md) for Vim packages and Neovim.
 It works independently of the language server.
@@ -91,13 +91,13 @@ vim.lsp.enable("iyi")
 `~/.config/helix/languages.toml`:
 
 ```toml
-[language-server.iyi]
+[language-server.ri]
 command = "iyi"
 args = ["lsp"]
 
 [[language]]
 name = "iyi"
-scope = "source.iyi"
+scope = "source.ri"
 file-types = ["iyi"]
 comment-token = "#"
 indent = { tab-width = 2, unit = "  " }
@@ -115,8 +115,8 @@ With the [LSP](https://packagecontrol.io/packages/LSP) package,
     "iyi": {
       "enabled": true,
       "command": ["iyi", "lsp"],
-      "selector": "source.iyi | text.plain",
-      "auto_complete_selector": "source.iyi"
+      "selector": "source.ri | text.plain",
+      "auto_complete_selector": "source.ri"
     }
   }
 }
@@ -129,4 +129,4 @@ server side is ready whenever someone writes that shim — command
 `iyi lsp`, stdio. The same sentence is the whole integration guide for
 any other client: Emacs (eglot), Kate, Acme bridges, and the agent
 harnesses that speak LSP directly all need only the command and the
-`.iyi` file association.
+`.ri` file association.

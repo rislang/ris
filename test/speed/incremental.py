@@ -20,7 +20,7 @@ rules exist to make untrue.
 
 What is measured, for each language:
 
-* **cold**       nothing cached anywhere. iyi gets a fresh `IYI_CACHE_DIR`,
+* **cold**       nothing cached anywhere. iyi gets a fresh `RIS_CACHE_DIR`,
                  Go a fresh `GOCACHE`.
 * **warm**       the same build again, nothing edited.
 * **one module** a constant inside one module's method body changes, and the
@@ -28,7 +28,7 @@ What is measured, for each language:
                  in, and the one R-1 is about.
 * **main only**  the entry file changes and no module does.
 
-The iyi rebuild is `--use-iyimod DIR --emit-iyimod DIR`: read every module's
+The iyi rebuild is `--use-rimod DIR --emit-rimod DIR`: read every module's
 artifact, compile the ones whose source moved, write their artifacts back.
 That is what iyi SPEC IV.3 calls the incremental loop, and this is the first
 thing in this repository to put a number on it.
@@ -54,7 +54,7 @@ from generate_project import write_project  # noqa: E402
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CRYSTAL = ROOT / ".build" / "crystal"
 # iyi: asked for paths, so it has to be the surface that knows them by the
-# names below — `crystal env IYI_PATH` prints an empty line and exits 0.
+# names below — `crystal env RIS_PATH` prints an empty line and exits 0.
 WRAPPER = ROOT / "bin" / "iyi"
 
 # Enough to find a floor without the run costing a coffee: each sample is a
@@ -76,23 +76,23 @@ def compiler_env():
     line for a name it does not know and exits 0, so asking the other command
     surface — which answers in `CRYSTAL_*` — returned "" twice and left the
     compiler with no search path at all. Every build here then failed with
-    `can't find file 'iyi/prelude'`, which is the whole bench.
+    `can't find file 'ris/prelude'`, which is the whole bench.
     """
     result = subprocess.run(
-        [str(WRAPPER), "env", "IYI_PATH", "IYI_LIBRARY_PATH"],
+        [str(WRAPPER), "env", "RIS_PATH", "RIS_LIBRARY_PATH"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
     lines = result.stdout.decode().split() if result.returncode == 0 else []
 
     if not lines or not lines[0]:
         fallback = f"lib:{ROOT / 'src'}"
-        print(f"  note: {WRAPPER.name} did not answer IYI_PATH; using {fallback}",
+        print(f"  note: {WRAPPER.name} did not answer RIS_PATH; using {fallback}",
               file=sys.stderr)
-        return {"IYI_PATH": fallback}
+        return {"RIS_PATH": fallback}
 
-    env = {"IYI_PATH": lines[0]}
+    env = {"RIS_PATH": lines[0]}
     if len(lines) > 1 and lines[1]:
-        env["IYI_LIBRARY_PATH"] = lines[1]
+        env["RIS_LIBRARY_PATH"] = lines[1]
     return env
 
 
@@ -132,20 +132,20 @@ class Iyi:
 
     def __init__(self, root, cache):
         self.root, self.cache = root, cache
-        self.main = root / "main.iyi"
-        self.part = root / "parts" / "mod0.iyi"
+        self.main = root / "main.ri"
+        self.part = root / "parts" / "mod0.ri"
         self.mods = root / "mods"
 
     def env(self):
-        return dict(CRYSTAL_ENV, IYI_CACHE_DIR=str(self.cache))
+        return dict(CRYSTAL_ENV, RIS_CACHE_DIR=str(self.cache))
 
     def full(self):
-        return [str(CRYSTAL), "build", "--emit-iyimod", str(self.mods),
-                "-o", "out", "main.iyi"]
+        return [str(CRYSTAL), "build", "--emit-rimod", str(self.mods),
+                "-o", "out", "main.ri"]
 
     def incremental(self):
-        return [str(CRYSTAL), "build", "--use-iyimod", str(self.mods),
-                "--emit-iyimod", str(self.mods), "-o", "out", "main.iyi"]
+        return [str(CRYSTAL), "build", "--use-rimod", str(self.mods),
+                "--emit-rimod", str(self.mods), "-o", "out", "main.ri"]
 
     def clear_cache(self):
         shutil.rmtree(self.cache, ignore_errors=True)
@@ -184,7 +184,7 @@ class Crystal:
         self.part = root / "parts" / "mod0.cr"
 
     def env(self):
-        return dict(CRYSTAL_ENV, IYI_CACHE_DIR=str(self.cache))
+        return dict(CRYSTAL_ENV, RIS_CACHE_DIR=str(self.cache))
 
     def full(self):
         return [str(CRYSTAL), "build", "-o", "out", "main.cr"]
@@ -291,9 +291,9 @@ def write_svg_animated(path, figures, names, lines):
     if not runs:
         return
     # The commands as the bench runs them, with iyi's artifact flags elided
-    # rather than dropped: `…` is `--use-iyimod mods --emit-iyimod mods`, and a
+    # rather than dropped: `…` is `--use-rimod mods --emit-rimod mods`, and a
     # picture that hid them would be claiming an ergonomics this does not have.
-    shown = {"iyi": ("iyi build … -o app main.iyi", "#3fb950"),
+    shown = {"iyi": ("iyi build … -o app main.ri", "#3fb950"),
              "crystal": ("crystal build -o app main.cr", "#d29922"),
              "go build": ("go build -o app .", "#58a6ff")}
     slowest = max(seconds for _, seconds in runs)
@@ -438,7 +438,7 @@ def main():
         timed(lang.incremental(), lang.root, lang.env())
     same_after = len({lang.output() for lang in languages}) == 1
 
-    lines = sum(len(p.read_text().splitlines()) for p in iyi_root.rglob("*.iyi"))
+    lines = sum(len(p.read_text().splitlines()) for p in iyi_root.rglob("*.ri"))
     print()
     print(f"the edit loop — best of {RUNS}, seconds")
     print()

@@ -5,6 +5,7 @@ module test/ris/task_value_nested
 @[OnTape]
 struct Inner
   getter tag : String
+
   def initialize(@tag : String)
   end
 end
@@ -13,6 +14,7 @@ end
 struct Outer
   getter inner : Inner
   getter list : Array(Inner)
+
   def initialize(@inner : Inner, @list : Array(Inner))
   end
 end

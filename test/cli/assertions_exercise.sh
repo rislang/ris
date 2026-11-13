@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # The prelude's assertions: `assert_eq`, `assert_ne`, `assert_nil`,
 # `assert_in_delta`, `assert_includes`, `assert_error`, `assert_ok`,
-# and `assert_panics` (src/iyi/testing.iyi).
+# and `assert_panics` (src/ris/testing.ri).
 #
 #     bash test/cli/assertions_exercise.sh
 #
-# `test/cli/assertions_exercise.iyi` is the program, run plain and optimised:
+# `test/cli/assertions_exercise.ri` is the program, run plain and optimised:
 # every assertion holding, and failing with the message it documents. Then
 # what a program cannot see of itself is driven here - the site a failure
 # names, which `raise` prints beside the message, and the exit status,
 # which is the one thing `iyi test` reads. Then each
 # check is proved capable of failing by patching a *copy of the prelude*
-# and building against it through `IYI_PATH`. A check that cannot fail is
+# and building against it through `RIS_PATH`. A check that cannot fail is
 # not a check.
 #
 # What this gate was written for: `assert(a == b)` said "assertion failed"
@@ -25,7 +25,7 @@ set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 # The wrapper in bin is a posix shell script, so a caller that already has a
 # compiler of its own names it through the environment.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 
@@ -52,7 +52,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 # A program literal stays a StringLiteral to macros, also when forwarded.
 # Runtime tape lowering used to expose String.view calls to reflection.
-cat > "$WORK/macro_literal.iyi" <<'IYI'
+cat > "$WORK/macro_literal.ri" <<'RIS'
 macro literal(value)
   {% unless value.is_a?(StringLiteral) && value == "page.eiy" %}
     {% raise "macro lost its string literal" %}
@@ -63,8 +63,8 @@ macro forward(value)
   literal({{ value }})
 end
 assert_eq "PAGE.EIY", forward("page.eiy")
-IYI
-"$IYI" run "$WORK/macro_literal.iyi" > "$WORK/literal.out" 2>&1 || {
+RIS
+"$RIS" run "$WORK/macro_literal.ri" > "$WORK/literal.out" 2>&1 || {
   tail -20 "$WORK/literal.out"
   exit 1
 }
@@ -72,7 +72,7 @@ echo "  macro string literal: held"
 
 status=0
 # The library a build reads: the repository's, or a patched copy ahead of it.
-LIBRARY="${IYI_PATH:-$REPO/src}"
+LIBRARY="${RIS_PATH:-$REPO/src}"
 
 SECTIONS=("assert_eq and assert_ne" "assert_nil" "assert_in_delta" "assert_includes"
   "assert_error and assert_ok" "assert_panics" "assert")
@@ -80,7 +80,7 @@ SECTIONS=("assert_eq and assert_ne" "assert_nil" "assert_in_delta" "assert_inclu
 run_case() { # run_case <label> <name> [build flags...]
   local label="$1" name="$2"
   shift 2
-  if ! IYI_PATH="$LIBRARY" "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/assertions_exercise.iyi" \
+  if ! RIS_PATH="$LIBRARY" "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/assertions_exercise.ri" \
        > "$WORK/$name.build" 2>&1; then
     echo "  $label: the exercise did not build"
     sed -n '1,12p' "$WORK/$name.build"
@@ -123,8 +123,8 @@ run_case "release" release --release
 # error stream in one file, as `iyi test` reads them. Answers the exit.
 run_program() { # run_program <name> <source>
   local name="$1"
-  printf '%b' "$2" > "$WORK/$name.iyi"
-  if ! IYI_PATH="$LIBRARY" "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf '%b' "$2" > "$WORK/$name.ri"
+  if ! RIS_PATH="$LIBRARY" "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $name: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     return 99
@@ -150,8 +150,8 @@ has_lines() { # has_lines <name> <line>...
 # Windows build may write the directory's separator its own way - while the
 # file and the line are the claim.
 has_site() { # has_site <name> <line number>
-  if ! grep -qE "^  at .*[/\\\\]$1\\.iyi:$2\$" "$WORK/$1.out"; then
-    echo "  $1: no line '  at .../$1.iyi:$2' in:"
+  if ! grep -qE "^  at .*[/\\\\]$1\\.ri:$2\$" "$WORK/$1.out"; then
+    echo "  $1: no line '  at .../$1.ri:$2' in:"
     sed 's/^/    /' "$WORK/$1.out"
     return 1
   fi
@@ -163,7 +163,7 @@ site_check() {
   run_program site 'module main\n\nsum = 2 + 3\nassert_eq 4, sum, "the sum"\nputs "after the failure"\n'
   local code=$?
   [ "$code" -eq 1 ] || { echo "  site: a failing assert_eq exited $code, not 1"; return 1; }
-  has_lines site "iyi: panic: assert_eq failed: the sum" "  expected: 4" "    actual: 5" || return 1
+  has_lines site "ris: panic: assert_eq failed: the sum" "  expected: 4" "    actual: 5" || return 1
   has_site site 4 || return 1
   if grep -q "after the failure" "$WORK/site.out"; then
     echo "  site: the program went on past a failed assertion"
@@ -175,7 +175,7 @@ error_site_check() {
   run_program error_site 'module main\n\nstruct Gone\n  def initialize\n  end\nend\n\nimpl Error for Gone\n  def message : String\n    "gone"\n  end\nend\n\ndef fetch : Int32 | Gone\n  Gone.new\nend\n\nvalue = assert_ok { fetch }\nputs value\n'
   local code=$?
   [ "$code" -eq 1 ] || { echo "  error site: a failing assert_ok exited $code, not 1"; return 1; }
-  has_lines error_site "iyi: panic: assert_ok failed" "    actual: Main::Gone (an error: \"gone\")" || return 1
+  has_lines error_site "ris: panic: assert_ok failed" "    actual: Main::Gone (an error: \"gone\")" || return 1
   has_site error_site 18 || return 1
 }
 
@@ -188,16 +188,16 @@ error_site_check && echo "  a failed assert_ok: exits 1 and names the error and 
 echo
 echo "== proving the checks can fail, one broken assertion at a time"
 
-# A copy of the whole prelude with one assertion patched, on `IYI_PATH` ahead
+# A copy of the whole prelude with one assertion patched, on `RIS_PATH` ahead
 # of the real one. The patch has to change the file - a sed that matched
 # nothing would otherwise read as a pass - and then the exercise has to fail
 # at the check that names the assertion, or the driver's own check has to.
 patch_prelude() { # patch_prelude <dir> <sed script>
   local dir="$1" script="$2"
-  mkdir -p "$WORK/$dir/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
-  sed -e "$script" "$REPO/src/iyi/testing.iyi" > "$WORK/$dir/iyi/testing.iyi"
-  if cmp -s "$REPO/src/iyi/testing.iyi" "$WORK/$dir/iyi/testing.iyi"; then
+  mkdir -p "$WORK/$dir/ris"
+  cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
+  sed -e "$script" "$REPO/src/ris/testing.ri" > "$WORK/$dir/ris/testing.ri"
+  if cmp -s "$REPO/src/ris/testing.ri" "$WORK/$dir/ris/testing.ri"; then
     echo "  $dir: the patch changed nothing, so this proves nothing"
     return 1
   fi
@@ -206,8 +206,8 @@ patch_prelude() { # patch_prelude <dir> <sed script>
 prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
   local label="$1" dir="$2" phrase="$3" script="$4"
   patch_prelude "$dir" "$script" || { status=1; return; }
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/assertions_exercise.iyi" \
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/assertions_exercise.ri" \
        > "$WORK/$dir/build" 2>&1; then
     echo "  $label: the patched prelude did not build"
     sed -n '1,10p' "$WORK/$dir/build"

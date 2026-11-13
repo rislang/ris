@@ -1133,7 +1133,7 @@ class Iyi::CodeGenVisitor
   # main module, which defined it only when the program's own code had
   # asked too: `import std/password::{Scrypt}` and one call to it linked
   # with "undefined reference to `~metaclass'" from std/digest's own
-  # `#{self.class}`, under `--use-iyimod` alone. A build that links
+  # `#{self.class}`, under `--use-rimod` alone. A build that links
   # artifacts defines it whatever its own code asked.
   def iyi_define_metaclass_fun : Nil
     name = "~metaclass"
@@ -1570,7 +1570,7 @@ class Iyi::CodeGenVisitor
   # first asked for, and an artifact's unit asked in the build that wrote it:
   # a `defer` or a `group` is a catch pad over `void*`, which names
   # `??_R0PEAX@8` in the main module. A consumer with no `defer`, `rescue`
-  # or `raise` of its own never asked, and `--use-iyimod` of a module whose
+  # or `raise` of its own never asked, and `--use-rimod` of a module whose
   # one def was `defer log << "lib-defer"` ended on `LNK2001: unresolved
   # external symbol "void * `RTTI Type Descriptor'" (??_R0PEAX@8)`.
   def iyi_define_msvc_catch_globals : Nil

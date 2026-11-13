@@ -12,5 +12,6 @@ class P
     walk(s, d + 1)
   end
 end
+
 p = P.new
 puts p.walk("root", 0)

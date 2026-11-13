@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives test/cli/thread_floor.iyi: what a kernel thread, and a stop-the-world
+# Drives test/cli/thread_floor.ri: what a kernel thread, and a stop-the-world
 # over kernel threads, cost the dependency floor (iyi SPEC III.9) — measured
 # before the design that needs them (GC_DESIGN.md Stages 4, 7, 8, 9;
 # iyi SPEC III.4.7's `Share`) is written.
@@ -50,9 +50,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The compiler, overridable: `bin/iyi` is a POSIX shell wrapper, and on
+# The compiler, overridable: `bin/ris` is a POSIX shell wrapper, and on
 # Windows the caller is the only one who knows where the real binary is.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -82,7 +82,7 @@ esac
 
 # ── 1. The program, twice ─────────────────────────────────────────────────
 step "thread floor, plain build"
-if ! "$IYI" build "$REPO/test/cli/thread_floor.iyi" -o floor > build.log 2>&1; then
+if ! "$RIS" build "$REPO/test/cli/thread_floor.ri" -o floor > build.log 2>&1; then
   cat build.log; exit 1
 fi
 if ! timeout 60 ./floor 4 100 > answers.txt 2>&1; then
@@ -91,7 +91,7 @@ fi
 grep -q 'every property held' answers.txt || { cat answers.txt; exit 1; }
 
 step "thread floor, release build"
-if ! "$IYI" build --release "$REPO/test/cli/thread_floor.iyi" -o floor-release > build-release.log 2>&1; then
+if ! "$RIS" build --release "$REPO/test/cli/thread_floor.ri" -o floor-release > build-release.log 2>&1; then
   cat build-release.log; exit 1
 fi
 if ! timeout 60 ./floor-release 4 100 > answers-release.txt 2>&1; then
@@ -107,7 +107,7 @@ grep -q 'every property held' answers-release.txt || { cat answers-release.txt; 
 if [ "$(uname -s)" = Darwin ]; then
   for variant in park_lock park_sigsuspend mach; do
     step "thread floor, release build, -Dtf_$variant"
-    if ! "$IYI" build --release "-Dtf_$variant" "$REPO/test/cli/thread_floor.iyi" -o "floor-$variant" > "build-$variant.log" 2>&1; then
+    if ! "$RIS" build --release "-Dtf_$variant" "$REPO/test/cli/thread_floor.ri" -o "floor-$variant" > "build-$variant.log" 2>&1; then
       cat "build-$variant.log"; exit 1
     fi
     if ! timeout 60 "./floor-$variant" 4 100 > "answers-$variant.txt" 2>&1; then
@@ -157,7 +157,7 @@ case "$(uname -s)" in
     # defines `bzero` now, the way it defines `memset`, so the name resolves
     # to the program's own and the release list is the plain list.
     step "dependency floor: what a thread costs darwin, by name"
-    # `_read` is the runtime's now, not only this probe's: since thread.iyi
+    # `_read` is the runtime's now, not only this probe's: since thread.ri
     # every darwin program can park for a collection's stop, and the park
     # is a read on a pipe, reachable from the runtime lock's spin in every
     # build the optimiser cannot fold — including the refused variants,
@@ -238,9 +238,9 @@ grep -E '^(touch|atomic):' answers-release.txt | sed 's/^/  /'
 # one-word edit that leaves the threads real, which is the point of them.
 step "failure proof: a thread that never counted is refused"
 sed 's/__tf_add(line + 16_u64, 1_u64)/__tf_add(line + 24_u64, 1_u64)/' \
-  "$REPO/test/cli/thread_floor.iyi" > idle.iyi
-grep -q 'line + 24_u64' idle.iyi || { echo "the sed found nothing to change"; exit 1; }
-if ! "$IYI" build idle.iyi -o idle > build-idle.log 2>&1; then
+  "$REPO/test/cli/thread_floor.ri" > idle.ri
+grep -q 'line + 24_u64' idle.ri || { echo "the sed found nothing to change"; exit 1; }
+if ! "$RIS" build idle.ri -o idle > build-idle.log 2>&1; then
   cat build-idle.log; exit 1
 fi
 timeout 60 ./idle 2 10 > idle.txt 2>&1
@@ -255,8 +255,8 @@ case "$(uname -s)" in
     # The one flag bit, dropped from the constant and from both arms' asm
     # immediates: every thread then inherits the parent's thread pointer
     # and shares its block, so the slots clash and the program says whose.
-    sed 's/012d/0125/g' "$REPO/test/cli/thread_floor.iyi" > shared.iyi
-    [ "$(grep -c '0125' shared.iyi)" -ge 3 ] || { echo "the sed found nothing to change"; exit 1; }
+    sed 's/012d/0125/g' "$REPO/test/cli/thread_floor.ri" > shared.ri
+    [ "$(grep -c '0125' shared.ri)" -ge 3 ] || { echo "the sed found nothing to change"; exit 1; }
     ;;
   Darwin)
     # No bit to drop: dyld lays the block out for every pthread. What can
@@ -267,12 +267,12 @@ case "$(uname -s)" in
     # name the clash; the lock park releases every lock whoever holds it,
     # and is what this proof builds with — the proof is about the
     # thread-local, not the park.
-    sed '/@\[ThreadLocal\]/d' "$REPO/test/cli/thread_floor.iyi" > shared.iyi
-    [ "$(grep -c '@\[ThreadLocal\]' "$REPO/test/cli/thread_floor.iyi")" -ge 3 ] || { echo "the sed found nothing to change"; exit 1; }
+    sed '/@\[ThreadLocal\]/d' "$REPO/test/cli/thread_floor.ri" > shared.ri
+    [ "$(grep -c '@\[ThreadLocal\]' "$REPO/test/cli/thread_floor.ri")" -ge 3 ] || { echo "the sed found nothing to change"; exit 1; }
     shared_flags="-Dtf_park_lock"
     ;;
 esac
-if ! "$IYI" build ${shared_flags:-} shared.iyi -o shared > build-shared.log 2>&1; then
+if ! "$RIS" build ${shared_flags:-} shared.ri -o shared > build-shared.log 2>&1; then
   cat build-shared.log; exit 1
 fi
 timeout 60 ./shared 2 10 > shared.txt 2>&1
@@ -285,9 +285,9 @@ fi
 # a code address is on no thread's stack, and every handler says so.
 step "failure proof: a handler reading the wrong register is refused"
 sed -e 's/TF_UC_SP = 160_u64/TF_UC_SP = 168_u64/' -e 's/TF_UC_SP = 432_u64/TF_UC_SP = 440_u64/' \
-    -e 's/TF_MC_SP = 264_u64/TF_MC_SP = 272_u64/' "$REPO/test/cli/thread_floor.iyi" > astray.iyi
-cmp -s astray.iyi "$REPO/test/cli/thread_floor.iyi" && { echo "the sed found nothing to change"; exit 1; }
-if ! "$IYI" build astray.iyi -o astray > build-astray.log 2>&1; then
+    -e 's/TF_MC_SP = 264_u64/TF_MC_SP = 272_u64/' "$REPO/test/cli/thread_floor.ri" > astray.ri
+cmp -s astray.ri "$REPO/test/cli/thread_floor.ri" && { echo "the sed found nothing to change"; exit 1; }
+if ! "$RIS" build astray.ri -o astray > build-astray.log 2>&1; then
   cat build-astray.log; exit 1
 fi
 timeout 60 ./astray 2 10 > astray.txt 2>&1
@@ -302,7 +302,7 @@ fi
 # sum comes up short: the program names the word and how many updates it
 # lost. The atomic contract, refused by its own removal.
 step "failure proof: a load-and-store in the atomic's place loses updates"
-if ! "$IYI" build --release -Dtf_plain_add "$REPO/test/cli/thread_floor.iyi" -o plain-add > build-plain-add.log 2>&1; then
+if ! "$RIS" build --release -Dtf_plain_add "$REPO/test/cli/thread_floor.ri" -o plain-add > build-plain-add.log 2>&1; then
   cat build-plain-add.log; exit 1
 fi
 timeout 60 ./plain-add 4 20 > plain-add.txt 2>&1

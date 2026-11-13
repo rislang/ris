@@ -15,6 +15,6 @@ Direction right, fixes the cause, reuses Outgoing. No blockers.
 1. Mapping section too code-detailed.
 2. Behaviour list repeats module doc; instead list what changes and
    update the doc comments "read as it is sent, never whole"
-   (fileserver.iyi:13-14, 49-50).
+   (fileserver.ri:13-14, 49-50).
 3. Router example should say Router cannot serve files until ported.
 4. Tests: HEAD Content-Length + no body; file over the cap.

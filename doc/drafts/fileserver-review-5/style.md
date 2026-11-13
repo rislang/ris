@@ -15,7 +15,7 @@ Nits:
    (134-135, 712-713).
 7. 681-683: "the same reason", "a third copy" lack antecedents.
 8. 326: `refusal` called private; code is protected
-   (http.iyi:2288).
+   (http.ri:2288).
 9. 614-616: ETag and date use the block form
-   (fileserver.iyi:184-185).
-10. 630-632: module doc differs from fileserver.iyi:16-19.
+   (fileserver.ri:184-185).
+10. 630-632: module doc differs from fileserver.ri:16-19.

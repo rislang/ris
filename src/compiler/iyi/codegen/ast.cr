@@ -88,7 +88,7 @@ module Iyi
       Iyi.safe_mangling(program, name)
     end
 
-    # iyi: the return type a symbol is made of, for a def read from a `.iyimod`
+    # iyi: the return type a symbol is made of, for a def read from a `.rimod`
     # (iyi SPEC IV.1g).
     #
     # A declaration may not name a virtual type — `Foo+` is how one *prints*

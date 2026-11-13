@@ -17,7 +17,7 @@
 #   bash test/speed/tls_speed.sh            needs openssl and python3
 set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 FLOOR="${FLOOR:-25}"
 MIB=32
 mkdir -p "$REPO/test/speed/.work"
@@ -28,7 +28,7 @@ trap '[ -n "$SERVER" ] && kill "$SERVER" 2>/dev/null; rm -rf "$WORK"' EXIT
 command -v openssl >/dev/null || { echo "tls_speed: no openssl"; exit 1; }
 command -v python3 >/dev/null || { echo "tls_speed: no python3"; exit 1; }
 
-"$IYI" build --release -o "$WORK/tls_speed" "$REPO/test/speed/tls_speed.iyi" || exit 1
+"$RIS" build --release -o "$WORK/tls_speed" "$REPO/test/speed/tls_speed.ri" || exit 1
 
 # A root and a P-256 leaf for localhost under it; a file to read.
 cd "$WORK" || exit 1

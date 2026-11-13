@@ -5,16 +5,16 @@
 #
 # `import std/text` is a program's line, not a checkout's: every `src/std/`
 # module has to be inside the package under its own name, and it has to
-# resolve out of the package with nothing else on the machine — no IYI_PATH,
+# resolve out of the package with nothing else on the machine — no RIS_PATH,
 # no CRYSTAL_PATH, no Crystal, no checkout.
 #
 # Two states this is written against, both real. 0.11.0 shipped
-# `share/iyi/src/iyi` and nothing beside it, so `import std/enumerable`
+# `share/ris/src/ris` and nothing beside it, so `import std/enumerable`
 # answered "can't find module" for everybody who downloaded it. And between
 # `src/std/` being made and `install_iyi` naming it, the directory rode into
 # the tarball as a passenger of the other language's library
-# (`share/iyi/crystal/std/`) and resolved out of a library it is not part of.
-# A gate that runs `hello.iyi` passes in both states, which is why this one
+# (`share/ris/crystal/std/`) and resolved out of a library it is not part of.
+# A gate that runs `hello.ri` passes in both states, which is why this one
 # reads the package instead.
 #
 # Takes the root of an unpacked tarball, or an `install_iyi` DESTDIR;
@@ -30,9 +30,9 @@ case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT) REPO="$(cygpath -m "$REPO")" ;;
 esac
 ROOT="${1:-$REPO/.build/iyi-package}"
-IYI="$ROOT/bin/iyi"
-SHIPPED="$ROOT/share/iyi/src/std"
-SAMPLES="$ROOT/share/iyi/samples"
+RIS="$ROOT/bin/ris"
+SHIPPED="$ROOT/share/ris/src/std"
+SAMPLES="$ROOT/share/ris/samples"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # And the same for the scratch directory, which is where the compiler is
@@ -59,8 +59,8 @@ fail() {
   status=1
 }
 
-if [ ! -x "$IYI" ]; then
-  echo "test/cli/tarball_std.sh: no compiler at $IYI"
+if [ ! -x "$RIS" ]; then
+  echo "test/cli/tarball_std.sh: no compiler at $RIS"
   echo "give it an unpacked tarball's root, or run make iyi-tarball first"
   exit 1
 fi
@@ -69,11 +69,11 @@ fi
 # unset — the compiler falls back to CRYSTAL_PATH, so a stray one in the
 # environment would answer for the package and this would stop proving
 # anything. What is left to resolve the import is the binary's own
-# `$ORIGIN/../share/iyi/src`.
+# `$ORIGIN/../share/ris/src`.
 build() { # build <name> <source>
   (
     cd "$WORK" &&
-      env -u IYI_PATH -u CRYSTAL_PATH "$IYI" build --no-color -o "$WORK/$1" "$2"
+      env -u RIS_PATH -u CRYSTAL_PATH "$RIS" build --no-color -o "$WORK/$1" "$2"
   ) > "$WORK/$1.log" 2>&1
 }
 
@@ -88,30 +88,30 @@ first_error() {
 echo "== every src/std module is in the package, byte for byte"
 count=0
 first=""
-for source in "$REPO"/src/std/*.iyi; do
+for source in "$REPO"/src/std/*.ri; do
   [ -f "$source" ] || continue
-  name="$(basename "$source" .iyi)"
+  name="$(basename "$source" .ri)"
   count=$((count + 1))
   [ -n "$first" ] || first="$name"
-  if [ ! -f "$SHIPPED/$name.iyi" ]; then
+  if [ ! -f "$SHIPPED/$name.ri" ]; then
     fail "std/$name is not in $SHIPPED"
-  elif ! cmp -s "$source" "$SHIPPED/$name.iyi"; then
+  elif ! cmp -s "$source" "$SHIPPED/$name.ri"; then
     fail "std/$name in the package is not the file in src/std"
   fi
 done
 if [ "$count" -eq 0 ]; then
   fail "no modules in $REPO/src/std — nothing was checked"
 elif [ "$status" -eq 0 ]; then
-  echo "  $count modules, each under its own name in share/iyi/src/std"
+  echo "  $count modules, each under its own name in share/ris/src/std"
 fi
 
 echo
 echo "== each one imports and builds out of the package, then runs"
-for source in "$REPO"/src/std/*.iyi; do
+for source in "$REPO"/src/std/*.ri; do
   [ -f "$source" ] || continue
-  name="$(basename "$source" .iyi)"
-  printf 'import std/%s\nputs "std/%s"\n' "$name" "$name" > "$WORK/probe_$name.iyi"
-  if ! build "probe_$name" "$WORK/probe_$name.iyi"; then
+  name="$(basename "$source" .ri)"
+  printf 'import std/%s\nputs "std/%s"\n' "$name" "$name" > "$WORK/probe_$name.ri"
+  if ! build "probe_$name" "$WORK/probe_$name.ri"; then
     fail "import std/$name does not build out of the package: $(first_error "probe_$name")"
     continue
   fi
@@ -121,7 +121,7 @@ for source in "$REPO"/src/std/*.iyi; do
   fi
 done
 if [ "$status" -eq 0 ]; then
-  echo "  all $count built with IYI_PATH and CRYSTAL_PATH unset, and ran"
+  echo "  all $count built with RIS_PATH and CRYSTAL_PATH unset, and ran"
 fi
 
 echo
@@ -129,11 +129,11 @@ echo "== the shipped samples that import std build out of the package"
 before="$status"
 if [ -d "$SAMPLES" ]; then
   samples=0
-  for sample in "$SAMPLES"/*.iyi; do
+  for sample in "$SAMPLES"/*.ri; do
     [ -f "$sample" ] || continue
     grep -q "^import std/" "$sample" || continue
     samples=$((samples + 1))
-    name="sample_$(basename "$sample" .iyi)"
+    name="sample_$(basename "$sample" .ri)"
     if ! build "$name" "$sample"; then
       fail "$(basename "$sample") does not build out of the package: $(first_error "$name")"
     fi
@@ -154,7 +154,7 @@ if [ ! -d "$SHIPPED" ]; then
   echo "  (nothing to move aside: $SHIPPED is already missing, said above)"
 else
   mv "$SHIPPED" "$SHIPPED.away"
-  if build "negative" "$WORK/probe_$probe.iyi"; then
+  if build "negative" "$WORK/probe_$probe.ri"; then
     fail "import std/$probe built with $SHIPPED moved aside — something else in the package answers for it"
   elif grep -q "can't find module 'std/$probe'" "$WORK/negative.log"; then
     echo "  without it: can't find module 'std/$probe', which is what 0.11.0 said"

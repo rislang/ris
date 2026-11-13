@@ -1,6 +1,7 @@
 def invoke(callback, a : Array(Int32), n : Int32) : Int32
   callback.call(a, n)
 end
+
 def descend(a : Array(Int32), n : Int32) : Int32
   return 0 if n == 0
   local = Array(Int32).new
@@ -10,4 +11,5 @@ def descend(a : Array(Int32), n : Int32) : Int32
   child = invoke(callback, a, n)
   child + local.size
 end
+
 tape { descend(Array(Int32).new, 2) }

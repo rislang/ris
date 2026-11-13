@@ -19,7 +19,7 @@ answered.
 3. Lines 264, 287-305: no rule sets `@state[2]` to 1; add it to
    rule 4.
 4. Lines 358, 651: six sites cited, "seven `parse` defs" claimed
-   (the count is right: also time.iyi:2463). Cite all seven.
+   (the count is right: also time.ri:2463). Cite all seven.
 5. Lines 299-300: "tape twin" is undefined.
 6. Lines 413-414, 423: say whether step 8 also uses `validators`.
 7. Lines 732-735, 811-813: "heap_trap" is undefined; cite check.sh.

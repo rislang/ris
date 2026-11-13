@@ -184,10 +184,10 @@ class Iyi::Command
       },
       {
         "name": "doc",
-        "description": "What can be called: a module's exported surface (functions, types, methods, impls, with their doc comments, no bodies) from a .ri file or a .iyimod artifact, or a type of the prelude by name - `String`, `Array`, `Hash`, `Float64`, `Program` - the same way. Text.",
+        "description": "What can be called: a module's exported surface (functions, types, methods, impls, with their doc comments, no bodies) from a .ri file or a .rimod artifact, or a type of the prelude by name - `String`, `Array`, `Hash`, `Float64`, `Program` - the same way. Text.",
         "inputSchema": {
           "type": "object",
-          "properties": {"target": {"type": "string", "description": "path to a .ri module or .iyimod artifact, a prelude type's name, or `prelude` for the list of them"}},
+          "properties": {"target": {"type": "string", "description": "path to a .ri module or .rimod artifact, a prelude type's name, or `prelude` for the list of them"}},
           "required": ["target"]
         }
       }
@@ -236,7 +236,7 @@ class Iyi::Command
         built
       when "doc"
         target = arguments.try(&.dig?("target")).try(&.as_s?)
-        return mcp_tool_error(id, "doc needs a target: a .ri module, a .iyimod artifact, or a prelude type's name") unless target
+        return mcp_tool_error(id, "doc needs a target: a .ri module, a .rimod artifact, or a prelude type's name") unless target
         ["doc", target]
       else
         # With the catalogue, because a caller that guessed a name wrong

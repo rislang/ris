@@ -60,7 +60,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -78,7 +78,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src"
+export RIS_PATH="$REPO/src"
 
 case "$(uname -s)" in
   Darwin) PLATFORM=darwin ;;
@@ -133,9 +133,9 @@ forbidden_undef() {
 # first file name was taken for one and every frame was named `??`. The
 # reader is private to the module, so its four defs are lifted out of the
 # source into a harness that hands it the table.
-line_reader_names() { # line_reader_names <debug.iyi> <name> -> prints what it resolved
+line_reader_names() { # line_reader_names <debug.ri> <name> -> prints what it resolved
   local src="$1" name="$2"
-  "$PY" - "$src" "$WORK/$name.iyi" <<'PY'
+  "$PY" - "$src" "$WORK/$name.ri" <<'PY'
 import sys
 lines = open(sys.argv[1]).read().split("\n")
 start = next(i for i, l in enumerate(lines) if l.startswith("  def self.read_uleb128"))
@@ -156,7 +156,7 @@ open(sys.argv[2], "w").write(
     "table = [" + ", ".join("%d_u8" % b for b in table) + "]\n" +
     "puts LineReader.resolve_line(0x1004_u64, table.to_unsafe, table.size.to_i64).inspect\n")
 PY
-  "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1 || {
+  "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1 || {
     sed -n '1,8p' "$WORK/$name.build"
     return 1
   }
@@ -167,14 +167,14 @@ echo "== the line-table reader names a version 3 table's file"
 if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the version 3 table is unmeasured"
 else
-  v3=$(line_reader_names "$REPO/src/std/debug.iyi" v3_reader)
+  v3=$(line_reader_names "$REPO/src/std/debug.ri" v3_reader)
   if [ "$v3" = '"/src/a.c:42:7"' ]; then
     echo "  0x1004 in a version 3 table: /src/a.c:42:7"
   else
     fail "a version 3 table resolved 0x1004 to $v3, not /src/a.c:42:7"
   fi
   mkdir -p "$WORK/v4only"
-  if ! "$PY" - "$REPO/src/std/debug.iyi" "$WORK/v4only/debug.iyi" <<'PY'
+  if ! "$PY" - "$REPO/src/std/debug.ri" "$WORK/v4only/debug.ri" <<'PY'
 import sys
 t = open(sys.argv[1]).read()
 old = "(version >= 4 ? 16_i64 : 15_i64)"
@@ -184,7 +184,7 @@ open(sys.argv[2], "w").write(t.replace(old, "16_i64", 1))
 PY
   then
     fail "the version-4-only copy could not be made"
-  elif ! v4only=$(line_reader_names "$WORK/v4only/debug.iyi" v4only_reader); then
+  elif ! v4only=$(line_reader_names "$WORK/v4only/debug.ri" v4only_reader); then
     fail "the version-4-only copy did not build: $v4only"
   elif [ "$v4only" = '"/src/a.c:42:7"' ]; then
     fail "a reader that takes every table for version 4 resolved the version 3 one anyway"
@@ -197,7 +197,7 @@ fi
 #
 # Written so the line numbers are stated here rather than discovered: the raise
 # is line 6, and the three callers are lines 11, 15 and 18.
-cat > "$WORK/deep.iyi" <<'EOF'
+cat > "$WORK/deep.ri" <<'EOF'
 module deep
 
 import std/debug
@@ -223,20 +223,20 @@ EOF
 # Darwin's names are not asked for here; Linux's are, in order.
 deep_holds() { # deep_holds <output>
   local out="$1" line
-  grep -q "^iyi: panic: boom" "$out" || { echo "the message is the first line"; return; }
+  grep -q "^ris: panic: boom" "$out" || { echo "the message is the first line"; return; }
   for line in 6 11 15 18; do
-    grep -q "deep.iyi:$line" "$out" || { echo "a frame at deep.iyi:$line"; return; }
+    grep -q "deep.ri:$line" "$out" || { echo "a frame at deep.ri:$line"; return; }
   done
   if [ "$PLATFORM" = linux ]; then
-    grep -qE "^0 +gamma at .*deep\.iyi:6:" "$out" &&
-      grep -qE "^1 +beta at .*deep\.iyi:11:" "$out" &&
-      grep -qE "^2 +alpha at .*deep\.iyi:15:" "$out" ||
+    grep -qE "^0 +gamma at .*deep\.ri:6:" "$out" &&
+      grep -qE "^1 +beta at .*deep\.ri:11:" "$out" &&
+      grep -qE "^2 +alpha at .*deep\.ri:15:" "$out" ||
       echo "frames 0 to 2 are gamma, beta and alpha"
   fi
 }
 
 echo "== a panic resolves its frames to file, line and column"
-if ! "$IYI" build -o "$WORK/deep" "$WORK/deep.iyi" > "$WORK/deep.build" 2>&1; then
+if ! "$RIS" build -o "$WORK/deep" "$WORK/deep.ri" > "$WORK/deep.build" 2>&1; then
   echo "  build failed"
   sed 's/^/    /' "$WORK/deep.build"
   exit 1
@@ -252,7 +252,7 @@ platform_libc_only "$WORK/deep" "the resolved program"
 
 # ── 2. move the raise, and the reported line moves with it
 echo "== the line follows the raise"
-cat > "$WORK/moved.iyi" <<'EOF'
+cat > "$WORK/moved.ri" <<'EOF'
 module moved
 
 import std/debug
@@ -266,12 +266,12 @@ end
 
 puts gamma(1)
 EOF
-if "$IYI" build -o "$WORK/moved" "$WORK/moved.iyi" > "$WORK/moved.build" 2>&1; then
+if "$RIS" build -o "$WORK/moved" "$WORK/moved.ri" > "$WORK/moved.build" 2>&1; then
   "$WORK/moved" > "$WORK/moved.out" 2>&1
   sed 's/^/  /' "$WORK/moved.out"
-  grep -q "moved.iyi:8" "$WORK/moved.out" \
+  grep -q "moved.ri:8" "$WORK/moved.out" \
     || fail "the raise is on line 8 and no frame says so"
-  grep -q "moved.iyi:6" "$WORK/moved.out" \
+  grep -q "moved.ri:6" "$WORK/moved.out" \
     && fail "a frame named line 6, where the raise is not"
 else
   echo "  build failed"
@@ -281,18 +281,18 @@ fi
 
 # ── 3. a program that does not import it keeps the minimal panic path
 echo "== without the import, the panic path is unchanged"
-cat > "$WORK/bare.iyi" <<'EOF'
+cat > "$WORK/bare.ri" <<'EOF'
 module bare
 
 raise "boom"
 EOF
-if "$IYI" build -o "$WORK/bare" "$WORK/bare.iyi" > "$WORK/bare.build" 2>&1; then
+if "$RIS" build -o "$WORK/bare" "$WORK/bare.ri" > "$WORK/bare.build" 2>&1; then
   "$WORK/bare" > "$WORK/bare.out" 2>&1
   bare_code=$?
   sed 's/^/  /' "$WORK/bare.out"
   [ "$bare_code" -ne 0 ] || fail "the bare program exited 0"
-  grep -q "^iyi: panic: boom" "$WORK/bare.out" || fail "the bare panic lost its message"
-  grep -q "\.iyi:[0-9]*:[0-9]*" "$WORK/bare.out" \
+  grep -q "^ris: panic: boom" "$WORK/bare.out" || fail "the bare panic lost its message"
+  grep -q "\.ri:[0-9]*:[0-9]*" "$WORK/bare.out" \
     && fail "a program that never imported std/debug resolved a column anyway"
   platform_libc_only "$WORK/bare" "the bare program"
 else
@@ -313,7 +313,7 @@ if [ "$PLATFORM" = linux ]; then
   # its frames by `.symtab`, each the symbol `nm` says holds the address.
   # The raise is line 7, its callers 12, 16 and 22.
   echo "== the walk and the names, against binutils"
-  cat > "$WORK/probe.iyi" <<'EOF'
+  cat > "$WORK/probe.ri" <<'EOF'
 module probe
 
 import std/debug
@@ -338,7 +338,7 @@ puts alpha(1)
 EOF
   if [ -z "$PY" ] || ! command -v addr2line >/dev/null 2>&1 || ! command -v strip >/dev/null 2>&1; then
     echo "  no python3, addr2line or strip here, so the comparison with binutils is unmeasured"
-  elif ! "$IYI" build -o "$WORK/probe" "$WORK/probe.iyi" > "$WORK/probe.build" 2>&1; then
+  elif ! "$RIS" build -o "$WORK/probe" "$WORK/probe.ri" > "$WORK/probe.build" 2>&1; then
     fail "the probe did not build"
     sed 's/^/    /' "$WORK/probe.build"
   else
@@ -396,10 +396,10 @@ PY
   echo "== the walk where its rules differ"
   # Optimised, gamma and beta are inlined into alpha and their frames are
   # alpha's: the raise's line and main's must still be there.
-  if "$IYI" build --release -o "$WORK/deep-release" "$WORK/deep.iyi" > "$WORK/release.build" 2>&1; then
+  if "$RIS" build --release -o "$WORK/deep-release" "$WORK/deep.ri" > "$WORK/release.build" 2>&1; then
     "$WORK/deep-release" > "$WORK/release.out" 2>&1
-    if grep -q "deep.iyi:6:" "$WORK/release.out" && grep -q "deep.iyi:18:" "$WORK/release.out"; then
-      echo "  --release: the raise at deep.iyi:6 and its call from deep.iyi:18"
+    if grep -q "deep.ri:6:" "$WORK/release.out" && grep -q "deep.ri:18:" "$WORK/release.out"; then
+      echo "  --release: the raise at deep.ri:6 and its call from deep.ri:18"
     else
       fail "an optimised build lost the raise's line or main's"
       sed 's/^/    /' "$WORK/release.out"
@@ -408,7 +408,7 @@ PY
     fail "the optimised build failed"
   fi
   # Every function keeping its frame pointer defines its CFA by it.
-  if "$IYI" build --frame-pointers always -o "$WORK/deep-fp" "$WORK/deep.iyi" > "$WORK/fp.build" 2>&1; then
+  if "$RIS" build --frame-pointers always -o "$WORK/deep-fp" "$WORK/deep.ri" > "$WORK/fp.build" 2>&1; then
     "$WORK/deep-fp" > "$WORK/fp.out" 2>&1
     missing="$(deep_holds "$WORK/fp.out")"
     if [ -z "$missing" ]; then
@@ -422,7 +422,7 @@ PY
   fi
   # A task runs on a stack of its own, mapped by the scheduler, which the
   # walk follows down to the fiber's entry.
-  cat > "$WORK/task.iyi" <<'EOF'
+  cat > "$WORK/task.ri" <<'EOF'
 module task
 
 import std/debug
@@ -443,11 +443,11 @@ group do |g|
   end
 end
 EOF
-  if "$IYI" build -o "$WORK/task" "$WORK/task.iyi" > "$WORK/task.build" 2>&1; then
+  if "$RIS" build -o "$WORK/task" "$WORK/task.ri" > "$WORK/task.build" 2>&1; then
     "$WORK/task" > "$WORK/task.out" 2>&1
-    if grep -qE "^0 +inner at .*task\.iyi:6:" "$WORK/task.out" &&
-       grep -qE "^1 +outer at .*task\.iyi:11:" "$WORK/task.out" &&
-       grep -qE "^2 +[^ ]* at .*task\.iyi:16:" "$WORK/task.out"; then
+    if grep -qE "^0 +inner at .*task\.ri:6:" "$WORK/task.out" &&
+       grep -qE "^1 +outer at .*task\.ri:11:" "$WORK/task.out" &&
+       grep -qE "^2 +[^ ]* at .*task\.ri:16:" "$WORK/task.out"; then
       echo "  a task's panic: inner, outer and the spawned block, on the task's own stack"
     else
       fail "a panic in a task did not name inner, outer and the spawned block"
@@ -463,7 +463,7 @@ EOF
     "$WORK/deep-stripped" > "$WORK/stripped-deep.out" 2>&1
     stripped_code=$?
     frames="$(grep -cE '^[0-9]+ +\[0x[0-9a-f]+\]$' "$WORK/stripped-deep.out")"
-    if [ "$stripped_code" -eq 1 ] && [ "$frames" -ge 4 ] && ! grep -q "deep.iyi:[0-9]*:" "$WORK/stripped-deep.out"; then
+    if [ "$stripped_code" -eq 1 ] && [ "$frames" -ge 4 ] && ! grep -q "deep.ri:[0-9]*:" "$WORK/stripped-deep.out"; then
       echo "  stripped: $frames frames, each an address"
     else
       fail "a stripped program's panic is not its addresses (exit $stripped_code):"
@@ -483,7 +483,7 @@ EOF
     echo "  no python3 on this machine, so the LibC.write proof is unmeasured"
   else
     mkdir -p "$WORK/bad/std"
-    "$PY" - "$REPO/src/std/debug.iyi" "$WORK/bad/std/debug.iyi" <<'PY'
+    "$PY" - "$REPO/src/std/debug.ri" "$WORK/bad/std/debug.ri" <<'PY'
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -506,7 +506,7 @@ t = t.replace(anchor, """module std/debug
 """, 1)
 open(dst, "w").write(t)
 PY
-    if IYI_PATH="$WORK/bad${PSEP}$REPO/src" "$IYI" build -o "$WORK/badprog" "$WORK/deep.iyi" \
+    if RIS_PATH="$WORK/bad${PSEP}$REPO/src" "$RIS" build -o "$WORK/badprog" "$WORK/deep.ri" \
          > "$WORK/badprog.build" 2>&1; then
       if forbidden_undef "$WORK/badprog" | grep -qE ' write(@.*)?$'; then
         echo "  a LibC.write copy leaves write undefined, so the check has teeth"
@@ -531,7 +531,7 @@ PY
       echo "  $label: no python3, unmeasured"
       return
     fi
-    if ! OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/debug.iyi" "$WORK/broken/std/debug.iyi" <<'PY'
+    if ! OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/debug.ri" "$WORK/broken/std/debug.ri" <<'PY'
 import os, sys
 t = open(sys.argv[1]).read()
 if t.count(os.environ["OLD"]) != 1:
@@ -542,7 +542,7 @@ PY
       fail "the $label patch did not apply"
       return
     fi
-    if ! IYI_PATH="$WORK/broken${PSEP}$REPO/src" "$IYI" build "$@" -o "$WORK/broken-deep" "$WORK/deep.iyi" \
+    if ! RIS_PATH="$WORK/broken${PSEP}$REPO/src" "$RIS" build "$@" -o "$WORK/broken-deep" "$WORK/deep.ri" \
          > "$WORK/broken.build" 2>&1; then
       fail "$label: the broken copy did not build"
       sed -n '1,8p' "$WORK/broken.build" | sed 's/^/    /'
@@ -561,7 +561,7 @@ PY
   }
   # The CFA's offset never moved past the CIE's: every frame past the
   # first is found at the wrong address.
-  prove_broken "def_cfa_offset ignored" "a frame at deep.iyi:11" \
+  prove_broken "def_cfa_offset ignored" "a frame at deep.ri:11" \
     '          when 0x0e
             state[1] = read_uleb128(pointerof(cursor)).unsafe_to_i64' \
     '          when 0x0e
@@ -569,16 +569,16 @@ PY
   # The rules of the whole function, not of the address: a row past it
   # applied. LLVM 23 can preserve beta and lose alpha instead: either
   # caller lost is this unwind defect, at lines 11 and 15 respectively.
-  prove_broken "a row past the address applied" "a frame at deep.iyi:1[15]" \
+  prove_broken "a row past the address applied" "a frame at deep.ri:1[15]" \
     '          loc = loc &+ (op & 0x3f).to_u64 &* code_align
           return true if loc > target' \
     '          loc = loc &+ (op & 0x3f).to_u64 &* code_align'
   # A caller's frame looked up by its return address, which after a call
   # that does not return is the next function's first byte.
-  prove_broken "a return address looked up as itself" "a frame at deep.iyi:11" \
+  prove_broken "a return address looked up as itself" "a frame at deep.ri:11" \
     'lookup = first ? pc : pc &- 1_u64' 'lookup = pc'
   # A CFA defined by the frame pointer refused.
-  prove_broken "the frame pointer never a CFA base" "a frame at deep.iyi:11" \
+  prove_broken "the frame pointer never a CFA base" "a frame at deep.ri:11" \
     'elsif state[0] == FP_COLUMN && fp_known' 'elsif false' --frame-pointers always
   # A subprogram's high_pc, which DWARF 4 writes as a length, read as the
   # address it ends at: no function holds a frame, and each is named by

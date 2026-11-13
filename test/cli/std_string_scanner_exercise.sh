@@ -24,7 +24,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -42,13 +42,13 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
-EXERCISE="$REPO/test/cli/std_string_scanner_exercise.iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
+EXERCISE="$REPO/test/cli/std_string_scanner_exercise.ri"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -102,7 +102,7 @@ echo "== what the scanner refuses, by its sentence"
 # the sentence that says which; `[]?` is the form that answers nil.
 # refuses <label> <statement> <sentence>
 refuses() {
-  cat >"$WORK/refuse.iyi" <<IYI
+  cat >"$WORK/refuse.ri" <<RIS
 module refuse
 
 import std/regex::{Regex}
@@ -112,11 +112,11 @@ s = StringScanner.new("Fri Dec 12")
 s.scan(/(?<wday>\\w+) (\\w+)/)
 $2
 puts "accepted"
-IYI
-  if "$IYI" run "$WORK/refuse.iyi" >"$WORK/refuse.out" 2>&1; then
+RIS
+  if "$RIS" run "$WORK/refuse.ri" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted"
     status=1
-  elif ! grep -qxF "iyi: panic: $3" "$WORK/refuse.out"; then
+  elif ! grep -qxF "ris: panic: $3" "$WORK/refuse.out"; then
     echo "  $1 was refused without the sentence: $(tr -d '\r' <"$WORK/refuse.out" | head -1)"
     status=1
   else
@@ -131,7 +131,7 @@ refuses "a name that is not there" 'puts s["day"]' "string_scanner: the last mat
 refuses "a group of no match" 's.scan("x")
 puts s[0]' "string_scanner: the last scan matched nothing, so it has no group 0"
 refuses "a negative count" 's.peek(-3)' "string_scanner: negative lookahead count: -3"
-if grep -nE '^\s*(lib|fun) |File\.|Dir\.|ENV' "$REPO/src/std/string_scanner.iyi"; then
+if grep -nE '^\s*(lib|fun) |File\.|Dir\.|ENV' "$REPO/src/std/string_scanner.ri"; then
   echo "  the module reaches outside itself"
   status=1
 else
@@ -288,15 +288,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/string_scanner.iyi").read_text()
+src = Path("$REPO/src/std/string_scanner.ri").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/string_scanner.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/string_scanner.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$EXERCISE" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$EXERCISE" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF -- "$2" "$WORK/mut.out"; then

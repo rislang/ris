@@ -1,6 +1,6 @@
 # iyi: the front end as a program of its own — parse, analyse, report, exit.
 #
-#     crystal-front samples/iyi/hello.iyi
+#     crystal-front samples/ris/hello.ri
 #
 # **Why it exists is a measurement.** `crystal build --no-codegen` never calls
 # LLVM and pays 0.026 s for linking it anyway: libLLVM's load-time initialisers
@@ -50,10 +50,10 @@ require "./iyi/codegen/types"
 require "./iyi/codegen/cache_dir"
 
 module Iyi::Front
-  # The prelude a `.iyi` file gets, which is the same rule `crystal build`
+  # The prelude a `.ri` file gets, which is the same rule `crystal build`
   # applies: iyi's own, unless the file is Crystal's.
   private def self.prelude_for(filename : String) : String
-    filename.ris_source? ? "iyi/prelude" : "prelude"
+    filename.ris_source? ? "ris/prelude" : "prelude"
   end
 
   def self.run(argv : Array(String)) : Int32
@@ -79,7 +79,7 @@ module Iyi::Front
 
     node = program.new_parser(source).tap(&.filename = filename).parse
     location = Location.new(filename, 1, 1)
-    # Flagged as the prelude's own `require`, because a `.iyi` file is not
+    # Flagged as the prelude's own `require`, because a `.ri` file is not
     # allowed one and the refusal does not know the compiler wrote this line.
     node = program.normalize(
       Expressions.new([Require.new(prelude_for(filename)).tap(&.iyi_prelude=(true)).at(location), node] of ASTNode))

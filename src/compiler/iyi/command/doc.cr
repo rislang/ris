@@ -6,8 +6,8 @@
 # with, served for one module at a time, because "what can I call here"
 # is a question a person asks too.
 #
-#     iyi doc lib/thing.iyimod    # from an artifact, source not needed
-#     iyi doc src/thing.iyi       # from source: the module is compiled
+#     iyi doc lib/thing.rimod    # from an artifact, source not needed
+#     iyi doc src/thing.ri       # from source: the module is compiled
 #                                 # alone, front end only, and read back
 #     iyi doc String              # a type of the prelude: what a String
 #                                 # can do, the prelude's own comments
@@ -33,18 +33,21 @@ class Iyi::Command
       abort! "doc reads one module, file or type at a time, and '#{extra}' is a second", :USAGE_ERROR
     when filename.starts_with?('-')
       abort! "doc: unknown flag #{filename}", :USAGE_ERROR
-    when filename.ends_with?(".iyimod")
-      doc_file! filename, ".iyimod"
+    when Lexer.iyi_named?(filename)
+      # ris: a `.iyi` file or `.iyimod` artifact is refused (SPEC 6.10).
+      abort! Lexer.iyi_miscased_sentence(filename), :USAGE_ERROR
+    when filename.ends_with?(".rimod")
+      doc_file! filename, ".rimod"
       doc_artifact(filename)
     when Iyi.path_key(filename).ris_source?
-      doc_file! filename, ".iyi module"
+      doc_file! filename, ".ri module"
       doc_from_source(File.expand_path(filename))
     when filename == "prelude"
       doc_prelude_index
     when prelude_type_name?(filename)
       doc_prelude_type(filename)
     when resolved = doc_module_path(filename)
-      resolved.ends_with?(".iyimod") ? doc_artifact(resolved) : doc_from_source(resolved)
+      resolved.ends_with?(".rimod") ? doc_artifact(resolved) : doc_from_source(resolved)
     when doc_module_spelling?(filename)
       # The subject is written as a module path is, and found nowhere:
       # `iyi doc std/sett` was told to give "a module path (`iyi doc
@@ -54,15 +57,15 @@ class Iyi::Command
       roots << File.expand_path(Compiler::ARTIFACT_DIR) if Compiler.workspace_artifacts(Dir.current)
       packages = Mod::Installer.manifest?(Dir.current) ? ", and through this project's #{File.basename(Mod::Installer.manifest_in(Dir.current))}" : ""
       abort! "can't find module '#{filename}'. A module's path is its file's path, so this one is " \
-             "`#{filename}.ri` (or `#{filename}.iyimod` in #{Compiler::ARTIFACT_DIR}), looked for under #{roots.join(", ")}#{packages}", :USAGE_ERROR
+             "`#{filename}.ri` (or `#{filename}.rimod` in #{Compiler::ARTIFACT_DIR}), looked for under #{roots.join(", ")}#{packages}", :USAGE_ERROR
     else
       abort! "expected a module path (`#{Command.program_name} doc app/greeter`), " \
-             "a .iyi file, a .iyimod artifact, or a type of the prelude " \
+             "a .ri file, a .rimod artifact, or a type of the prelude " \
              "(`#{Command.program_name} doc String`)", :USAGE_ERROR
     end
   end
 
-  # An artifact's surface, the subject named as a `.iyimod` or found as
+  # An artifact's surface, the subject named as a `.rimod` or found as
   # one in the workspace's `mods`.
   private def doc_artifact(path : String) : Nil
     artifact =
@@ -75,7 +78,7 @@ class Iyi::Command
   end
 
   # Whether the subject is spelled as a module path - lower-case segments
-  # between `/`, a package's dotted host included, the grammar `iyi.mod`
+  # between `/`, a package's dotted host included, the grammar `ris.mod`
   # holds a module path to - rather than as a file `doc` reads some other
   # way.
   private def doc_module_spelling?(name : String) : Bool
@@ -95,10 +98,10 @@ class Iyi::Command
   end
 
   # iyi: the file a module path names, found the way `import` finds it —
-  # the project root, then every `IYI_PATH` entry, `.iyi` before `.cr`
+  # the project root, then every `RIS_PATH` entry, `.ri` before `.cr`
   # (R-1, IV.6).
   #
-  # `iyi doc app/greeter` answered "expected a .iyi module, a .iyimod
+  # `iyi doc app/greeter` answered "expected a .ri module, a .rimod
   # artifact, or a type of the prelude" for the one spelling this language
   # is built on: a module's path *is* its file's path, it is what `import`
   # takes, what `mod context` prints as a header, and what every error
@@ -107,7 +110,7 @@ class Iyi::Command
   private def doc_module_path(path : String) : String?
     return nil if path.empty? || path.starts_with?('-') || path.ends_with?(".cr")
 
-    # A package's module, through this project's iyi.mod - a short name
+    # A package's module, through this project's ris.mod - a short name
     # included - the way a build resolves the import: `iyi doc
     # github.com/sdogruyol/iyi-web/iyi_web/dsl`, or `iyi doc web/iyi_web/dsl`.
     if Mod::Installer.manifest?(Dir.current)
@@ -129,7 +132,7 @@ class Iyi::Command
             next
           end
         # ris: `name.ri` first, as the compiler reads it.
-        {".ri", ".iyi"}.each do |extension|
+        {".ri"}.each do |extension|
           file = File.join(checkout, "#{inner}#{extension}")
           return File.expand_path(file) if File.file?(file)
         end
@@ -138,7 +141,11 @@ class Iyi::Command
 
     roots = [Dir.current] + IyiPath.new(iyi_path_entries).entries
     roots.each do |root|
-      {".ri", ".iyi", ".cr"}.each do |extension|
+      old = File.join(root, "#{path}.iyi")
+      if File.file?(old) && !File.file?(File.join(root, "#{path}.ri"))
+        abort! Lexer.iyi_miscased_sentence(old), :USAGE_ERROR
+      end
+      {".ri", ".cr"}.each do |extension|
         relative = "#{path}#{extension}"
         candidate = File.join(root, relative)
         next unless File.file?(candidate) && doc_spelled_as?(root, relative)
@@ -151,12 +158,12 @@ class Iyi::Command
     end
 
     # And the workspace's own `mods`, after its sources, as every other
-    # verb reads it: a library that arrived as `.iyimod` files has no
-    # source to find, and `iyi doc app/twice` beside `mods/app/twice.iyimod`
+    # verb reads it: a library that arrived as `.rimod` files has no
+    # source to find, and `iyi doc app/twice` beside `mods/app/twice.rimod`
     # answered "expected a module path" about a module `iyi build` compiles
     # against.
     if mods = Compiler.workspace_artifacts(Dir.current)
-      relative = "#{path}.iyimod"
+      relative = "#{path}.rimod"
       candidate = File.join(mods, relative)
       return File.expand_path(candidate) if File.file?(candidate) && doc_spelled_as?(mods, relative)
     end
@@ -191,7 +198,7 @@ class Iyi::Command
   end
 
   # iyi: "no such file" about a path that is there sends the reader to `ls`,
-  # where they find it and learn nothing. A directory named `x.iyimod` is a
+  # where they find it and learn nothing. A directory named `x.rimod` is a
   # directory, and that is the fact to hand back.
   private def doc_file!(filename : String, kind : String) : Nil
     return if File.file?(filename)
@@ -249,17 +256,17 @@ class Iyi::Command
     filename = location.original_filename
     return false unless filename.is_a?(String)
     posix = ::Path[filename].to_posix.to_s
-    posix.includes?("/src/iyi/") || posix.starts_with?("src/iyi/")
+    posix.includes?("/src/ris/") || posix.starts_with?("src/ris/")
   end
 
   private def doc_prelude_program : Program
     compiler = Compiler.new
-    compiler.prelude = "iyi/prelude"
+    compiler.prelude = "ris/prelude"
     compiler.no_codegen = true
     compiler.wants_doc = true
     compiler.stdout = IO::Memory.new
     # No packages: the prelude imports none, and the empty entry sits in the
-    # working directory, whose iyi.mod would otherwise be resolved for it.
+    # working directory, whose ris.mod would otherwise be resolved for it.
     # In a project with a requirement not in the cache and no network, `iyi
     # doc String`, `doc prelude` and `init` (which asks this for the
     # prelude's names) each answered "the prelude does not compile: cannot
@@ -267,7 +274,7 @@ class Iyi::Command
     compiler.iyi_mod_table = [] of {String, String}
     compiler.stderr = IO::Memory.new
     begin
-      compiler.top_level_semantic(Compiler::Source.new("doc.iyi", "")).program
+      compiler.top_level_semantic(Compiler::Source.new("doc.ri", "")).program
     rescue ex : Iyi::Error | Iyi::CodeError
       abort! "the prelude does not compile: #{ex.message.to_s.lines.first?}", :USAGE_ERROR
     end
@@ -342,7 +349,7 @@ class Iyi::Command
     if type.is_a?(IntegerType)
       io << "\n# `import std/int` gives #{type} the rest of the integer tower's surface:\n" \
             "# arithmetic and comparison with every integer type, `//`, `%`, `<<`, `>>`,\n" \
-            "# `<=>`, the bit counts and every `to_*` conversion (`iyi doc std/int`).\n"
+            "# `<=>`, the bit counts and every `to_*` conversion (`ris doc std/int`).\n"
     end
   end
 
@@ -365,7 +372,7 @@ class Iyi::Command
       # "Unhandled exception ... (InvalidByteSequenceError)", a dozen frames
       # of this compiler's own files, and an invitation to file an issue
       # against the other language's tracker.
-      abort! "file '#{Iyi.relative_filename(filename)}' is not a valid iyi " \
+      abort! "file '#{Iyi.relative_filename(filename)}' is not a valid ris " \
              "source file: it holds bytes that are not UTF-8 text", :USAGE_ERROR
     end
 
@@ -374,8 +381,7 @@ class Iyi::Command
       abort! "#{filename} declares no module, and a module is what `doc` reads", :USAGE_ERROR
     end
     module_root = doc_module_root(filename, module_name)
-    # ris: the file's own extension, `.ri` or the `.iyi` carried over.
-    extension = filename.ends_with?(".ri") ? ".ri" : ".iyi"
+    extension = ".ri"
     unless Iyi.same_file?(File.join(module_root, "#{module_name}#{extension}"), filename)
       abort! "#{filename} declares `module #{module_name}`, and a module's path " \
              "is its file's path (iyi SPEC R-1, IV.6): a module by that name is " \
@@ -385,11 +391,11 @@ class Iyi::Command
     emit_dir = File.tempname("iyi-doc", nil)
     Dir.mkdir_p(emit_dir)
     begin
-      entry = File.join(emit_dir, "doc_entry.iyi")
+      entry = File.join(emit_dir, "doc_entry.ri")
       File.write(entry, "import #{module_name}\n")
 
       compiler = Compiler.new
-      compiler.prelude = "iyi/prelude"
+      compiler.prelude = "ris/prelude"
       compiler.no_codegen = true
       compiler.iyi_mod_table = Mod::Installer.table_for(module_root)
       # The artifacts a workspace keeps, for an import whose source is not
@@ -404,7 +410,7 @@ class Iyi::Command
       compiler.stdout = IO::Memory.new
       compiler.stderr = IO::Memory.new
       # The module's root is where the entry's import is resolved first, as
-      # a project's root is. It travelled as the front of `IYI_PATH`, which
+      # a project's root is. It travelled as the front of `RIS_PATH`, which
       # is split on `;` on Windows (`:` elsewhere): a project in `a;b`
       # arrived as two entries that are not directories, and `iyi doc`
       # answered "can't find module" about a module `iyi run` builds.
@@ -418,7 +424,7 @@ class Iyi::Command
         # the module, so an error arrives wrapped in `while importing "X"`
         # (`SemanticVisitor#import_file`) and the first line of *that* names
         # the file the author has just typed and nothing they can act on:
-        # `iyi doc twoheaders.iyi` answered `does not compile alone: while
+        # `iyi doc twoheaders.ri` answered `does not compile alone: while
         # importing "twoheaders"` where `iyi run` answered `a file declares
         # one module, and this one already declares 'main'`.
         deepest = Iyi.deepest_error(ex)
@@ -429,7 +435,7 @@ class Iyi::Command
         abort! "#{filename} does not compile alone: #{deepest.message.to_s.lines.first?}", :USAGE_ERROR
       end
 
-      Dir.glob(Iyi.glob_root(emit_dir).join("**", "*.iyimod")) do |candidate|
+      Dir.glob(Iyi.glob_root(emit_dir).join("**", "*.rimod")) do |candidate|
         begin
           artifact = IyiMod.read(candidate)
           if artifact.module_name == module_name
@@ -449,7 +455,7 @@ class Iyi::Command
 
   # iyi: the name a module *declares*, which is its identity. R-1 makes a
   # module's path its name, and a file's basename is only the last segment
-  # of it: `iyi doc deep/inner/thing.iyi` took the basename, imported
+  # of it: `iyi doc deep/inner/thing.ri` took the basename, imported
   # `thing`, resolved nothing of the sort and printed `module thing` with an
   # empty surface at exit 0 — a documented module reported as exporting
   # nothing, which is the worst of the three answers a verb can give.
@@ -473,9 +479,9 @@ class Iyi::Command
     Prints a module's exported surface with its doc comments — functions,
     types, methods, impls; no bodies, nothing private. MODULE is a module
     path written the way `import` writes it — `app/greeter`, `std/set` —
-    found under the project root and `IYI_PATH`, then as an artifact in the
-    project's `mods`. FILE is a `.iyimod` artifact (read directly, source
-    not needed) or a `.iyi` module (compiled alone, front end only). TYPE
+    found under the project root and `RIS_PATH`, then as an artifact in the
+    project's `mods`. FILE is a `.rimod` artifact (read directly, source
+    not needed) or a `.ri` module (compiled alone, front end only). TYPE
     is a type of the prelude - `String`, `Array`, `Hash`, `Program` -
     printed the same way: what it can do, with the prelude's own comments;
     `prelude` lists them all, one line each.

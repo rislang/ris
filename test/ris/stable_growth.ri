@@ -39,5 +39,6 @@ def check_growth
     raise "padding" unless padding.bytesize > 0
   end
 end
+
 check_growth
 puts "PASS: stable interleaved growth"

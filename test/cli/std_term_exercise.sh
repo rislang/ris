@@ -42,7 +42,7 @@ if [ -n "$PY" ] && "$PY" -c 'import pty, termios, fcntl' >/dev/null 2>&1 && comm
   PTY=yes
 fi
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -60,7 +60,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 # The exercise's own standard input is closed off: its terminal-free checks
 # run a copy of itself with pipes on all three streams, and nothing here
@@ -68,7 +68,7 @@ export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_term_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_term_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -556,14 +556,14 @@ echo "== what term refuses"
 refuses() {
   local label="$1" name="$2" phrase="$3" input="$4"
   shift 4
-  cat >"$WORK/$name.iyi" <<EOF
+  cat >"$WORK/$name.ri" <<EOF
 module $name
 
 import std/term::{Term}
 
 $*
 EOF
-  if "$IYI" run "$WORK/$name.iyi" <"$input" >"$WORK/$name.out" 2>&1; then
+  if "$RIS" run "$WORK/$name.ri" <"$input" >"$WORK/$name.out" 2>&1; then
     echo "  $label: accepted"
     status=1
   elif ! grep -qF "$phrase" "$WORK/$name.out"; then
@@ -610,7 +610,7 @@ prove_broken() {
     echo "  no pseudo-terminal here, so the $label proof is unmeasured"
     return
   fi
-  if ! OLD="$4" NEW="$5" "$PY" - "$REPO/src/std/term.iyi" "$WORK/patched/std/term.iyi" <<'PY'
+  if ! OLD="$4" NEW="$5" "$PY" - "$REPO/src/std/term.ri" "$WORK/patched/std/term.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1]).read()
 if src.count(os.environ["OLD"]) != 1:
@@ -622,8 +622,8 @@ PY
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/patched/program" \
-       "$REPO/test/cli/std_term_exercise.iyi" >"$WORK/patched/build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/patched/program" \
+       "$REPO/test/cli/std_term_exercise.ri" >"$WORK/patched/build.log" 2>&1; then
     echo "  $label: the broken copy did not compile"
     sed -n '1,6p' "$WORK/patched/build.log" | sed 's/^/    /'
     status=1

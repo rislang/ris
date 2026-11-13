@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives test/cli/server_load.iyi: the shape every server has — a fiber per
+# Drives test/cli/server_load.ri: the shape every server has — a fiber per
 # connection, both halves parked on the poller, a collection in the
 # middle — and the two things that shape used to break.
 #
@@ -34,7 +34,7 @@ case "$(uname -s)" in
   *) PSEP=':' ;;
 esac
 
-IYI="${IYI:-$REPO/bin/ris}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -64,7 +64,7 @@ case "$(uname -s)" in
 esac
 
 step "a server's shape, plain build"
-if ! "$IYI" build "$REPO/test/cli/server_load.iyi" -o server > build.log 2>&1; then
+if ! "$RIS" build "$REPO/test/cli/server_load.ri" -o server > build.log 2>&1; then
   cat build.log; exit 1
 fi
 if ! timeout 300 ./server > answers.txt 2>&1; then
@@ -74,7 +74,7 @@ grep -q 'every property held' answers.txt || { cat answers.txt; exit 1; }
 grep -E '^(collections|answers|stacks|canary) ' answers.txt | sed 's/^/  /'
 
 step "a server's shape, release build"
-if ! "$IYI" build --release "$REPO/test/cli/server_load.iyi" -o server-release > build-release.log 2>&1; then
+if ! "$RIS" build --release "$REPO/test/cli/server_load.ri" -o server-release > build-release.log 2>&1; then
   cat build-release.log; exit 1
 fi
 if ! timeout 300 ./server-release > answers-release.txt 2>&1; then
@@ -83,7 +83,7 @@ fi
 grep -q 'every property held' answers-release.txt || { cat answers-release.txt; exit 1; }
 
 mkdir -p patched/iyi
-cp "$REPO"/src/iyi/*.iyi patched/iyi/
+cp "$REPO"/src/ris/*.ri patched/ris/
 
 # This proof injects its defect into what the kernel writes into: the
 # event buffer `epoll_wait` and `kevent` fill, and on Windows, whose poller
@@ -96,10 +96,10 @@ case "$(uname -s)" in
     step "failure proof: the fiber's OVERLAPPED as a number is an OVERLAPPED nobody keeps"
     sed -e 's/^  property wait_overlapped : Pointer(UInt8)$/  property wait_overlapped_word : UInt64\n\n  def wait_overlapped : Pointer(UInt8)\n    Pointer(UInt8).new(@wait_overlapped_word)\n  end/' \
         -e 's/^    @wait_overlapped = Pointer(UInt8)\.malloc(32_u64)$/    @wait_overlapped_word = Pointer(UInt8).malloc(32_u64).address/' \
-        "$REPO/src/iyi/concurrency.iyi" > patched/iyi/concurrency.iyi
-    [ "$(diff "$REPO/src/iyi/concurrency.iyi" patched/iyi/concurrency.iyi | grep -c '^>')" -eq 6 ] || {
+        "$REPO/src/ris/concurrency.ri" > patched/ris/concurrency.ri
+    [ "$(diff "$REPO/src/ris/concurrency.ri" patched/ris/concurrency.ri | grep -c '^>')" -eq 6 ] || {
       echo "the sed did not find both lines it changes"; exit 1; }
-    if ! IYI_PATH="$WORK/patched${PSEP}$REPO/src" "$IYI" build "$REPO/test/cli/server_load.iyi" -o hidden > build-hidden.log 2>&1; then
+    if ! RIS_PATH="$WORK/patched${PSEP}$REPO/src" "$RIS" build "$REPO/test/cli/server_load.ri" -o hidden > build-hidden.log 2>&1; then
       cat build-hidden.log; exit 1
     fi
     timeout -k 5 300 ./hidden > hidden.txt 2>&1
@@ -108,7 +108,7 @@ case "$(uname -s)" in
       echo "an OVERLAPPED the collector cannot see survived the run, so the run proves nothing (exit $code):"
       tail -3 hidden.txt; exit 1
     fi
-    printf '  exits 1 at "%s"\n' "$(grep -m1 'freed the OVERLAPPED' hidden.txt | sed 's/^iyi: panic: FAIL: //')"
+    printf '  exits 1 at "%s"\n' "$(grep -m1 'freed the OVERLAPPED' hidden.txt | sed 's/^ris: panic: FAIL: //')"
     ;;
   *)
     step "failure proof: the poller's buffer as a number is a buffer nobody keeps"
@@ -117,8 +117,8 @@ case "$(uname -s)" in
         -e 's/^    return buffer\.address if buffer\.address != 0_u64$/    return buffer if buffer != 0_u64/' \
         -e 's/^    buffer = Pointer(UInt8)\.malloc((EVENTS \* IYI_POLL_EVENT_BYTES)\.to_u64)$/    buffer = Pointer(UInt8).malloc((EVENTS * IYI_POLL_EVENT_BYTES).to_u64).address/' \
         -e 's/^    buffer\.address$/    buffer/' \
-        "$REPO/src/iyi/concurrency.iyi" > patched/iyi/concurrency.iyi
-    cmp -s patched/iyi/concurrency.iyi "$REPO/src/iyi/concurrency.iyi" && {
+        "$REPO/src/ris/concurrency.ri" > patched/ris/concurrency.ri
+    cmp -s patched/ris/concurrency.ri "$REPO/src/ris/concurrency.ri" && {
       echo "the sed found nothing to change"; exit 1; }
     # The one arm here whose defect arrives by timing rather than by counting:
     # the freed chunk has to be handed to a canary *and* the kernel has to write
@@ -135,10 +135,10 @@ case "$(uname -s)" in
     # The formatter aligns `ROUNDS` with the constant under it, so the pattern
     # takes the run of spaces that alignment leaves; the `cmp` below is what
     # proves the line was actually found.
-    sed -E 's/^ROUNDS[[:space:]]+= 200$/ROUNDS = 2000/' "$REPO/test/cli/server_load.iyi" > load/server_load.iyi
-    cmp -s load/server_load.iyi "$REPO/test/cli/server_load.iyi" && {
+    sed -E 's/^ROUNDS[[:space:]]+= 200$/ROUNDS = 2000/' "$REPO/test/cli/server_load.ri" > load/server_load.ri
+    cmp -s load/server_load.ri "$REPO/test/cli/server_load.ri" && {
       echo "the rounds line moved; this proof is running at the plain size"; exit 1; }
-    if ! IYI_PATH="$WORK/patched${PSEP}$REPO/src" "$IYI" build "$WORK/load/server_load.iyi" -o hidden > build-hidden.log 2>&1; then
+    if ! RIS_PATH="$WORK/patched${PSEP}$REPO/src" "$RIS" build "$WORK/load/server_load.ri" -o hidden > build-hidden.log 2>&1; then
       cat build-hidden.log; exit 1
     fi
     # Still timing: a loaded CI runner let the hidden buffer survive two
@@ -164,12 +164,12 @@ case "$(uname -s)" in
 esac
 
 step "failure proof: a stack nobody hands back is a stack per connection"
-cp "$REPO"/src/iyi/*.iyi patched/iyi/
+cp "$REPO"/src/ris/*.ri patched/ris/
 sed -e 's/^    fiber\.release_stack$/    # the stack is not handed back/' \
-    "$REPO/src/iyi/concurrency.iyi" > patched/iyi/concurrency.iyi
-cmp -s patched/iyi/concurrency.iyi "$REPO/src/iyi/concurrency.iyi" && {
+    "$REPO/src/ris/concurrency.ri" > patched/ris/concurrency.ri
+cmp -s patched/ris/concurrency.ri "$REPO/src/ris/concurrency.ri" && {
   echo "the sed found nothing to change"; exit 1; }
-if ! IYI_PATH="$WORK/patched${PSEP}$REPO/src" "$IYI" build "$REPO/test/cli/server_load.iyi" -o noreuse > build-noreuse.log 2>&1; then
+if ! RIS_PATH="$WORK/patched${PSEP}$REPO/src" "$RIS" build "$REPO/test/cli/server_load.ri" -o noreuse > build-noreuse.log 2>&1; then
   cat build-noreuse.log; exit 1
 fi
 timeout 300 ./noreuse > noreuse.txt 2>&1
@@ -177,7 +177,7 @@ code=$?
 if [ "$code" -ne 1 ] || ! grep -q 'the stacks were not reused' noreuse.txt; then
   echo "the stack-reuse check did not fire (exit $code):"; tail -3 noreuse.txt; exit 1
 fi
-printf '  exits 1 at "%s"\n' "$(grep -m1 'the stacks were not reused' noreuse.txt | sed 's/^iyi: panic: FAIL: //')"
+printf '  exits 1 at "%s"\n' "$(grep -m1 'the stacks were not reused' noreuse.txt | sed 's/^ris: panic: FAIL: //')"
 echo "workdir $WORK"
 echo "server load: every step held"
 exit 0

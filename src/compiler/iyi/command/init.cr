@@ -3,12 +3,12 @@
 # `go mod init example.com/me/hello` writes `go.mod` and stops; this writes
 # the manifest and the one file the name promises, and stops there too:
 #
-#     iyi init kemal          # iyi.mod (module kemal) and kemal.iyi
-#     iyi run kemal.iyi
+#     iyi init kemal          # ris.mod (module kemal) and kemal.ri
+#     iyi run kemal.ri
 #
 # The file is the project's root module - `module kemal`, which is what a
 # consumer's `import kemal` of the package reads - and it runs as it lands.
-# It wrote four files before: an entry, a `greet.iyi` it imported and a
+# It wrote four files before: an entry, a `greet.ri` it imported and a
 # test of it, a tutorial every project began by deleting.
 #
 # It was refused before this: `init` sat in the list of verbs that belong to
@@ -50,10 +50,10 @@ class Iyi::Command
 
     # The manifest's own grammar decides what a module path is (III.7), and
     # its sentences say why one is not — the same ones a hand-written
-    # `iyi.mod` would draw on the first build. Asked of the path alone: it
+    # `ris.mod` would draw on the first build. Asked of the path alone: it
     # was asked of a whole manifest, `module <path>`, and a path holding a
     # newline was two directives - `x<LF>require a.b/c v1.0.0<LF>#/hello`
-    # wrote `module x` and a `require` nobody asked for, beside `hello.iyi`.
+    # wrote `module x` and a `require` nobody asked for, beside `hello.ri`.
     begin
       Mod::ModFile.check_module_path(module_path)
     rescue ex : Mod::ModError

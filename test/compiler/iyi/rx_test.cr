@@ -210,7 +210,7 @@ describe Iyi::Rx do
         # src/compiler/iyi/semantic/semantic_visitor.cr, strip_source_suffix.
         # A pcre2 $ also matches just before one final newline, which is why
         # "src/foo.cr\n" strips and foo.crs does not.
-        {"\\.(iyi|cr)$", false, ["src/foo.cr", "lib/bar.iyi", "src/foo.cr\n", "src/foo.txt", "foo.crs"]},
+        {"\\.(iyi|cr)$", false, ["src/foo.cr", "lib/bar.ri", "src/foo.cr\n", "src/foo.txt", "foo.crs"]},
         # src/compiler/iyi/semantic/suggestions.cr, SuggestableDefName. \A,
         # not ^ and not unanchored: a lowercase name past a newline still fails
         # because only position 0 can match.

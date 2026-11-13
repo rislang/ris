@@ -2,6 +2,7 @@
 struct BoardCopyFailure
   getter text : String
   getter after : Array(String)
+
   def initialize(@text : String, @after : Array(String))
   end
 end
@@ -23,6 +24,6 @@ end
 # The failed claim leaves the original complete image at the queue head.
 answer = RisBoard.take(BoardCopyFailure)
 raise "lost image" unless answer.is_a?(BoardCopyFailure) &&
-  answer.text == "before" && answer.after[0] == "after"
+                          answer.text == "before" && answer.after[0] == "after"
 raise "duplicate" unless RisBoard.poll(BoardCopyFailure) == {nil, false}
 puts "PASS: board copy rollback"

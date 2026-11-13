@@ -33,7 +33,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 WORK="$(cd "$WORK" && pwd -P)"
@@ -52,13 +52,13 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 export TEST_SANDBOX="$WORK/sandbox"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_dir_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_dir_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -123,16 +123,16 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the broken-module proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/dir.iyi").read_text()
+src = Path("$REPO/src/std/dir.ri").read_text()
 old = 'if entry != "." && entry != ".."'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/dir.iyi").write_text(src.replace(old, 'if true', 1))
+Path("$WORK/patched/std/dir.ri").write_text(src.replace(old, 'if true', 1))
 PY
 then
   echo "  the patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_dir_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_dir_exercise.ri" >"$WORK/mut.out" 2>&1; then
   echo "  the exercise PASSED on a broken module"
   status=1
 else
@@ -146,16 +146,16 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the broken-module proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/dir.iyi").read_text()
+src = Path("$REPO/src/std/dir.ri").read_text()
 old = "next unless File.match?(name, seg)"
 if old not in src:
     raise SystemExit("glob patch site missing")
-Path("$WORK/patched_glob/std/dir.iyi").write_text(src.replace(old, "next", 1))
+Path("$WORK/patched_glob/std/dir.ri").write_text(src.replace(old, "next", 1))
 PY
 then
   echo "  the glob patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched_glob${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_dir_exercise.iyi" >"$WORK/mut_glob.out" 2>&1; then
+elif RIS_PATH="$WORK/patched_glob${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_dir_exercise.ri" >"$WORK/mut_glob.out" 2>&1; then
   echo "  the exercise PASSED on a dead glob matcher"
   status=1
 else
@@ -176,11 +176,11 @@ case "$(uname -s)" in
     ;;
   *) ln -s "$WORK/looped/d" "$WORK/looped/d/loop" ;;
 esac
-printf 'module main\n\nimport std/dir::{Dir}\n\ntexts = String::Builder.new(4096)\nputs Dir.glob(Program.args[0] + "/**/*.txt", texts).size\n' > "$WORK/looped.iyi"
+printf 'module main\n\nimport std/dir::{Dir}\n\ntexts = String::Builder.new(4096)\nputs Dir.glob(Program.args[0] + "/**/*.txt", texts).size\n' > "$WORK/looped.ri"
 if [ ! -d "$WORK/looped/d/loop" ]; then
   echo "  no link was made, so a walk past one is unmeasured"
 else
-  answer="$("$IYI" run "$WORK/looped.iyi" -- "$WORK/looped" 2>&1)"
+  answer="$("$RIS" run "$WORK/looped.ri" -- "$WORK/looped" 2>&1)"
   if [ "$answer" = "1" ]; then
     echo "  ** answers the file once, past a link back to its directory"
   else
@@ -209,7 +209,7 @@ dir_broken() {
     return
   fi
   mkdir -p "$WORK/$2/std"
-  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/dir.iyi" "$WORK/$2/std/dir.iyi" <<'PY'
+  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/dir.ri" "$WORK/$2/std/dir.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1]).read()
 assert src.count(os.environ["OLD"]) == 1
@@ -220,7 +220,7 @@ PY
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$2${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/$2/program" "$REPO/test/cli/std_dir_exercise.iyi" >"$WORK/$2/build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$2${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/$2/program" "$REPO/test/cli/std_dir_exercise.ri" >"$WORK/$2/build.log" 2>&1; then
     echo "  $1: the broken copy did not compile"
     sed -n '1,6p' "$WORK/$2/build.log" | sed 's/^/    /'
     status=1
@@ -281,11 +281,11 @@ echo "== what dir operations refuse"
 refuses() { # refuses <label> <name> <phrase> <code>
   local label="$1" name="$2" phrase="$3"
   shift 3
-  cat > "$WORK/$name.iyi" <<EOF
+  cat > "$WORK/$name.ri" <<EOF
 import std/dir::{Dir}
 $*
 EOF
-  if IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$WORK/$name.iyi" >"$WORK/$name.out" 2>&1; then
+  if RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$WORK/$name.ri" >"$WORK/$name.out" 2>&1; then
     echo "  $label: accepted invalid input"
     status=1
   elif ! grep -q "$phrase" "$WORK/$name.out"; then

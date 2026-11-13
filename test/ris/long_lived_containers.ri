@@ -1,7 +1,7 @@
 module test/ris/long_lived_containers
 
 CACHE = Array(String).new
-ROWS = Array(Array(Int32)).new
+ROWS  = Array(Array(Int32)).new
 TABLE = Hash(String, Array(String)).new
 
 def store
@@ -38,6 +38,7 @@ TABLE.clear
 
 class Registry
   getter texts : Array(String)
+
   def initialize
     @texts = Array(String).new
   end

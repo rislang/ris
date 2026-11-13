@@ -2,7 +2,7 @@
 """AI_FIRST.md §5 — the gate the plan wrote before the work.
 
 Two arms. The token arm is hermetic and runs in CI: for each target below,
-the surface pack (`iyi mod context FILE`) must be smaller than the raw
+the surface pack (`ris mod context FILE`) must be smaller than the raw
 grounding it replaces — the sources of the target's import closure, which
 is what an agent reads when no pack exists — and must carry no body. The
 rounds arm needs a model, so it is pluggable: `--agent 'CMD'` names a
@@ -29,26 +29,26 @@ import sys
 import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-IYI = pathlib.Path(os.environ.get("IYI", REPO / "bin" / "iyi"))
+RIS = pathlib.Path(os.environ.get("RIS", REPO / "bin" / "iyi"))
 
 # {entry file: its import closure's sources — what raw grounding costs}
 TARGETS = {
-    "samples/iyi/webapp.iyi": [
-        "samples/iyi/kemal/dsl.iyi",
-        "samples/iyi/kemal/router.iyi",
+    "samples/ris/webapp.ri": [
+        "samples/ris/kemal/dsl.ri",
+        "samples/ris/kemal/router.ri",
     ],
-    "samples/iyi/calc.iyi": [
-        "samples/iyi/calc/lexer.iyi",
-        "samples/iyi/calc/parser.iyi",
-        "samples/iyi/calc/ast.iyi",
+    "samples/ris/calc.ri": [
+        "samples/ris/calc/lexer.ri",
+        "samples/ris/calc/parser.ri",
+        "samples/ris/calc/ast.ri",
     ],
 }
 
 # A line that lives in a body in each closure. The pack carrying one is the
 # pack carrying bodies, whatever its size says.
 BODY_MARKERS = {
-    "samples/iyi/webapp.iyi": "join_paths",
-    "samples/iyi/calc.iyi": "evaluate(scope)!",
+    "samples/ris/webapp.ri": "join_paths",
+    "samples/ris/calc.ri": "evaluate(scope)!",
 }
 
 THRESHOLD = 0.70
@@ -56,7 +56,7 @@ THRESHOLD = 0.70
 
 def pack_for(entry: str) -> str:
     result = subprocess.run(
-        [str(IYI), "mod", "context", entry],
+        [str(RIS), "mod", "context", entry],
         capture_output=True, text=True, cwd=REPO,
     )
     if result.returncode != 0:
@@ -103,7 +103,7 @@ def main() -> int:
     return 0
 
 
-TASK = """Write a complete iyi program, file name main.iyi, that uses the kemal
+TASK = """Write a complete iyi program, file name main.ri, that uses the kemal
 modules to build a small web app, exactly this surface:
 
 - GET / answers "home"
@@ -129,8 +129,8 @@ def rounds_arm(agent: str, trials: int) -> list[str]:
     failures = []
     totals = {}
     for grounding_name, grounding in (
-        ("pack", pack_for("samples/iyi/webapp.iyi")),
-        ("raw", "".join((REPO / s).read_text() for s in TARGETS["samples/iyi/webapp.iyi"])),
+        ("pack", pack_for("samples/ris/webapp.ri")),
+        ("raw", "".join((REPO / s).read_text() for s in TARGETS["samples/ris/webapp.ri"])),
     ):
         total_rounds = 0
         total_bytes = 0
@@ -167,7 +167,7 @@ def run_task(agent: str, grounding: str):
     with tempfile.TemporaryDirectory() as work:
         workdir = pathlib.Path(work)
         # The imports resolve the way the sample's own do.
-        for source in TARGETS["samples/iyi/webapp.iyi"]:
+        for source in TARGETS["samples/ris/webapp.ri"]:
             target = workdir / "kemal" / pathlib.Path(source).name
             target.parent.mkdir(exist_ok=True)
             target.write_text((REPO / source).read_text())
@@ -183,7 +183,7 @@ def run_task(agent: str, grounding: str):
                 inside = [i for i, l in enumerate(lines) if l.strip().startswith("```")]
                 if len(inside) >= 2:
                     answer = "\n".join(lines[inside[0] + 1:inside[-1]]) + "\n"
-            (workdir / "main.iyi").write_text(answer)
+            (workdir / "main.ri").write_text(answer)
             # Green is the build passing *on the program asked for*: an
             # empty file compiles, and one raw trial was seen to answer
             # nothing and score a one-round win for it. The marks are the
@@ -198,7 +198,7 @@ def run_task(agent: str, grounding: str):
                 )
                 continue
             build = subprocess.run(
-                [str(IYI), "build", "--no-codegen", "main.iyi", "-o", "out"],
+                [str(RIS), "build", "--no-codegen", "main.ri", "-o", "out"],
                 capture_output=True, text=True, cwd=workdir,
             )
             if build.returncode == 0:
@@ -210,16 +210,16 @@ def run_task(agent: str, grounding: str):
             # on the round that wrote it, and what fix changed is printed
             # so a win here is a win somebody can read.
             fix = subprocess.run(
-                [str(IYI), "check", "types", "--fix", "main.iyi"],
+                [str(RIS), "check", "types", "--fix", "main.ri"],
                 capture_output=True, text=True, cwd=workdir,
             )
             if fix.stdout.strip():
                 print(f"  ris check types --fix: {fix.stdout.strip()}")
             if fix.returncode == 0:
                 return attempt, sent
-            answer = (workdir / "main.iyi").read_text()
+            answer = (workdir / "main.ri").read_text()
             build = subprocess.run(
-                [str(IYI), "build", "--no-codegen", "main.iyi", "-o", "out"],
+                [str(RIS), "build", "--no-codegen", "main.ri", "-o", "out"],
                 capture_output=True, text=True, cwd=workdir,
             )
             prompt = (

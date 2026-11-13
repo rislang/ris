@@ -2,9 +2,11 @@ module test/ris/board_support/protocol
 
 pub struct Mail(T)
   getter value : T
+
   def initialize(@value : T)
   end
 end
+
 pub alias Job = Mail(Int32)
 
 pub def send_job : Bool

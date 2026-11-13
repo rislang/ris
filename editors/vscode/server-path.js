@@ -39,10 +39,10 @@ function namesOf(command, windows, env) {
   );
 }
 
-// Where install.ps1 and install.sh put it, and what IYI_PREFIX overrode.
+// Where install.ps1 and install.sh put it, and what RIS_PREFIX overrode.
 function prefixesOf(windows, env, home) {
   const prefixes = [];
-  if (env.IYI_PREFIX) prefixes.push(env.IYI_PREFIX);
+  if (env.RIS_PREFIX) prefixes.push(env.RIS_PREFIX);
   if (windows) {
     if (env.LOCALAPPDATA)
       prefixes.push(path.win32.join(env.LOCALAPPDATA, "Programs", "iyi"));

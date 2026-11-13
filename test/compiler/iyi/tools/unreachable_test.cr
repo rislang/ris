@@ -446,10 +446,10 @@ describe "unreachable" do
   # that calls them inside an `if false` (R-2c). Counted as callers, the
   # probes made every def of a file with a module header reachable.
   it "does not count a definition probe as a call" do
-    with_tempfile("unreachable-probe.iyi") do |path|
+    with_tempfile("unreachable-probe.ri") do |path|
       File.write path, "module probe\n\ndef used : Int32\n  1\nend\n\ndef unused : Int32\n  2\nend\n\nused\n"
       compiler = Compiler.new
-      compiler.prelude = "iyi/prelude"
+      compiler.prelude = "ris/prelude"
       compiler.no_codegen = true
       result = compiler.compile(Compiler::Source.new(path, File.read(path)), "fake-no-build")
 
@@ -469,8 +469,8 @@ describe "unreachable" do
   it "excludes a def whose path is spelled through .." do
     visitor = UnreachableVisitor.new
     visitor.excludes << "/opt/iyi/src"
-    visitor.match_path?("/opt/iyi/.build/../src/std/math.iyi").should be_false
-    visitor.match_path?("/opt/iyi/.build/../app/main.iyi").should be_true
+    visitor.match_path?("/opt/iyi/.build/../src/std/math.ri").should be_false
+    visitor.match_path?("/opt/iyi/.build/../app/main.ri").should be_true
   end
 
   it "tallies calls" do

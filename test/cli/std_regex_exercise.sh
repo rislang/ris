@@ -8,9 +8,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -46,7 +46,7 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 if [ -z "$PY" ]; then
   echo "std/regex: SKIPPED, not a pass: every check compares against oracle cases drawn by python3, none runs here, so no case was measured"
@@ -171,7 +171,7 @@ echo "group cases: $(wc -l < "$WORK/groups.txt")"
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_regex_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_regex_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -222,14 +222,14 @@ refuses() { # refuses <label> <name> <phrase> <pattern>
     echo "  $label: skipped, no working python3 to write the probe program with"
     return 0
   fi
-  PATTERN="$pattern" "$PY" - "$WORK/$name.iyi" <<'PY'
+  PATTERN="$pattern" "$PY" - "$WORK/$name.ri" <<'PY'
 import os, sys
 pat = os.environ["PATTERN"].replace("\\", "\\\\").replace('"', '\\"')
 # UTF-8 by name: Windows' default is the ANSI code page, which wrote `[é]`
 # as the single byte 0xE9 and made a source file the compiler refuses.
 open(sys.argv[1], "w", encoding="utf-8").write('module main\n\nimport std/regex::{Regex}\n\nputs Regex.compile("%s").find("a").inspect\n' % pat)
 PY
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -281,8 +281,8 @@ echo
 echo "== what a regex literal refuses, at the literal"
 literal_refused() { # literal_refused <label> <name> <phrase> <source>
   local label="$1" name="$2" phrase="$3"
-  printf '%s\n' "$4" > "$WORK/$name.iyi"
-  if "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf '%s\n' "$4" > "$WORK/$name.ri"
+  if "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: it built"
     status=1
   elif ! grep -qF "$phrase" "$WORK/$name.build"; then
@@ -301,7 +301,7 @@ literal_refused "a literal with no std/regex" literal_unimported "nothing in thi
 echo
 echo "== a regex literal with flags"
 mkdir -p "$WORK/flags/app"
-cat > "$WORK/flags/app/names.iyi" <<'IYI'
+cat > "$WORK/flags/app/names.ri" <<'RIS'
 module app/names
 
 import std/regex::{Regex}
@@ -309,8 +309,8 @@ import std/regex::{Regex}
 pub def greek(text : String) : String?
   /\p{Greek}+|Σ+/i.find(text)
 end
-IYI
-cat > "$WORK/flags/main.iyi" <<'IYI'
+RIS
+cat > "$WORK/flags/main.ri" <<'RIS'
 module main
 
 import app/names
@@ -323,7 +323,7 @@ puts /^b$/m.find("a\nb") || "nil"
 puts /a b # c/x.match?("ab")
 puts /k/ix.options
 puts App::Names.greek("x σς y") || "nil"
-IYI
+RIS
 want='false
 true
 true
@@ -331,11 +331,11 @@ b
 true
 IGNORE_CASE | EXTENDED
 σς'
-if (cd "$WORK/flags" && "$IYI" build -o from-source main.iyi) > "$WORK/flags/build.log" 2>&1 &&
+if (cd "$WORK/flags" && "$RIS" build -o from-source main.ri) > "$WORK/flags/build.log" 2>&1 &&
    "$WORK/flags/from-source" > "$WORK/flags/source.out" 2>&1 &&
    [ "$(cat "$WORK/flags/source.out")" = "$want" ] &&
-   (cd "$WORK/flags" && "$IYI" build --emit-iyimod mods -o emitted main.iyi) > "$WORK/flags/emit.log" 2>&1 &&
-   (cd "$WORK/flags" && "$IYI" build --use-iyimod mods -o from-artifact main.iyi) > "$WORK/flags/use.log" 2>&1 &&
+   (cd "$WORK/flags" && "$RIS" build --emit-rimod mods -o emitted main.ri) > "$WORK/flags/emit.log" 2>&1 &&
+   (cd "$WORK/flags" && "$RIS" build --use-rimod mods -o from-artifact main.ri) > "$WORK/flags/use.log" 2>&1 &&
    "$WORK/flags/from-artifact" > "$WORK/flags/artifact.out" 2>&1 &&
    cmp -s "$WORK/flags/source.out" "$WORK/flags/artifact.out"; then
   echo "  i, m and x on a literal, two constants for /a/ and /a/i, and from an artifact alike: $(tr '\n' ' ' < "$WORK/flags/artifact.out")"
@@ -352,7 +352,7 @@ fi
 echo
 echo "== a module's regex literal, from its artifact"
 mkdir -p "$WORK/lit/app"
-cat > "$WORK/lit/app/words.iyi" <<'IYI'
+cat > "$WORK/lit/app/words.ri" <<'RIS'
 module app/words
 
 import std/regex::{Regex}
@@ -364,8 +364,8 @@ end
 pub def word(text : String) : String?
   /w[a-z]*/.find(text)
 end
-IYI
-cat > "$WORK/lit/main.iyi" <<'IYI'
+RIS
+cat > "$WORK/lit/main.ri" <<'RIS'
 module main
 
 import app/words
@@ -374,9 +374,9 @@ import std/regex::{Regex}
 puts App::Words.digits("a1 b22").inspect
 puts App::Words.word("xx word") || "none"
 puts /[0-9]+/.find("q9") || "none"
-IYI
-if (cd "$WORK/lit" && "$IYI" build --emit-iyimod mods -o from-source main.iyi) > "$WORK/lit/emit.log" 2>&1 &&
-   (cd "$WORK/lit" && "$IYI" build --use-iyimod mods -o from-artifact main.iyi) > "$WORK/lit/use.log" 2>&1 &&
+RIS
+if (cd "$WORK/lit" && "$RIS" build --emit-rimod mods -o from-source main.ri) > "$WORK/lit/emit.log" 2>&1 &&
+   (cd "$WORK/lit" && "$RIS" build --use-rimod mods -o from-artifact main.ri) > "$WORK/lit/use.log" 2>&1 &&
    "$WORK/lit/from-source" > "$WORK/lit/source.out" 2>&1 &&
    "$WORK/lit/from-artifact" > "$WORK/lit/artifact.out" 2>&1 &&
    cmp -s "$WORK/lit/source.out" "$WORK/lit/artifact.out" &&
@@ -404,17 +404,17 @@ mutate() { # mutate <label> <old> <new> [<phrase> [<pattern>]]
   OLD="$old" NEW="$new" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/regex.iyi").read_text()
+src = Path("$REPO/src/std/regex.ri").read_text()
 old = os.environ["OLD"]
 if old not in src:
     raise SystemExit("patch site missing: " + old)
-Path("$WORK/patched/std/regex.iyi").write_text(src.replace(old, os.environ["NEW"], 1))
+Path("$WORK/patched/std/regex.ri").write_text(src.replace(old, os.environ["NEW"], 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  $label: the patch did not apply"
     status=1
   elif [ -n "$pattern" ]; then
-    if (export IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi"; refuses "$label" mutated_refusal "$phrase" "$pattern") >"$WORK/mut.out" 2>&1 &&
+    if (export RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris"; refuses "$label" mutated_refusal "$phrase" "$pattern") >"$WORK/mut.out" 2>&1 &&
        grep -q "it answered instead of refusing" "$WORK/mut.out"; then
       echo "  $label: caught, /$pattern/ answered"
     else
@@ -422,7 +422,7 @@ PY
       sed 's/^/    /' "$WORK/mut.out"
       status=1
     fi
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" timeout 300 "$IYI" run "$REPO/test/cli/std_regex_exercise.iyi" -- "$WORK/cases.txt" "$WORK/groups.txt" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" timeout 300 "$RIS" run "$REPO/test/cli/std_regex_exercise.ri" -- "$WORK/cases.txt" "$WORK/groups.txt" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the exercise PASSED on a broken module"
     status=1
   elif [ -n "$phrase" ] && ! grep -qF -- "$phrase" "$WORK/mut.out"; then
@@ -511,16 +511,16 @@ mutate "match_at that searches ahead" '      if !matched && !whole && !anchored'
 # cost, 2^n, and does not finish.
 echo
 echo "== linear time, against a clock"
-cat > "$WORK/linear.iyi" <<'IYI'
+cat > "$WORK/linear.ri" <<'RIS'
 import std/regex::{Regex}
 
 text = "a" * 30000
 puts Regex.compile("(a|a)*b").match(text).nil?
 puts Regex.compile("(?:a|a)*b").find(text).nil?
-IYI
+RIS
 bounded() { # bounded <label> <search path>: 0 when the probe answers within 20 s
   local label="$1" path="$2"
-  if ! IYI_PATH="$path" "$IYI" build -o "$WORK/linear" "$WORK/linear.iyi" > "$WORK/linear.build" 2>&1; then
+  if ! RIS_PATH="$path" "$RIS" build -o "$WORK/linear" "$WORK/linear.ri" > "$WORK/linear.build" 2>&1; then
     echo "  $label: the probe did not build"
     sed -n '1,8p' "$WORK/linear.build"
     return 2
@@ -533,7 +533,7 @@ bounded() { # bounded <label> <search path>: 0 when the probe answers within 20 
   LINEAR_MS=$(( (end - start) / 1000000 ))
   [ "$code" -eq 0 ] && [ "$(tr '\n' ' ' < "$WORK/linear.out")" = "true true " ]
 }
-if bounded "(a|a)*b" "$REPO/src${PSEP}$REPO/samples/iyi"; then
+if bounded "(a|a)*b" "$REPO/src${PSEP}$REPO/samples/ris"; then
   echo "  (a|a)*b over 30,000 a's, with its group and without: ${LINEAR_MS} ms"
 else
   echo "  FAIL: (a|a)*b over 30,000 a's did not answer within 20 s ($(head -c 200 "$WORK/linear.out"))"
@@ -541,7 +541,7 @@ else
 fi
 if [ -n "$PY" ]; then
   rm -rf "$WORK/patched" && mkdir -p "$WORK/patched/std"
-  "$PY" - "$REPO/src/std/regex.iyi" "$WORK/patched/std/regex.iyi" <<'PY'
+  "$PY" - "$REPO/src/std/regex.ri" "$WORK/patched/std/regex.ri" <<'PY'
 import sys
 from pathlib import Path
 src = Path(sys.argv[1]).read_text()
@@ -553,7 +553,7 @@ PY
   if [ $? -ne 0 ]; then
     echo "  a state joined more than once a step: the patch did not apply"
     status=1
-  elif bounded "a state joined more than once a step" "$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi"; then
+  elif bounded "a state joined more than once a step" "$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris"; then
     echo "  a state joined more than once a step: the probe still answered in ${LINEAR_MS} ms"
     status=1
   else
@@ -568,12 +568,12 @@ fi
 # method 'compile' for Regex.class".
 echo
 echo "== a script without a module header imports Regex"
-cat > "$WORK/script.iyi" <<'IYI'
+cat > "$WORK/script.ri" <<'RIS'
 import std/regex::{Regex}
 
 puts Regex.compile("a+").find("xaay") || "none"
-IYI
-if "$IYI" run "$WORK/script.iyi" > "$WORK/script.out" 2>&1 && grep -qx "aa" "$WORK/script.out"; then
+RIS
+if "$RIS" run "$WORK/script.ri" > "$WORK/script.out" 2>&1 && grep -qx "aa" "$WORK/script.out"; then
   echo "  the imported Regex answers: $(cat "$WORK/script.out")"
 else
   echo "  FAIL: a headerless script's Regex is not the imported one:"
@@ -584,13 +584,13 @@ fi
 # first cut of the rule above handed them to the prelude too: a script that
 # imported `std/gc::{GC}` and built a `List` was told `Std::Gc` "is not
 # imported here", at a line of std/list.
-cat > "$WORK/walled.iyi" <<'IYI'
+cat > "$WORK/walled.ri" <<'RIS'
 import std/gc::{GC}
 import std/list::{List}
 
 puts List(Int64).new([4_i64, 5_i64]).appended(6_i64).size + GC.stats.collections.to_i32 * 0
-IYI
-if "$IYI" run "$WORK/walled.iyi" > "$WORK/walled.out" 2>&1 && grep -qx "3" "$WORK/walled.out"; then
+RIS
+if "$RIS" run "$WORK/walled.ri" > "$WORK/walled.out" 2>&1 && grep -qx "3" "$WORK/walled.out"; then
   echo "  a script's import stays the script's: $(cat "$WORK/walled.out")"
 else
   echo "  FAIL: a script's import reached the prelude:"

@@ -11,9 +11,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -49,12 +49,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_kernel_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_kernel_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -117,16 +117,16 @@ else
   mkdir -p "$WORK/patched/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/kernel.iyi").read_text()
+src = Path("$REPO/src/std/kernel.ri").read_text()
 old = '  while true\n    yield\n  end'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/kernel.iyi").write_text(src.replace(old, '  return nil', 1))
+Path("$WORK/patched/std/kernel.ri").write_text(src.replace(old, '  return nil', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_kernel_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_kernel_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on a broken module"
     status=1
   else
@@ -143,15 +143,15 @@ echo "== one sleep, and it is the prelude's milliseconds"
 # things are checked: `std/kernel` exports no `sleep`, a `Float64` argument
 # is refused by the prelude's own sentence, and a 2 ms sleep costs 2 ms of
 # wall clock and no core.
-if "$IYI" doc "$REPO/src/std/kernel.iyi" 2>/dev/null | grep -q "def sleep"; then
+if "$RIS" doc "$REPO/src/std/kernel.ri" 2>/dev/null | grep -q "def sleep"; then
   echo "  std/kernel declares a sleep again"
   status=1
 else
   echo "  std/kernel declares no sleep"
 fi
 
-printf '%s\n' 'module kernel_sleep_using' 'import std/kernel' 'import std/kernel::{sleep}' 'puts "USING_OK"' > "$WORK/sleep_using.iyi"
-if "$IYI" build -o "$WORK/sleep_using" "$WORK/sleep_using.iyi" >"$WORK/sleep_using.build" 2>&1; then
+printf '%s\n' 'module kernel_sleep_using' 'import std/kernel' 'import std/kernel::{sleep}' 'puts "USING_OK"' > "$WORK/sleep_using.ri"
+if "$RIS" build -o "$WORK/sleep_using" "$WORK/sleep_using.ri" >"$WORK/sleep_using.build" 2>&1; then
   echo "  \`import std/kernel::{sleep}\` still compiles, so the name is still there"
   status=1
 elif grep -q "no \`sleep\`" "$WORK/sleep_using.build"; then
@@ -162,8 +162,8 @@ else
   status=1
 fi
 
-printf '%s\n' 'module kernel_sleep_seconds' 'sleep(0.005)' > "$WORK/sleep_seconds.iyi"
-if "$IYI" build -o "$WORK/sleep_seconds" "$WORK/sleep_seconds.iyi" >"$WORK/sleep_seconds.build" 2>&1; then
+printf '%s\n' 'module kernel_sleep_seconds' 'sleep(0.005)' > "$WORK/sleep_seconds.ri"
+if "$RIS" build -o "$WORK/sleep_seconds" "$WORK/sleep_seconds.ri" >"$WORK/sleep_seconds.build" 2>&1; then
   echo "  a Float64 sleep compiled: two units for one name are back"
   status=1
 elif grep -q "takes milliseconds" "$WORK/sleep_seconds.build"; then
@@ -178,8 +178,8 @@ echo
 echo "== abort paths"
 check_abort() { # check_abort <label> <name> <expected_code> <expected_stderr> <code>
   local label="$1" name="$2" expected_code="$3" expected_stderr="$4" code="$5"
-  printf 'module main\n\nimport std/kernel::{abort}\n\n%s\n' "$code" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/kernel::{abort}\n\n%s\n' "$code" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -217,8 +217,8 @@ check_abort "abort with nil message and custom status" abort_nil 42 "" 'abort(ni
 # byte, because a `grep` for the message finds it either way.
 abort_stream_is() { # abort_stream_is <label> <name> <expected stream> <code>
   local label="$1" name="$2" expected="$3" code="$4"
-  printf 'module main\n\nimport std/kernel::{abort}\n\n%s\n' "$code" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/kernel::{abort}\n\n%s\n' "$code" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     return 1
@@ -240,16 +240,16 @@ if [ -n "$PY" ]; then
   mkdir -p "$WORK/doubled/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/kernel.iyi").read_text()
+src = Path("$REPO/src/std/kernel.ri").read_text()
 old = r'unless message.ends_with?("\\n")'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/doubled/std/kernel.iyi").write_text(src.replace(old, 'unless false', 1))
+Path("$WORK/doubled/std/kernel.ri").write_text(src.replace(old, 'unless false', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the doubled-newline patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/doubled${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" \
+  elif RIS_PATH="$WORK/doubled${PSEP}$REPO/src${PSEP}$REPO/samples/ris" \
        abort_stream_is "doubled newline (broken copy)" abort_doubled "line one
 " 'abort("line one\n", 2)' >/dev/null; then
     echo "  a newline written after one already there PASSED"
@@ -266,8 +266,8 @@ fi
 # never ran and the buffered error line was lost.
 abort_ends_as_exit() { # abort_ends_as_exit <label> <name>
   local label="$1" name="$2"
-  printf 'module main\n\nimport std/kernel::{abort}\n\ndef work : Nil\n  defer { puts "cleanup ran" }\n  STDOUT.sync = false\n  STDERR.sync = false\n  puts "buffered line"\n  STDERR.puts "buffered error"\n  abort("the message", 4)\nend\n\nwork\n' > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/kernel::{abort}\n\ndef work : Nil\n  defer { puts "cleanup ran" }\n  STDOUT.sync = false\n  STDERR.sync = false\n  puts "buffered line"\n  STDERR.puts "buffered error"\n  abort("the message", 4)\nend\n\nwork\n' > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     return 1
@@ -296,16 +296,16 @@ if [ -n "$PY" ]; then
   mkdir -p "$WORK/rawexit/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/kernel.iyi").read_text()
+src = Path("$REPO/src/std/kernel.ri").read_text()
 old = '  exit(status)\n'
 if src.count(old) != 1:
     raise SystemExit("patch site missing")
-Path("$WORK/rawexit/std/kernel.iyi").write_text(src.replace(old, '  __iyi_exit(status)\n', 1))
+Path("$WORK/rawexit/std/kernel.ri").write_text(src.replace(old, '  __iyi_exit(status)\n', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the raw-exit patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/rawexit${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" \
+  elif RIS_PATH="$WORK/rawexit${PSEP}$REPO/src${PSEP}$REPO/samples/ris" \
        abort_ends_as_exit "raw exit (broken copy)" abort_rawexit >/dev/null; then
     echo "  an abort that skips the cleanups and the flush PASSED"
     status=1

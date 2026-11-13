@@ -18,9 +18,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -56,12 +56,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_websocket_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_websocket_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -72,7 +72,7 @@ build_and_run() {
   local exit_code=$?
   # The refusals the exercise provokes on purpose print their panics as
   # they are caught; the section that checks them says which they were.
-  grep -v -E '^iyi: panic: (WebSocket|Inflater): ' "$WORK/$name.out" | sed 's/^/  /'
+  grep -v -E '^ris: panic: (WebSocket|Inflater): ' "$WORK/$name.out" | sed 's/^/  /'
   if [ "$exit_code" -ne 0 ]; then
     echo "$label: exited $exit_code"
     status=1
@@ -117,8 +117,8 @@ echo "== what a program is refused"
 refuses() { # refuses <label> <name> <phrase> <statement>
   local label="$1" name="$2" phrase="$3" statement="$4"
   printf 'module main\n\nimport std/websocket::{WebSocket}\nimport std/socket::{IyiSocket}\n\nl = IyiSocket.listen("127.0.0.1", 0)\nc = IyiSocket.connect("127.0.0.1", l.local_port).or_panic\nws = WebSocket.new(l.accept.or_panic, "", false)\n%s\nputs "ACCEPTED"\n' \
-    "$statement" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$statement" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -153,7 +153,7 @@ refuses "a caller's Upgrade" own_upgrade "WebSocket: Upgrade is the handshake's 
   'WebSocket.connect("ws://127.0.0.1:#{l.local_port}/", {"Upgrade" => "h2c"})'
 refuses "a negative limit" limit_negative "WebSocket: max_message is a count of bytes, not -1" \
   'WebSocket.new(c, "", true, nil, -1)'
-if grep -nE '^\s*(lib|fun) |File\.|Dir\.|ENV' "$REPO/src/std/websocket.iyi"; then
+if grep -nE '^\s*(lib|fun) |File\.|Dir\.|ENV' "$REPO/src/std/websocket.ri"; then
   echo "  the module reaches outside itself"
   status=1
 else
@@ -1016,7 +1016,7 @@ closed 1000 done'
     # Under src/std/, where runtime annotations such as
     # @[TaskClosureUnsafe] are allowed.
     mkdir -p "$WORK/bare/src/std"
-    if ! "$PY" - "$REPO/src/std/http.iyi" "$WORK/bare/src/std/http.iyi" <<'PY'
+    if ! "$PY" - "$REPO/src/std/http.ri" "$WORK/bare/src/std/http.ri" <<'PY'
 import sys
 src = open(sys.argv[1], encoding="utf-8").read()
 old = "      conn.held { takeover.call(socket, leftover) }"
@@ -1027,7 +1027,7 @@ PY
     then
       echo "  the bare-socket patch did not apply"
       status=1
-    elif ! IYI_PATH="$WORK/bare/src${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/ws-bare" "$REPO/test/cli/std_websocket_exercise.iyi" >"$WORK/bare.log" 2>&1; then
+    elif ! RIS_PATH="$WORK/bare/src${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/ws-bare" "$REPO/test/cli/std_websocket_exercise.ri" >"$WORK/bare.log" 2>&1; then
       echo "  the bare-socket copy did not compile"
       sed -n '1,6p' "$WORK/bare.log" | sed 's/^/    /'
       status=1
@@ -1052,8 +1052,8 @@ echo "== the exercise's artifacts and other platforms"
 # printed from source; and it typechecks for the four other platforms std
 # is held to.
 mkdir -p "$WORK/r1/mods"
-if (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_websocket_exercise.iyi" \
-      && "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_websocket_exercise.iyi") > "$WORK/r1/build.log" 2>&1 \
+if (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_websocket_exercise.ri" \
+      && "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_websocket_exercise.ri") > "$WORK/r1/build.log" 2>&1 \
    && timeout -k 5 300 "$WORK/r1/from-source" > "$WORK/r1/source.out" 2>&1 \
    && timeout -k 5 300 "$WORK/r1/from-artifact" > "$WORK/r1/artifact.out" 2>&1 \
    && cmp -s "$WORK/r1/source.out" "$WORK/r1/artifact.out" \
@@ -1066,19 +1066,19 @@ else
   status=1
 fi
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross-$target" "$REPO/test/cli/std_websocket_exercise.iyi" > "$WORK/cross-$target.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" -o "$WORK/cross-$target" "$REPO/test/cli/std_websocket_exercise.ri" > "$WORK/cross-$target.log" 2>&1; then
     echo "  FAIL: $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross-$target.log" | cut -c1-140)"
     status=1
   fi
 done
 echo "  typechecks for x86_64-linux-gnu, aarch64-darwin, x86_64-windows-msvc, aarch64-linux-gnu, x86_64-linux-musl"
-if "$IYI" doc "$REPO/src/std/websocket.iyi" > "$WORK/doc.out" 2>&1 && grep -q "deflate : Bool = true" "$WORK/doc.out" && grep -q "PerMessageDeflate" "$WORK/doc.out"; then
+if "$RIS" doc "$REPO/src/std/websocket.ri" > "$WORK/doc.out" 2>&1 && grep -q "deflate : Bool = true" "$WORK/doc.out" && grep -q "PerMessageDeflate" "$WORK/doc.out"; then
   echo "  iyi doc reads the module, permessage-deflate and all"
 else
-  echo "  FAIL: iyi doc src/std/websocket.iyi"
+  echo "  FAIL: iyi doc src/std/websocket.ri"
   status=1
 fi
-if "$IYI" check format "$REPO/src/std/websocket.iyi" "$REPO/test/cli/std_websocket_exercise.iyi" > "$WORK/format.log" 2>&1; then
+if "$RIS" check format "$REPO/src/std/websocket.ri" "$REPO/test/cli/std_websocket_exercise.ri" > "$WORK/format.log" 2>&1; then
   echo "  the module and its exercise are formatted"
 else
   echo "  not formatted: $(grep -m1 produced "$WORK/format.log")"
@@ -1105,17 +1105,17 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/${MUTATE:-websocket.iyi}").read_text()
+src = Path("$REPO/src/std/${MUTATE:-websocket.ri}").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/${MUTATE:-websocket.iyi}").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/${MUTATE:-websocket.ri}").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $label patch did not apply"
     status=1
   # Built first, then run: a patch that does not compile would also fail,
   # and that proves nothing about whether the exercise catches the break.
-  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mut-$mutations" "$REPO/test/cli/std_websocket_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations" "$REPO/test/cli/std_websocket_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the $label copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1
@@ -1128,7 +1128,7 @@ PY
     echo "  $label failed, but not where it should have:"
     # The panic that ended it, not the run's last lines: on darwin those
     # are the frames printed after the message.
-    grep -v '^iyi: panic: WebSocket: ' "$WORK/mut.out" | grep -m3 -E '^iyi: panic|ASSERTION' | sed 's/^/    /'
+    grep -v '^ris: panic: WebSocket: ' "$WORK/mut.out" | grep -m3 -E '^ris: panic|ASSERTION' | sed 's/^/    /'
     status=1
   fi
 }
@@ -1216,9 +1216,9 @@ prove_broken "an answer's client_max_window_bits taken without a value" 'an answ
   'elsif answer || name == "server_max_window_bits"' 'elsif name == "server_max_window_bits"'
 prove_broken "server_no_context_takeover accepted and not named back" "both no_context_takeovers named back" \
   'answer = answer + "; server_no_context_takeover" if terms.server_no_context_takeover' 'answer = answer + "" if terms.server_no_context_takeover'
-MUTATE=compress.iyi prove_broken "a chain's head taken past a smaller window" "a window of 2^8 holds every match to 256 back" \
+MUTATE=compress.ri prove_broken "a chain's head taken past a smaller window" "a window of 2^8 holds every match to 256 back" \
   's - old > @reach ? 0 : old' 's - old > WSIZE ? 0 : old'
-MUTATE=compress.iyi prove_broken "a final block that ends the stream by pieces" "the window kept past a final block" \
+MUTATE=compress.ri prove_broken "a final block that ends the stream by pieces" "the window kept past a final block" \
   '@state = @pieces ? BLOCK : DONE' '@state = DONE'
 
 echo

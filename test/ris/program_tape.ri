@@ -12,7 +12,7 @@ struct Saved
   end
 end
 
-TEXT = "program #{42}"
+TEXT  = "program #{42}"
 TYPED_TEXT : String = "typed program"
 WORDS = Array(String){"one", "two"}
 @@shared = Array(String){"top level"}

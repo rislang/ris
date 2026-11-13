@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# spec: 6.7@10750e35, 6.8@82707d6b, 6.9@1e0b6a98
+# spec: 6.7@436841dc, 6.8@82707d6b, 6.9@1e0b6a98
 """`ris spec`: the spec's clauses linked to the tests that name them.
 
-    IYI=./bin/ris python3 test/cli/spec_verb.py
+    RIS=./bin/ris python3 test/cli/spec_verb.py
 
 Runs the real binary on scratch projects (doc/drafts/spec-cli/spec-cli.md,
 Gate). Parsing: SPEC.md and the same spec split in spec/ report alike;
@@ -23,7 +23,7 @@ import subprocess
 import sys
 import tempfile
 
-IYI = os.path.abspath(os.environ.get("IYI", "./bin/ris"))
+RIS = os.path.abspath(os.environ.get("RIS", "./bin/ris"))
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
 
@@ -40,8 +40,8 @@ def step(name, ok, detail=""):
 
 
 def run(*args, cwd):
-    env = dict(os.environ, IYI_PATH=os.path.join(REPO, "src"))
-    return subprocess.run([IYI, *args], capture_output=True, text=True,
+    env = dict(os.environ, RIS_PATH=os.path.join(REPO, "src"))
+    return subprocess.run([RIS, *args], capture_output=True, text=True,
                           cwd=cwd, env=env)
 
 
@@ -297,7 +297,7 @@ def part_c():
          r.returncode == 1 and "next:" in r.stdout, r.stdout + r.stderr)
     write(root, "SPEC.md", SPEC)
 
-    r = subprocess.run([IYI, "mcp"], capture_output=True, text=True,
+    r = subprocess.run([RIS, "mcp"], capture_output=True, text=True,
                        cwd=root, input=json.dumps(
                            {"jsonrpc": "2.0", "id": 1,
                             "method": "tools/list"}) + "\n")

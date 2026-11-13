@@ -32,7 +32,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -50,12 +50,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_system_roots_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_system_roots_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -142,7 +142,7 @@ fi
 
 echo
 echo "== an error value's sentence, through .or_panic"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/system_roots::{SystemRoots}
@@ -154,9 +154,9 @@ if error = roots.read_system
   raise error.message
 end
 puts "accepted"
-IYI
+RIS
 printf 'no certificates\n' >"$WORK/empty.pem"
-if REFUSE_EMPTY="$WORK/empty.pem" "$IYI" run "$WORK/refuse.iyi" >"$WORK/refuse.out" 2>&1; then
+if REFUSE_EMPTY="$WORK/empty.pem" "$RIS" run "$WORK/refuse.ri" >"$WORK/refuse.out" 2>&1; then
   echo "  a bundle with no certificate was accepted as a store"
   status=1
 elif ! grep -qF "x509: no root certificates in \$SSL_CERT_FILE and \$SSL_CERT_DIR ($WORK/empty.pem)" "$WORK/refuse.out"; then
@@ -182,15 +182,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/system_roots.iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/system_roots.ri").read_text(encoding="utf-8")
 if src.count(os.environ["OLD"]) != 1:
     raise SystemExit("patch site missing or not one")
-Path("$WORK/patched/std/system_roots.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
+Path("$WORK/patched/std/system_roots.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_system_roots_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_system_roots_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF -e "$2" "$WORK/mut.out"; then

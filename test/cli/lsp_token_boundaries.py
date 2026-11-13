@@ -7,7 +7,7 @@ previous number's *length* — and every editor showed `t`otal, the
 first letter colored, the rest plain. The second was the language: the
 scanner built its lexer without the file's name, which is the only
 thing about a buffer the lexer cannot read out of the source, so every
-`.iyi` file was colored by the other language's rules. There `foo!` is
+`.ri` file was colored by the other language's rules. There `foo!` is
 one name, so the propagation operator was swallowed into the name
 before it, and `end!` was a name too — which cost a block's `end` its
 keyword color. In iyi `!` is never part of a name (iyi SPEC III.1.7),
@@ -36,7 +36,7 @@ def name_char(ch):
 def main():
     root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "..", "samples", "iyi"))
-    files = sorted(glob.glob(root + "/**/*.iyi", recursive=True))
+    files = sorted(glob.glob(root + "/**/*.ri", recursive=True))
     if not files:
         sys.exit(f"no corpus under {root}")
 

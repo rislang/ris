@@ -218,13 +218,13 @@ def write_project(directory, modules=MODULES, types_per_module=TYPES_PER_MODULE)
 
     for part in range(modules):
         indices = range(part * types_per_module, (part + 1) * types_per_module)
-        (iyi_root / "parts" / f"mod{part}.iyi").write_text(module_iyi(part, indices))
+        (iyi_root / "parts" / f"mod{part}.ri").write_text(module_iyi(part, indices))
         (crystal_root / "parts" / f"mod{part}.cr").write_text(module_crystal(part, indices))
         package = go_root / "parts" / f"mod{part}"
         package.mkdir(parents=True, exist_ok=True)
         (package / f"mod{part}.go").write_text(module_go(part, indices))
 
-    (iyi_root / "main.iyi").write_text(main_iyi(modules))
+    (iyi_root / "main.ri").write_text(main_iyi(modules))
     (crystal_root / "main.cr").write_text(main_crystal(modules))
     (go_root / "main.go").write_text(main_go(modules))
     (go_root / "go.mod").write_text("module bench/incremental\n\ngo 1.21\n")
@@ -234,7 +234,7 @@ def write_project(directory, modules=MODULES, types_per_module=TYPES_PER_MODULE)
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "."
     iyi_root, go_root, crystal_root = write_project(target)
-    lines = sum(len(p.read_text().splitlines()) for p in iyi_root.rglob("*.iyi"))
+    lines = sum(len(p.read_text().splitlines()) for p in iyi_root.rglob("*.ri"))
     print(f"{iyi_root}: {MODULES} modules, {MODULES * TYPES_PER_MODULE} types, {lines} lines")
     print(f"{go_root}: the same, as Go packages")
     print(f"{crystal_root}: the same again, as Crystal requires")

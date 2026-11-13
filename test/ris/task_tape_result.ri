@@ -22,19 +22,23 @@ end
 @[OnTape]
 struct Tm
   getter what : String
+
   def initialize(@what : String)
   end
 end
+
 def rd(name : String) : String | Tm
   return Tm.new(name) if name == "slow"
   "<#{name}>"
 end
+
 def one(n : String) : String | Tm | Panicked
   group do |g|
     t = g.spawn { rd(n) }
     t.value
   end
 end
+
 r = one("slow")
 puts r.what if r.is_a?(Tm)
 r2 = one("ok")

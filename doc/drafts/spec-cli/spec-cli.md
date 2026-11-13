@@ -49,7 +49,7 @@ tagged test.
 ### 4.1 Root and spec files
 
 The root is the nearest directory, from the current one up, holding
-`ris.mod` or `iyi.mod`; with none, the current directory when it holds
+`ris.mod` or `ris.mod`; with none, the current directory when it holds
 a spec. The spec is `ROOT/SPEC.md` or every `ROOT/spec/*.md` read in
 order of its leading number (`spec/1-storage.md`); either is read,
 both present is an error. The clause number is the address, so
@@ -76,7 +76,7 @@ tests.
 ### 4.3 Tests and tags
 
 The scanned set: every file under `ROOT/test/` ending in `.ri`,
-`.iyi`, `.cr`, `.sh` or `.py`, hidden directories left out. These use
+`.ri`, `.cr`, `.sh` or `.py`, hidden directories left out. These use
 `#` comments. src/ and std/ citations are not tags. The unit is the
 file: whatever it names, it names as a whole.
 
@@ -112,7 +112,7 @@ A promise not yet kept still gets its test at once:
 ends the file. `ris test` reports `FILE: todo` with the reason; text
 counts `N passed, M failed, K todo`; JSON adds `"todo": K` and status
 `"todo"`; it exits 0 when only todos and passes ran; no death sentence
-(77 is a normal exit). `ris spec` reads a `.ri`/`.iyi` file holding a
+(77 is a normal exit). `ris spec` reads a `.ri` file holding a
 line `todo "reason"` as a todo test.
 
 ### 4.5 Change without a silent pass
@@ -194,7 +194,7 @@ Step A adds these to SPEC.md chapter 6, exactly:
 ```
 * 6.7 `ris spec` links the spec's clauses to the tests that prove them.
   The spec is SPEC.md or spec/*.md (both is an error) at the root: the
-  nearest directory holding ris.mod or iyi.mod, else the current one. A
+  nearest directory holding ris.mod, else the current one. A
   clause is `* N.M text` under `## N. Title`, continued by indented
   lines; its version is the first 8 hex digits of SHA-256 of its text
   with each whitespace run one space. A file under the root's test/
@@ -304,7 +304,7 @@ C. `ris check spec`.
    SPEC_CHANGELOG.md (baseline entry recording every clause's
    version), spec_verb.py.
 D. `todo` and coverage.
-   Modify: src/iyi/prelude.iyi (`todo`),
+   Modify: src/ris/prelude.ri (`todo`),
    src/compiler/iyi/command/test.cr (verdict, counts, JSON, summary,
    exit), spec_clauses.cr (`ris spec todo`, uncovered fails),
    spec_verb.py.

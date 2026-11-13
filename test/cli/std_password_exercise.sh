@@ -24,7 +24,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -42,12 +42,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_password_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_password_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -135,10 +135,10 @@ for _ in range(30):
     length = rng.randint(1, 100)
     lines.append(f'puts hex(Scrypt.derive(b("{pw.hex()}"), b("{salt.hex()}"), {n}, {r}, {p}, {length}))')
     expected.append(f"{hashlib.scrypt(pw, salt=salt, n=n, r=r, p=p, dklen=length).hex()} n={n} r={r} p={p} length={length}")
-open(os.path.join(work, "scrypt_cases.iyi"), "w").write("\n".join(lines) + "\n")
+open(os.path.join(work, "scrypt_cases.ri"), "w").write("\n".join(lines) + "\n")
 open(os.path.join(work, "scrypt_expected.txt"), "w").write("\n".join(expected) + "\n")
 PY
-  if ! "$IYI" run "$WORK/scrypt_cases.iyi" >"$WORK/scrypt_got.txt" 2>&1; then
+  if ! "$RIS" run "$WORK/scrypt_cases.ri" >"$WORK/scrypt_got.txt" 2>&1; then
     echo "  the scrypt cases did not run: $(tail -1 "$WORK/scrypt_got.txt")"
     status=1
   elif ! "$PY" - "$WORK" <<'PY'
@@ -188,10 +188,10 @@ for i in range(16):
 made = [password() for _ in range(10)]
 for i, pw in enumerate(made):
     lines.append(f'puts "made {i} #{{Bcrypt.hash(b("{pw.hex()}"), 4)}}"')
-open(os.path.join(work, "bcrypt_cases.iyi"), "w").write("\n".join(lines) + "\n")
+open(os.path.join(work, "bcrypt_cases.ri"), "w").write("\n".join(lines) + "\n")
 open(os.path.join(work, "bcrypt_made.txt"), "w").write("\n".join(pw.hex() for pw in made) + "\n")
 PY
-  if ! "$IYI" run "$WORK/bcrypt_cases.iyi" >"$WORK/bcrypt_got.txt" 2>&1; then
+  if ! "$RIS" run "$WORK/bcrypt_cases.ri" >"$WORK/bcrypt_got.txt" 2>&1; then
     echo "  the bcrypt cases did not run: $(tail -1 "$WORK/bcrypt_got.txt")"
     status=1
   elif ! "$PY" - "$WORK" <<'PY'
@@ -219,8 +219,8 @@ PY
 fi
 if command -v htpasswd >/dev/null 2>&1; then
   stored="$(htpasswd -nbBC 5 user 'apache wrote this' | cut -d: -f2- | tr -d '\r\n')"
-  printf 'module htpasswd_case\n\nimport std/password::{Bcrypt}\n\nputs Bcrypt.verify("apache wrote this", "%s")\nputs Bcrypt.verify("apache wrote that", "%s")\n' "$stored" "$stored" >"$WORK/htpasswd.iyi"
-  if [ "$("$IYI" run "$WORK/htpasswd.iyi" 2>&1 | tr '\n' ' ')" = "true false " ]; then
+  printf 'module htpasswd_case\n\nimport std/password::{Bcrypt}\n\nputs Bcrypt.verify("apache wrote this", "%s")\nputs Bcrypt.verify("apache wrote that", "%s")\n' "$stored" "$stored" >"$WORK/htpasswd.ri"
+  if [ "$("$RIS" run "$WORK/htpasswd.ri" 2>&1 | tr '\n' ' ')" = "true false " ]; then
     echo "  htpasswd -B's ${stored:0:7} hash verifies, and not for another password"
   else
     echo "  htpasswd -B's hash $stored did not verify as it should"
@@ -235,7 +235,7 @@ echo "== what bcrypt at cost 10 takes"
 # Recorded, not held to a figure: the time is the machine's as much as the
 # code's. The best of three, --release, against Python's bcrypt when it is
 # here.
-cat >"$WORK/cost.iyi" <<'IYI'
+cat >"$WORK/cost.ri" <<'RIS'
 module cost
 
 import std/password::{Bcrypt}
@@ -249,8 +249,8 @@ best = 0_i64
   best = (t1 - t0).to_i64 if k == 0 || (t1 - t0).to_i64 < best
 end
 puts "iyi #{best // 1_000_000} ms"
-IYI
-if "$IYI" build --release -o "$WORK/cost" "$WORK/cost.iyi" >"$WORK/cost.build.log" 2>&1 && "$WORK/cost" >"$WORK/cost.out" 2>&1; then
+RIS
+if "$RIS" build --release -o "$WORK/cost" "$WORK/cost.ri" >"$WORK/cost.build.log" 2>&1 && "$WORK/cost" >"$WORK/cost.out" 2>&1; then
   python_ms=""
   if [ -n "$PY" ] && "$PY" -c 'import bcrypt' >/dev/null 2>&1; then
     python_ms="$("$PY" -c '
@@ -271,7 +271,7 @@ fi
 
 echo
 echo "== what password refuses"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/password::{Scrypt, Bcrypt}
@@ -301,9 +301,9 @@ when "scrypt-one-byte-short"
   Scrypt.derive("pleaseletmein", "SodiumChloride", 16384, 8, 1, 64, 16_780_287_i64)
 end
 puts "accepted"
-IYI
+RIS
 refuse() { # refuse <case> <phrase>
-  if "$IYI" run "$WORK/refuse.iyi" -- "$1" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
   elif ! grep -qF "$2" "$WORK/refuse.out"; then
@@ -339,15 +339,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/password.iyi").read_text()
+src = Path("$REPO/src/std/password.ri").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/password.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/password.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_password_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_password_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF "$2" "$WORK/mut.out"; then

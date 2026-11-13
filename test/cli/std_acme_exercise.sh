@@ -42,7 +42,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 case "$(uname -s)" in
@@ -63,12 +63,12 @@ cleanup() {
 trap cleanup EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_acme_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_acme_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -125,8 +125,8 @@ else
   read_ok=0
   for kind in p256 p384 rsa ed25519; do
     if openssl req -inform DER -in "$WORK/art/csr-$kind.der" -verify -noout -text >"$WORK/req-$kind.txt" 2>&1 &&
-      grep -q "verify OK" "$WORK/req-$kind.txt" && grep -q "DNS:www.iyi-acme.example, DNS:iyi-acme.example" "$WORK/req-$kind.txt" &&
-      grep -q "Subject: CN *= *www.iyi-acme.example" "$WORK/req-$kind.txt"; then
+      grep -q "verify OK" "$WORK/req-$kind.txt" && grep -q "DNS:www.ri-acme.example, DNS:iyi-acme.example" "$WORK/req-$kind.txt" &&
+      grep -q "Subject: CN *= *www.ri-acme.example" "$WORK/req-$kind.txt"; then
       read_ok=$((read_ok + 1))
     else
       echo "  FAIL: openssl req -verify on the $kind request: $(tr -d '\r' <"$WORK/req-$kind.txt" | head -3)"
@@ -135,8 +135,8 @@ else
   done
   echo "  openssl req -verify: $read_ok of 4 requests (P-256, P-384, RSA, Ed25519) verify OK, their subject and both names read"
   if openssl x509 -inform DER -in "$WORK/art/alpn.der" -noout -text >"$WORK/alpn.txt" 2>&1 &&
-    grep -q "1.3.6.1.5.5.7.1.31: critical" "$WORK/alpn.txt" && grep -q "DNS:alpn.iyi-acme.example" "$WORK/alpn.txt"; then
-    echo "  openssl x509: the tls-alpn-01 certificate carries 1.3.6.1.5.5.7.1.31, critical, and DNS:alpn.iyi-acme.example"
+    grep -q "1.3.6.1.5.5.7.1.31: critical" "$WORK/alpn.txt" && grep -q "DNS:alpn.ri-acme.example" "$WORK/alpn.txt"; then
+    echo "  openssl x509: the tls-alpn-01 certificate carries 1.3.6.1.5.5.7.1.31, critical, and DNS:alpn.ri-acme.example"
   else
     echo "  FAIL: openssl x509 on the tls-alpn-01 certificate: $(grep -m2 -E 'critical|DNS|rror' "$WORK/alpn.txt")"
     status=1
@@ -154,7 +154,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.x509.oid import NameOID
 art = sys.argv[1]
 bad = []
-names = ["www.iyi-acme.example", "iyi-acme.example"]
+names = ["www.ri-acme.example", "iyi-acme.example"]
 for kind in ("p256", "p384", "rsa", "ed25519"):
     csr = x509.load_der_x509_csr(open(f"{art}/csr-{kind}.der", "rb").read())
     if not csr.is_signature_valid:
@@ -367,7 +367,7 @@ PY
           echo "  no openssl here, so the chains go unverified by it"
         else
           verified=0
-          for chain in "$WORK"/pebble/out/*.iyi-acme.example.pem; do
+          for chain in "$WORK"/pebble/out/*.ri-acme.example.pem; do
             domain="$(basename "$chain" .pem)"
             "$PY" - "$chain" "$WORK/pebble/leaf.pem" "$WORK/pebble/rest.pem" <<'PY'
 import re, sys
@@ -397,13 +397,13 @@ fi
 
 echo
 echo "== doc, format, other platforms and artifacts"
-if "$IYI" doc "$REPO/src/std/acme.iyi" >"$WORK/doc.txt" 2>&1 && grep -q "wait_authorization" "$WORK/doc.txt"; then
+if "$RIS" doc "$REPO/src/std/acme.ri" >"$WORK/doc.txt" 2>&1 && grep -q "wait_authorization" "$WORK/doc.txt"; then
   echo "  iyi doc reads std/acme, AcmeClient's waits included"
 else
   echo "  FAIL: iyi doc: $(grep -m1 -E 'Error|BUG' "$WORK/doc.txt")"
   status=1
 fi
-if "$IYI" check format "$REPO/src/std/acme.iyi" "$REPO/src/std/x509.iyi" "$REPO/test/cli/std_acme_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$RIS" check format "$REPO/src/std/acme.ri" "$REPO/src/std/x509.ri" "$REPO/test/cli/std_acme_exercise.ri" >"$WORK/format.log" 2>&1; then
   echo "  the module, std/x509 and the exercise are formatted"
 else
   echo "  FAIL: not formatted: $(grep -m1 produced "$WORK/format.log")"
@@ -411,7 +411,7 @@ else
 fi
 apart=""
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_acme_exercise.iyi" >"$WORK/cross.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_acme_exercise.ri" >"$WORK/cross.log" 2>&1; then
     echo "  $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross.log")"
     apart="$apart $target"
   fi
@@ -423,8 +423,8 @@ else
   echo "  the exercise typechecks for x86_64-linux-gnu, aarch64-darwin, x86_64-windows-msvc, aarch64-linux-gnu, x86_64-linux-musl"
 fi
 mkdir -p "$WORK/r1"
-if (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_acme_exercise.iyi" &&
-  "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_acme_exercise.iyi") >"$WORK/r1/build.log" 2>&1; then
+if (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_acme_exercise.ri" &&
+  "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_acme_exercise.ri") >"$WORK/r1/build.log" 2>&1; then
   "$WORK/r1/from-artifact" >"$WORK/r1/artifact.out" 2>&1
   if grep -q "ALL CHECKS PASSED" "$WORK/r1/artifact.out" && cmp -s "$WORK/acme-plain.out" "$WORK/r1/artifact.out"; then
     echo "  built from its artifacts, the exercise prints what it prints from source"
@@ -455,15 +455,15 @@ prove_broken() {
   if ! OLD="$4" NEW="$5" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/$1.iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/$1.ri").read_text(encoding="utf-8")
 if src.count(os.environ["OLD"]) != 1:
     raise SystemExit("patch site missing or not one")
-Path("$WORK/patched/std/$1.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8", newline="\n")
+Path("$WORK/patched/std/$1.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8", newline="\n")
 PY
   then
     echo "  the $2 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_acme_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_acme_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $2"
     status=1
   elif grep -qF -e "$3" "$WORK/mut.out"; then

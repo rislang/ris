@@ -9,7 +9,8 @@ module Iyi
     def normalize(node, inside_exp = false, current_def = nil, macro_code = false)
       if node.is_a?(Call) || node.is_a?(Assign)
         if !current_def && !macro_code &&
-           node.location.try(&.original_filename).try(&.ends_with?(".ri"))
+           node.location.try(&.original_filename).try(&.ends_with?(".ri")) &&
+           !TapePointerCheckerLibrary.library?(node.location)
           return normalize(Expressions.new([node] of ASTNode).at(node),
             inside_exp, current_def, macro_code)
         end
@@ -253,7 +254,7 @@ module Iyi
       directory = program.iyi_prelude_dir
       # The shared tape now lives beside the allocator choices.
       file = deferred.location.try(&.original_filename)
-      !!(directory && {"prelude.iyi", "region.iyi"}.any? do |name|
+      !!(directory && {"prelude.ri", "region.ri"}.any? do |name|
         file == File.join(directory, name)
       end)
     end
@@ -482,14 +483,14 @@ module Iyi
       return false unless location
       return false if TapeScopeRuntime.runtime?(location)
       file = location.original_filename.try(&.gsub('\\', '/')) || ""
-      !(file.includes?("/src/std/") || file.ends_with?(".iyimod"))
+      !(TapeScopeRuntime.library_file?(file) || file.ends_with?(".rimod"))
     end
 
-    # A body read back from a `.iyimod` was lowered when its module was
+    # A body read back from a `.rimod` was lowered when its module was
     # built: lowering it again would take the lowering's own temporaries
     # (`__temp_1 << item`) for growing text.
     private def iyimod_code?(node : ASTNode) : Bool
-      !!node.location.try(&.original_filename).try(&.ends_with?(".iyimod"))
+      !!node.location.try(&.original_filename).try(&.ends_with?(".rimod"))
     end
 
     @ris_growing_locals = Set(String).new
@@ -708,17 +709,17 @@ module Iyi
     end
 
     # Program code (.ri) and std's own: both write text as `s = ""` and
-    # `<<`. test/ and the runtime (src/iyi/) keep their builders.
+    # `<<`. test/ and the runtime (src/ris/) keep their builders.
     private def ris_text_code?(node : ASTNode) : Bool
       return true if ris_program_code?(node)
       return false unless program.iyi_prelude?
       file = node.location.try(&.original_filename.try(&.gsub('\\', '/'))) || ""
-      file.includes?("/src/std/") && file.ends_with?(".iyi")
+      file.includes?("/src/std/") && file.ends_with?(".ri")
     end
 
     private def refuse_plain_builders(body : ASTNode) : Nil
       return unless ris_text_code?(body) &&
-                    body.location.try(&.original_filename.try { |f| f.ends_with?(".ri") || f.ends_with?(".iyi") })
+                    body.location.try(&.original_filename.try { |f| f.ends_with?(".ri") })
       starts = BuilderStarts.new
       body.accept(starts)
       starts.locals.each do |name, call|
@@ -1126,7 +1127,8 @@ module Iyi
 
     def transform(node : Def)
       if ris_program_code?(node) &&
-         node.location.try(&.original_filename.try(&.ends_with?(".ri")))
+         node.location.try(&.original_filename.try(&.ends_with?(".ri"))) &&
+         !TapePointerCheckerLibrary.library?(node.location)
         node.args.each do |arg|
           if (type = arg.restriction).is_a?(Path) && type.names == ["IO"]
             type.raise "a text parameter takes `String::Builder`: write " \
@@ -1507,11 +1509,11 @@ module Iyi
       end
 
       # ris: an artifact's text carries a constant already lowered to
-      # `::__ris_program_init do ... end`; read back from a .iyimod it is the
+      # `::__ris_program_init do ... end`; read back from a .rimod it is the
       # compiler's own initializer, not a call a user wrote.
       if (value = node.value).is_a?(Call) && value.name == "__ris_program_init" &&
          value.global? && value.block &&
-         node.location.try(&.filename).as?(String).try(&.ends_with?(".iyimod"))
+         node.location.try(&.filename).as?(String).try(&.ends_with?(".rimod"))
         value.program_initializer = true
       elsif program_initializer?(node.target, node) &&
             !node.value.simple_literal?
@@ -1792,10 +1794,10 @@ module Iyi
     # Macro code and annotation arguments remain compiler metadata.
     private def tape_text?(node : ASTNode) : Bool
       file = node.location.try(&.original_filename)
-      # ris: every program file, .ri or .iyi, has no heap: its text is tape
+      # ris: every program file, .ri, has no heap: its text is tape
       # text. std, the runtime and artifacts keep String until migrated.
       @macro_code == 0 && !!file &&
-        (file.ends_with?(".ri") || (file.ends_with?(".iyi") && ris_program_code?(node))) &&
+        file.ends_with?(".ri") && ris_program_code?(node) &&
         !TapePointerCheckerLibrary.library?(node.location)
     end
 

@@ -12,8 +12,8 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IYI="${IYI:-$REPO/bin/ris}"
-case "$IYI" in /*) ;; *) IYI="$PWD/$IYI" ;; esac
+RIS="${RIS:-$REPO/bin/ris}"
+case "$RIS" in /*) ;; *) RIS="$PWD/$RIS" ;; esac
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -53,7 +53,7 @@ end
 EOF
 
 echo "== build and run"
-"$IYI" build m.ri -o m > build.out 2>&1 || { fail "build:"; cat build.out; }
+"$RIS" build m.ri -o m > build.out 2>&1 || { fail "build:"; cat build.out; }
 if [ -x m ]; then
   out="$(./m)"
   [ "$out" = "hello from m" ] || fail "run printed: $out"
@@ -70,7 +70,7 @@ fi
 sed -e 's/^module m$/module m\n\nimport std\/dir::{Dir}/' \
   -e 's/^puts greet$/puts Dir.exists?(".")/' \
   -e '/^spec 1.1/,$d' m.ri > control.ri
-"$IYI" build control.ri -o control > control.out 2>&1 ||
+"$RIS" build control.ri -o control > control.out 2>&1 ||
   { fail "control build:"; cat control.out; }
 if [ -x control ] && ! nm control 2>/dev/null | grep -q 'Std::Dir'; then
   fail "control: no Std::Dir symbol found, the symbol check sees nothing"
@@ -78,16 +78,16 @@ fi
 
 echo "== format leaves the file unchanged"
 cp m.ri before.ri
-"$IYI" check format m.ri > fmt.out 2>&1 ||
+"$RIS" check format m.ri > fmt.out 2>&1 ||
   { fail "check format:"; cat fmt.out; }
-"$IYI" check format --fix m.ri > fmt.out 2>&1 ||
+"$RIS" check format --fix m.ri > fmt.out 2>&1 ||
   { fail "check format --fix:"; cat fmt.out; }
 cmp -s before.ri m.ri || { fail "format changed m.ri:"; diff before.ri m.ri; }
 # The formatter does run: it fixes the def, and keeps the block as written.
 printf 'module f\n\npub def two : Int32\n  a  =  2\n  a\nend\n\nspec 1.1   #  odd  label\n    two  ==  2\nend\n' \
   > f.ri
 sed -n '/^spec/,$p' f.ri > f.block
-"$IYI" check format --fix f.ri > fmt.out 2>&1 ||
+"$RIS" check format --fix f.ri > fmt.out 2>&1 ||
   { fail "check format --fix f.ri:"; cat fmt.out; }
 grep -qx '  a = 2' f.ri || { fail "format did not fix f.ri:"; cat f.ri; }
 sed -n '/^spec/,$p' f.ri | cmp -s - f.block ||
@@ -95,15 +95,15 @@ sed -n '/^spec/,$p' f.ri | cmp -s - f.block ||
 
 echo "== export metadata omits the section"
 printf 'import m\n\nputs M.greet\n' > main.ri
-"$IYI" build main.ri --no-codegen --emit-iyimod meta > meta.out 2>&1 ||
+"$RIS" build main.ri --no-codegen --emit-rimod meta > meta.out 2>&1 ||
   { fail "emit-iyimod:"; cat meta.out; }
-ls meta/* > /dev/null 2>&1 || fail "no .iyimod written"
+ls meta/* > /dev/null 2>&1 || fail "no .rimod written"
 if grep -r -q -e 'std/dir' -e helper_marker meta; then
   fail "the export metadata names the spec section"
 fi
 
 echo "== doc omits the section"
-"$IYI" doc m.ri > doc.out 2>&1 || { fail "doc:"; cat doc.out; }
+"$RIS" doc m.ri > doc.out 2>&1 || { fail "doc:"; cat doc.out; }
 grep -q greet doc.out || { fail "doc lacks greet:"; cat doc.out; }
 if grep -q -e helper_marker -e 'spec 1' -e 'Dir' doc.out; then
   fail "doc shows the spec section:"; cat doc.out
@@ -111,7 +111,7 @@ fi
 
 # refuse NAME EXPECTED: build NAME.ri, which must fail with EXPECTED.
 refuse() {
-  "$IYI" build "$1.ri" -o "$1" > "$1.out" 2>&1 &&
+  "$RIS" build "$1.ri" -o "$1" > "$1.out" 2>&1 &&
     { fail "$1 built"; return; }
   grep -qF -- "$2" "$1.out" || { fail "$1: wanted \"$2\", got:"; cat "$1.out"; }
 }

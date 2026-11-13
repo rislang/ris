@@ -6,5 +6,5 @@ def slurp(path : String) : String
   File.read(path)
 end
 
-text = slurp("./.build/iyi")
+text = slurp("./.build/ris")
 puts text.bytesize > 1_000_000

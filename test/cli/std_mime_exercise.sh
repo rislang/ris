@@ -24,7 +24,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -42,12 +42,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_mime_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_mime_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -94,15 +94,15 @@ echo
 echo "== what mime refuses"
 # The table is fixed: there is no way to add to it, and the module reads
 # no file, so it answers the same on every machine.
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/mime::{MIME}
 
-MIME.register(".iyi", "text/x-iyi")
+MIME.register(".ri", "text/x-iyi")
 puts "accepted"
-IYI
-cat >"$WORK/malformed.iyi" <<'IYI'
+RIS
+cat >"$WORK/malformed.ri" <<'RIS'
 module malformed
 
 import std/mime::{MIME}
@@ -110,8 +110,8 @@ import std/mime::{MIME}
 ["text", "/html", "text/", "text/ht ml", "text/html; a", "text/html; a=\"open", "text/html; a = b"].each do |bad|
   puts "#{bad.inspect} -> #{MIME.parse?(bad).nil? ? "refused" : "ACCEPTED"}"
 end
-IYI
-if "$IYI" run "$WORK/refuse.iyi" >"$WORK/refuse.out" 2>&1; then
+RIS
+if "$RIS" run "$WORK/refuse.ri" >"$WORK/refuse.out" 2>&1; then
   echo "  register was accepted"
   status=1
 elif ! grep -qF "undefined method 'register'" "$WORK/refuse.out"; then
@@ -120,7 +120,7 @@ elif ! grep -qF "undefined method 'register'" "$WORK/refuse.out"; then
 else
   echo "  register: no such method"
 fi
-if ! "$IYI" run "$WORK/malformed.iyi" >"$WORK/refuse.out" 2>&1 || grep -q ACCEPTED "$WORK/refuse.out" \
+if ! "$RIS" run "$WORK/malformed.ri" >"$WORK/refuse.out" 2>&1 || grep -q ACCEPTED "$WORK/refuse.out" \
    || [ "$(grep -c refused "$WORK/refuse.out")" -ne 7 ]; then
   echo "  malformed media types were not all refused:"
   sed 's/^/    /' "$WORK/refuse.out"
@@ -128,7 +128,7 @@ if ! "$IYI" run "$WORK/malformed.iyi" >"$WORK/refuse.out" 2>&1 || grep -q ACCEPT
 else
   echo "  seven malformed media types refused"
 fi
-if grep -nE '^\s*(lib|fun) |File\.|Dir\.|ENV' "$REPO/src/std/mime.iyi"; then
+if grep -nE '^\s*(lib|fun) |File\.|Dir\.|ENV' "$REPO/src/std/mime.ri"; then
   echo "  the module reaches outside itself"
   status=1
 else
@@ -234,15 +234,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/mime.iyi").read_text()
+src = Path("$REPO/src/std/mime.ri").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/mime.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/mime.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_mime_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_mime_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF "$2" "$WORK/mut.out"; then

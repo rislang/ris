@@ -376,7 +376,7 @@ module Iyi
       @types_to_modules = {} of Type => ModuleInfo
 
       # iyi: the unit a callee should be copied into while emitting code that
-      # will travel in a `.iyimod` (iyi SPEC IV.1g). Nil in every build that is
+      # will travel in a `.rimod` (iyi SPEC IV.1g). Nil in every build that is
       # not writing artifacts, which is every build that is not making a
       # library out of a module.
       @iyi_closure_host = nil.as(ModuleInfo?)
@@ -656,7 +656,7 @@ module Iyi
     # all of these by name in the main module: `x + 1` calls
     # `__iyi_raise_overflow`, a class's `new` reads `X:type_id` and
     # `X:headed`, `group` reads `IyiScheduler`'s class variables. Internal,
-    # they were invisible to it, and `--release --use-iyimod` linked no module
+    # they were invisible to it, and `--release --use-rimod` linked no module
     # that did any of that: `unresolved external symbol __iyi_raise_overflow`
     # for a module of one `x + 1`, 126 symbols for one that used `group`. They
     # keep the linkage a build of many modules gives them, which is what every
@@ -835,10 +835,10 @@ module Iyi
         mod.verify
       end
 
-      if type_info_path = ENV["IYI_DUMP_TYPE_INFO"]?.presence
+      if type_info_path = ENV["RIS_DUMP_TYPE_INFO"]?.presence
         dump_type_info(type_info_path)
       end
-      dump_type_id if ENV["IYI_DUMP_TYPE_ID"]? == "1"
+      dump_type_id if ENV["RIS_DUMP_TYPE_ID"]? == "1"
     end
 
     # iyi: every function this unit defines touches its frame a page at a
@@ -1124,7 +1124,7 @@ module Iyi
       # A proc literal is otherwise emitted into `_main`, and the unit that
       # creates one refers to it from there — which is fine for a program and
       # not for an artifact: the router's unit called
-      # `~procProc(Context, String)@kemal/router.iyi:211` and the producing
+      # `~procProc(Context, String)@kemal/router.ri:211` and the producing
       # build had left the definition in a module nothing carries. Nor could
       # the consumer make its own, because the name has the file and line it
       # was written on in it and the consumer reads declarations under another
@@ -1815,7 +1815,7 @@ module Iyi
         already_loaded = (node.special_var? ? false : var.already_loaded)
 
         # iyi: the slot can be *narrower* than the read, which is a shape only a
-        # boundary makes. A call to a method read from a `.iyimod` is keyed on
+        # boundary makes. A call to a method read from a `.rimod` is keyed on
         # the parameter as declared and the argument widened to it, so an `IO`
         # parameter is read as `IO+`; inside a dispatch arm the same variable's
         # slot holds the arm's concrete type. Widening is `upcast` — `downcast`
@@ -2706,7 +2706,7 @@ module Iyi
     # Emits a debug message that shows the current llvm basic block name,
     # the location within the codegen that was used to emit this log.
     #
-    # The message is only generated if `IYI_DEBUG_CODEGEN` is set
+    # The message is only generated if `RIS_DEBUG_CODEGEN` is set
     #
     # The block given to this method should yield `printf` arguments to show
     # additional information. The following forms are all valid and helps to
@@ -2721,7 +2721,7 @@ module Iyi
     # ```
     #
     def debug_codegen_log(file = __FILE__, line = __LINE__, &)
-      return unless ENV["IYI_DEBUG_CODEGEN"]?
+      return unless ENV["RIS_DEBUG_CODEGEN"]?
       printf_args = yield || ""
       printf_args = {printf_args, [] of LLVM::Value} if printf_args.is_a?(String)
       printf_args = {printf_args[0], [] of LLVM::Value} if printf_args.is_a?({String})

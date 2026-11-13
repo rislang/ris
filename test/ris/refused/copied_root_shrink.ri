@@ -29,4 +29,5 @@ def run
   copy.bytes.clear
   puts kept
 end
+
 tape { run }

@@ -1,0 +1,489 @@
+# Fixed-size stack-allocated array for iyi.
+#
+# A fixed-size array on the stack: `StaticArray(T, N)`.
+
+module std/static_array
+
+# ris: `Int32#<=>` is `std/traits`'s.
+import std/traits
+
+import std/slice::{Slice}
+
+struct ::StaticArray(T, N)
+  # Returns a pointer to this static array's data.
+  def to_unsafe : Pointer(T)
+    pointerof(@buffer)
+  end
+
+  # Returns the size of self.
+  def size : Int32
+    N
+  end
+
+  # `StaticArray.new { |i| }` is the runtime's (src/ris/tape_core.ri):
+  # its loop keeps each element the block makes, as Array.new's does.
+
+  # Creates a new StaticArray filled with the given value.
+  def self.new(value : T) : self
+    new { value }
+  end
+
+  # Returns true when the static array contains zero elements.
+  def empty? : Bool
+    N == 0
+  end
+
+  # Returns the element at *index* without bounds checking.
+  def unsafe_fetch(index : Int) : T
+    to_unsafe[index]
+  end
+
+  # Sets the element at *index* to *value* without bounds checking.
+  def unsafe_put(index : Int, value : T) : T
+    to_unsafe[index] = value
+    value
+  end
+
+  # Returns the element at the given *index*. Negative indices count backward.
+  def [](index : Int) : T
+    idx = index_within(index) || raise "Index out of bounds: #{index} (size: #{N})"
+    to_unsafe[idx]
+  end
+
+  # Returns the element at *index*, or nil if out of bounds.
+  def []?(index : Int) : T?
+    idx = index_within(index)
+    idx ? to_unsafe[idx] : nil
+  end
+
+  # Sets the element at *index* to *value*.
+  def []=(index : Int, value : T) : T
+    idx = index_within(index) || raise "Index out of bounds: #{index} (size: #{N})"
+    to_unsafe[idx] = value
+    value
+  end
+
+  # *index*, counted from the end when negative, or nil when it is outside.
+  # Counted in `Int64` and narrowed after: narrowed first, an index past
+  # `Int32` panicked "arithmetic overflow", in `[]?` too, where the other
+  # library and this method's own doc answer nil.
+  private def index_within(index : Int) : Int32?
+    idx = index.to_i64
+    idx += N if idx < 0
+    idx < 0 || idx >= N ? nil : idx.to_i
+  end
+
+  # Returns the first element. Raises if empty.
+  def first : T
+    raise "Empty StaticArray" if N == 0
+    to_unsafe[0]
+  end
+
+  # Returns the first element or nil if empty.
+  def first? : T?
+    return nil if N == 0
+    to_unsafe[0]
+  end
+
+  # Returns the last element. Raises if empty.
+  def last : T
+    raise "Empty StaticArray" if N == 0
+    to_unsafe[N - 1]
+  end
+
+  # Returns the last element or nil if empty.
+  def last? : T?
+    return nil if N == 0
+    to_unsafe[N - 1]
+  end
+
+  # Equality. Returns true if corresponding elements are equal, where one
+  # element type holds the other, as tuples compare (src/ris/object.ri).
+  # Restricted to `StaticArray(T, N)`, a `StaticArray(Int32, 2)` was taken
+  # for a `StaticArray(Int32?, 2)` and not back: the one equality answered
+  # true one way and false the other.
+  def ==(other : StaticArray(U, M)) : Bool forall U, M
+    return false unless {{ T <= U || U <= T }} && N == M
+    i = 0
+    while i < N
+      return false unless to_unsafe[i] == other.to_unsafe[i]
+      i += 1
+    end
+    true
+  end
+
+  def ==(other : Object) : Bool
+    false
+  end
+
+  # Comparison based on lexicographical element order. Written out here: it
+  # forwarded to `Slice#<=>`, which the slice module does not have, so any
+  # call of this method failed to compile.
+  def <=>(other : StaticArray(T, N)) : Int32
+    i = 0
+    while i < N
+      cmp = to_unsafe[i] <=> other.to_unsafe[i]
+      return cmp if cmp != 0
+      i += 1
+    end
+    0
+  end
+
+  # Returns a Slice backed by this static array.
+  def to_slice : Std::Slice::Slice(T)
+    Std::Slice::Slice(T).new(to_unsafe, N, read_only: false)
+  end
+
+  # Converts this static array into a heap Array.
+  def to_a : Array(T)
+    arr = Array(T).new(N)
+    i = 0
+    while i < N
+      arr << to_unsafe[i]
+      i += 1
+    end
+    arr
+  end
+
+  # Fills the entire static array with *value*.
+  def fill(value : T) : self
+    i = 0
+    while i < N
+      to_unsafe[i] = value
+      i += 1
+    end
+    self
+  end
+
+  # Fills *count* elements starting at *start* with *value*.
+  #
+  # A negative count and a start outside are refused before anything is
+  # filled, as the other library and `Slice#fill` refuse them: an early
+  # return for `c <= 0` came first, so `fill(7, 0, -1)` and `fill(7, 9, 0)`
+  # of four elements answered the array untouched and said nothing.
+  def fill(value : T, start : Int, count : Int) : self
+    s = start.to_i64
+    s += N if s < 0
+    c = count.to_i64
+    raise "negative count: #{count}" if c < 0
+    raise "Start out of bounds" if s < 0 || s > N
+    # In `Int64`, as `index_within` counts, until the start is inside and the
+    # count is cut to the room left: narrowed first, a count of 2^32
+    # panicked "arithmetic overflow" where the other library fills to the
+    # end. Room left, not `s + c`: that overflowed for a count near the top
+    # of `Int32`.
+    i = s.to_i
+    limit = c > N - i ? N : i + c.to_i
+    while i < limit
+      to_unsafe[i] = value
+      i += 1
+    end
+    self
+  end
+
+  # Yields each element in order.
+  def each(& : T -> Nil) : Nil
+    i = 0
+    while i < N
+      yield to_unsafe[i]
+      i += 1
+    end
+  end
+
+  # Yields each element alongside its index.
+  def each_with_index(offset : Int = 0, & : (T, Int32) -> Nil) : Nil
+    i = 0
+    off = offset.to_i
+    while i < N
+      yield to_unsafe[i], off + i
+      i += 1
+    end
+  end
+
+  # Yields elements in reverse order.
+  def reverse_each(& : T -> Nil) : Nil
+    i = N - 1
+    while i >= 0
+      yield to_unsafe[i]
+      i -= 1
+    end
+  end
+
+  # Returns a new StaticArray with mapped elements.
+  def map(&block : T -> U) : StaticArray(U, N) forall U
+    StaticArray(U, N).new { |i| yield to_unsafe[i] }
+  end
+
+  # Returns a new StaticArray with mapped elements and indices.
+  def map_with_index(offset : Int = 0, &block : (T, Int32) -> U) : StaticArray(U, N) forall U
+    off = offset.to_i
+    StaticArray(U, N).new { |i| yield to_unsafe[i], off + i }
+  end
+
+  # Sorted by `Array#sort_in_place`, the stable merge sort, and copied
+  # back. It was an insertion sort of its own, quadratic: 8,000 elements in
+  # reverse order took 31,996,000 comparisons where the array's sort takes
+  # under 100,000. Equal elements keep their order, as they did.
+  def sort_in_place : self
+    sort_in_place { |a, b| a > b ? 1 : 0 }
+  end
+
+  # Returns a new sorted static array.
+  def sort : StaticArray(T, N)
+    ary = dup
+    ary.sort_in_place
+    ary
+  end
+
+  # In-place sort with custom block comparator, by the same merge sort.
+  def sort_in_place(&block : (T, T) -> Int32) : self
+    write_back(to_a.sort_in_place { |a, b| yield a, b })
+  end
+
+  # Puts *sorted*, this array's elements in their new order, back in place.
+  private def write_back(sorted : Array(T)) : self
+    i = 0
+    sorted.each do |value|
+      to_unsafe[i] = value
+      i += 1
+    end
+    self
+  end
+
+  def sort(&block : (T, T) -> Int32) : StaticArray(T, N)
+    ary = dup
+    ary.sort_in_place(&block)
+    ary
+  end
+
+  def unstable_sort_in_place : self
+    sort_in_place
+  end
+
+  def unstable_sort : StaticArray(T, N)
+    sort
+  end
+
+  def unstable_sort_in_place(&block : (T, T) -> Int32) : self
+    sort_in_place(&block)
+  end
+
+  def unstable_sort(&block : (T, T) -> Int32) : StaticArray(T, N)
+    sort(&block)
+  end
+
+  def sort_by(&block : T -> _) : StaticArray(T, N)
+    ary = dup
+    ary.sort_by_in_place { |e| yield e }
+    ary
+  end
+
+  # Each key computed once, by `Array#sort_in_place_by`, the merge sort of
+  # key and element pairs: a comparison of `yield(a) <=> yield(b)` computed
+  # it twice per comparison, 63,992,000 times for 8,000 elements.
+  def sort_by_in_place(&block : T -> _) : self
+    write_back(to_a.sort_in_place_by { |e| yield e })
+  end
+
+  def unstable_sort_by(&block : T -> _) : StaticArray(T, N)
+    sort_by { |e| yield e }
+  end
+
+  def unstable_sort_by_in_place(&block : T -> _) : self
+    sort_by_in_place { |e| yield e }
+  end
+
+  # Rotates elements in place by *n* positions. Reduced in `Int64` before it
+  # is narrowed, as `index_within` and `BitArray`'s rotation count: `n.to_i`
+  # panicked "arithmetic overflow" for 3000000001_i64, which rotates four
+  # elements by one.
+  def rotate_in_place(n : Int = 1) : self
+    return self if N <= 1
+    k = (n.to_i64 % N.to_i64).to_i
+    k += N if k < 0
+    return self if k == 0
+
+    reverse_range(0, k)
+    reverse_range(k, N)
+    reverse_range(0, N)
+    self
+  end
+
+  # Reverses elements in place.
+  def reverse_in_place : self
+    reverse_range(0, N)
+    self
+  end
+
+  private def reverse_range(start : Int32, stop : Int32) : Nil
+    left = start
+    right = stop - 1
+    while left < right
+      tmp = to_unsafe[left]
+      to_unsafe[left] = to_unsafe[right]
+      to_unsafe[right] = tmp
+      left += 1
+      right -= 1
+    end
+  end
+
+  # Duplicates this static array.
+  def dup : self
+    array = uninitialized self
+    i = 0
+    while i < N
+      array.to_unsafe[i] = to_unsafe[i]
+      i += 1
+    end
+    array
+  end
+
+  def clone : self
+    dup
+  end
+
+  # Returns the index of *object*, or nil if not found.
+  def index(object, offset : Int = 0) : Int32?
+    i = index_within(offset)
+    return nil unless i
+    while i < N
+      return i if to_unsafe[i] == object
+      i += 1
+    end
+    nil
+  end
+
+  # Returns the last index of *object*, or nil if not found.
+  def rindex(object, offset : Int = N - 1) : Int32?
+    i = index_within(offset)
+    return nil unless i
+    while i >= 0
+      return i if to_unsafe[i] == object
+      i -= 1
+    end
+    nil
+  end
+
+  # The first entry matching the caller's predicate, without a copy.
+  def find(& : T -> Bool) : T?
+    i = 0
+    while i < N
+      value = to_unsafe[i]
+      return value if yield value
+      i += 1
+    end
+    nil
+  end
+
+  # Returns true if *object* is in the array.
+  def includes?(object) : Bool
+    !index(object).nil?
+  end
+
+  def all? : Bool
+    i = 0
+    while i < N
+      return false unless to_unsafe[i]
+      i += 1
+    end
+    true
+  end
+
+  def any? : Bool
+    i = 0
+    while i < N
+      return true if to_unsafe[i]
+      i += 1
+    end
+    false
+  end
+
+  def none? : Bool
+    !any?
+  end
+
+  def one? : Bool
+    count = 0
+    i = 0
+    while i < N
+      if to_unsafe[i]
+        count += 1
+        return false if count > 1
+      end
+      i += 1
+    end
+    count == 1
+  end
+
+  def count : Int32
+    N
+  end
+
+  def count(item) : Int32
+    c = 0
+    i = 0
+    while i < N
+      c += 1 if to_unsafe[i] == item
+      i += 1
+    end
+    c
+  end
+
+  # The text `to_s` builds, written as `BitArray#to_s(io)` writes it. It
+  # asked each element for `inspect(io)`, which no prelude type has, and
+  # `IyiIO` for `<<`, which only `import std/io` gives it: `to_s(STDOUT)`
+  # of a `StaticArray(Int32, 3)` did not compile, and `inspect(io)` with it.
+  def to_s(io : IO) : Nil
+    io.write(to_s)
+  end
+
+  # Into one builder: adding each element to the text so far copied that
+  # text once per element, and 10,000 elements took 1.4 s where `to_a.to_s`
+  # of the same took 1 ms.
+  def to_s : String
+    io = ""
+    io << "StaticArray["
+    i = 0
+    while i < N
+      io << ", " if i > 0
+      io << to_unsafe[i].inspect
+      i += 1
+    end
+    io << "]"
+    io
+  end
+
+  def inspect(io : IO) : Nil
+    to_s(io)
+  end
+
+  def inspect : String
+    to_s
+  end
+
+  # Hashing follows the `==` above, mixed as `Array#hash` mixes. There was
+  # only the other library's `hash(hasher)`, which no table here calls, so
+  # `Object#hash` answered the type's id: every `StaticArray(Int32, 2)` was
+  # one slot, and 40,000 of them took 13 s to insert where the same pairs
+  # as tuples took 3 ms.
+  def hash : Int32
+    value = 0x9E3779B97F4A7C15_u64 ^ N.to_i64.unsafe_to_u64
+    i = 0
+    while i < N
+      value = (value ^ to_unsafe[i].hash.to_i64.unsafe_to_u64) &* 0x100000001B3_u64
+      value = value ^ value.unsafe_shr(29_u64)
+      i += 1
+    end
+    value.hash
+  end
+
+  macro [](*args)
+    %array = uninitialized ::StaticArray(typeof({{args.splat}}), {{args.size}})
+    {% for arg, i in args %}
+      %array[{{i}}] = {{arg}}
+    {% end %}
+    %array
+  end
+end
+
+pub alias StaticArray = ::StaticArray

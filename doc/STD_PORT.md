@@ -38,7 +38,7 @@ checked handles or run offsets. Free returns typed slots for reuse; it
 does not collect memory. See the Goose design in
 [owning_dynamic_data.md](reference/goose/docs/design/owning_dynamic_data.md).
 
-RisByteCache in src/iyi/byte_cache.iyi demonstrates one reusable byte run.
+RisByteCache in src/ris/byte_cache.ri demonstrates one reusable byte run.
 Construct one named owner for a server or session. Borrow it in handlers;
 store copies request bytes into SlicePool(UInt8), write_to writes into
 the caller's builder, and clear returns the run for reuse. The example in

@@ -29,6 +29,7 @@ raise "subview" unless total(values[1, 2]) == 5
 raise "generic view" unless generic_first(values) == 1
 raise "exact overload" unless preferred(values) == 1
 raise "bytes" unless byte_count([1_u8, 2_u8]) == 2
+
 def mixed_size(values : String | Array::View(UInt8)) : Int32
   values.is_a?(String) ? values.bytesize : values.size
 end
@@ -40,6 +41,7 @@ raise "contiguous byte view" unless bytes[1, 2].bytes == "bc"
 raise "gathered byte view" unless bytes.values_at([2, 0]).bytes == "ca"
 values.drop_prefix(1)
 raise "consume prefix" unless values == [2, 3]
+
 def generic_size(kind : T.class,
                  values : String | Array::View(UInt8)) : Int32 forall T
   mixed_size(values)

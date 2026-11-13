@@ -60,13 +60,13 @@ is wider:
 * A program whose blocks capture only a Bool and an Int32 is refused
   inside the library: `on` stores a String built on its scratch into a
   field (`@help << {"  #{flag}  #{description}", …}`,
-  `src/std/option_parser.iyi:117`, `:121`, `:134`; SPEC 1.1, 3.6).
+  `src/std/option_parser.ri:117`, `:121`, `:134`; SPEC 1.1, 3.6).
 * With that fixed, the library still cannot call a block: a stored
   `String -> Nil` proc called with a view is refused, "cannot prove
   opaque callback retain/escape effects". Every `on` block and both
   handlers have that type.
 * No build mode accepts the block form. The compiler sets `ris_no_gc`
-  for every program (`src/compiler/iyi/compiler.cr:2833`); `bin/iyi`
+  for every program (`src/compiler/iyi/compiler.cr:2833`); `bin/ris`
   and `bin/ris` are one binary. `bench/std_option_parser_exercise.sh`,
   the library's only exercise, fails at its first block.
   `test/ris/check.sh` imports the module (`std_text_plain.ri`) but
@@ -105,13 +105,13 @@ description texts given to `on`, the names cut from them, the banner
 and separators, in the order given. The help is written when asked,
 into the caller's `String::Builder` (`help(io)`); `to_s : String` is
 that call on the caller's tape, and ris's `puts(value)` prints
-`value.to_s` (`src/iyi/io.iyi:365`, p18), so `puts parser` prints it.
+`value.to_s` (`src/ris/io.ri:365`, p18), so `puts parser` prints it.
 The caller's texts must outlive the parser: literals are static; text
 built on a shorter scope is refused at `on` by SPEC 3.2, with its
 usual safe form (`copy_to(owner)`).
 
 The accepted spellings are unchanged
-(`src/std/option_parser.iyi:103-113`, `:278-283`): `--name VALUE`,
+(`src/std/option_parser.ri:103-113`, `:278-283`): `--name VALUE`,
 `--name=VALUE`, `-n VALUE`, `-nVALUE`, `--color [WHEN]` and `-c[WHEN]`
 for a value that may be left out, `-vq` for `-v -q` (a bundle), and
 `--` ending the flags. A short and long pair, `on("-v", "--verbose",
@@ -256,7 +256,7 @@ parser), what goes is the callbacks; an agent writing Crystal's
 
 ### Phase 1: the library and its gates (one commit)
 
-1. `src/std/option_parser.iyi`. Fields and public defs:
+1. `src/std/option_parser.ri`. Fields and public defs:
 
        struct RisFlag            # getter index : Int32
        class RisOptions          # owner (SPEC 2.1)
@@ -335,7 +335,7 @@ parser), what goes is the callbacks; an agent writing Crystal's
    tape_block_handler_store, by two greps: the message
    (`reads its flags after parse`, `records bad flags`,
    `Overloads are:`) and `option_parser_NAME.ri:LINE:` of the call.
-6. Remove `bench/std_option_parser_exercise.iyi` and `.sh`. Its release
+6. Remove `bench/std_option_parser_exercise.ri` and `.sh`. Its release
    build and mutation proofs go with it: the `want=` block fails on
    any changed answer, as the other std gates do.
 

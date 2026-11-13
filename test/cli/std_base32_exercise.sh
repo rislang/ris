@@ -33,7 +33,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -51,12 +51,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_base32_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_base32_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -151,10 +151,10 @@ for _ in range(300):
     lines.append(f'puts hex(Base32Hex.decode("{b32hex.lower()}"))')
     lines.append(f'puts hex(Base32Hex.decode("{b32hex.rstrip("=")}"))')
     expected += [b32, b32.rstrip("="), b32hex, b32hex.rstrip("="), "ok " + h, "ok " + h, "ok " + h, "ok " + h]
-open(os.path.join(work, "encode_cases.iyi"), "w").write("\n".join(lines) + "\n")
+open(os.path.join(work, "encode_cases.ri"), "w").write("\n".join(lines) + "\n")
 open(os.path.join(work, "encode_expected.txt"), "w").write("\n".join(expected) + "\n")
 PY
-  if ! "$IYI" run "$WORK/encode_cases.iyi" >"$WORK/encode_got.txt" 2>&1; then
+  if ! "$RIS" run "$WORK/encode_cases.ri" >"$WORK/encode_got.txt" 2>&1; then
     echo "  the cases did not run: $(tail -1 "$WORK/encode_got.txt")"
     status=1
   elif ! "$PY" - "$WORK" <<'PY'
@@ -239,11 +239,11 @@ for i in range(1500):
     literal = broken.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t").replace("#", "\\#")
     lines.append(f'puts hex({"Base32Hex" if hexa else "Base32"}.decode("{literal}"))')
     expected.append(verdict + "\t" + repr(broken))
-open(os.path.join(work, "broken_cases.iyi"), "w").write("\n".join(lines) + "\n")
+open(os.path.join(work, "broken_cases.ri"), "w").write("\n".join(lines) + "\n")
 open(os.path.join(work, "broken_expected.txt"), "w").write("\n".join(expected) + "\n")
 open(os.path.join(work, "broken_kinds.txt"), "w").write(f"{kinds['ok']} decode, {kinds['refused']} python refuses, {kinds['non-canonical']} python takes with bits past the data\n")
 PY
-  if ! "$IYI" run "$WORK/broken_cases.iyi" >"$WORK/broken_got.txt" 2>&1; then
+  if ! "$RIS" run "$WORK/broken_cases.ri" >"$WORK/broken_got.txt" 2>&1; then
     echo "  the cases did not run: $(tail -1 "$WORK/broken_got.txt")"
     status=1
   elif ! "$PY" - "$WORK" <<'PY'
@@ -265,7 +265,7 @@ fi
 
 echo
 echo "== an error value's sentence, through .or_panic"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/base32::{Base32, Base32Hex}
@@ -285,9 +285,9 @@ when "hex-outside"
   Base32Hex.decode("CPNMUOJ1EZ").or_panic
 end
 puts "accepted"
-IYI
+RIS
 refuse() { # refuse <case> <phrase>
-  if "$IYI" run "$WORK/refuse.iyi" -- "$1" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
   elif ! grep -qF -e "$2" "$WORK/refuse.out"; then
@@ -318,15 +318,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/base32.iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/base32.ri").read_text(encoding="utf-8")
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/base32.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
+Path("$WORK/patched/std/base32.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_base32_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_base32_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF -e "$2" "$WORK/mut.out"; then

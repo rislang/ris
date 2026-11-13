@@ -5,7 +5,7 @@ def board_capacity(value : T) : UInt64 forall T
 end
 
 enum BoardColor
-  Red = 7
+  Red  =  7
   Blue = 19
 end
 

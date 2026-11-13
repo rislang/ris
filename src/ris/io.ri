@@ -1,0 +1,531 @@
+# IO: a buffered stream over a descriptor or handle - the standard
+# streams, files, pipes and sockets - one read path and one write path,
+# shared by `puts`, `print` and `File`.
+
+@[OnTape]
+class IyiIO
+  @fd : Int64
+  @closed : Bool
+  @eof : Bool
+  property sync : Bool
+
+  @read_buffer : Pointer(UInt8)
+  @read_capacity : Int32
+  @read_pos : Int32
+  @read_limit : Int32
+
+  @write_buffer : Pointer(UInt8)
+  @write_capacity : Int32
+  @write_pos : Int32
+  {% if flag?(:win32) %}
+    # A console a file was opened on - `CON`, `CONIN$`, `CONOUT$` - is
+    # written and read wide, as the standard streams' consoles are, with a
+    # carry of its own (`IyiConsole.write_handle`). Through `WriteFile` and
+    # `ReadFile` it was the console's code page: `çay ğ` written to
+    # `CONOUT$` showed as `├ºay ─ƒ`, and `Türkçe ğ` typed at `CONIN$` read
+    # as eight bytes of code page 437, `ğ` folded to `g`.
+    @console : Bool = false
+    @console_carry : UInt64 = 0_u64
+  {% end %}
+
+  def initialize(@fd : Int64, buffer_size : Int32 = 4096, @sync : Bool = false)
+    @closed = false
+    @eof = false
+
+    @read_capacity = buffer_size
+    @read_buffer = Pointer(UInt8).new(RisRegion.tape_bytes(buffer_size.to_u64))
+    @read_pos = 0
+    @read_limit = 0
+
+    @write_capacity = buffer_size
+    @write_buffer = Pointer(UInt8).new(RisRegion.tape_bytes(buffer_size.to_u64))
+    @write_pos = 0
+    {% if flag?(:win32) %}
+      # A character device answers the console's own question if it was
+      # opened to be read; opened only to be written, `GetConsoleMode`
+      # refuses it (ERROR_ACCESS_DENIED), and a wide write of nothing,
+      # which `NUL` refuses, is the test.
+      mode = 0
+      handle = Pointer(Void).new(@fd > 2_i64 ? @fd.to_u64 : 0_u64)
+      if @fd > 2_i64 && LibC.GetFileType(handle) == 2
+        readable = LibC.GetConsoleMode(handle, pointerof(mode)) != 0
+        @console = readable || LibC.WriteConsoleW(handle, pointerof(mode).as(Void*), 0, pointerof(mode), Pointer(Void).new(0_u64)) != 0
+      end
+    {% end %}
+  end
+
+  # A stream retained for the program's lifetime, such as a log sink.
+  def self.on_program(fd : Int64, buffer_size : Int32 = 4096,
+                      sync : Bool = false) : IyiIO
+    io = RisRegion.program_object(IyiIO)
+    RisRegion.storage_scope { io.initialize(fd, buffer_size, sync) }
+    io
+  end
+
+  def self.new(fd : Int32, buffer_size : Int32 = 4096, sync : Bool = false) : IyiIO
+    new(fd.to_i64, buffer_size, sync)
+  end
+
+  def fd : Int32
+    @fd.to_i32
+  end
+
+  def handle : Int64
+    @fd
+  end
+
+  def write_pos : Int32
+    @write_pos
+  end
+
+  def write_capacity : Int32
+    @write_capacity
+  end
+
+  def closed? : Bool
+    @closed
+  end
+
+  def eof? : Bool
+    return true if @closed
+    return false if @read_pos < @read_limit
+    return true if @eof
+    fill_buffer
+    @eof && @read_pos >= @read_limit
+  end
+
+  # A failed read is not an ended one - `File.read` of a directory said ""
+  # - and is kept as a limit of -1, not a field the sweep's proofs would
+  # see the size of. Nor is a withdrawn one (-2, `low_level_read`): taken
+  # for the end, it ended for good a stream whose read a cancelled task
+  # had begun, and the next line was never read.
+  def read_failed? : Bool
+    @read_limit < 0
+  end
+
+  private def fill_buffer : Int32
+    return 0 if @closed || @eof
+    @read_pos = 0
+    @read_limit = 0
+
+    count = low_level_read(@fd, @read_buffer.as(Void*), @read_capacity.to_u64)
+    if count <= 0_i64
+      @read_limit = -1 if count < 0_i64 && count != -2_i64
+      @eof = true unless count == -2_i64
+      return 0
+    end
+    @read_limit = count.to_i
+    @read_limit
+  end
+
+  # The buffer grows with what arrives, up to `count`, as std/io's
+  # `Reader#read_bytes` does: allocated whole first, 10 bytes read with a
+  # count of 1,500,000,000 took 1.6 GB. It starts at the stream's buffer,
+  # the most one piece is, so one doubling holds the next piece.
+  # A byte read borrows the existing buffer; no temporary text is built.
+  def read_byte : UInt8?
+    raise "cannot read from closed IO" if @closed
+    if @read_pos >= @read_limit
+      return nil if @eof || fill_buffer <= 0
+    end
+    byte = @read_buffer[@read_pos]
+    @read_pos += 1
+    byte
+  end
+
+  def read_bytes(count : Int32) : String
+    raise "cannot read from closed IO" if @closed
+    return "" if count <= 0
+
+    writer = String::Builder.new(count)
+    while writer.length < count
+      avail = @read_limit - @read_pos
+      if avail > 0
+        needed = count - writer.length
+        take = avail < needed ? avail : needed
+        writer.append(String.new(@read_buffer + @read_pos, take))
+        @read_pos += take
+      else
+        break if @eof || fill_buffer <= 0
+      end
+    end
+    writer.finish
+  end
+
+  # Up to *count* bytes as text on the caller's tape: what is buffered,
+  # then one fill of the buffer when it is empty. Empty at the end.
+  def read_str(count : Int32) : String
+    String.build(count < @read_capacity ? (count < 1 ? 1 : count) : @read_capacity) do |w|
+      read_str(count, w)
+    end
+  end
+
+  # The same bytes appended to the caller's *into*, read straight from
+  # the buffer with no text built between; answers how many (0 at the end).
+  def read_str(count : Int32, into : String::Builder) : Int32
+    raise "cannot read from closed IO" if @closed
+    return 0 if count <= 0
+    if @read_pos >= @read_limit
+      return 0 if @eof
+      return 0 if fill_buffer <= 0
+    end
+    avail = @read_limit - @read_pos
+    take = avail < count ? avail : count
+    from = @read_buffer + @read_pos
+    @read_pos = @read_pos + take
+    i = 0
+    while i < take
+      into.push(from[i])
+      i = i + 1
+    end
+    take
+  end
+
+  # ris: a pooled stream (`Std::Io::RisPipeEnd`) taken again for a new
+  # descriptor keeps its buffers and starts over.
+  protected def reopen(fd : Int64, sync : Bool) : Nil
+    @fd = fd
+    @sync = sync
+    @closed = false
+    @eof = false
+    @read_pos = 0
+    @read_limit = 0
+    @write_pos = 0
+  end
+
+  # What is buffered, then the rest straight into the growing result, as
+  # much as it has room for each time: through the stream's own buffer
+  # it was a read and a copy per 4 KB, and an 86 MB file took 150 ms to
+  # read where one read per doubling of the result takes a fraction. A
+  # failed read leaves the limit at -1 as `fill_buffer` does, which is
+  # what `read_failed?` reports. In Int64, up to one byte past what a
+  # string holds: in Int32, doubling 1 GiB panicked "arithmetic overflow",
+  # and `File.read` of any file over 1 GiB - 64 KiB with it. *size* is
+  # what the file says it holds, for `read_sized`.
+  def read_all(size : Int64 = 0_i64) : String
+    raise "cannot read from closed IO" if @closed
+    return read_sized(size.to_i32) if size > 0_i64 && size < 2147483647_i64 && @read_pos >= @read_limit && !@eof
+
+    writer = String::Builder.new(size > 0 && size < 2147483647 ? size.to_i32 : 8192)
+    avail = @read_limit - @read_pos
+    if avail > 0
+      writer.append(String.new(@read_buffer + @read_pos, avail))
+      @read_pos = @read_limit
+    end
+    until @eof
+      got = 0_i64
+      writer.unsafe_append(65536) do |buffer|
+        got = low_level_read(@fd, buffer.as(Void*), 65536_u64)
+        got > 0 ? got.to_i32 : 0
+      end
+      if got <= 0
+        @read_pos = 0
+        @read_limit = got < 0 ? -1 : 0
+        @eof = true
+      end
+    end
+    writer.finish
+  end
+
+  # Straight into the string: grown and then copied out, `File.read` of a
+  # 256 MB file peaked at 774 MB of working set, three times the file. A
+  # file that came up short is cut to what came; one that grew reads on.
+  private def read_sized(size : Int32) : String
+    filled = 0
+    got = 0_i64
+    text = String.new(size) do |buffer|
+      while filled < size && (got = low_level_read(@fd, (buffer + filled).as(Void*), (size - filled).to_u64)) > 0_i64
+        filled = filled + got.to_i32
+      end
+    end
+    return fill_buffer > 0 ? text + read_all : text if filled == size
+    @read_limit = got < 0_i64 ? -1 : 0
+    @eof = true
+    text[0, filled]
+  end
+
+  def read_line(chomp : Bool = false) : String?
+    raise "cannot read from closed IO" if @closed
+
+    if @read_pos >= @read_limit
+      return nil if @eof
+      filled = fill_buffer
+      return nil if filled <= 0
+    end
+
+    # Fast path: the line is in the buffer, one copy.
+    found = newline_from(@read_pos)
+    if found < @read_limit
+      start_ptr = @read_buffer + @read_pos
+      len = found - @read_pos + 1
+      @read_pos = found + 1
+      len = len - (len > 1 && start_ptr[len - 2] == 13_u8 ? 2 : 1) if chomp
+      return String.new(len) { |target| target.copy_from(start_ptr, len) }
+    end
+
+    writer = String::Builder.new(@read_capacity)
+    loop do
+      avail = @read_limit - @read_pos
+      if avail > 0
+        stop = @read_pos
+        while stop < @read_limit && @read_buffer[stop] != 10_u8
+          stop += 1
+        end
+        newline = stop < @read_limit
+        take = newline ? stop - @read_pos + 1 : avail
+        writer.append(String.new(@read_buffer + @read_pos, take))
+        @read_pos += take
+        break if newline
+      end
+      break if @eof || fill_buffer <= 0
+    end
+    text = writer.finish
+    return nil if text.empty? && @eof
+    chomp ? text.chomp : text
+  end
+
+  def gets(chomp : Bool = false) : String?
+    read_line(chomp)
+  end
+
+  def write(bytes : Pointer(UInt8), count : Int32) : Nil
+    raise "cannot write to closed IO" if @closed
+    return if count <= 0
+
+    if @sync
+      flush if @write_pos > 0
+      written = 0_i64
+      total = count.to_i64
+      while written < total
+        n = low_level_write(@fd, (bytes + written).as(Void*), (total - written).to_u64)
+        raise "write failed: the reader is gone, or the device refused it" if n <= 0_i64
+        written = written + n
+      end
+      return
+    end
+
+    if (@write_pos + count) <= @write_capacity
+      (@write_buffer + @write_pos).copy_from(bytes, count)
+      @write_pos = @write_pos + count
+    else
+      flush
+      if count >= @write_capacity
+        written = 0_i64
+        total = count.to_i64
+        while written < total
+          n = low_level_write(@fd, (bytes + written).as(Void*), (total - written).to_u64)
+          raise "write failed: the reader is gone, or the device refused it" if n <= 0_i64
+          written = written + n
+        end
+      else
+        @write_buffer.copy_from(bytes, count)
+        @write_pos = count
+      end
+    end
+    flush if @sync
+  end
+
+  def write(text : String) : Nil
+    write(text.to_unsafe, text.bytesize)
+  end
+
+  # Tape text, written where it lies.
+  def write(text : String) : Nil
+    write(text.to_unsafe, text.bytesize)
+  end
+
+  # One write of the line on a sync stream: the text and its newline as two
+  # let another thread's line in between - 750 of 80,000 lines from four.
+  def write_line(text : String = "") : Nil
+    if @sync
+      print(String.build(text.bytesize + 1) { |writer| writer << text << '\n' })
+    else
+      write(text)
+      write("\n")
+    end
+  end
+
+  def print(text : String) : Nil
+    write(text)
+  end
+
+  def print(value) : Nil
+    write(value.to_s)
+  end
+
+  def puts(text : String) : Nil
+    text.bytesize > 0 && text.to_unsafe[text.bytesize - 1] == 10_u8 ? write(text) : write_line(text)
+  end
+
+  def puts : Nil
+    write_line("")
+  end
+
+  def puts(value) : Nil
+    write_line(value.to_s)
+  end
+
+  def flush : Nil
+    return if @closed
+    if @write_pos > 0
+      written = 0_i64
+      total = @write_pos.to_i64
+      @write_pos = 0 # before the write: a refused one flushed again from `close`, a second panic
+      while written < total
+        n = low_level_write(@fd, (@write_buffer + written).as(Void*), (total - written).to_u64)
+        raise "write failed: the reader is gone, or the device refused it" if n <= 0_i64
+        written = written + n
+      end
+    end
+  end
+
+  def close : Nil
+    return if @closed
+    flush if @write_pos > 0
+    low_level_close(@fd)
+    @closed = true
+  end
+
+  private def low_level_read(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+    {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) || (flag?(:darwin) && flag?(:aarch64)) %}
+      if target_fd == 0_i64
+        outcome = iyi_read(0, buffer, count)
+        # -2: withdrawn, which `fill_buffer` does not take for the end.
+        # No read(2) answers it: ENOENT is not a read's error.
+        return -2_i64 if outcome.is_a?(Cancelled)
+        outcome
+      else
+        __iyi_read(target_fd.to_i32, buffer, count)
+      end
+    {% elsif flag?(:win32) %}
+      if target_fd == 0_i64
+        # Parked, as on Linux: a pipe or a console is read by a thread of
+        # its own (`IyiStdinReader`), a disk file where it is asked.
+        outcome = iyi_read(0, buffer, count)
+        return -2_i64 if outcome.is_a?(Cancelled)
+        outcome
+      elsif @console
+        IyiConsole.read(Pointer(Void).new(target_fd.to_u64), buffer, count)
+      else
+        __iyi_file_read(target_fd, buffer, count)
+      end
+    {% else %}
+      __iyi_read(target_fd.to_i32, buffer, count)
+    {% end %}
+  end
+
+  private def low_level_write(target_fd : Int64, buffer : Void*, count : UInt64) : Int64
+    {% if flag?(:win32) %}
+      if target_fd == 1_i64 || target_fd == 2_i64
+        __iyi_write(target_fd.to_i32, buffer, count)
+      elsif @console
+        IyiConsole.write_handle(Pointer(Void).new(target_fd.to_u64), buffer, count, pointerof(@console_carry))
+      else
+        __iyi_file_write(target_fd, buffer, count)
+      end
+    {% else %}
+      __iyi_write(target_fd.to_i32, buffer, count)
+    {% end %}
+  end
+
+  private def low_level_close(target_fd : Int64) : Nil
+    __iyi_close(target_fd)
+  end
+end
+
+alias IO = IyiIO
+
+# Standard streams live until program shutdown, outside any caller tape.
+STDIN  = IyiIO.on_program(0_i64, buffer_size: 4096, sync: false)
+STDOUT = IyiIO.on_program(1_i64, buffer_size: 4096, sync: true)
+STDERR = IyiIO.on_program(2_i64, buffer_size: 4096, sync: true)
+
+def stdin : IyiIO
+  STDIN
+end
+
+def stdout : IyiIO
+  STDOUT
+end
+
+def stderr : IyiIO
+  STDERR
+end
+
+def print(text : String) : Nil
+  stdout.write(text)
+end
+
+def print(value) : Nil
+  print value.to_s
+end
+
+def puts(text : String) : Nil
+  stdout.puts(text)
+end
+
+def puts : Nil
+  stdout.write_line("")
+end
+
+def puts(first, second, *rest : *T) : Nil forall T
+  puts first
+  puts second
+  {% for i in 0...T.size %}
+    puts rest[{{i}}]
+  {% end %}
+end
+
+def puts(value) : Nil
+  stdout.puts(value)
+end
+
+def read_input : String
+  stdin.read_all
+end
+
+# ris (SPEC 6.1): the pool of pipe ends (`Std::Io::RisPipeEnd`). A
+# slot and its end are program storage taken once; a closed end comes
+# back here and its generation moves, so a handle kept past the close
+# (`Std::Io::PipeReader`, `PipeWriter`) is refused, not handed the next
+# pipe that reuses it.
+class RisPipeSlot
+  getter io : IyiIO
+  getter generation : UInt64 = 0_u64
+  @next_free : RisPipeSlot?
+  @@free : RisPipeSlot?
+
+  def initialize(@io : IyiIO)
+  end
+
+  def self.on_program(io : IyiIO) : RisPipeSlot
+    slot = RisRegion.program_object(RisPipeSlot)
+    slot.initialize(io)
+    slot
+  end
+
+  # A closed end's slot, or nil when the pool is empty.
+  def self.take : RisPipeSlot?
+    IyiSchedLock.lock
+    slot = @@free
+    if slot.is_a?(RisPipeSlot)
+      @@free = slot.@next_free
+      slot.unlink
+    end
+    IyiSchedLock.unlock
+    slot
+  end
+
+  protected def unlink : Nil
+    @next_free = nil
+  end
+
+  # Back to the pool once its end is closed.
+  def recycle : Nil
+    @generation = @generation &+ 1
+    IyiSchedLock.lock
+    @next_free = @@free
+    @@free = self
+    IyiSchedLock.unlock
+  end
+end

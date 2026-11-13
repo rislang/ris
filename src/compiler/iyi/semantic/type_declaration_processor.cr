@@ -397,7 +397,7 @@ struct Iyi::TypeDeclarationProcessor
     if supervar
       # Unless this is a module that already carries the variable and has since
       # gained a type that includes it. That happens when the analysis is split
-      # across runs — the fork probe, and any `.iyimod` restoring a module the
+      # across runs — the fork probe, and any `.rimod` restoring a module the
       # current run then includes — where the module was processed while
       # `raw_including_types` was still empty. Returning here would leave the
       # including type without the variable, and it only fails much later, when
@@ -483,7 +483,7 @@ struct Iyi::TypeDeclarationProcessor
   private def nilable_instance_var?(owner, name)
     return false if @has_macro_def.includes?(owner)
 
-    # iyi: a type read from a `.iyimod` carries its fields and, when the module
+    # iyi: a type read from a `.rimod` carries its fields and, when the module
     # keeps it to itself, none of its methods — so there is no `initialize`
     # here to assign them in. Assumed to assign everything, like a macro def
     # and on the same grounds: the build that wrote the artifact already
@@ -545,7 +545,7 @@ struct Iyi::TypeDeclarationProcessor
     # super or assign all of those variables
     if ancestor_non_nilable
       infos.each do |info|
-        # iyi: an `initialize` read from a `.iyimod` is a header — there is no
+        # iyi: an `initialize` read from a `.rimod` is a header — there is no
         # body for it to assign in, and the build that wrote the artifact
         # already checked that the real one assigns everything. Treated like a
         # macro def below, and for the same reason (iyi SPEC IV.1g).
@@ -592,7 +592,7 @@ struct Iyi::TypeDeclarationProcessor
         # (will be checked later)
         next if info.def.macro_def?
 
-        # iyi: and an `initialize` from a `.iyimod` for the same reason — it is
+        # iyi: and an `initialize` from a `.rimod` for the same reason — it is
         # a header with no body, and the artifact's own build checked it.
         next if info.def.iyi_from_artifact?
 
@@ -700,7 +700,7 @@ struct Iyi::TypeDeclarationProcessor
   private def check_nilable_instance_vars
     @nilable_instance_vars.each do |owner, vars|
       vars.each do |name, info|
-        # iyi: a type read from a `.iyimod` has no `initialize` here to assign
+        # iyi: a type read from a `.rimod` has no `initialize` here to assign
         # its fields in — the module keeps its own, and what travels is the
         # declaration. The build that wrote the artifact checked the real one
         # (iyi SPEC IV.1g). `nilable_instance_var?` says the same thing for the
