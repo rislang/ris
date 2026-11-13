@@ -1,11 +1,13 @@
 # Draft: the std specification lives in its modules
 
-Status: draft, before EGM review. No SPEC.md or code change yet.
+Status: draft, EGM reviewed 2026-11-13 (consolidated_review_report.md:
+0 Blocker, 7 Major, 4 Minor); every Major is answered in section 7.
+No SPEC.md or code change yet.
 
 ## 1. Problem and decided shape
 
-src/std/SPEC.md (untracked, 4488 lines) holds 967 clauses for 120 std
-modules, `* json.3 text (test/cli/std_json_exercise.iyi)`. 137 lines say
+src/std/SPEC.md (committed in 2739b82d5, 4488 lines) holds 967 clauses
+for 120 std modules, `* json.3 text (test/cli/std_json_exercise.iyi)`. 137 lines say
 `<!-- todo: Needs proof -->`, 27 more carry another todo marker. No tool
 reads the file: a clause and its proof drift apart unseen, and an agent
 editing json.iyi never sees json's promises.
@@ -65,19 +67,46 @@ where the text is read from are new.
 
 ### 3.1 Id
 
-`MODULE.N`: MODULE is the module's path under src/std without `.iyi`
-(all 120 are top-level files today: `json`, `crypto`); N a positive
-integer, never reused. Root clauses keep `N.M`. Text cites it as
-`std json.3`.
+`MODULE.N`. Root clauses keep `N.M`.
+
+* MODULE is the file's path under ROOT/src without `.ri` or `.iyi`, a
+  leading `std/` dropped: src/std/json.iyi is `json`, src/std/eiy/x.iyi
+  is `eiy/x`, a package's src/route.ri is `route`. Each segment matches
+  `[a-z_][a-z0-9_]*`; segments join with `/`.
+* Two files with one MODULE (json.ri beside json.iyi, src/json.iyi
+  beside src/std/json.iyi) fail: "two files are module json: A, B".
+* Files are found by `project_walk` under ROOT/src, with its exclusions
+  (symlinks, lib/, mods/, dot dirs, .ris-fixtures). A file outside
+  ROOT/src holds no clauses; a `spec json.3` block there is a further
+  proof of the clause.
+* N is a positive integer without leading zeros; `json.0` is refused.
+* A number is never reused. The tool refuses two live clauses with one
+  id; it keeps no history, so reuse of a removed number is a review
+  rule: `ris spec ack` prints "removed: json.4" for each lock line it
+  drops, and the reviewer checks a new clause is numbered past the
+  module's highest ever (git log -S 'spec json.' shows it).
+* Text cites a std clause as `std json.3`.
 
 ### 3.2 A clause in its module
 
 The clause is a comment directly above the block that owns it, in the
 spec section at the end of the file. Every clause has exactly one owning
 block; its first line is `# MODULE.N text`, continuation lines
-`#   text`. A todo clause owns a block holding `todo "reason"` (the
-marker's reason moves there). The owning block takes no `# label`: the
-text is right above it.
+`#   text`. A todo clause owns a block holding one `todo "reason"`
+line per reason (log.9 has three markers today, so three lines); each
+marker's reason moves there byte for byte, `"` and `\` escaped. The
+owning block takes no `# label`: the text is right above it, and
+`ris check --fix` leaves an owning block's head alone (running it twice
+changes nothing).
+
+The clause comment is the unbroken run of `#` lines that starts at
+`# MODULE.N ` and ends on the line before `spec MODULE.N`. A line
+`# MODULE.N ` with this file's MODULE and no such block right after the
+run is an orphan and fails; a second owner of one id fails as a
+duplicate. Comments naming another file's module are prose.
+
+The old file's trailing proof citation, `(test/cli/std_json_exercise.iyi)`,
+is not part of the comment: the proof is the block below.
 
 Worked example, end of src/std/json.iyi:
 
@@ -110,7 +139,12 @@ module); they keep the usual `# label` rule.
   (and, later, any package's src/), taking `# MODULE.N` comments that
   sit directly above `spec MODULE.N`. MODULE must match the file:
   `json.3` in yaml.iyi fails with "move it to src/std/json.iyi".
-  Duplicates and gaps-reused are refused as for N.M.
+  Duplicates are refused as for N.M (reuse: see 3.1).
+* The parser lets a block end in several `todo` lines (today: one, the
+  last line); nothing but `todo` lines may follow the first.
+* A block's todo reasons are kept (a list, not a Bool): `ris spec todo`
+  lists them beside marker reasons, `ris spec --json` gives
+  `"todo": ["reason", ...]` for a clause.
 * `spec_number?`, `spec_block_head`, the parser regex, lock and tag
   parsers and `spec_version_tokens` accept `MODULE.N`.
 * `ris spec`: lists root clauses, then module clauses by module.
@@ -119,7 +153,7 @@ module); they keep the usual `# label` rule.
 * `ris check spec`: unchanged rules apply to module clauses, plus: a
   `# MODULE.N` comment with no block below it fails; a module clause's
   version needs no CHANGELOG.md entry (git and .spec.lock record it;
-  see question 2).
+  decision 6.2).
 * .spec.lock: root file, lines `json.3 1a2b3c4d` after the N.M lines,
   sorted by module then N.
 
@@ -157,23 +191,68 @@ lines.
 
 ## 5. Migration
 
-1. Commit src/std/SPEC.md as is first, so the source is in git.
-2. Land the tool change (3.3) with gates in test/cli: a scratch project
-   with module clauses (ok, todo, mismatch, orphan comment, ack, lock).
-3. A one-off script (scratchpad, not committed) per module, alphabetical:
-   append the clause comments and blocks to src/std/MODULE.iyi. A clause
-   citing a test gets its checks moved from that test (6.1); a marker
-   reason becomes the
-   block's todo text. Reflow to 80 columns keeps the version.
-4. Gate that none was lost: the script dumps id and version of all 967
-   from the old file; `ris spec --json` after must list the same 967
-   ids with the same versions and the same todo reasons. Put the diff
-   (empty) result in the commit body; then `ris spec ack` per module.
-5. Replace src/std/SPEC.md with the short form (3.4), `ris check` green.
+Done: src/std/SPEC.md is committed as is (2739b82d5).
 
-The exercise tests' checks move into the blocks (6.1), one module per
-commit: move, count the checks before and after, `ris check` green,
-remove the emptied exercise program and its check.sh line.
+### 5.1 Order of commits
+
+1. Tools (3.3) with gates in test/cli on a scratch project: ok, todo
+   with two reasons, mismatch, orphan comment, duplicate owner, two
+   files one module, a non-std src/route.ri, a nested src/a/b.iyi, both
+   extensions, a clause under lib/ (ignored), ack and its "removed:"
+   line, lock order, --fix twice. Root SPEC 6.7, 6.8, new 8.2, AGENTS.md
+   and CHANGELOG.md land in this commit. `ris check` green.
+2. Baseline: a script (scratchpad, not committed; one script, run per
+   module) reads src/std/SPEC.md and writes for each of the 967 clauses
+   its id, its text with the trailing `(test/...)` citation removed,
+   the version of that text, and every todo reason in order. The same
+   script later reads `ris spec --json` and prints the difference.
+3. One commit per module, alphabetical, in this order:
+   a. append the clause comments and owning blocks to MODULE.iyi and
+      delete the module's section from src/std/SPEC.md;
+   b. move the exercise's checks into the blocks (5.2, 5.3);
+   c. compare the module with the baseline: same ids, versions and todo
+      reasons; the commit body says "baseline: N clauses, no diff";
+   d. `ris spec ack MODULE` after reading the blocks;
+   e. remove what 5.2 allows; `ris check` green; commit.
+   Between module commits src/std/SPEC.md holds the modules not moved
+   yet; no tool reads it, so every checkpoint is green.
+4. Last: the whole-baseline comparison (967, no diff) in the commit
+   body, and src/std/SPEC.md replaced by the short form (3.4).
+
+### 5.2 What an exercise's shell script keeps
+
+A std_NAME_exercise.sh often does more than run the program: it reads
+the program's output (sentinels, a corpus), compares with an outside
+oracle (Python's json, libxml2), builds with --release, and builds
+programs that must be refused. Before a module moves, list for it: the
+program's checks, the script's assertions, fixtures, who reads the
+program's output, and the build modes. Then:
+
+* A check inside the program moves into a block.
+* Output that the script reads stays: the program shrinks to a producer
+  with no checks of its own, and the script keeps consuming it.
+* Refusal programs, oracle comparisons and mutation proofs stay in the
+  script. Its plain and --release runs of the checks become runs of the
+  module's spec blocks in both modes.
+* The program and its script are removed only when the list shows
+  nothing left for them; test/ris/check.sh loses the line then.
+
+### 5.3 Counting checks
+
+One check is one place a test can fail, counted in the source text by
+the baseline script, the same way before and after:
+
+* in an exercise: each call of its assertion helper and each direct
+  failure site (a `fail`/exit-nonzero line outside the helper);
+* in a spec block: each top-level expression line (a block fails when
+  one is false) and each helper call inside it;
+* a check in a loop or helper body counts once, however often it runs;
+  one assertion with several `&&` conditions counts once;
+* in a shell script: each line that sets the failing status.
+
+Per module the count after (blocks + remaining program + script) is at
+least the count before; the commit body gives both numbers. The mapping
+of each old check to its block is a scratch worksheet, not committed.
 
 ## 6. Decided (user, 2026-11-13)
 
@@ -188,3 +267,24 @@ remove the emptied exercise program and its check.sh line.
 3. The clause comment sits directly above its owning block.
 4. The mechanism is not std-specific (any `src/` under a root), but
    only std moves now; rispacks keep their SPEC.md.
+
+## 7. Answers to the EGM review (2026-11-13)
+
+* M1 discovery and identity: 3.1 defines MODULE for std, nested and
+  package files, the walk and its exclusions, and collisions; 3.2 the
+  comment's bounds and the orphan rule; 5.1 step 1 lists the fixtures.
+* M2 number reuse: the tool refuses live duplicates and non-positive
+  numbers only; reuse of a removed number is a review rule helped by
+  ack's "removed:" line (3.1). No history file is added.
+* M3 hash baseline: the citation is dropped; the baseline is the old
+  text without it, hashed by the same rule on both sides (3.2, 5.1.2).
+  Module clauses are not in .spec.lock yet, so no acked version changes.
+* M4 todo reasons: one `todo` line per reason, kept as a list, shown by
+  `ris spec todo` and --json; the baseline holds all reasons (3.2, 3.3).
+* M5 shell coverage: 5.2. This narrows decision 6.1's "removed when all
+  its checks have moved" to "and nothing reads its output".
+* M6 checkpoints: 5.1 step 3 gives the per-module order with ack before
+  the green check; step 1 says when SPEC and AGENTS land.
+* M7 counting: 5.3.
+* Minor N1-N4: fixed in place (6.2 reference, --fix on owning blocks,
+  one script, the baseline commit is done).
