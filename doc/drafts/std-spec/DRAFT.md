@@ -162,8 +162,7 @@ lines.
    with module clauses (ok, todo, mismatch, orphan comment, ack, lock).
 3. A one-off script (scratchpad, not committed) per module, alphabetical:
    append the clause comments and blocks to src/std/MODULE.iyi. A clause
-   citing a test gets a block with `todo "proof in test/cli/<file>"`
-   unless question 1 says otherwise; a marker reason becomes the
+   citing a test gets its checks moved from that test (6.1); a marker reason becomes the
    block's todo text. Reflow to 80 columns keeps the version.
 4. Gate that none was lost: the script dumps id and version of all 967
    from the old file; `ris spec --json` after must list the same 967
@@ -171,24 +170,20 @@ lines.
    (empty) result in the commit body; then `ris spec ack` per module.
 5. Replace src/std/SPEC.md with the short form (3.4), `ris check` green.
 
-The exercise tests stay; they keep running in `ris check`. They become
-proofs either by tags (question 1 b) or by moving their checks into
-blocks module by module after 0.1.0.
+The exercise tests' checks move into the blocks (6.1), one module per
+commit: move, count the checks before and after, `ris check` green,
+remove the emptied exercise program and its check.sh line.
 
-## 6. Open questions
+## 6. Decided (user, 2026-11-13)
 
-1. How do the 837 clauses proven by test/cli/std_*_exercise count?
-   a) block with `todo "proof in test/cli/…"`: honest, 837 todos;
-   b) tag the exercise: `# spec: json.1, json.2, …` (old mechanism,
-      counts as proof now, legacy per AGENTS.md);
-   c) move each proof into its block before 0.1.0 (much work).
-   Recommendation: b now, c module by module later.
-2. CHANGELOG.md for module clauses: a) exempt (git + lock suffice);
-   b) one migration entry listing all 967 `id@ver`, then per change.
-   Recommendation: a; 967 tokens are noise and std changes often.
-3. Should the comment sit above its block (as proposed) or in the
-   module header? Header: read first by an agent, far from the proof.
-   Recommendation: above the block (the decided "next to the proof").
-4. Do packages outside std (rispacks) get module clauses too?
-   a) yes, any `src/` under a root; b) std only for now.
-   Recommendation: a, it is the same code path, gated once.
+1. The 837 clauses proven by test/cli/std_*_exercise: each proof moves
+   into its `spec MODULE.N` block before 0.1.0, module by module, as in
+   the rispacks ports. An exercise program is removed when all its
+   checks have moved; the number of checks per module must not go down
+   (counted before and after). No `# spec:` tags, no todo placeholders
+   for a clause that has a test.
+2. CHANGELOG.md: module clauses are exempt; git and .spec.lock record
+   their versions.
+3. The clause comment sits directly above its owning block.
+4. The mechanism is not std-specific (any `src/` under a root), but
+   only std moves now; rispacks keep their SPEC.md.
