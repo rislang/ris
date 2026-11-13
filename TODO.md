@@ -342,3 +342,21 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
 * The mutation phases of std_acme, cookie, router, sse and websocket .sh
   run past 20 minutes; recheck on minitest whether they finish.
 * base64's timing ratio fails under load; recheck on minitest.
+
+* Found while porting rispacks (2026-11-13), reproducers not yet in
+  test/cli; the first three are reported by the port, not rechecked:
+  * A native worker's tape trap stops a spec module; the runner's
+    summary leaves out the blocks not run and says 0 broken (sha2).
+  * `a == b` with both `UInt8 | Char` is refused as a String index
+    comparison (sqlite).
+  * An optional path given to `Process.run` fails LLVM module
+    validation: `(String | Nil)` passed where String is expected (pg).
+  * `ris check types --fix` reports db's program-owned driver registry
+    as request storage; a plain build passes (ricord).
+  * The formatter fails on `x.each(&.destroy.or_panic)`; macro
+    declarations are dropped in a spec build (ricord).
+  * `ris check` checks a library's root module as a program, so its
+    exported defs read as unreachable when the proofs live in other
+    modules (slim, htmlparse, ricord); a package with no root module
+    skips the part. Needs a rule for library roots.
+  * `ris check format` reads files git ignores (web's tmp/).
