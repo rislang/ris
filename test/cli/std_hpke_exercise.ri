@@ -174,10 +174,16 @@ def run_vector(c : Any, label : String) : {Int32, Int32}
   secret = kem.decapsulate(read_r, b(c["enc"].as_s), sender_public)
   check secret.is_a?(Array(UInt8)) && hex(secret) == c["shared_secret"].as_s, "#{label}: the decapsulated shared secret"
 
-  sender = suite.sender(public_r, info, ikm_e, psk, psk_id, sender_key).as(HpkeSender)
+  sender = HpkeSender.new
+  if problem = sender.setup(suite, public_r, info, ikm_e, psk, psk_id, sender_key)
+    raise problem.message
+  end
   check hex(sender.enc) == c["enc"].as_s, "#{label}: the sender's enc"
   check sender.mode.value == mode, "#{label}: the sender's mode"
-  recipient = suite.recipient(read_r, sender.enc, info, psk, psk_id, sender_public).as(HpkeRecipient)
+  recipient = HpkeRecipient.new
+  if problem = recipient.setup(suite, read_r, sender.enc, info, psk, psk_id, sender_public)
+    raise problem.message
+  end
   check recipient.mode.value == mode, "#{label}: the recipient's mode"
 
   count = c["count"].as_i
@@ -205,7 +211,10 @@ def run_vector(c : Any, label : String) : {Int32, Int32}
     check hex(digest.final) == c["ciphertexts_sha256"].as_s, "#{label}: all #{count} encryptions, by the SHA-256 of their ciphertexts"
     check sender.sequence == count.to_u128 && recipient.sequence == count.to_u128, "#{label}: both sequences at #{count}"
 
-    skipper = suite.recipient(read_r, sender.enc, info, psk, psk_id, sender_public).as(HpkeRecipient)
+    skipper = HpkeRecipient.new
+    if problem = skipper.setup(suite, read_r, sender.enc, info, psk, psk_id, sender_public)
+      raise problem.message
+    end
     listed.each do |e|
       seq = e["seq"].as_i
       skipper.advance_to(seq.to_u128)
@@ -214,13 +223,19 @@ def run_vector(c : Any, label : String) : {Int32, Int32}
 
     # Sequence 2^96 - 2 is the last a context seals at; the vector's key
     # and base nonce give its ciphertext through std/aead directly.
-    late = suite.sender(public_r, info, ikm_e, psk, psk_id, sender_key).as(HpkeSender)
+    late = HpkeSender.new
+    if problem = late.setup(suite, public_r, info, ikm_e, psk, psk_id, sender_key)
+      raise problem.message
+    end
     late.advance_to(LAST &- 1_u128)
     last = late.seal(pt, "late")
     want = aead_seal(suite.aead, b(c["key"].as_s), nonce_at(b(c["base_nonce"].as_s), LAST &- 1_u128), pt, "late")
     check last.is_a?(String) && last == want, "#{label}: the key and base nonce, at sequence 2^96 - 2"
     check refused?(late.seal(pt, "late"), "nonces are spent"), "#{label}: sealing at sequence 2^96 - 1 refused"
-    late_r = suite.recipient(read_r, sender.enc, info, psk, psk_id, sender_public).as(HpkeRecipient)
+    late_r = HpkeRecipient.new
+    if problem = late_r.setup(suite, read_r, sender.enc, info, psk, psk_id, sender_public)
+      raise problem.message
+    end
     late_r.advance_to(LAST &- 1_u128)
     check opened?(late_r.open(want, "late"), pt), "#{label}: opened at sequence 2^96 - 2"
     check refused?(late_r.open(want, "late"), "nonces are spent"), "#{label}: opening at sequence 2^96 - 1 refused"
@@ -261,13 +276,15 @@ def run_vectors(vectors : Any, prefix : String) : Nil
   puts "  #{total} vectors (#{modes[0]} base, #{modes[1]} psk, #{modes[2]} auth, #{modes[3]} auth_psk): #{sealed} encryptions sealed and opened, #{exported} exports"
 end
 
-# A context's messages: AAD.PT pairs, comma-joined, hex.
-def messages(field : String) : Array({Array(UInt8), Array(UInt8)})
-  return [] of {Array(UInt8), Array(UInt8)} if field == "-"
-  field.split(',').map do |pair|
-    parts = pair.split('.')
-    {b(parts[0]), parts.size > 1 ? b(parts[1]) : [] of UInt8}
-  end
+# A context's messages: AAD.PT pairs, comma-joined, hex; "-" for none.
+def message_pairs(field : String) : Array(String)
+  field == "-" ? [] of String : field.split(',')
+end
+
+# The AAD (0) or plaintext (1) of one AAD.PT pair, decoded.
+def message_part(pair : String, part : Int32) : Array(UInt8)
+  parts = pair.split('.')
+  parts.size > part ? b(parts[part]) : [] of UInt8
 end
 
 def kem_of(id : String) : HpkeKem
@@ -296,11 +313,13 @@ def oracle_seal(w : Array(String)) : String
     return "refused: #{got.message}" if got.is_a?(HpkeError)
     sender_key = got
   end
-  sender = suite.sender(public_r, bytes_or_empty(w[5]), b(w[6]), field(w[7]), field(w[8]), sender_key)
-  return "refused: #{sender.message}" if sender.is_a?(HpkeError)
+  sender = HpkeSender.new
+  if problem = sender.setup(suite, public_r, bytes_or_empty(w[5]), b(w[6]), field(w[7]), field(w[8]), sender_key)
+    return "refused: #{problem.message}"
+  end
   exported = sender.export(bytes_or_empty(w[10]), w[11].to_i)
-  sealed = messages(w[12]).map do |m|
-    got = sender.seal(m[1], m[0])
+  sealed = message_pairs(w[12]).map do |m|
+    got = sender.seal(message_part(m, 1), message_part(m, 0))
     return "refused: #{got.message}" if got.is_a?(HpkeError)
     hex(got)
   end
@@ -319,11 +338,13 @@ def oracle_open(w : Array(String)) : String
     return "refused: #{got.message}" if got.is_a?(HpkeError)
     sender_public = got
   end
-  recipient = suite.recipient(key, b(w[5]), bytes_or_empty(w[6]), field(w[7]), field(w[8]), sender_public)
-  return "refused: #{recipient.message}" if recipient.is_a?(HpkeError)
+  recipient = HpkeRecipient.new
+  if problem = recipient.setup(suite, key, b(w[5]), bytes_or_empty(w[6]), field(w[7]), field(w[8]), sender_public)
+    return "refused: #{problem.message}"
+  end
   exported = recipient.export(bytes_or_empty(w[10]), w[11].to_i)
-  opened = messages(w[12]).map_with_index do |m, i|
-    got = recipient.open(m[1], m[0])
+  opened = message_pairs(w[12]).map_with_index do |m, i|
+    got = recipient.open(message_part(m, 1), message_part(m, 0))
     return "refused: message #{i}: #{got.message}" if got.is_a?(HpkeError)
     got.empty? ? "-" : hex(got)
   end
@@ -382,15 +403,23 @@ if args.size > 0 && args[0] == "cost"
   ok = true
   seal_one = best_of { suite.seal(public, info, "", message, randomness) }
   open_one = best_of { ok = ok && opened?(suite.open(key, shot[0], info, "", shot[1]), message) }
-  sender = suite.sender(public, info, randomness).as(HpkeSender)
+  sender = HpkeSender.new
+  if problem = sender.setup(suite, public, info, randomness)
+    raise problem.message
+  end
   sealed = Array(String).new(1000) { |_| sender.seal(message).as(String) }
-  sender = suite.sender(public, info, randomness).as(HpkeSender)
-  seal_ctx = best_of { sender.seal(message) }
-  recipients = Array(HpkeRecipient).new(5) { |_| suite.recipient(key, shot[0], info).as(HpkeRecipient) }
+  timed = HpkeSender.new
+  if problem = timed.setup(suite, public, info, randomness)
+    raise problem.message
+  end
+  seal_ctx = best_of { timed.seal(message) }
   run = -1
   fastest = 0_i64
   5.times do |k|
-    r = recipients[k]
+    r = HpkeRecipient.new
+    if problem = r.setup(suite, key, shot[0], info)
+      raise problem.message
+    end
     t0 = __iyi_monotonic_ns
     200.times { |i| ok = ok && opened?(r.open(sealed[i]), message) }
     took = (__iyi_monotonic_ns - t0).to_i64
@@ -474,22 +503,28 @@ KEMS.each do |kem|
         sender_public = mode >= 2 ? HpkePublicKey.from_bytes(kem, mine.public_key.bytes).as(HpkePublicKey) : nil
         public = HpkePublicKey.from_bytes(kem, key.public_key.bytes).as(HpkePublicKey)
         info = drawn("#{name} info", mode * 9)
-        sender = suite.sender(public, info, drawn("#{name} e", kem.private_key_size), psk, psk_id, sender_key).as(HpkeSender)
-        check sender.mode.value == mode, "#{name}: the mode"
+        trip_sender = HpkeSender.new
+        if problem = trip_sender.setup(suite, public, info, drawn("#{name} e", kem.private_key_size), psk, psk_id, sender_key)
+          raise problem.message
+        end
+        check trip_sender.mode.value == mode, "#{name}: the mode"
         read = HpkePrivateKey.from_bytes(kem, key.bytes).as(HpkePrivateKey)
-        recipient = suite.recipient(read, sender.enc, info, psk, psk_id, sender_public).as(HpkeRecipient)
+        trip_recipient = HpkeRecipient.new
+        if problem = trip_recipient.setup(suite, read, trip_sender.enc, info, psk, psk_id, sender_public)
+          raise problem.message
+        end
         unless aead == HpkeAead::ExportOnly
           3.times do |m|
             pt = drawn("#{name} pt #{m}", m * 500)
             aad = drawn("#{name} aad #{m}", m * 3)
-            sealed = sender.seal(pt, aad).as(String)
+            sealed = trip_sender.seal(pt, aad).as(String)
             check sealed.bytesize == pt.size + 16, "#{name}: message #{m} is its plaintext and a tag"
-            check opened?(recipient.open(sealed, aad), pt), "#{name}: message #{m} opened"
+            check opened?(trip_recipient.open(sealed, aad), pt), "#{name}: message #{m} opened"
           end
         end
-        check sender.export("ctx", 77) == recipient.export("ctx", 77), "#{name}: the exports"
-        check sender.export("ctx", 77) != sender.export("ctx2", 77), "#{name}: exports under two contexts"
-        check sender.export("", 255 * kdf.hash_size).size == 255 * kdf.hash_size, "#{name}: the longest export"
+        check trip_sender.export("ctx", 77) == trip_recipient.export("ctx", 77), "#{name}: the exports"
+        check trip_sender.export("ctx", 77) != trip_sender.export("ctx2", 77), "#{name}: exports under two contexts"
+        check trip_sender.export("", 255 * kdf.hash_size).size == 255 * kdf.hash_size, "#{name}: the longest export"
         trips = trips + 1
       end
     end
@@ -512,12 +547,14 @@ small = ["0000000000000000000000000000000000000000000000000000000000000000",
          "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
          "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
          "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"]
+probe_r = HpkeRecipient.new
+probe_s = HpkeSender.new
 small.each do |u|
-  check refused?(x_suite.recipient(x_key, b(u), "info"), "all zero"), "an X25519 encapsulation of small order (u = #{u[0, 8]}...) refused"
+  check refused?(probe_r.setup(x_suite, x_key, b(u), "info"), "all zero"), "an X25519 encapsulation of small order (u = #{u[0, 8]}...) refused"
   check refused?(x_suite.open(x_key, b(u), "info", "", "0123456789abcdef"), "all zero"), "an X25519 single-shot open of small order (u = #{u[0, 8]}...) refused"
   theirs = HpkePublicKey.from_bytes(x_suite.kem, b(u)).as(HpkePublicKey)
-  check refused?(x_suite.sender(theirs, "info", drawn("e", 32)), "all zero"), "an X25519 recipient key of small order (u = #{u[0, 8]}...) refused"
-  check refused?(x_suite.recipient(x_key, x_key.public_key.bytes, "info", sender_public: theirs), "all zero"), "an X25519 sender key of small order (u = #{u[0, 8]}...) refused"
+  check refused?(probe_s.setup(x_suite, theirs, "info", drawn("e", 32)), "all zero"), "an X25519 recipient key of small order (u = #{u[0, 8]}...) refused"
+  check refused?(probe_r.setup(x_suite, x_key, x_key.public_key.bytes, "info", sender_public: theirs), "all zero"), "an X25519 sender key of small order (u = #{u[0, 8]}...) refused"
 end
 puts "  #{small.size} encapsulations, recipient keys and sender keys of small order: refused"
 
@@ -526,21 +563,29 @@ p_suite = HpkeSuite.new(HpkeKem::P256Sha256, HpkeKdf::HkdfSha256, HpkeAead::Aes1
 p_key = HpkePrivateKey.derive(p_suite.kem, drawn("p256 refusals", 32))
 q_suite = HpkeSuite.new(HpkeKem::P384Sha384, HpkeKdf::HkdfSha384, HpkeAead::Aes256Gcm)
 q_key = HpkePrivateKey.derive(q_suite.kem, drawn("p384 refusals", 48))
-check refused?(x_suite.recipient(x_key, drawn("short", 31), "info"), "is 32 bytes, not 31"), "an X25519 encapsulation of 31 bytes refused"
-check refused?(x_suite.recipient(x_key, drawn("long", 33), "info"), "is 32 bytes, not 33"), "an X25519 encapsulation of 33 bytes refused"
-p_enc = p_suite.sender(p_key.public_key, "info", drawn("p e", 32)).as(HpkeSender).enc
-check refused?(p_suite.recipient(p_key, p_enc[0, 33], "info"), "is 65 bytes, not 33"), "a P-256 encapsulation compressed refused"
+check refused?(probe_r.setup(x_suite, x_key, drawn("short", 31), "info"), "is 32 bytes, not 31"), "an X25519 encapsulation of 31 bytes refused"
+check refused?(probe_r.setup(x_suite, x_key, drawn("long", 33), "info"), "is 32 bytes, not 33"), "an X25519 encapsulation of 33 bytes refused"
+p_sender = HpkeSender.new
+if problem = p_sender.setup(p_suite, p_key.public_key, "info", drawn("p e", 32))
+  raise problem.message
+end
+p_enc = p_sender.enc
+check refused?(probe_r.setup(p_suite, p_key, p_enc[0, 33], "info"), "is 65 bytes, not 33"), "a P-256 encapsulation compressed refused"
 bent = p_enc.dup
 bent[64] = bent[64] ^ 1_u8
-check refused?(p_suite.recipient(p_key, bent, "info"), "not on"), "a P-256 encapsulation off the curve refused"
+check refused?(probe_r.setup(p_suite, p_key, bent, "info"), "not on"), "a P-256 encapsulation off the curve refused"
 check refused?(HpkePublicKey.from_bytes(p_suite.kem, bent), "not on"), "a P-256 public key off the curve refused"
 bent[0] = 2_u8
-check refused?(p_suite.recipient(p_key, bent, "info"), "refused"), "a P-256 encapsulation not starting 0x04 refused"
-q_enc = q_suite.sender(q_key.public_key, "info", drawn("q e", 48)).as(HpkeSender).enc
+check refused?(probe_r.setup(p_suite, p_key, bent, "info"), "refused"), "a P-256 encapsulation not starting 0x04 refused"
+q_sender = HpkeSender.new
+if problem = q_sender.setup(q_suite, q_key.public_key, "info", drawn("q e", 48))
+  raise problem.message
+end
+q_enc = q_sender.enc
 q_bent = q_enc.dup
 q_bent[96] = q_bent[96] ^ 1_u8
-check refused?(q_suite.recipient(q_key, q_bent, "info"), "not on"), "a P-384 encapsulation off the curve refused"
-check refused?(q_suite.recipient(q_key, q_enc[0, 65], "info"), "is 97 bytes, not 65"), "a P-384 encapsulation of 65 bytes refused"
+check refused?(probe_r.setup(q_suite, q_key, q_bent, "info"), "not on"), "a P-384 encapsulation off the curve refused"
+check refused?(probe_r.setup(q_suite, q_key, q_enc[0, 65], "info"), "is 97 bytes, not 65"), "a P-384 encapsulation of 65 bytes refused"
 n256 = b("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551")
 check refused?(HpkePrivateKey.from_bytes(p_suite.kem, n256), "1 to n - 1"), "a P-256 private key of n refused"
 check refused?(HpkePrivateKey.from_bytes(p_suite.kem, Array(UInt8).new(32, 0_u8)), "1 to n - 1"), "a P-256 private key of 0 refused"
@@ -558,10 +603,16 @@ a_key = HpkePrivateKey.derive(a_suite.kem, drawn("auth r", 32))
 a_mine = HpkePrivateKey.derive(a_suite.kem, drawn("auth s", 32))
 a_other = HpkePrivateKey.derive(a_suite.kem, drawn("auth other", 32))
 a_psk = drawn("psk", 32)
-a_sender = a_suite.sender(a_key.public_key, "info", drawn("auth e", 32), a_psk, "psk id", a_mine).as(HpkeSender)
+a_sender = HpkeSender.new
+if problem = a_sender.setup(a_suite, a_key.public_key, "info", drawn("auth e", 32), a_psk, "psk id", a_mine)
+  raise problem.message
+end
 first = a_sender.seal("first", "aad").as(String)
 second = a_sender.seal("second", "aad").as(String)
-a_recipient = a_suite.recipient(a_key, a_sender.enc, "info", a_psk, "psk id", a_mine.public_key).as(HpkeRecipient)
+a_recipient = HpkeRecipient.new
+if problem = a_recipient.setup(a_suite, a_key, a_sender.enc, "info", a_psk, "psk id", a_mine.public_key)
+  raise problem.message
+end
 check refused?(a_recipient.open(second, "aad"), "does not open"), "the second message opened first refused"
 check a_recipient.sequence == 0_u128, "a failed open leaves the sequence at 0"
 tampered = bytes_of(first)
@@ -570,18 +621,29 @@ check refused?(a_recipient.open(tampered, "aad"), "does not open"), "a ciphertex
 check refused?(a_recipient.open(first, "aaD"), "does not open"), "other aad refused"
 check refused?(a_recipient.open(first[0, 4], "aad"), "does not open"), "a ciphertext shorter than a tag refused"
 check opened?(a_recipient.open(first, "aad"), bytes_of("first")) && opened?(a_recipient.open(second, "aad"), bytes_of("second")), "both opened in order after the refusals"
-[{"info", "inf0", "psk id", a_psk, a_mine}, {"psk_id", "info", "psk iD", a_psk, a_mine}, {"psk", "info", "psk id", drawn("other psk", 32), a_mine},
- {"sender key", "info", "psk id", a_psk, a_other}].each do |t|
-  other = a_suite.recipient(a_key, a_sender.enc, t[1], t[3], t[2], t[4].public_key).as(HpkeRecipient)
-  check refused?(other.open(first, "aad"), "does not open"), "a recipient with another #{t[0]} opens nothing"
-  check other.export("ctx", 32) != a_recipient.export("ctx", 32), "a recipient with another #{t[0]} exports another secret"
+other_psk = drawn("other psk", 32)
+4.times do |k|
+  what = k == 0 ? "info" : k == 1 ? "psk_id" : k == 2 ? "psk" : "sender key"
+  other = HpkeRecipient.new
+  if problem = other.setup(a_suite, a_key, a_sender.enc, k == 0 ? "inf0" : "info", k == 2 ? other_psk : a_psk,
+       k == 1 ? "psk iD" : "psk id", (k == 3 ? a_other : a_mine).public_key)
+    raise problem.message
+  end
+  check refused?(other.open(first, "aad"), "does not open"), "a recipient with another #{what} opens nothing"
+  check other.export("ctx", 32) != a_recipient.export("ctx", 32), "a recipient with another #{what} exports another secret"
 end
-base = a_suite.recipient(a_key, a_sender.enc, "info").as(HpkeRecipient)
+base = HpkeRecipient.new
+if problem = base.setup(a_suite, a_key, a_sender.enc, "info")
+  raise problem.message
+end
 check refused?(base.open(first, "aad"), "does not open"), "a recipient in base mode opens no auth_psk message"
 puts "  out of order, changed, other aad, too short: refused, sequence kept; another info, psk_id, psk or sender key opens nothing"
 
 puts "\n== the nonce limit (section 5.2)"
-limit = x_suite.sender(x_key.public_key, "info", drawn("limit e", 32)).as(HpkeSender)
+limit = HpkeSender.new
+if problem = limit.setup(x_suite, x_key.public_key, "info", drawn("limit e", 32))
+  raise problem.message
+end
 limit.advance_to(LAST &- 2_u128)
 check limit.seal("a").is_a?(String) && limit.seal("b").is_a?(String), "sequences 2^96 - 3 and 2^96 - 2 sealed"
 check limit.sequence == LAST, "the sequence at 2^96 - 1"

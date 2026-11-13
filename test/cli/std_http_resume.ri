@@ -115,9 +115,14 @@ end
 
 class RisResume0Handler
   @tls : TlsServerConfig
+  @identity : TlsIdentity
 
   def initialize(tickets : Int32)
-    @tls = TlsServerConfig.from_pem(LEAF_PEM + ROOT_PEM, KEY_PEM).or_panic
+    identity = TlsIdentity.new(LEAF_PEM + ROOT_PEM, KEY_PEM)
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
     @tls.tickets = tickets
   end
 
@@ -137,9 +142,14 @@ end
 
 class RisResume1Handler
   @tls : TlsServerConfig
+  @identity : TlsIdentity
 
   def initialize(tickets : Int32)
-    @tls = TlsServerConfig.from_pem(LEAF_PEM + ROOT_PEM, KEY_PEM).or_panic
+    identity = TlsIdentity.new(LEAF_PEM + ROOT_PEM, KEY_PEM)
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
     @tls.tickets = tickets
   end
 
@@ -159,9 +169,14 @@ end
 
 class RisResume2Handler
   @tls : TlsServerConfig
+  @identity : TlsIdentity
 
   def initialize(tickets : Int32)
-    @tls = TlsServerConfig.from_pem(LEAF_PEM + ROOT_PEM, KEY_PEM).or_panic
+    identity = TlsIdentity.new(LEAF_PEM + ROOT_PEM, KEY_PEM)
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
     @tls.tickets = tickets
   end
 
@@ -181,9 +196,14 @@ end
 
 class RisResume3Handler
   @tls : TlsServerConfig
+  @identity : TlsIdentity
 
   def initialize(tickets : Int32)
-    @tls = TlsServerConfig.from_pem(LEAF_PEM + ROOT_PEM, KEY_PEM).or_panic
+    identity = TlsIdentity.new(LEAF_PEM + ROOT_PEM, KEY_PEM)
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
     @tls.tickets = tickets
   end
 
@@ -203,9 +223,14 @@ end
 
 class RisResumePeerHandler
   @tls : TlsServerConfig
+  @identity : TlsIdentity
 
   def initialize(config : {String, String})
-    @tls = TlsServerConfig.from_pem(ris_heap_text(config[0]), ris_heap_text(config[1])).or_panic
+    identity = TlsIdentity.new(ris_heap_text(config[0]), ris_heap_text(config[1]))
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
   end
 
   def listening(port : Int32) : Nil
@@ -224,7 +249,7 @@ end
 
 import std/http::{HTTP, HTTPClient, HTTPError, Incoming, Outgoing, Response, Server}
 import std/socket::{IyiSocket, SocketError}
-import std/tls::{TlsClient, TlsConfig, TlsError, TlsServerConfig, TlsSession}
+import std/tls::{TlsIdentity, TlsClient, TlsConfig, TlsError, TlsServerConfig, TlsSession}
 import std/x509::{RisCertificateStore, Certificate}
 import std/file::{File}
 
@@ -315,9 +340,10 @@ end
 def shake(port : Int32, config : TlsConfig, session : TlsSession?) : Int64
   offered = (held = session) ? held.size > 0 : false
   started = __iyi_monotonic_ns
-  tls = TlsClient.connect("localhost", port, config, session: session)
+  tls = TlsClient.new("localhost", config, session)
+  problem = tls.connect(port)
   took = __iyi_monotonic_ns - started
-  raise "no handshake: #{tls.message}" if tls.is_a?(TlsError)
+  raise "no handshake: #{problem.message}" if problem
   raise "resumed #{tls.resumed?} with a ticket offered #{offered}" unless tls.resumed? == offered
   tls.write("GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
   while true
@@ -381,7 +407,7 @@ if mode.empty?
       failures = [] of String
       config = TlsConfig.new
       config.roots = roots
-      config.alpn = ["http/1.1"]
+      config.alpn << "http/1.1"
       # A new connection for every request: none is kept to be reused.
       client = HTTPClient.new(idle: 0, tls: config)
       first = client.get(bases[0])
@@ -412,7 +438,7 @@ if mode.empty?
       # reach the server.
       mine = TlsConfig.new
       mine.roots = roots
-      mine.alpn = ["http/1.1"]
+      mine.alpn << "http/1.1"
       own = HTTPClient.new(idle: 0, tls: mine)
       before = said(own.get(bases[0]))
       again = said(own.get(bases[0]))
@@ -469,7 +495,7 @@ if mode == "s_server"
   config = TlsConfig.new
   pem_store_5 = RisCertificateStore.new
   config.roots = pem_certs(pem_store_5, File.read(args[2]))
-  config.alpn = ["http/1.1"]
+  config.alpn << "http/1.1"
   base = "https://localhost:#{args[1]}/"
   # Ten seconds a read: a broken copy that confuses s_server fails rather
   # than waits.
@@ -493,38 +519,36 @@ end
 if mode == "speed"
   port = args[1].to_i
   base = "https://localhost:#{port}/"
-  config = TlsConfig.new
+  speed_config = TlsConfig.new
   pem_store_7 = RisCertificateStore.new
-  config.roots = pem_certs(pem_store_7, File.read(args[2]))
-  config.alpn = ["http/1.1"]
+  speed_config.roots = pem_certs(pem_store_7, File.read(args[2]))
+  speed_config.alpn << "http/1.1"
   count = args[3].to_i
   # The handshake alone, as the client makes it: std/tls's, with the
   # session an `HTTPClient` would hand it or none.
   session = TlsSession.new
-  shake(port, config, nil)
-  shake(port, config, session)
+  shake(port, speed_config, nil)
+  shake(port, speed_config, session)
   full_shakes = [] of Int64
   resumed_shakes = [] of Int64
   count.times do
-    full_shakes << shake(port, config, nil)
-    resumed_shakes << shake(port, config, session)
+    full_shakes << shake(port, speed_config, nil)
+    resumed_shakes << shake(port, speed_config, session)
   end
   puts "the handshake, #{count} each: full #{median(full_shakes)}, resumed #{median(resumed_shakes)}"
   # And a GET on a new connection, the handshake and all.
-  full = HTTPClient.new(idle: 0, tickets: 0, tls: config)
-  resuming = HTTPClient.new(idle: 0, tls: config)
+  full = HTTPClient.new(idle: 0, tickets: 0, tls: speed_config)
+  resuming = HTTPClient.new(idle: 0, tls: speed_config)
   # The first of each warms the code and, for the second, takes tickets.
-  full.get(base).or_panic
-  resuming.get(base).or_panic
   fulls = [] of Int64
   resumes = [] of Int64
-  count.times do
+  (count + 1).times do |round|
     started = __iyi_monotonic_ns
     full.get(base).or_panic
-    fulls << __iyi_monotonic_ns - started
+    fulls << __iyi_monotonic_ns - started if round > 0
     started = __iyi_monotonic_ns
     resuming.get(base).or_panic
-    resumes << __iyi_monotonic_ns - started
+    resumes << __iyi_monotonic_ns - started if round > 0
   end
   puts "a GET on a new connection, #{count} each: full #{median(fulls)}, resumed #{median(resumes)} (#{resuming.connections_resumed} of #{count} resumed, #{full.connections_resumed} of the full)"
   exit 0

@@ -1407,12 +1407,37 @@ pub struct Zstd
   # it. Bytes after the last frame that do not begin another are refused,
   # as is a stream with no frame at all.
   def self.decompress(data : String, max_window : Int32 = WINDOW_LIMIT) : String | ZstdError
+    answer(tagged(data, max_window))
+  end
+
+  # The bytes after a 0 byte, or the error's sentence after a 1: one flat
+  # String the decoder's output is copied into, which moves down to the
+  # caller (SPEC 1.5), as the decoder goes with this def.
+  def self.tagged(data : String, max_window : Int32) : String
     core = Decoder.new(data, max_window)
     core.run
-    return core.error if core.failed?
+    sink = ""
+    if core.failed?
+      sink << 1_u8.unsafe_chr
+      sink << core.error.message
+      return sink
+    end
     rest = core.leftover.bytesize
-    return ZstdError.new("zstd: #{rest} bytes after the last frame are not a frame") if rest > 0
-    core.output
+    if rest > 0
+      sink << 1_u8.unsafe_chr
+      sink << "zstd: " << rest.to_s << " bytes after the last frame are not a frame"
+      return sink
+    end
+    sink << 0_u8.unsafe_chr
+    sink << core.output
+    sink
+  end
+
+  # What `tagged` made, as the answer: a view of it.
+  def self.answer(tagged : String) : String | ZstdError
+    text = tagged[1, tagged.bytesize - 1]
+    return ZstdError.new(text) if tagged.byte_at(0) == 1_u8
+    text
   end
 
   # One frame of *data*, with its content size and checksum, that any

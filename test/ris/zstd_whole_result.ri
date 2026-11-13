@@ -1,0 +1,10 @@
+# Zstd.decompress answers text or an error that outlive its decoder:
+# the decoder is the def's own, so both are copied into one tagged
+# String the caller keeps.
+import std/zstd::{Zstd, ZstdError}
+
+back = Zstd.decompress(Zstd.compress("hello, hello"))
+raise "round trip: #{back.inspect}" unless back == "hello, hello"
+junk = Zstd.decompress(Zstd.compress("x") + "junk")
+raise "junk: #{junk.inspect}" unless junk.is_a?(ZstdError) &&
+                                     junk.message == "zstd: 4 bytes after the last frame are not a frame"

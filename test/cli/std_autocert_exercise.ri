@@ -318,7 +318,9 @@ def handshake_ms(manager : AutocertView, name : String) : Int64
       unless settings.is_a?(Cancelled)
         client = IyiSocket.connect("127.0.0.1", settings.port)
         if client.is_a?(IyiSocket)
-          TlsClient.over(client, settings.name, TlsConfig.new, 10000)
+          tls_config = TlsConfig.new
+          tls = TlsClient.new(client, settings.name, tls_config)
+          tls.over(10000)
           client.close
         end
       end
@@ -327,7 +329,8 @@ def handshake_ms(manager : AutocertView, name : String) : Int64
     socket = listener.accept
     if socket.is_a?(IyiSocket)
       started = Time.monotonic.total_milliseconds.to_i64
-      shaken = TlsServer.over(socket, config, DEADLINE_MS)
+      server = TlsServer.new(socket, config)
+      shaken = server.accept(DEADLINE_MS)
       took = Time.monotonic.total_milliseconds.to_i64 - started
       check shaken.is_a?(TlsError), "a handshake for #{name} with no certificate to show is refused"
       socket.close

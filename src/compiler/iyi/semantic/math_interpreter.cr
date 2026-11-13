@@ -30,6 +30,12 @@ struct Iyi::MathInterpreter
   end
 
   def interpret(node : Call)
+    # ris wraps a constant's value in `::__ris_program_init do ... end`
+    # (normalizer.cr); the value folds from the block's body.
+    if node.program_initializer? && (block = node.block)
+      return interpret(block.body)
+    end
+
     obj = node.obj
     if obj
       if obj.is_a?(Path)

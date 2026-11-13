@@ -137,9 +137,15 @@ end
 
 class RisLatency2Handler
   @tls : TlsServerConfig
+  @identity : TlsIdentity
 
   def initialize(config : {String, String})
-    @tls = server_config(ris_heap_text(config[0]), ris_heap_text(config[1]))
+    identity = TlsIdentity.new(File.read(ris_heap_text(config[0])), File.read(ris_heap_text(config[1])))
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
+    @tls.alpn << "http/1.1"
   end
 
   def listening(port : Int32) : Nil
@@ -158,9 +164,15 @@ end
 
 class RisLatency3Handler
   @tls : TlsServerConfig
+  @identity : TlsIdentity
 
   def initialize(config : {String, String})
-    @tls = server_config(ris_heap_text(config[0]), ris_heap_text(config[1]))
+    identity = TlsIdentity.new(File.read(ris_heap_text(config[0])), File.read(ris_heap_text(config[1])))
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
+    @tls.alpn << "http/1.1"
   end
 
   def listening(port : Int32) : Nil
@@ -193,7 +205,7 @@ end
 
 import std/http::{HTTP, HTTPClient, Response, Server, Incoming, Outgoing}
 import std/socket::{IyiSocket}
-import std/tls::{TlsClient, TlsConfig, TlsError, TlsServerConfig}
+import std/tls::{TlsClient, TlsConfig, TlsError, TlsIdentity, TlsServerConfig}
 import std/x509::{RisCertificateStore, Certificate}
 import std/file::{File}
 
@@ -232,12 +244,11 @@ end
 # *tls*: the client's own roots, built in the task that asks.
 def gets(url : String, count : Int32, idle : Int32 = 0, tls : TlsConfig? = nil) : Array(Int64)
   client = HTTPClient.new(idle: idle, timeout_ms: 10000, tls: tls)
-  client.get(url).or_panic
   samples = [] of Int64
-  count.times do
+  (count + 1).times do |round|
     started = __iyi_monotonic_ns
     client.get(url).or_panic
-    samples << __iyi_monotonic_ns - started
+    samples << __iyi_monotonic_ns - started if round > 0
   end
   raise "#{url}: #{client.connections_made} connections for #{count + 1} GETs on a kept one" if idle > 0 && client.connections_made != 1
   client.close
@@ -268,14 +279,15 @@ def nagle_get(port : Int32, config : TlsConfig) : Int64
   socket = IyiSocket.connect("127.0.0.1", port).or_panic
   socket.nodelay = false
   socket.read_timeout_ms = 10000
-  tls = TlsClient.over(socket, "localhost", config)
-  raise "no handshake: #{tls.message}" if tls.is_a?(TlsError)
+  tls = TlsClient.new(socket, "localhost", config)
+  problem = tls.over
+  raise "no handshake: #{problem.message}" if problem
   tls.write("GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
   heard = ""
   while true
     got = tls.read
     break if got.is_a?(TlsError) || got.empty?
-    heard = heard + got
+    heard << got
   end
   took = __iyi_monotonic_ns - started
   tls.close
@@ -290,18 +302,14 @@ def nagle_gets(port : Int32, config : TlsConfig, count : Int32) : Array(Int64)
   samples
 end
 
-def client_config(root : String) : TlsConfig
-  config = TlsConfig.new
-  pem_store_1 = RisCertificateStore.new
-  config.roots = pem_certs(pem_store_1, File.read(root))
-  config.alpn = ["http/1.1"]
-  config
-end
-
-def server_config(chain : String, key : String) : TlsServerConfig
-  config = TlsServerConfig.from_pem(File.read(chain), File.read(key)).or_panic
-  config.alpn = ["http/1.1"]
-  config
+# Fills *config* to trust *root*'s certificates, kept in *store*: read
+# into the store before the config views it.
+macro client_config(config, store, root)
+  if problem = {{store}}.read_pem(File.read({{root}}))
+    raise problem.message
+  end
+  {{config}}.roots = {{store}}.kept_certificates
+  {{config}}.alpn << "http/1.1"
 end
 
 args = Program.args
@@ -328,17 +336,23 @@ if mode == "self" || mode == "once"
     end
     RisExerciseServer.wait(RisLatency2Handler)
     g.spawn do
+      client = TlsConfig.new
+      store = RisCertificateStore.new
+      client_config(client, store, ca)
       if mode == "once"
-        HTTPClient.new(tls: client_config(ca)).get("https://localhost:#{tls}/").or_panic
+        once = HTTPClient.new(tls: client)
+        once.get("https://localhost:#{tls}/").or_panic
+        nil
       else
         report("plain http://, std/http at both ends, a GET on a new connection", gets("http://127.0.0.1:#{plain}/", count))
         report("plain http://, a kept connection, an answer the server streams", gets("http://127.0.0.1:#{plain}/stream", count, 1))
-        report("https://, std/http at both ends, a GET on a new connection", gets("https://localhost:#{tls}/", count, 0, client_config(ca)))
-        report("https://, a kept connection, an answer the server streams", gets("https://localhost:#{tls}/stream", count, 1, client_config(ca)))
-        report("https://, Nagle on at the client, its handshake and a GET", nagle_gets(tls, client_config(ca), count))
+        report("https://, std/http at both ends, a GET on a new connection", gets("https://localhost:#{tls}/", count, 0, client))
+        report("https://, a kept connection, an answer the server streams", gets("https://localhost:#{tls}/stream", count, 1, client))
+        report("https://, Nagle on at the client, its handshake and a GET", nagle_gets(tls, client, count))
       end
       HTTP.get("http://127.0.0.1:#{plain}/stop")
-      HTTPClient.new(tls: client_config(ca)).get("https://localhost:#{tls}/stop")
+      stopper = HTTPClient.new(tls: client)
+      stopper.get("https://localhost:#{tls}/stop")
       0
     end
   end
@@ -347,7 +361,9 @@ end
 
 if mode == "s_server"
   port = args[1].to_i
-  config = client_config(args[2])
+  config = TlsConfig.new
+  store = RisCertificateStore.new
+  client_config(config, store, args[2])
   rounds = args[3].to_i
   report("https:// to s_server, a GET on a new connection", gets("https://localhost:#{port}/", rounds, 0, config))
   report("https:// to s_server, Nagle on at the client, its handshake and a GET", nagle_gets(port, config, rounds))

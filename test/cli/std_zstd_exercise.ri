@@ -389,11 +389,11 @@ assert_true z.leftover == "traili" && z.leftover + feed.rest == "trailing", "wha
 junk = Zstd.decompress(hello_raw + "junk")
 assert_true junk.is_a?(ZstdError) && junk.as(ZstdError).message == "zstd: 4 bytes after the last frame are not a frame", "bytes after the last frame, whole: #{junk.inspect}"
 two = Zstd.compress(long_text)
-feed = Feed.new(two, [65536])
-z = ZstdReader.new(feed)
-first = z.read(1048576)
+feed2 = Feed.new(two, [65536])
+z2 = ZstdReader.new(feed2)
+first = z2.read(1048576)
 assert_true first.is_a?(String) && first.as(String).bytesize == 131072, "a read of 1 MiB answers one block"
-assert_true feed.calls <= 3, "and asks the source only for what that block needs (#{feed.calls} calls)"
+assert_true feed2.calls <= 3, "and asks the source only for what that block needs (#{feed2.calls} calls)"
 puts "  leftover, reads of a block at most, and a source asked only for what a block needs"
 
 puts "\n== refused as a value"
@@ -456,12 +456,12 @@ if args.size > 0
     base = RisRegion.tape_bytes(1_u64)
     most = 0_u64
     io = File.open(path)
-    z = ZstdReader.new(io)
+    zio = ZstdReader.new(io)
     crc = 0_u32
     total = 0_i64
     reads = 0
     while true
-      piece = z.read(65536)
+      piece = zio.read(65536)
       raise "ASSERTION FAILED: #{e[1]}: refused with #{piece.message.inspect}" if piece.is_a?(ZstdError)
       break if piece.bytesize == 0
       crc = CRC32.update(crc, piece, piece.bytesize)
@@ -481,14 +481,14 @@ if args.size > 0
     best = 0_i64
     3.times do |k|
       t0 = __iyi_monotonic_ns
-      feed = Feed.new(data, [65536])
-      z = ZstdReader.new(feed)
+      tfeed = Feed.new(data, [65536])
+      ztimed = ZstdReader.new(tfeed)
       n = 0_i64
       while true
-        piece = z.read(131072)
-        raise "ASSERTION FAILED: #{e[1]} refused" if piece.is_a?(ZstdError)
-        break if piece.bytesize == 0
-        n = n + piece.bytesize.to_i64
+        tpiece = ztimed.read(131072)
+        raise "ASSERTION FAILED: #{e[1]} refused" if tpiece.is_a?(ZstdError)
+        break if tpiece.bytesize == 0
+        n = n + tpiece.bytesize.to_i64
       end
       t1 = __iyi_monotonic_ns
       best = (t1 - t0).to_i64 if k == 0 || (t1 - t0).to_i64 < best
