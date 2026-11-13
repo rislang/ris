@@ -30,6 +30,7 @@ end
 
 # One derive, two declarations. The macro reads each one's own fields, so
 # neither type had to be written down inside the macro.
+@[OnTape]
 pub struct Span
   @from : Int32
   @to : Int32
@@ -56,6 +57,7 @@ puts Span.new(1, 9, "range").described
 #
 # One line, two derives: each macro reads the same declaration and adds its own
 # methods.
+@[OnTape]
 pub struct Tag
   getter label : Name
   @count : Int32

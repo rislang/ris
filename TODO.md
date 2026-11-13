@@ -21,7 +21,7 @@ sections below and are listed here in order:
   time web/static_test.ri once it builds (it fails: web/spec import
   before the first `spec` block, a web-side change).
 * Benches build (section 7), including `HTTP.tls_config=` callers.
-* Release: Linux tarball and its job, `install_ris.sh`, tag v0.1.0;
+* Release: Linux tarball and its job, `install_ris.sh`, tag ris-v0.1.0;
   `ris --version` prints 0.1.0.
 
 ## 1. Programs first
@@ -35,6 +35,10 @@ sections below and are listed here in order:
   back `form`, `multipart` and `cookies`, which `Request` had.
 
 * The user's own ris programs: each obstacle becomes an item here.
+
+* `Iterator#to_a` (iterator.ri:225) stores each round's item past its
+  round, so samples/ris/std_iterator.ri does not build and is left out
+  of the tarball with autocert.ri (Makefile, ris-tarball).
 
 Breakage between steps is fine; no transition stages.
 

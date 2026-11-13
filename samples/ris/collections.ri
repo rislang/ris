@@ -15,6 +15,7 @@ module samples/collections
 
 import std/enumerable::{Enumerable}
 
+@[OnTape]
 pub struct Nums
   def initialize(@a : Array(Int32))
   end
@@ -28,6 +29,7 @@ impl Enumerable for Nums
   end
 end
 
+@[OnTape]
 pub struct Words
   def initialize(@a : Array(String))
   end

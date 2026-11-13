@@ -71,6 +71,10 @@ jobs:
       - name: Build ris and package it
         run: make ris-tarball LLVM_CONFIG=/tmp/llvm-static/bin/llvm-config
 
+      # Every std module and shipped sample builds out of the package.
+      - name: The package carries a usable standard library
+        run: bash test/cli/tarball_std.sh .build/ris-package
+
       - name: Stage the tarball
         run: mkdir -p dist && cp .build/ris-*-linux-*.tar.gz dist/
 
