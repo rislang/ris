@@ -4664,7 +4664,7 @@ end").as(ClassDef)
       # `def or` compiled and every call to it was refused as a recovery.
       it "rejects a def named or or or_panic" do
         {"def or(x)\nend", "def self.or_panic\nend"}.each do |source|
-          expect_raises(SyntaxException, "is a reserved name in iyi") do
+          expect_raises(SyntaxException, "is a reserved name in ris") do
             parse(source, filename: "x.ri")
           end
         end
@@ -4676,7 +4676,7 @@ end").as(ClassDef)
       # "undefined method 'join' for Spawner". The prelude's is the group.
       it "rejects a def named group outside the prelude" do
         {"def group(&)\nend", "def self.group\nend"}.each do |source|
-          expect_raises(SyntaxException, "`group` is a reserved name in iyi") do
+          expect_raises(SyntaxException, "`group` is a reserved name in ris") do
             parse(source, filename: "x.ri")
           end
         end

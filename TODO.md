@@ -21,8 +21,6 @@ sections below and are listed here in order:
   time web/static_test.ri once it builds (it fails: web/spec import
   before the first `spec` block, a web-side change).
 * Benches build (section 7), including `HTTP.tls_config=` callers.
-* compiler_test passes (exception_test.cr is removed: ris has no
-  `rescue`); rerun it whole on minitest.
 * Release: Linux tarball and its job, `install_ris.sh`, tag v0.1.0;
   `ris --version` prints 0.1.0.
 

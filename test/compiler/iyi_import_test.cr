@@ -260,7 +260,7 @@ describe "Semantic: iyi import" do
       with_iyi_modules({
         "main.ri" => "module app/main\n\nrequire \"json\"\n",
       }) do
-        expect_raises(Iyi::TypeException, /iyi has no `require`/) do
+        expect_raises(Iyi::TypeException, /ris has no `require`/) do
           semantic_iyi("main.ri")
         end
       end
@@ -270,7 +270,7 @@ describe "Semantic: iyi import" do
       with_iyi_modules({
         "main.ri" => "module app/main\n\nimport app/ghost\n",
       }) do
-        expect_raises(Iyi::TypeException, /this one is `app\/ghost\.ri` \(or `\.ri`\)/) do
+        expect_raises(Iyi::TypeException, /this one is `app\/ghost\.ri`/) do
           semantic_iyi("main.ri")
         end
       end
@@ -1047,7 +1047,7 @@ describe "Semantic: iyi import" do
           require "json"
           IYI
       }) do
-        expect_raises(Iyi::TypeException, /iyi has no `require`/) do
+        expect_raises(Iyi::TypeException, /ris has no `require`/) do
           semantic_iyi("main.ri")
         end
       end

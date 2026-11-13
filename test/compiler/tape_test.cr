@@ -37,18 +37,16 @@ describe "ris tape text" do
   end
 
   it "builds a class variable's array on the program tape, as a constant's" do
-    ["ri", "iyi"].each do |extension|
-      tape_compile(<<-'CODE', extension)
-        LIST = [1, 2, 4]
-        class Foo
-          @@var = [1, 2, 4]
-          def self.var
-            @@var
-          end
+    tape_compile(<<-'CODE')
+      LIST = [1, 2, 4]
+      class Foo
+        @@var = [1, 2, 4]
+        def self.var
+          @@var
         end
-        puts Foo.var.size + LIST.size
-        CODE
-    end
+      end
+      puts Foo.var.size + LIST.size
+      CODE
   end
 
   it "accepts an explicit deep program copy" do

@@ -22,6 +22,10 @@ module Iyi
     # handling below.
     property? iyi_module_extends_written = false
     property def_nest : Int32
+    # The formatter parses a macro body inside a def with `def_nest` set, so
+    # `spec = 1` is a local there; but a constant in that body is fine, as
+    # it is in the def's own parse, where the body is macro text.
+    property? macro_body_in_def = false
     property fun_nest : Int32
     property type_nest : Int32
     getter? wants_doc : Bool
@@ -1469,7 +1473,7 @@ module Iyi
             atomic.args << arg
             atomic.end_location = arg.end_location
           else
-            if atomic.is_a?(Path) && (inside_def? || inside_fun? || @is_constant_assignment)
+            if atomic.is_a?(Path) && ((inside_def? && !macro_body_in_def?) || inside_fun? || @is_constant_assignment)
               raise "dynamic constant assignment. Constants can only be declared at the top level or inside other types."
             end
 
