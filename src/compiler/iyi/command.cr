@@ -881,14 +881,16 @@ class Iyi::Command
         compiler.use_iyimod = dir
       end
 
+      # Unused analysis also collects callers from a spec build.
+      if command == "build" || unreachable_command
+        opts.on("--spec", "ris: build the file's spec blocks as a\ntest program (`ris test` uses it)") do
+          ris_spec_setup(compiler)
+        end
+      end
+
       unless no_codegen
         opts.on("--release", "Release mode (-O3 --single-module)") do
           compiler.release!
-        end
-        if command == "build"
-          opts.on("--spec", "ris: build the file's spec blocks as a\ntest program (`ris test` uses it)") do
-            ris_spec_setup(compiler)
-          end
         end
         opts.on("-O LEVEL", "Optimization: 0 (default), 1, 2, 3, s, z") do |level|
           if mode = Compiler::OptimizationMode.from_level?(level)

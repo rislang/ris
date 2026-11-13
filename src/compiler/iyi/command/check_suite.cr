@@ -146,8 +146,10 @@ class Iyi::Command
       end
     when "unused"
       check_each_target("unused", ok_targets(paths)) do |target|
+        with_specs = spec_module?(target)
         options.replace(["--check", target])
-        unreachable "vet"
+        options.unshift("--spec") if with_specs
+        unreachable "vet", with_specs
       end
     when "test"
       options.replace((jobs ? ["-j", jobs] : [] of String) +

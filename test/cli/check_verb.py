@@ -77,6 +77,30 @@ def new_project(name):
 
 
 def main():
+    # Spec blocks are callers; an uncalled export still fails unused.
+    with tempfile.TemporaryDirectory(prefix="ris-unused-spec-") as bare:
+        write(os.path.join(bare, "SPEC.md"),
+              "# Spec\n\n## 1. Answer\n\n* 1.1 The answer is 42.\n")
+        os.mkdir(os.path.join(bare, "build"))
+        src = os.path.join(bare, "build", "unused_spec.ri")
+        write(src, "module build/unused_spec\n\n"
+              "pub def answer : Int32\n  42\nend\n\n"
+              "spec 1.1\n  answer == 42\nend\n")
+        proc = run("check", "unused", "build/unused_spec.ri", cwd=bare)
+        step("unused counts a spec block as a caller",
+             proc.returncode == 0, proc.stdout + proc.stderr)
+
+        write(src, "module build/unused_spec\n\n"
+              "pub def answer : Int32\n  42\nend\n\n"
+              "pub def unused_answer : Int32\n  7\nend\n\n"
+              "spec 1.1\n  answer == 42\nend\n")
+        proc = run("check", "unused", "build/unused_spec.ri", cwd=bare)
+        step("unused still reports an export with no caller",
+             proc.returncode == 1
+             and "Build::UnusedSpec#unused_answer" in proc.stdout
+             and "Build::UnusedSpec#answer" not in proc.stdout,
+             proc.stdout + proc.stderr)
+
     root = new_project("hello")
     agents = os.path.join(root, "AGENTS.md")
     text = " ".join(open(agents).read().split())

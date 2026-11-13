@@ -9,8 +9,16 @@ module Iyi
     # line has to name the one that was typed. `iyi vet` with no file
     # answered "Usage: iyi tool unreachable [options] ...", which sends the
     # author to a command they did not run.
-    private def unreachable(verb = "tool unreachable")
+    private def unreachable(verb = "tool unreachable", with_plain = false)
+      plain_options = options.reject { |option| option == "--spec" }
       config, result = compile_no_codegen verb, path_filter: true, unreachable_command: true, allowed_formats: %w[text json csv codecov]
+      results = [result]
+      if with_plain
+        options.replace(plain_options)
+        _, plain_result = compile_no_codegen verb, path_filter: true,
+          unreachable_command: true, allowed_formats: %w[text json csv codecov]
+        results << plain_result
+      end
 
       unreachable = UnreachableVisitor.new
 
@@ -24,11 +32,13 @@ module Iyi
       # of greet's two exports printed `..\cache\mod\example.com\me\greet@v0.1.0\
       # greet.iyi:7:1  Greet#unused_here` and exited 1, a finding only the
       # package's author can act on. Rows starting `@` are short names.
-      result.program.iyi_mod_table.each do |(prefix, dir)|
-        unreachable.excludes << ::Path[dir].expand.to_posix.to_s unless prefix.starts_with?('@')
+      results.each do |compiled|
+        compiled.program.iyi_mod_table.each do |(prefix, dir)|
+          unreachable.excludes << ::Path[dir].expand.to_posix.to_s unless prefix.starts_with?('@')
+        end
       end
 
-      tallies = unreachable.process(result)
+      tallies = unreachable.process(results)
       tallies.sort_by! do |a_def, _|
         location = a_def.location.not_nil!
         {
@@ -187,13 +197,19 @@ module Iyi
     end
 
     def process(result : Compiler::Result) : Array({Def, Int32})
+      process([result])
+    end
+
+    def process(results : Array(Compiler::Result)) : Array({Def, Int32})
       @tallies.clear
 
-      result.node.accept(self)
+      # A spec build replaces top-level code. Keep callers from both
+      # programs before deciding which source definitions are unused.
+      results.each { |result| result.node.accept(self) }
 
-      process_type(result.program)
+      results.each { |result| process_type(result.program) }
 
-      @tallies.to_a
+      @tallies.to_a.uniq { |entry| entry[0].location }
     end
 
     def visit(node)
