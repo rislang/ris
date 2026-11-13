@@ -47,3 +47,32 @@ struct ::Bool
     self ? 1231 : 1237
   end
 end
+
+# bool.1 The | and & operators evaluate both operands and return Boolean
+#   disjunction and conjunction; ^ is true exactly when the operands differ.
+spec bool.1
+  (true | false) == true
+  (false | false) == false
+  (true & false) == false
+  (true & true) == true
+  (true ^ true) == false
+  (true ^ false) == true
+end
+
+# bool.2 to_unsafe returns Int32 1 for true and 0 for false; clone returns the
+#   same Boolean value.
+spec bool.2
+  true.to_unsafe == 1
+  false.to_unsafe == 0
+  true.clone == true
+  false.clone == false
+end
+
+# bool.3 to_s(io) writes the same text as the prelude to_s; hash is 1231 for
+#   true and 1237 for false.
+spec bool.3
+  true.hash != false.hash
+  true.hash == true.hash
+  true.hash == 1231
+  false.hash == 1237
+end
