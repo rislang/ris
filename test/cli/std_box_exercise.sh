@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Exercises `std/box`: heap box holding a value.
+# Runs the `std/box` spec blocks plain and --release, and proves a broken
+# unbox is caught.
 #
 #     bash test/cli/std_box_exercise.sh
 set -u
@@ -24,7 +25,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+IYI="${IYI:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -47,7 +48,7 @@ export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_box_exercise.iyi" \
+  if ! "$IYI" build --spec "$@" -o "$WORK/$name" "$REPO/src/std/box.iyi" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -57,24 +58,30 @@ build_and_run() {
   "$WORK/$name" >"$WORK/$name.out" 2>&1
   local exit_code=$?
   sed 's/^/  /' "$WORK/$name.out"
-  if [ "$exit_code" -ne 0 ]; then
+  if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 77 ]; then
     echo "$label: exited $exit_code"
+    status=1
+    return 1
+  fi
+  if [ "$exit_code" -eq 77 ] &&
+     ! grep -q 'todo  spec box.3 ' "$WORK/$name.out"; then
+    echo "$label: unexpected todo exit"
     status=1
     return 1
   fi
   return 0
 }
 
-echo "== the std/box exercise, plain build"
+echo "== the std/box blocks, plain build"
 build_and_run "plain" box-plain
-if ! grep -q "ALL CHECKS PASSED" "$WORK/box-plain.out" 2>/dev/null; then
+if ! grep -q "ok  spec box.1 " "$WORK/box-plain.out" 2>/dev/null; then
   echo "plain: missing pass sentinel"
   status=1
 fi
 
 echo
-echo "== every box section reported"
-for phrase in "== box"; do
+echo "== every box block reported"
+for phrase in "spec box.1 " "spec box.2 " "spec box.3 "; do
   if ! grep -q "$phrase" "$WORK/box-plain.out" 2>/dev/null; then
     echo "  missing section: $phrase"
     status=1
@@ -83,9 +90,9 @@ done
 [ "$status" -eq 0 ] && echo "  sections reported"
 
 echo
-echo "== the same program with optimisation on (--release)"
+echo "== the same blocks with optimisation on (--release)"
 build_and_run "release" box-release --release >/dev/null
-if ! grep -q "ALL CHECKS PASSED" "$WORK/box-release.out" 2>/dev/null; then
+if ! grep -q "ok  spec box.2 " "$WORK/box-release.out" 2>/dev/null; then
   echo "release: missing pass sentinel"
   status=1
 fi
@@ -106,8 +113,13 @@ PY
 then
   echo "  the patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_box_exercise.iyi" >"$WORK/mut.out" 2>&1; then
-  echo "  the exercise PASSED on a broken module"
+elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build --spec -o "$WORK/mut.bin" "$WORK/patched/std/box.iyi" >"$WORK/mut.out" 2>&1; then
+  echo "  the broken copy did not compile"
+  sed -n '1,6p' "$WORK/mut.out"
+  status=1
+elif "$WORK/mut.bin" >"$WORK/mut.out" 2>&1 ||
+     ! grep -q "spec box.1 " "$WORK/mut.out"; then
+  echo "  the blocks PASSED on a broken module"
   status=1
 else
   echo "  a broken box is caught"
@@ -115,8 +127,8 @@ fi
 
 echo
 if [ "$status" -eq 0 ]; then
-  echo "the std/box exercise holds"
+  echo "the std/box blocks hold"
 else
-  echo "the std/box exercise did not hold"
+  echo "the std/box blocks did not hold"
 fi
 exit $status

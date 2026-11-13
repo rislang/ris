@@ -160,32 +160,6 @@ This module reads ASN.1 DER values for certificates, keys and signatures.
   decoded text follow SPEC 1.5; borrowed views follow SPEC 3.2.
   <!-- todo: Needs proof -->
 
-## atomic
-
-This module adds weaker memory orderings, bit operations and fences to Atomic.
-
-* atomic.1 The admitted words are Int32, Int64, UInt8 and UInt64; other types
-  are refused by the prelude. (test/cli/std_atomic_exercise.iyi)
-* atomic.2 get_relaxed and set_relaxed are atomic without synchronization;
-  get_acquire and set_release use acquire loads and release stores.
-  (test/cli/std_atomic_exercise.iyi)
-* atomic.3 add, sub and swap with relaxed, acquire, release or acq_rel
-  suffixes use that ordering and return the previous word.
-  (test/cli/std_atomic_exercise.iyi)
-* atomic.4 compare_and_set with an ordering suffix returns the previous word
-  and whether expected was exchanged for desired. Failure is acquire for
-  acquire and acq_rel success, relaxed otherwise.
-  (test/cli/std_atomic_exercise.iyi)
-* atomic.5 and, nand, bitwise_or and xor atomically replace the word with the
-  named bit operation and return its previous value, sequentially
-  consistently. (test/cli/std_atomic_exercise.iyi)
-* atomic.6 max and min return the old word and store the selected extremum,
-  using signed comparison for signed words and unsigned comparison otherwise.
-  (test/cli/std_atomic_exercise.iyi)
-* atomic.7 fence, fence_acquire, fence_release and fence_acq_rel emit the
-  corresponding process-wide LLVM fence. No relaxed fence is supplied.
-  (test/cli/std_atomic_exercise.sh)
-
 ## autocert
 
 Autocert manages on-demand certificate issuance and renewal for task-local
@@ -255,26 +229,6 @@ Base32 and Base32Hex encode and decode binary text using RFC 4648.
   SPEC 1.5; writer overloads append to the supplied builder and decoding
   errors append nothing. (src/std/base32.iyi)
   <!-- todo: Header still describes Array(UInt8) input and output. -->
-
-## base64
-
-Base64 encodes binary Strings and reads standard or URL-safe base64 text.
-
-* base64.1 encode writes RFC 4648 section 4's alphabet; urlsafe_encode uses
-  section 5's alphabet. Both pad with = and insert no line breaks.
-  (test/cli/std_base64_exercise.iyi)
-* base64.2 decode accepts both alphabets, even mixed, ignores ASCII space and
-  bytes 9 through 13, and accepts missing padding.
-  (test/cli/std_base64_exercise.iyi)
-* base64.3 Invalid alphabet bytes, padding without a group, excess padding,
-  data after padding and a final single data character panic.
-  (test/cli/std_base64_exercise.iyi)
-* base64.4 Decoding does not require zero unused bits and accepts an
-  incomplete final padding run; this is a permissive decoder rather than
-  canonical RFC 4648 validation.
-  <!-- todo: Needs proof -->
-* base64.5 Results are new binary Strings under SPEC 1.5. Writer overloads
-  append the completed result to the caller's builder. (src/std/base64.iyi)
 
 ## benchmark
 
@@ -389,31 +343,6 @@ BitArray stores a fixed count of Boolean values in packed words.
 * bit_array.9 Packed words and exported byte copies live on tape; copies and
   formatted results follow SPEC 1.5. Assignment of the struct aliases its
   array under SPEC 1.4.
-  <!-- todo: Needs proof -->
-
-## bool
-
-This module extends the prelude Bool with eager operations and conversions.
-
-* bool.1 The | and & operators evaluate both operands and return Boolean
-  disjunction and conjunction; ^ is true exactly when the operands differ.
-  (test/cli/std_bool_exercise.iyi)
-* bool.2 to_unsafe returns Int32 1 for true and 0 for false; clone returns the
-  same Boolean value. (test/cli/std_bool_exercise.iyi)
-* bool.3 to_s(io) writes the same text as the prelude to_s; hash is 1231 for
-  true and 1237 for false. (test/cli/std_bool_exercise.iyi)
-
-## box
-
-Box holds a typed value for passing opaque context through a foreign call.
-
-* box.1 A Box(T) retains its object and unbox of that box's pointer returns it
-  as T. (test/cli/std_box_exercise.iyi)
-* box.2 Unboxing a null pointer returns nil when T admits nil, and otherwise
-  panics with Unboxing null pointer. (test/cli/std_box_exercise.iyi)
-* box.3 to_unsafe returns the box's address without copying its object. The
-  pointer is valid only while the tape-owned box is alive; the caller must
-  supply a live pointer to the matching Box(T).
   <!-- todo: Needs proof -->
 
 ## bzip2

@@ -3,7 +3,7 @@
 #
 #     bash test/cli/std_base64_exercise.sh
 #
-# Proves the exercise holds plain and --release, that a broken encoder or
+# Runs the module blocks plain and --release, proves a broken encoder or
 # decoder is caught, and what `decode` refuses: a byte outside the alphabet,
 # data after the padding, data inside it, more `=` than the group needs, `=`
 # with no group to close, and a final group of one character - each a panic with
@@ -30,7 +30,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+IYI="${IYI:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -53,7 +53,7 @@ export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_base64_exercise.iyi" \
+  if ! "$IYI" build --spec "$@" -o "$WORK/$name" "$REPO/src/std/base64.iyi" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -63,8 +63,19 @@ build_and_run() {
   "$WORK/$name" >"$WORK/$name.out" 2>&1
   local exit_code=$?
   sed 's/^/  /' "$WORK/$name.out"
-  if [ "$exit_code" -ne 0 ]; then
+  if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 77 ]; then
     echo "$label: exited $exit_code"
+    status=1
+    return 1
+  fi
+  if [ "$exit_code" -eq 77 ] &&
+     ! grep -q 'todo  spec base64.4 ' "$WORK/$name.out"; then
+    echo "$label: unexpected todo exit"
+    status=1
+    return 1
+  fi
+  if ! "$IYI" run "$REPO/test/cli/std_base64_exercise.iyi" \
+       >>"$WORK/$name.out" 2>&1; then
     status=1
     return 1
   fi
@@ -127,12 +138,15 @@ PY
     status=1
   # Build first, then run: a patch that does not compile would also "fail",
   # and that proves nothing about whether the exercise catches the break.
-  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_base64_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build --spec -o "$WORK/mut-$mutations.bin" "$WORK/patched/std/base64.iyi" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the broken copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1
   elif "$WORK/mut-$mutations.bin" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the exercise PASSED on a broken module"
+    status=1
+  elif ! grep -q 'BROKEN  spec ' "$WORK/mut.out"; then
+    echo "  $label: no broken spec block reported"
     status=1
   elif [ -n "$phrase" ] && ! grep -qF -- "$phrase" "$WORK/mut.out"; then
     echo "  $label: failed, but not at '$phrase'"

@@ -225,3 +225,144 @@ spec 1.5  # A def builds its tape result in its caller's destination (Goose §7,
   end
   Base64.decode(kept) == "\u0000hello café\u00ff"
 end
+
+private def base64_assert_true(cond : Bool, msg : String) : Bool
+  raise "ASSERTION FAILED: #{msg}" unless cond
+  true
+end
+
+private def base64_assert_str(expected : String, actual : String, msg : String) : Bool
+  raise "ASSERTION FAILED: #{msg}\n  expected #{expected.inspect}\n  got      #{actual.inspect}" unless expected == actual
+  true
+end
+
+
+private def base64_byte_sum(s : String) : UInt64
+  p = s
+  sum = 0_u64
+  i = 0
+  while i < s.bytesize
+    sum = sum &+ p.byte_at(i).to_u64
+    i = i + 1
+  end
+  sum
+end
+
+private def base64_encode_checks : Bool
+  base64_assert_str "aGk=", Base64.encode("hi"), "hi"
+  base64_assert_str "Zg==", Base64.encode("f"), "f"
+  base64_assert_str "Zm8=", Base64.encode("fo"), "fo"
+  base64_assert_str "Zm9v", Base64.encode("foo"), "foo"
+  base64_assert_str "", Base64.encode(""), "empty"
+  base64_assert_str "Pz8=", Base64.urlsafe_encode("??"), "urlsafe"
+
+  # Past eight bytes the encoder reads six at a time and writes eight
+  # characters as one word; every byte value, both alphabets, and every
+  # length around the switch to the byte-at-a-time tail.
+  every_byte = String.from_bytes(256) { |p| 256.times { |k| p[k] = k.to_u8 } }
+  backwards = String.from_bytes(256) { |p| 256.times { |k| p[k] = (255 - k).to_u8 } }
+  base64_assert_str (
+    "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKiss" +
+    "LS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZ" +
+    "WltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWG" +
+    "h4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKz" +
+    "tLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g" +
+    "4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w=="
+  ), Base64.encode(every_byte), "every byte value"
+  base64_assert_str (
+    "__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-" +
+    "bl5OPi4eDf3t3c29rZ2NfW1dTT0tHQz87NzMvKycjHxsXEw8LBwL--vby7ur" +
+    "m4t7a1tLOysbCvrq2sq6qpqKempaSjoqGgn56dnJuamZiXlpWUk5KRkI-OjY" +
+    "yLiomIh4aFhIOCgYB_fn18e3p5eHd2dXRzcnFwb25tbGtqaWhnZmVkY2JhYF" +
+    "9eXVxbWllYV1ZVVFNSUVBPTk1MS0pJSEdGRURDQkFAPz49PDs6OTg3NjU0Mz" +
+    "IxMC8uLSwrKikoJyYlJCMiISAfHh0cGxoZGBcWFRQTEhEQDw4NDAsKCQgHBg" +
+    "UEAwIBAA=="
+  ), Base64.urlsafe_encode(backwards), "every byte value, url-safe"
+  40.times do |len|
+    piece = every_byte[200 - len, len]
+    base64_assert_str piece, Base64.decode(Base64.encode(piece)), "a round trip of #{len} bytes"
+  end
+
+  # What encoding costs against a pass that only adds the bytes up: a byte
+  # and a character at a time it is one and a half of them in a plain
+  # build, read and written a word at a time half of one. A release build
+  # turns the pass into vector code, so the ratio is not asked there.
+  {% unless flag?(:release) %}
+
+    sample = "0123456789abcdefghijklmnopqrstuvwxyz!?" * 30000
+    best_sum = 0_i64
+    best_encode = 0_i64
+    seen = 0_u64
+    3.times do |k|
+      t0 = __iyi_monotonic_ns
+      seen = seen &+ base64_byte_sum(sample)
+      t1 = __iyi_monotonic_ns
+      seen = seen &+ Base64.encode(sample).bytesize.to_u64
+      t2 = __iyi_monotonic_ns
+      best_sum = (t1 - t0).to_i64 if k == 0 || (t1 - t0).to_i64 < best_sum
+      best_encode = (t2 - t1).to_i64 if k == 0 || (t2 - t1).to_i64 < best_encode
+    end
+    base64_assert_true best_encode < best_sum, "encode cost: #{best_encode * 10 // best_sum}/10 of a byte sum (#{seen})"
+  {% end %}
+
+  true
+end
+
+private def base64_refusal_checks : Bool
+  caught = 0
+  ["QU*JD", "QQ==QQ==", "QU=JD", "QQ===", "QUJD=", "Q",
+   "QUJDR", "Q="].each do |text|
+    group do |g|
+      task = g.spawn { Base64.decode(text) }
+      caught += 1 if task.value.is_a?(Panicked)
+    end
+  end
+  caught == 8
+end
+
+# base64.1 encode writes RFC 4648 section 4's alphabet; urlsafe_encode uses
+#   section 5's alphabet. Both pad with = and insert no line breaks.
+spec base64.1
+  base64_encode_checks
+end
+
+# base64.2 decode accepts both alphabets, even mixed, ignores ASCII space and
+#   bytes 9 through 13, and accepts missing padding.
+spec base64.2
+  base64_assert_str "hi", Base64.decode("aGk="), "pad"
+  base64_assert_str "hello world", Base64.decode(Base64.encode("hello world")), "round trip"
+  # What stays lenient next to the refusals the gate drives: missing or
+  # partial padding, and whitespace anywhere, including between the `=`.
+  base64_assert_str "A", Base64.decode("QQ"), "missing padding"
+  base64_assert_str "ABCA", Base64.decode("QUJD\nQQ=\n=\n"), "whitespace between groups and padding"
+  base64_assert_str "ABCEFG", Base64.decode("QUJD\nRUZH"), "whole groups either side of a line break"
+  base64_assert_str "ABCD", Base64.decode("QUJDRA=="), "a full group then a padded one"
+  # All six ASCII whitespace bytes, as the module's header says: `\v` and
+  # `\f` were refused as invalid bytes.
+  base64_assert_str "ABCD", Base64.decode("QUJD\vRA=\f="), "vertical tab and form feed are whitespace"
+end
+
+# base64.3 Invalid alphabet bytes, padding without a group, excess padding, data
+#   after padding and a final single data character panic.
+spec base64.3
+  base64_refusal_checks
+end
+
+# base64.4 Decoding does not require zero unused bits and accepts an incomplete
+#   final padding run; this is a permissive decoder rather than canonical RFC
+#   4648 validation.
+spec base64.4
+  base64_assert_str "A", Base64.decode("QQ="), "partial padding"
+  todo "Needs proof"
+end
+
+# base64.5 Results are new binary Strings under SPEC 1.5. Writer overloads
+#   append the completed result to the caller's builder.
+spec base64.5
+  w = String::Builder.new(1)
+  w << "prefix:"
+  Base64.encode("foo", w)
+  Base64.decode("YmFy", w)
+  Base64.urlsafe_encode("?", w)
+  w.finish == "prefix:Zm9vbarPw=="
+end

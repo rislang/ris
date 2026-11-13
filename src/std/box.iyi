@@ -38,3 +38,28 @@ pub class Box(T)
     pointer.as(self).object
   end
 end
+
+# box.1 A Box(T) retains its object and unbox of that box's pointer returns it
+#   as T.
+spec box.1
+  Box(Int32).new(41).object == 41
+  Box(Int32).unbox(Box(Int32).new(41).to_unsafe) == 41
+end
+
+# box.2 Unboxing a null pointer returns nil when T admits nil, and otherwise
+#   panics with Unboxing null pointer.
+spec box.2
+  # A null pointer is nil for a T that admits nil, as the other library
+  # answers it for `String?`: it was refused for every T, so a C callback
+  # handed no data panicked "Unboxing null pointer" where nil was the answer.
+  Box(String?).unbox(Pointer(Void).new(0_u64)).nil?
+  Box(Int32?).unbox(Pointer(Void).new(0_u64)).nil?
+  Box(String?).unbox(Box(String?).new("kept").to_unsafe).to_s == "kept"
+end
+
+# box.3 to_unsafe returns the box's address without copying its object. The
+#   pointer is valid only while the tape-owned box is alive; the caller must
+#   supply a live pointer to the matching Box(T).
+spec box.3
+  todo "Needs proof"
+end
