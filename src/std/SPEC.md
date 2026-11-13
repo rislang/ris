@@ -345,18 +345,6 @@ BitArray stores a fixed count of Boolean values in packed words.
   array under SPEC 1.4.
   <!-- todo: Needs proof -->
 
-## bool
-
-This module extends the prelude Bool with eager operations and conversions.
-
-* bool.1 The | and & operators evaluate both operands and return Boolean
-  disjunction and conjunction; ^ is true exactly when the operands differ.
-  (test/cli/std_bool_exercise.iyi)
-* bool.2 to_unsafe returns Int32 1 for true and 0 for false; clone returns the
-  same Boolean value. (test/cli/std_bool_exercise.iyi)
-* bool.3 to_s(io) writes the same text as the prelude to_s; hash is 1231 for
-  true and 1237 for false. (test/cli/std_bool_exercise.iyi)
-
 ## box
 
 Box holds a typed value for passing opaque context through a foreign call.
