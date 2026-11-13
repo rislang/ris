@@ -27,13 +27,13 @@ describe "`iyi-*` external commands" do
     result.output.should contain(%(ARGV=["foo", "bar"]))
     # The directory `iyi` itself is in, for the command to find its sibling:
     # compared as a file, because the path it is read from may be resolved.
-    exec_dir = result.output.lines.find(&.starts_with?("IYI_EXEC_PATH=")).not_nil!.lchop("IYI_EXEC_PATH=")
+    exec_dir = result.output.lines.find(&.starts_with?("RIS_EXEC_PATH=")).not_nil!.lchop("RIS_EXEC_PATH=")
     File.same?(File.join(exec_dir, File.basename(IYI_BIN)), IYI_BIN).should be_true
   end
 
   it "formats with fmt and format, as tool format does" do
     %w(format fmt).each do |verb|
-      with_tempfile("iyi-#{verb}.iyi") do |path|
+      with_tempfile("iyi-#{verb}.ri") do |path|
         File.write(path, "def f(a : Int32) : Int32\n        a\nend\n")
         Process.capture_result(iyi, verb, "--check", path).should(be_failure(1))
         Process.capture_result(iyi, verb, path).should(be_success)

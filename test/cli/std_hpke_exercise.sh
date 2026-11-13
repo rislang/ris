@@ -36,7 +36,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -54,13 +54,13 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 VECTORS="$REPO/test/cli/std_hpke_fixture/rfc9180_vectors.json"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_hpke_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_hpke_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -195,7 +195,7 @@ else
   # The known answers the exercise embeds for DHKEM(P-384) and
   # HKDF-SHA384 are what this HPKE answers now.
   "$PY" "$REPO/test/cli/std_hpke_oracle.py" answers >"$WORK/answers.json"
-  if "$PY" - "$REPO/test/cli/std_hpke_exercise.iyi" "$WORK/answers.json" <<'PY'; then
+  if "$PY" - "$REPO/test/cli/std_hpke_exercise.ri" "$WORK/answers.json" <<'PY'; then
 import json, sys
 src = open(sys.argv[1]).read()
 block = src.split("PYTHON_ANSWERS = <<-JSON\n", 1)[1].split("\n  JSON\n", 1)[0]
@@ -231,7 +231,7 @@ fi
 
 echo
 echo "== what hpke refuses"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/int
@@ -270,9 +270,9 @@ when "past-the-end"
   x.sender(key.public_key, "info", "r" * 32).as(HpkeSender).advance_to(1_u128.unsafe_shl(96))
 end
 puts "accepted"
-IYI
+RIS
 refuse() { # refuse <case> <phrase>
-  if "$IYI" run "$WORK/refuse.iyi" -- "$1" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
   elif ! grep -qF "$2" "$WORK/refuse.out"; then
@@ -297,13 +297,13 @@ refuse past-the-end "HPKE: a context's sequence ends at 2^96 - 1, not 7922816251
 
 echo
 echo "== doc and format"
-if "$IYI" doc "$REPO/src/std/hpke.iyi" >"$WORK/doc.txt" 2>&1 && grep -q "advance_to" "$WORK/doc.txt"; then
+if "$RIS" doc "$REPO/src/std/hpke.ri" >"$WORK/doc.txt" 2>&1 && grep -q "advance_to" "$WORK/doc.txt"; then
   echo "  iyi doc reads the module"
 else
   echo "  iyi doc: $(tail -2 "$WORK/doc.txt")"
   status=1
 fi
-if "$IYI" check format "$REPO/src/std/hpke.iyi" "$REPO/test/cli/std_hpke_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$RIS" check format "$REPO/src/std/hpke.ri" "$REPO/test/cli/std_hpke_exercise.ri" >"$WORK/format.log" 2>&1; then
   echo "  formatted"
 else
   sed 's/^/  /' "$WORK/format.log" | tail -5
@@ -313,7 +313,7 @@ fi
 echo
 echo "== proving the checks can fail when the module is broken"
 # prove_broken <module> <label> <phrase> <old> <new>: the exercise must fail
-# on a copy of src/std/<module>.iyi with <old> replaced, at the check that
+# on a copy of src/std/<module>.ri with <old> replaced, at the check that
 # names <phrase>.
 prove_broken() {
   rm -rf "$WORK/patched"
@@ -325,15 +325,15 @@ prove_broken() {
   if ! OLD="$4" NEW="$5" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/$1.iyi").read_text()
+src = Path("$REPO/src/std/$1.ri").read_text()
 if src.count(os.environ["OLD"]) != 1:
     raise SystemExit("patch site missing or not unique")
-Path("$WORK/patched/std/$1.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/$1.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $2 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_hpke_exercise.iyi" -- "$VECTORS" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_hpke_exercise.ri" -- "$VECTORS" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $2"
     status=1
   elif grep -qF "$3" "$WORK/mut.out"; then

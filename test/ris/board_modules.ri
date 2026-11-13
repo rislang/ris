@@ -6,7 +6,7 @@ raise "module post" unless send_job
 raise "alias limit" if RisBoard.post(Mail(Int32).new(456))
 answer = RisBoard.take(Mail(Int32))
 raise "module identity" unless answer.is_a?(Mail(Int32)) &&
-  answer.value == 123
+                               answer.value == 123
 raise "specialized identity" unless RisBoard.post(Mail(Int64).new(789_i64))
 raise "first key empty" unless RisBoard.poll(Job) == {nil, false}
 puts "PASS: board modules"

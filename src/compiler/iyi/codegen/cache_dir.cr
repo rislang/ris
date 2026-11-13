@@ -1,7 +1,7 @@
 require "crystal/digest/md5"
 
 module Iyi
-  # Manages cache files in the ".iyi" directory.
+  # Manages cache files in the ".ris" directory.
   #
   # For each compiled program a directory is created in the cache
   # that stores .bc and .o files that could possibly be reused
@@ -34,8 +34,8 @@ module Iyi
       dir = compute_dir
 
       # iyi: without a verbatim prefix (`Iyi.unverbatim`): `::Path` reads
-      # `\\?\C:\p\main.iyi` as the anchor `\\?\` and the parts `C:`, `p`,
-      # ..., and the name came out `\-C:-p-main.iyi`, which Windows refuses
+      # `\\?\C:\p\main.ri` as the anchor `\\?\` and the parts `C:`, `p`,
+      # ..., and the name came out `\-C:-p-main.ri`, which Windows refuses
       # for its colon - `iyi run`, `build` and `test` of such an entry
       # stopped at "The directory name is invalid".
       filename = ::Path[Iyi.unverbatim(filename)]
@@ -55,9 +55,9 @@ module Iyi
         # And a name Windows keeps as written, which one holding a colon -
         # the verbatim prefix's leftover above - is not, nor one ending in a
         # space: Win32 drops a trailing space from the last part of a path
-        # and keeps it everywhere else, so for `iyi run "hello.iyi "` the
-        # directory was made as `...-hello.iyi` and then written into as
-        # `...-hello.iyi \`: "The system cannot find the path specified".
+        # and keeps it everywhere else, so for `iyi run "hello.ri "` the
+        # directory was made as `...-hello.ri` and then written into as
+        # `...-hello.ri \`: "The system cannot find the path specified".
         name = name.gsub { |char| char.in?('<', '>', ':', '"', '/', '\\', '|', '?', '*') || char.ord < 32 ? '-' : char }
         name += "-" if name.ends_with?(' ') || name.ends_with?('.')
       {% end %}
@@ -80,7 +80,7 @@ module Iyi
     # On Windows the limit is also what MAX_PATH leaves after the cache root
     # and the longest file written inside: a unit's object is at most 50
     # characters of name, the optimization suffix and `.obj.tmp`, and the
-    # separators. A fixed 100 assumed a short root, and IYI_CACHE_DIR is the
+    # separators. A fixed 100 assumed a short root, and RIS_CACHE_DIR is the
     # author's: under a 101-character root a program's 96-character name
     # left its 61-character object 260 characters long, and `iyi run`
     # stopped at "a codegen thread failed: Error renaming file ...: The
@@ -129,8 +129,8 @@ module Iyi
       dir = @dir
       return dir if dir
 
-      # iyi: a blank one names no directory. `IYI_CACHE_DIR=""` is what a
-      # shell makes of `IYI_CACHE_DIR="$DIR"` with `DIR` unset, and
+      # iyi: a blank one names no directory. `RIS_CACHE_DIR=""` is what a
+      # shell makes of `RIS_CACHE_DIR="$DIR"` with `DIR` unset, and
       # `File.expand_path("")` is the working directory — so a build wrote
       # its `.bc` and `.o` files, its linker probe and its link templates
       # beside the source under names nobody typed, and `clear_cache`,
@@ -148,15 +148,15 @@ module Iyi
         [
           Config.env("CACHE_DIR"),
           {% if flag?(:windows) %}
-            ENV["LOCALAPPDATA"]?.try { |dir| "#{dir}/iyi/cache" },
-            ENV["USERPROFILE"]?.try { |home| "#{home}/.cache/iyi" },
-            ENV["USERPROFILE"]?.try { |home| "#{home}/.iyi" },
+            ENV["LOCALAPPDATA"]?.try { |dir| "#{dir}/ris/cache" },
+            ENV["USERPROFILE"]?.try { |home| "#{home}/.cache/ris" },
+            ENV["USERPROFILE"]?.try { |home| "#{home}/.ris" },
           {% else %}
-            ENV["XDG_CACHE_HOME"]?.try { |home| "#{home}/iyi" },
-            ENV["HOME"]?.try { |home| "#{home}/.cache/iyi" },
-            ENV["HOME"]?.try { |home| "#{home}/.iyi" },
+            ENV["XDG_CACHE_HOME"]?.try { |home| "#{home}/ris" },
+            ENV["HOME"]?.try { |home| "#{home}/.cache/ris" },
+            ENV["HOME"]?.try { |home| "#{home}/.ris" },
           {% end %}
-          ".iyi",
+          ".ris",
         ]
       {% end %}
       candidates = candidates
@@ -171,7 +171,7 @@ module Iyi
       rescue File::Error
         # iyi: unless it is the one the author named. The list below it
         # is defaults, and falling through defaults is what a default is
-        # for; `IYI_CACHE_DIR` is an instruction. Pointed at a path that
+        # for; `RIS_CACHE_DIR` is an instruction. Pointed at a path that
         # cannot be a directory it was skipped in silence, and the build
         # went on writing megabytes into `~/.cache/iyi` — which is the
         # whole thing the variable was set to stop.
@@ -193,7 +193,7 @@ module Iyi
         io.puts
         io.puts "but none of them are writable."
         io.puts
-        io.puts "Please specify a writable cache directory by setting the IYI_CACHE_DIR environment variable."
+        io.puts "Please specify a writable cache directory by setting the RIS_CACHE_DIR environment variable."
       end
 
       puts msg
@@ -201,12 +201,12 @@ module Iyi
     end
 
     # Which of the two names above the author actually set: a sentence
-    # about `IYI_CACHE_DIR` read by somebody who set `CRYSTAL_CACHE_DIR`
+    # about `RIS_CACHE_DIR` read by somebody who set `CRYSTAL_CACHE_DIR`
     # names a variable they do not have, and this compiler answers under
     # both names (see `Config.env`). Neither set is the default's, and
-    # IYI_CACHE_DIR is the one to set.
+    # RIS_CACHE_DIR is the one to set.
     private def cache_dir_variable : String
-      ENV["IYI_CACHE_DIR"]? || !ENV["CRYSTAL_CACHE_DIR"]? ? "IYI_CACHE_DIR" : "CRYSTAL_CACHE_DIR"
+      ENV["RIS_CACHE_DIR"]? || !ENV["CRYSTAL_CACHE_DIR"]? ? "RIS_CACHE_DIR" : "CRYSTAL_CACHE_DIR"
     end
 
     private def cleanup_dirs(entries)
@@ -250,7 +250,7 @@ module Iyi
 
     # iyi: what the cache root holds besides build directories, which the
     # rotation leaves alone. `mod` is every package checkout `iyi get` made
-    # (`Mod::Fetcher`), and a checkout is what iyi.sum pins, not a build's
+    # (`Mod::Fetcher`), and a checkout is what ris.sum pins, not a build's
     # leftovers: its modification time moves only when a new host's
     # directory is made under it, so eleven builds after a `get` it was the
     # oldest entry and was deleted, and a project that had built a minute

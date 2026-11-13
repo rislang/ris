@@ -33,9 +33,9 @@ class Iyi::Command
           The program computes and prints; everything else is refused by
           the runtime, by name.
 
-          Needs a wasi-sdk clang (IYI_WASI_CC, $WASI_SDK/bin/clang,
+          Needs a wasi-sdk clang (RIS_WASI_CC, $WASI_SDK/bin/clang,
           /opt/wasi-sdk/bin/clang or ~/.local/opt/wasi-sdk/bin/clang)
-          and wasmtime (IYI_WASMTIME or on PATH). Missing tools are
+          and wasmtime (RIS_WASMTIME or on PATH). Missing tools are
           named, never worked around.
           USAGE
         exit
@@ -99,15 +99,15 @@ class Iyi::Command
   end
 
   # iyi: a variable the author set is the answer or the refusal, and the
-  # refusal names it. Pointed at nothing, IYI_WASI_CC was skipped in
+  # refusal names it. Pointed at nothing, RIS_WASI_CC was skipped in
   # silence and the sentence said to set it - which they had. And clang
   # under `$WASI_SDK` is `clang.exe` on Windows: the bare `clang` this
   # looked for is not there, so an installed wasi-sdk was "install
   # wasi-sdk", and the help names `$WASI_SDK` while the refusal did not.
   private def sandbox_wasi_cc : String
-    if from_env = ENV["IYI_WASI_CC"]?
+    if from_env = ENV["RIS_WASI_CC"]?
       return from_env if File.file?(from_env)
-      abort! "run --sandbox: IYI_WASI_CC is #{from_env}, and there is no file there. " \
+      abort! "run --sandbox: RIS_WASI_CC is #{from_env}, and there is no file there. " \
              "Point it at wasi-sdk's clang, or unset it", :USAGE_ERROR
     end
     clang = {% if flag?(:win32) %} "clang.exe" {% else %} "clang" {% end %}
@@ -119,14 +119,14 @@ class Iyi::Command
     candidates << File.expand_path("~/.local/opt/wasi-sdk/bin/#{clang}", home: true)
     candidates.find { |candidate| File.file?(candidate) } ||
       abort! "run --sandbox needs a wasi-sdk clang, and there is none at " \
-             "#{candidates.join(", ")}. Set IYI_WASI_CC to one, or install wasi-sdk " \
+             "#{candidates.join(", ")}. Set RIS_WASI_CC to one, or install wasi-sdk " \
              "(https://github.com/WebAssembly/wasi-sdk) and set WASI_SDK", :USAGE_ERROR
   end
 
   private def sandbox_wasmtime : String
-    if from_env = ENV["IYI_WASMTIME"]?
+    if from_env = ENV["RIS_WASMTIME"]?
       return from_env if File.file?(from_env)
-      abort! "run --sandbox: IYI_WASMTIME is #{from_env}, and there is no file there. " \
+      abort! "run --sandbox: RIS_WASMTIME is #{from_env}, and there is no file there. " \
              "Point it at wasmtime, or unset it", :USAGE_ERROR
     end
     Process.find_executable("wasmtime") ||
@@ -134,7 +134,7 @@ class Iyi::Command
         fallback = File.expand_path("~/.wasmtime/bin/wasmtime", home: true)
         File.file?(fallback) ? fallback : nil
       end ||
-      abort! "run --sandbox needs wasmtime: set IYI_WASMTIME or install it " \
+      abort! "run --sandbox needs wasmtime: set RIS_WASMTIME or install it " \
              "(https://wasmtime.dev) on PATH", :USAGE_ERROR
   end
 end

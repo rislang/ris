@@ -7,11 +7,11 @@ No SPEC.md or code change yet.
 ## 1. Problem and decided shape
 
 src/std/SPEC.md (committed in 2739b82d5, 4488 lines) holds 967 clauses
-for 120 std modules, `* json.3 text (test/cli/std_json_exercise.iyi)`.
+for 120 std modules, `* json.3 text (test/cli/std_json_exercise.ri)`.
 137 lines say
 `<!-- todo: Needs proof -->`, 27 more carry another todo marker. No tool
 reads the file: a clause and its proof drift apart unseen, and an agent
-editing json.iyi never sees json's promises.
+editing json.ri never sees json's promises.
 
 Decided by the user, done before 0.1.0:
 
@@ -24,7 +24,7 @@ Decided by the user, done before 0.1.0:
 
 All in src/compiler/iyi/command/spec_clauses.cr unless named.
 
-* Root: the nearest dir with ris.mod or iyi.mod, else the current dir if
+* Root: the nearest dir with ris.mod, else the current dir if
   it holds a spec (128-138). ris's repo has no manifest, so its root is
   the repo top and src/std/ is inside it.
 * One spec source: SPEC.md or spec/*.md, both is an error (144-157).
@@ -35,7 +35,7 @@ All in src/compiler/iyi/command/spec_clauses.cr unless named.
 * Version: first 8 hex of SHA-256 of whitespace-collapsed text (243).
 * Todo marker: `  <!-- todo: reason -->` after the clause text, at most
   80 columns, one per clause (175-185).
-* Blocks: every `.ri`/`.iyi` under the root via `project_walk`
+* Blocks: every `.ri` under the root via `project_walk`
   (project_walk.cr:14-27, skips lib/, mods/, dot dirs, .ris-fixtures),
   head `spec N.M  # label` (305-346). So src/std blocks already count.
 * The parser accepts `spec 1.2.3` (parser.cr:270, `\d+(?:\.\d+)+`) but
@@ -70,12 +70,12 @@ where the text is read from are new.
 
 `MODULE.N`. Root clauses keep `N.M`.
 
-* MODULE is the file's path under ROOT/src without `.ri` or `.iyi`, a
-  leading `std/` dropped: src/std/json.iyi is `json`, src/std/eiy/x.iyi
+* MODULE is the file's path under ROOT/src without `.ri`, a
+  leading `std/` dropped: src/std/json.ri is `json`, src/std/eiy/x.ri
   is `eiy/x`, a package's src/route.ri is `route`. Each segment matches
   `[a-z_][a-z0-9_]*`; segments join with `/`.
-* Two files with one MODULE (json.ri beside json.iyi, src/json.iyi
-  beside src/std/json.iyi) fail: "two files are module json: A, B".
+* Two files with one MODULE (json.ri beside json.ri, src/json.ri
+  beside src/std/json.ri) fail: "two files are module json: A, B".
 * Files are found by `project_walk` under ROOT/src, with its exclusions
   (symlinks, lib/, mods/, dot dirs, .ris-fixtures). A file outside
   ROOT/src holds no clauses; a `spec json.3` block there is a further
@@ -106,10 +106,10 @@ The clause comment is the unbroken run of `#` lines that starts at
 run is an orphan and fails; a second owner of one id fails as a
 duplicate. Comments naming another file's module are prose.
 
-The old file's trailing proof citation, `(test/cli/std_json_exercise.iyi)`,
+The old file's trailing proof citation, `(test/cli/std_json_exercise.ri)`,
 is not part of the comment: the proof is the block below.
 
-Worked example, end of src/std/json.iyi:
+Worked example, end of src/std/json.ri:
 
 ```
 # json.1 Parsing maps null to Nil, booleans to Bool, fitting integer
@@ -131,15 +131,15 @@ spec json.12
 end
 ```
 
-Further blocks may name `json.1` elsewhere (in json.iyi or another
+Further blocks may name `json.1` elsewhere (in json.ri or another
 module); they keep the usual `# label` rule.
 
 ### 3.3 Tools
 
-* Clauses: `spec_clauses` also reads every `.iyi` under ROOT/src/std
+* Clauses: `spec_clauses` also reads every `.ri` under ROOT/src/std
   (and, later, any package's src/), taking `# MODULE.N` comments that
   sit directly above `spec MODULE.N`. MODULE must match the file:
-  `json.3` in yaml.iyi fails with "move it to src/std/json.iyi".
+  `json.3` in yaml.ri fails with "move it to src/std/json.ri".
   Duplicates are refused as for N.M (reuse: see 3.1).
 * The parser lets a block end in several `todo` lines (today: one, the
   last line); nothing but `todo` lines may follow the first.
@@ -198,7 +198,7 @@ Done: src/std/SPEC.md is committed as is (2739b82d5).
 
 1. Tools (3.3) with gates in test/cli on a scratch project: ok, todo
    with two reasons, mismatch, orphan comment, duplicate owner, two
-   files one module, a non-std src/route.ri, a nested src/a/b.iyi, both
+   files one module, a non-std src/route.ri, a nested src/a/b.ri, both
    extensions, a clause under lib/ (ignored), ack and its "removed:"
    line, lock order, --fix twice. Root SPEC 6.7, 6.8, new 8.2, AGENTS.md
    and CHANGELOG.md land in this commit. `ris check` green.
@@ -208,7 +208,7 @@ Done: src/std/SPEC.md is committed as is (2739b82d5).
    the version of that text, and every todo reason in order. The same
    script later reads `ris spec --json` and prints the difference.
 3. One commit per module, alphabetical, in this order:
-   a. append the clause comments and owning blocks to MODULE.iyi and
+   a. append the clause comments and owning blocks to MODULE.ri and
       delete the module's section from src/std/SPEC.md;
    b. move the exercise's checks into the blocks (5.2, 5.3);
    c. compare the module with the baseline: same ids, versions and todo

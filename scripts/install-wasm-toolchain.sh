@@ -67,7 +67,7 @@ is_archive() { # is_archive <file> <gzip|xz>
 }
 
 echo "== wasi-sdk $WASI_SDK_VERSION"
-if [ -x "$sdk_dir/bin/clang" ] && [ -f "$sdk_dir/.iyi-version-$WASI_SDK_VERSION" ]; then
+if [ -x "$sdk_dir/bin/clang" ] && [ -f "$sdk_dir/.ri-version-$WASI_SDK_VERSION" ]; then
   echo "  already installed under $sdk_dir"
 else
   asset="wasi-sdk-$WASI_SDK_VERSION.0-x86_64-linux.tar.gz"
@@ -82,7 +82,7 @@ else
   mkdir -p "$sdk_dir"
   tar -xzf /tmp/wasi-sdk.tar.gz -C "$sdk_dir" --strip-components=1
   rm -f /tmp/wasi-sdk.tar.gz
-  touch "$sdk_dir/.iyi-version-$WASI_SDK_VERSION"
+  touch "$sdk_dir/.ri-version-$WASI_SDK_VERSION"
 fi
 "$sdk_dir/bin/clang" --version | head -1 | sed 's/^/  /'
 [ -x "$sdk_dir/bin/wasm-ld" ] || { echo "  wasi-sdk unpacked without wasm-ld"; exit 1; }

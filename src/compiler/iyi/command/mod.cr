@@ -1,4 +1,4 @@
-# iyi: `crystal mod dump FILE` — read a `.iyimod` back as text.
+# iyi: `crystal mod dump FILE` — read a `.rimod` back as text.
 #
 # Under the eventual `iyi` binary this reads `iyi mod dump`, which is the
 # spelling iyi SPEC IV.1 uses. It is required rather than optional there, and the
@@ -43,7 +43,7 @@ class Iyi::Command
                                  to be called, from what its exported surface
                                  did since the last tag; exit 1 when VERSION
                                  understates it
-        context FILE.iyi         print what a change to this module is allowed
+        context FILE.ri         print what a change to this module is allowed
                                  to know: the exact exported surface of every
                                  module it imports, and nothing's body. This is
                                  the grounding a model needs (AI_FIRST.md §2);
@@ -51,7 +51,7 @@ class Iyi::Command
         diff OLD NEW             say whether a change reaches this module's
                                  consumers, and what changed if it does.
                                  `--exit-code` exits 1 when it does
-        dump FILE                print a .iyimod as text
+        dump FILE                print a .rimod as text
         dump --declarations FILE print the iyi declarations a consumer compiles
                                  against, which is what `import` reads instead
                                  of the module's source
@@ -59,9 +59,9 @@ class Iyi::Command
                                  exact signatures, types, fields, impls, and
                                  the interface hash they are keyed by
 
-    A .iyimod is a module's compiled interface: what another module reads
+    A .rimod is a module's compiled interface: what another module reads
     instead of this one's source (iyi SPEC Part IV). Produced by
-    `#{Command.program_name} build --emit-iyimod DIR`.
+    `#{Command.program_name} build --emit-rimod DIR`.
     USAGE
   end
 
@@ -76,10 +76,10 @@ class Iyi::Command
   # answers `--help` with its usage.
   private def mod_context_usage
     <<-USAGE
-    Usage: #{Command.program_name} mod context [--json] [--budget N] FILE.iyi
+    Usage: #{Command.program_name} mod context [--json] [--budget N] FILE.ri
 
     Print what a change to this module is allowed to know: the exact
-    exported surface of every module FILE.iyi imports, and nothing's body.
+    exported surface of every module FILE.ri imports, and nothing's body.
 
     Switches:
         --json          the same pack as data, one object per import
@@ -93,7 +93,7 @@ class Iyi::Command
 
   private def mod_diff_usage
     <<-USAGE
-    Usage: #{Command.program_name} mod diff [--exit-code] OLD.iyimod NEW.iyimod
+    Usage: #{Command.program_name} mod diff [--exit-code] OLD.rimod NEW.rimod
 
     Say whether a change reaches this module's consumers, and what changed
     if it does: interface, implementation, source, and the dependencies it
@@ -107,9 +107,9 @@ class Iyi::Command
 
   private def mod_dump_usage
     <<-USAGE
-    Usage: #{Command.program_name} mod dump [--declarations | --json] FILE.iyimod
+    Usage: #{Command.program_name} mod dump [--declarations | --json] FILE.rimod
 
-    Print a .iyimod as text: what a module offers a consumer, read back out
+    Print a .rimod as text: what a module offers a consumer, read back out
     of the artifact itself.
 
     Switches:
@@ -123,7 +123,7 @@ class Iyi::Command
   private def mod_dump
     # Not a flag on the command, because it selects between two whole outputs:
     # the file as it is stored, and the file as the compiler reads it. The
-    # second exists so that a diagnostic pointing into a `.iyimod` can be
+    # second exists so that a diagnostic pointing into a `.rimod` can be
     # looked at — the text it names is the text this prints.
     #
     # Read from either side of the path, because that is where a person writes
@@ -146,7 +146,7 @@ class Iyi::Command
         abort! "mod dump: unknown flag #{option}", :USAGE_ERROR
       else
         if filename
-          abort! "unexpected '#{option}' after the .iyimod path", :USAGE_ERROR
+          abort! "unexpected '#{option}' after the .rimod path", :USAGE_ERROR
         end
         filename = option
       end
@@ -156,7 +156,7 @@ class Iyi::Command
     # a hole where the name goes.
     filename = filename.presence
     unless filename
-      abort! "expected a .iyimod path", :USAGE_ERROR
+      abort! "expected a .rimod path", :USAGE_ERROR
     end
     if declarations && as_json
       abort! "--declarations and --json are two different outputs; ask for one", :USAGE_ERROR
@@ -167,7 +167,7 @@ class Iyi::Command
       # sentence says which of the two it is; `no such file` is kept for a
       # path that really is not there.
       if Dir.exists?(filename)
-        abort! "#{filename} is a directory, not a .iyimod", :USAGE_ERROR
+        abort! "#{filename} is a directory, not a .rimod", :USAGE_ERROR
       end
       abort! "no such file: #{filename}", :USAGE_ERROR
     end
@@ -222,14 +222,14 @@ class Iyi::Command
         abort! "mod diff: unknown flag #{option}", :USAGE_ERROR
       else
         if paths.size == 2
-          abort! "unexpected '#{option}' after the two .iyimod paths", :USAGE_ERROR
+          abort! "unexpected '#{option}' after the two .rimod paths", :USAGE_ERROR
         end
         paths << option
       end
     end
 
     unless paths.size == 2
-      abort! "expected two .iyimod paths", :USAGE_ERROR
+      abort! "expected two .rimod paths", :USAGE_ERROR
     end
     old_path = paths[0]
     new_path = paths[1]
@@ -259,7 +259,7 @@ class Iyi::Command
     # The fourth thing an artifact records, and the one a source-shaped
     # reading misses: what it was compiled *against*. A module whose own
     # file, interface and bodies are identical is a different artifact when
-    # a dependency moved under it — `iyi.mod` bumped from `liba v1.0.0` to
+    # a dependency moved under it — `ris.mod` bumped from `liba v1.0.0` to
     # `v1.1.0` left every line above reading "unchanged" while the program
     # printed something else. IV.3 keeps those hashes on the edge for
     # exactly this, and the verdict has to read them.
@@ -426,7 +426,7 @@ class Iyi::Command
   private def read_iyimod(path : String) : IyiMod::Artifact
     unless File.file?(path)
       if Dir.exists?(path)
-        abort! "#{path} is a directory, not a .iyimod", :USAGE_ERROR
+        abort! "#{path} is a directory, not a .rimod", :USAGE_ERROR
       end
       abort! "no such file: #{path}", :USAGE_ERROR
     end

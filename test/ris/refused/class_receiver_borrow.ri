@@ -25,4 +25,5 @@ def run
   holder = Holder.new("x")
   puts holder.wipe_using(holder.bytes.finish)
 end
+
 tape { run }

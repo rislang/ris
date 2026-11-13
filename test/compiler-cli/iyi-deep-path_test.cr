@@ -13,11 +13,11 @@ describe "a program at a deep path" do
     target = {{ flag?(:win32) ? 240 : 300 }}
     root = File.tempname("deep")
     dir = root
-    while File.join(dir, "proje_klasoru", "deep.iyi").size < target
+    while File.join(dir, "proje_klasoru", "deep.ri").size < target
       dir = File.join(dir, "proje_klasoru")
     end
     Dir.mkdir_p(dir)
-    source = File.join(dir, "deep.iyi")
+    source = File.join(dir, "deep.ri")
     File.write(source, %(module main\n\nputs "deep"\n))
     output = File.join(root, "deep#{EXE_SUFFIX}")
 

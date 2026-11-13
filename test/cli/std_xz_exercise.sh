@@ -28,7 +28,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping (see
@@ -43,7 +43,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 if [ -z "$PY" ]; then
   echo "no python3 on this machine: the lzma oracle cannot be written, so std/xz goes unmeasured"
@@ -66,7 +66,7 @@ fi
 # read one to seven bytes at a time too ("pieces") or, being large, one
 # to seven bytes a piece with 64 KiB reads ("whole").
 mkdir -p "$WORK/fixtures/suite"
-if ! XZ="$(command -v xz || true)" "$PY" - "$WORK/fixtures" "$REPO/src/std/xz.iyi" <<'PY'
+if ! XZ="$(command -v xz || true)" "$PY" - "$WORK/fixtures" "$REPO/src/std/xz.ri" <<'PY'
 import lzma, os, random, subprocess, sys, zlib
 out, source = sys.argv[1], sys.argv[2]
 xz = os.environ.get("XZ")
@@ -302,7 +302,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_xz_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_xz_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -369,10 +369,10 @@ PY
 echo
 echo "== built from its artifacts, the exercise says the same"
 mkdir -p "$WORK/r1/mods"
-if ! (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_xz_exercise.iyi") >"$WORK/r1/emit.log" 2>&1; then
+if ! (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_xz_exercise.ri") >"$WORK/r1/emit.log" 2>&1; then
   echo "  the artifacts could not be written: $(grep -m1 -E 'Error|BUG' "$WORK/r1/emit.log")"
   status=1
-elif ! (cd "$WORK/r1" && "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_xz_exercise.iyi") >"$WORK/r1/use.log" 2>&1; then
+elif ! (cd "$WORK/r1" && "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_xz_exercise.ri") >"$WORK/r1/use.log" 2>&1; then
   echo "  the program did not build from its artifacts: $(grep -m1 -E 'Error|BUG|undefined' "$WORK/r1/use.log")"
   status=1
 else
@@ -390,7 +390,7 @@ fi
 echo
 echo "== on the platforms this runner is not"
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if "$IYI" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_xz_exercise.iyi" >"$WORK/cross.log" 2>&1; then
+  if "$RIS" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_xz_exercise.ri" >"$WORK/cross.log" 2>&1; then
     echo "  $target: typechecks"
   else
     echo "  $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross.log")"
@@ -406,8 +406,8 @@ echo "== what a stream refuses, by name"
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
   printf 'module main\n\nimport std/xz::{Xz, XzReader, XzFormat, XzError}\n\nputs (%s).bytesize\n' \
-    "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -452,16 +452,16 @@ mutate() { # mutate <label> <old> <new> <phrase>
   if ! OLD="$old" NEW="$new" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/xz.iyi").read_text()
+src = Path("$REPO/src/std/xz.ri").read_text()
 old = os.environ["OLD"]
 if old not in src:
     raise SystemExit("patch site missing: " + old)
-Path("$WORK/patched/std/xz.iyi").write_text(src.replace(old, os.environ["NEW"], 1))
+Path("$WORK/patched/std/xz.ri").write_text(src.replace(old, os.environ["NEW"], 1))
 PY
   then
     echo "  $label: the patch did not apply"
     status=1
-  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_xz_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_xz_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the broken copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1

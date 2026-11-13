@@ -15,6 +15,7 @@ import std/http::{Server, ParsedHead, Field}
 struct User
   getter id : Int32
   getter name : String
+
   def initialize(@id, @name)
   end
 end

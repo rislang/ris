@@ -14,7 +14,7 @@ import std/x509::{RisCertificateStore, Certificate}
 struct Ready
 end
 
-# A test PKI (test/cli/std_http_resume.iyi's): Ed25519, valid to 9999. The
+# A test PKI (test/cli/std_http_resume.ri's): Ed25519, valid to 9999. The
 # leaf's key guards nothing but this test.
 LEAF_PEM = "-----BEGIN CERTIFICATE-----\n" \
            "MIIBQzCB9qADAgECAgEDMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
@@ -154,7 +154,7 @@ def h2c(port : Int32) : String
   while ended < 3
     while got.bytesize - at < 9 ||
           got.bytesize - at < 9 + ((got.byte_at(at).to_i32 << 16) |
-            (got.byte_at(at + 1).to_i32 << 8) | got.byte_at(at + 2).to_i32)
+                                   (got.byte_at(at + 1).to_i32 << 8) | got.byte_at(at + 2).to_i32)
       piece = socket.read(65536).or_panic
       raise "closed early: #{got.inspect}" if piece.empty?
       got << piece

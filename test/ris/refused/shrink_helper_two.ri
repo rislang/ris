@@ -1,6 +1,7 @@
 def reset(b : String::Builder)
   b.clear
 end
+
 def reset_twice(b : String::Builder)
   reset(b)
 end

@@ -27,11 +27,11 @@ The per-reviewer reports are in this directory.
 | Item | State |
 | --- | --- |
 | B1 | resolved by the block form; rules missing (MA2) |
-| B2 | resolved; the read loop matches io.iyi:165-181 |
+| B2 | resolved; the read loop matches io.ri:165-181 |
 | B3, B4 | resolved |
 | M1 | the HEAD design is resolved; the check is misplaced (MA1) |
 | M2 | resolved; the sendfile citation is corrected |
-| M3-M11 | resolved; M10 verified at src/iyi/file.iyi:28, 32-38 |
+| M3-M11 | resolved; M10 verified at src/ris/file.ri:28, 32-38 |
 
 ## Prioritized Findings
 
@@ -40,7 +40,7 @@ The per-reviewer reports are in this directory.
 * **Affected Scope:** lines 157-163, 458-459
 * **Discrepancy Description**: The draft says "`Outgoing.new`
   appears only at 2452", and that is false. A public
-  `Server.format_response` (src/std/http.iyi:2444-2447) also
+  `Server.format_response` (src/std/http.ri:2444-2447) also
   writes an Outgoing. Its callers are test/ris/server_groups.ri:73-76
   and samples/ris/serve.ri:69-72, and they reach `format_head` without
   going through `answered_on_tape?`.
@@ -60,13 +60,13 @@ The per-reviewer reports are in this directory.
   - that `@spans` is made at full size, not pushed.
 
   The draft says `@text` "never moves", which is false:
-  `owned_resize` can move it (src/iyi/tape.iyi:902-917). Spans
+  `owned_resize` can move it (src/ris/tape.ri:902-917). Spans
   survive anyway, because they are offsets. The draft also
   overlooks the existing `append_span` and `String::Span`
-  (tape.iyi:919-924).
+  (tape.ri:919-924).
 * **Rationale & Recommendation**: State the rules and reuse
   `String::Span`. Consider uniform spans, with every value copied
-  into `@text`: `each_line` has one caller (http.iyi:2428) and an
+  into `@text`: `each_line` has one caller (http.ri:2428) and an
   answer has at most 32 lines. A6 is refused on a cost claim that
   was never measured.
 
@@ -75,7 +75,7 @@ The per-reviewer reports are in this directory.
 * **Affected Scope:** lines 143-145, 470-475, 491-492
 * **Discrepancy Description**: An inline value is made in `call`'s
   scratch, yet `res` is read after `call` returns
-  (http.iyi:2453-2455). Accepting the inline form while refusing
+  (http.ri:2453-2455). Accepting the inline form while refusing
   the same value in a local is inconsistent. The first review
   reported that this very inline form was refused, so the result
   depends on context. Suspected cause: the "viewing" returns in
@@ -99,7 +99,7 @@ The per-reviewer reports are in this directory.
     case-sensitive;
   - range checks, and how an invalid fixdate is handled;
   - the civil-date-to-unix conversion. `Time.days_from_civil`
-    (src/std/time.iyi:1784) could be reused for it.
+    (src/std/time.ri:1784) could be reused for it.
 * **Rationale & Recommendation**: Parse RFC 850 and asctime as well
   (about 30 lines), or document the deviation from §5.6.7. Specify
   the parse, and add tests for an invalid or malformed date.
@@ -149,19 +149,19 @@ The per-reviewer reports are in this directory.
   16 GiB worst case holds with overcommit=2.
 * **HEAD via `res.length`**: the design is sound. The check must
   move (MA1). Say that a 304 drops the length through the bodiless
-  branch (http.iyi:2434).
+  branch (http.ri:2434).
 
 ## Nits (grouped)
 
 * Off-by-one citations:
-  - `as_tape` is at tape.iyi:214;
-  - `reserve` is at tape.iyi:895, and it takes `Int32 | Int64`;
-  - the Outgoing doc is at http.iyi:2213-2217;
-  - `LINES` is at http.iyi:2220;
-  - Content-Length is written at http.iyi:2434-2438.
-* `seek` belongs to `IyiIO` (src/std/file.iyi:2141), not `File`.
-* http.iyi:2582-2584 is a doc comment, not code.
-* test/ris/fileserver.ri needs `import std/dir` (dir.iyi:464).
+  - `as_tape` is at tape.ri:214;
+  - `reserve` is at tape.ri:895, and it takes `Int32 | Int64`;
+  - the Outgoing doc is at http.ri:2213-2217;
+  - `LINES` is at http.ri:2220;
+  - Content-Length is written at http.ri:2434-2438.
+* `seek` belongs to `IyiIO` (src/std/file.ri:2141), not `File`.
+* http.ri:2582-2584 is a doc comment, not code.
+* test/ris/fileserver.ri needs `import std/dir` (dir.ri:464).
 * For the check.sh block, give the exact comparison against the
   stats line. For test 4, say how the later date is built.
 * Wording:
@@ -176,4 +176,4 @@ The per-reviewer reports are in this directory.
   - say in Phase 2 that it is gated on its own.
 * Add a follow-up to delete the private date helper once std/time's
   parser compiles. Check whether `Time.parse_rfc1123`
-  (time.iyi:2266) compiles.
+  (time.ri:2266) compiles.

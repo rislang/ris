@@ -30,6 +30,12 @@ struct Iyi::MathInterpreter
   end
 
   def interpret(node : Call)
+    # ris wraps a constant's value in `::__ris_program_init do ... end`
+    # (normalizer.cr); the value folds from the block's body.
+    if node.program_initializer? && (block = node.block)
+      return interpret(block.body)
+    end
+
     obj = node.obj
     if obj
       if obj.is_a?(Path)
@@ -101,7 +107,7 @@ struct Iyi::MathInterpreter
   end
 
   # A count past the width shifts every bit out, and a negative count shifts
-  # the other way, as number.iyi's `<<` does. It answered 0 for a negative
+  # the other way, as number.ri's `<<` does. It answered 0 for a negative
   # count (or -1, for `>>` of a negative value), so `C = 8 >> -1`, an enum's
   # `64 >> -2` and `{{ 8 >> -1 }}` were 0 where the line answers 16 and 256.
   # `0 - count` rather than `-count`, which an unsigned count does not have.

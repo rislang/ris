@@ -26,8 +26,8 @@ and the run stays under three.
 Nothing is printed for a build that failed. This probe reported `front end
 0.009 s` against a 50 ms target, which is not a fast compiler but a failure
 with a stopwatch on it: `timed()` never read `returncode`, and the environment
-set `IYI_PATH` for a binary that answers `CRYSTAL_PATH`, so every build in it
-died with `can't find file 'iyi/prelude'`. That is the defect CHANGELOG 0.3.0
+set `RIS_PATH` for a binary that answers `CRYSTAL_PATH`, so every build in it
+died with `can't find file 'ris/prelude'`. That is the defect CHANGELOG 0.3.0
 records under Fixed for `build_speed.py` and again for `incremental.py` — both
 of which now check the answer rather than the exit status, because an exit code
 cannot see an empty string. This one checks both, and refuses by name instead
@@ -47,16 +47,16 @@ ROOT = Path(__file__).resolve().parents[2]
 # The binary `make crystal` writes, which is the one the specs and the rest of
 # `test/cli/` time. This used to be `.build/crystal-release`, a copy taken by
 # hand after `make crystal release=1` — and a copy goes stale in silence. The
-# one in this tree was three weeks older than `src/iyi` and could not compile it
+# one in this tree was three weeks older than `src/ris` and could not compile it
 # at all, so the probe timed a compiler error. Whether the binary is optimised
 # is read off its own version line below rather than assumed from a filename: a
 # debug front end is about 1.5x, which is worth printing and not worth refusing
 # over, since this probe is read as a ratio against its own second run.
 CRYSTAL = ROOT / ".build" / "crystal"
-HELLO = ROOT / "samples" / "iyi" / "hello.iyi"
+HELLO = ROOT / "samples" / "iyi" / "hello.ri"
 SOURCES = ROOT / "src"
 
-# The variable this binary answers. `crystal env IYI_PATH` is not a synonym —
+# The variable this binary answers. `crystal env RIS_PATH` is not a synonym —
 # the two command surfaces answer in their own vocabularies by design — and
 # setting a name the binary never reads leaves the build with no search path,
 # which is the whole of the defect above.
@@ -133,10 +133,10 @@ def check_search_path():
     tree `PATH_VAR` points at has to hold the prelude the build will ask for,
     because a search path that resolves nothing fails the same way.
     """
-    prelude = SOURCES / "iyi" / "prelude.iyi"
+    prelude = SOURCES / "iyi" / "prelude.ri"
     if not prelude.exists():
         raise Refusal(f"{shown([str(prelude)])} is missing, so no build here "
-                      f"can find 'iyi/prelude'")
+                      f"can find 'ris/prelude'")
     code, answer, errors = asked([str(CRYSTAL), "env", PATH_VAR])
     if code != 0 or not answer.strip():
         raise Refusal(

@@ -1,0 +1,39 @@
+# Samples imported from iyi; exercised by the CLI sample/module gates.
+# Includes library fragments and interactive or unbounded programs.
+# Keep this list explicit so a new sample still requires a heap budget.
+samples/ris/app/formal.ri
+samples/ris/app/greeter.ri
+samples/ris/autocert.ri
+samples/ris/basics.ri
+samples/ris/boot/config.ri
+samples/ris/boot/registry.ri
+samples/ris/calc.ri
+samples/ris/calc/ast.ri
+samples/ris/calc/lexer.ri
+samples/ris/calc/parser.ri
+samples/ris/collections.ri
+samples/ris/config.ri
+samples/ris/derive.ri
+samples/ris/enums.ri
+samples/ris/errors.ri
+samples/ris/files.ri
+samples/ris/format.ri
+samples/ris/formatting.ri
+samples/ris/generics.ri
+samples/ris/grid.ri
+samples/ris/immutable.ri
+samples/ris/init_order.ri
+samples/ris/inventory.ri
+samples/ris/io.ri
+samples/ris/kemal/dsl.ri
+samples/ris/kemal/router.ri
+samples/ris/modules.ri
+samples/ris/sessions.ri
+samples/ris/shapes.ri
+samples/ris/socket.ri
+samples/ris/std_iterator.ri
+samples/ris/std_text.ri
+samples/ris/std_time.ri
+samples/ris/visited.ri
+samples/ris/webapp.ri
+samples/ris/workers.ri

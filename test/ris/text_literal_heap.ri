@@ -1,4 +1,4 @@
-TEXT = ("constant")
+TEXT   = ("constant")
 TYPED : String = ("typed")
 USERS = {42 => "alice"}
 NESTED = [{name: "nested"}]
@@ -31,7 +31,6 @@ def choose(text : String, n : Int64 = 0_i64) : Int32
   1
 end
 
-
 def choose(text : String, n : Int64 = 0_i64) : String
   text
 end
@@ -47,10 +46,10 @@ named = {name: "named"}
 list << "x"
 hash["key"] = "value"
 raise "container types" unless list.is_a?(Array(String)) &&
-  hash.is_a?(Hash(String, String)) && tuple[0].is_a?(String) &&
-  named[:name].is_a?(String)
+                               hash.is_a?(Hash(String, String)) && tuple[0].is_a?(String) &&
+                               named[:name].is_a?(String)
 raise "constant types" unless TEXT.is_a?(String) && TYPED.is_a?(String) &&
-  USERS[42].is_a?(String) && NESTED[0][:name].is_a?(String)
+                              USERS[42].is_a?(String) && NESTED[0][:name].is_a?(String)
 raise "default type" unless typeof("a") == String && choose("a") == 1
 raise "numeric retry" unless choose("a", 1) == 1
 raise "named argument" unless user.name == "carol"

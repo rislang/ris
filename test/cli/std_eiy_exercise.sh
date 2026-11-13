@@ -25,7 +25,7 @@
 #     with the same sentences.
 #   * Dependency floor: the exercise binary adds no symbol and no library.
 #
-# Needs `make` for bin/iyi, plus `nm`, and `otool` on Darwin or `readelf` on
+# Needs `make` for bin/ris, plus `nm`, and `otool` on Darwin or `readelf` on
 # Linux. Exits non-zero if any check fails.
 set -u
 
@@ -50,7 +50,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -69,8 +69,8 @@ trap 'rm -rf "$WORK"' EXIT
 
 status=0
 
-# Ensure IYI_PATH can find std modules in src/ and samples/iyi/
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+# Ensure RIS_PATH can find std modules in src/ and samples/ris/
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 symbols() {
   nm -u "$1" 2>/dev/null |
@@ -106,7 +106,7 @@ unexpected() {
 build_and_run() {
   local label="$1" name="$2" source="$3"
   shift 3
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -124,7 +124,7 @@ build_and_run() {
 }
 
 echo "== the std/eiy exercise"
-build_and_run "std_eiy" exercise-eiy "$REPO/test/cli/std_eiy_exercise.iyi"
+build_and_run "std_eiy" exercise-eiy "$REPO/test/cli/std_eiy_exercise.ri"
 
 echo
 echo "== every eiy check reported"
@@ -138,7 +138,7 @@ done
 
 echo
 echo "== the same program with optimisation on (--release)"
-build_and_run "std_eiy --release" exercise-eiy-release "$REPO/test/cli/std_eiy_exercise.iyi" --release >"$WORK/release.log"
+build_and_run "std_eiy --release" exercise-eiy-release "$REPO/test/cli/std_eiy_exercise.ri" --release >"$WORK/release.log"
 if grep -qF "ALL CHECKS PASSED" "$WORK/exercise-eiy-release.out" 2>/dev/null; then
   echo "  the release build reports the same"
 else
@@ -156,16 +156,16 @@ echo "== two builds of it at once, the template helper stale before each"
 # two in each of 4 rounds with "LNK1104: cannot open file ...\macro_run".
 # The module is copied so that its helper can be made stale here.
 mkdir -p "$WORK/twice/std/eiy"
-cp "$REPO/src/std/eiy.iyi" "$WORK/twice/std/eiy.iyi"
-cp "$REPO/src/std/eiy/process.iyi" "$WORK/twice/std/eiy/process.iyi"
+cp "$REPO/src/std/eiy.ri" "$WORK/twice/std/eiy.ri"
+cp "$REPO/src/std/eiy/process.ri" "$WORK/twice/std/eiy/process.ri"
 twice_failed=0
 for round in 1 2 3 4; do
   # A modification time the helper was not built from.
-  touch -t "2020010100${round}0" "$WORK/twice/std/eiy/process.iyi"
+  touch -t "2020010100${round}0" "$WORK/twice/std/eiy/process.ri"
   pids=""
   for side in a b; do
-    IYI_PATH="$WORK/twice${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/twice/$side" \
-      "$REPO/test/cli/std_eiy_exercise.iyi" >"$WORK/twice/$round$side.log" 2>&1 &
+    RIS_PATH="$WORK/twice${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/twice/$side" \
+      "$REPO/test/cli/std_eiy_exercise.ri" >"$WORK/twice/$round$side.log" 2>&1 &
     pids="$pids $!"
   done
   for pid in $pids; do
@@ -184,17 +184,17 @@ fi
 # Negative failure proofs
 # ---------------------------------------------------------------------------
 
-# A patched copy of the module ahead of src on IYI_PATH; `eiy/process`, the
+# A patched copy of the module ahead of src on RIS_PATH; `eiy/process`, the
 # program the macros run, goes with it, so the patched lexer is the one that
 # compiles the template.
 patched_std() { # patched_std <dir> <python replace expression>
   local dir="$1" replace="$2"
   mkdir -p "$WORK/$dir/std/eiy"
-  cp "$REPO/src/std/eiy.iyi" "$WORK/$dir/std/eiy.iyi"
-  cp "$REPO/src/std/eiy/process.iyi" "$WORK/$dir/std/eiy/process.iyi"
+  cp "$REPO/src/std/eiy.ri" "$WORK/$dir/std/eiy.ri"
+  cp "$REPO/src/std/eiy/process.ri" "$WORK/$dir/std/eiy/process.ri"
   "$PY" -c "
 import sys
-path = '$WORK/$dir/std/eiy.iyi'
+path = '$WORK/$dir/std/eiy.ri'
 with open(path) as f:
     content = f.read()
 broken = $replace
@@ -214,7 +214,7 @@ prove_fails() { # prove_fails <label> <dir> <named check> <python replace expres
     return
   fi
   patched_std "$dir" "$replace"
-  if (IYI_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_eiy_exercise.iyi" >"$WORK/$dir.out" 2>&1); then
+  if (RIS_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_eiy_exercise.ri" >"$WORK/$dir.out" 2>&1); then
     echo "  the exercise PASSED with $label (it should have failed):"
     head -15 "$WORK/$dir.out" | sed 's/^/    /'
     status=1
@@ -262,8 +262,8 @@ echo
 echo "== what the macros refuse at build time"
 eiy_build_refuses() { # eiy_build_refuses <label> <name> <phrase>
   local label="$1" name="$2" phrase="$3"
-  printf 'module main\n\nimport std/eiy::{Eiy}\n\nputs Eiy.render("%s.eiy")\n' "$name" > "$WORK/$name.iyi"
-  if "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/eiy::{Eiy}\n\nputs Eiy.render("%s.eiy")\n' "$name" > "$WORK/$name.ri"
+  if "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: it built instead of refusing"
     status=1
     return
@@ -296,8 +296,8 @@ echo
 echo "== what the runtime API refuses"
 eiy_panics_with() { # eiy_panics_with <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
-  printf 'module main\n\nimport std/eiy::{Eiy}\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/eiy::{Eiy}\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -316,7 +316,7 @@ eiy_panics_with() { # eiy_panics_with <label> <name> <phrase> <expression>
     status=1
     return
   fi
-  printf '  %s: exits 1 at "%s"\n' "$label" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits 1 at "%s"\n' "$label" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 eiy_panics_with "an open control tag, processed with a filename" open_control "t.eiy: unterminated <% tag at line 1, column 4" \
   'Eiy.process_string("ab <% x", "t.eiy")'

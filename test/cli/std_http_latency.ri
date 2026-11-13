@@ -1,0 +1,422 @@
+# How long a small GET takes over loopback, std/http at either end: the
+# request/response latency that Nagle's algorithm and a peer's delayed
+# ACK put 40 ms into.
+#
+#   ./bin/ris run test/cli/std_http_latency.ri
+#   ./bin/ris run test/cli/std_http_latency.ri self CHAIN.pem KEY.pem ROOT.pem
+# COUNT
+#   ./bin/ris run test/cli/std_http_latency.ri s_server PORT ROOT.pem COUNT
+#   ./bin/ris run test/cli/std_http_latency.ri serve PORTFILE CHAIN.pem KEY.pem
+#   ./bin/ris run test/cli/std_http_latency.ri once CHAIN.pem KEY.pem ROOT.pem
+#
+# `self` runs std/http's server, plain and over TLS, and its client
+# against them in one program: COUNT GETs each on a new connection, COUNT
+# on a kept one of an answer the server streams (its head, then a chunk,
+# each a write), and COUNT over TLS from a client whose socket has Nagle
+# back on (`nodelay = false`), its handshake std/tls's over that socket.
+# `s_server` is the client against OpenSSL's `s_server -www` on PORT,
+# on new connections and with Nagle back on. Each line says whether the
+# median of COUNT was under `BOUND_MS`, and what it was. `serve` is the
+# TLS server for curl, until a GET of /quit. `once` is one TLS GET with
+# both ends in this program, for a tracer to count their writes. With no
+# arguments it checks, alone, what the end of the file says.
+#
+# The bound, 15 ms: the wait a stall adds is the peer's delayed ACK,
+# which is 40 ms at least on Linux (its TCP_DELACK_MIN). Built --release
+# here, a GET on a new TLS connection took about 1 ms (medians of 50 from
+# 0.97 to 1.15 ms), and the broken copies the gate makes 41 and 42 ms.
+# 15 ms leaves a slow runner more than ten times this machine's time and
+# stays well under the least stall.
+
+module bench/std_http_latency
+
+# The probe owns its socket only until it chooses a nonzero pool port.
+# Ready and Stop are keyed by factory, so simultaneous pools do not steal
+# one another's lifecycle messages. Stop gives the response time to flush.
+# These exercises still use std's legacy String APIs and assertions.
+# Board messages themselves own copied tape text; this is the heap adapter.
+def ris_heap_text(value : String) : String
+  value.to_s
+end
+
+import std/file::{File}
+
+module RisExerciseServer
+  struct RisReady(H)
+  end
+
+  struct RisStop(H)
+  end
+
+  @[OnTape]
+  struct RisConfig(C, H)
+    getter value : C
+
+    def initialize(@value)
+    end
+  end
+
+  def self.port : Int32
+    probe = IyiSocket.listen("127.0.0.1", 0)
+    port = probe.local_port
+    probe.close
+    port
+  end
+
+  def self.ready(handler : H.class) : Nil forall H
+    raise "ready queue full" unless RisBoard.post(RisReady(H).new)
+  end
+
+  def self.wait(handler : H.class) : Nil forall H
+    ready = RisBoard.take(RisReady(H), 10000_i64)
+    raise "cancelled before listening" if ready.is_a?(Cancelled)
+    raise "server did not listen within 10 s" unless ready[1]
+  end
+
+  def self.stop(handler : H.class) : Nil forall H
+    raise "stop queue full" unless RisBoard.post(RisStop(H).new)
+  end
+
+  def self.answer(port : Int32, config : C, handler : H.class,
+                  stream_bodies : Bool = false, compress : Bool = false,
+                  timeout_ms : Int32 = 60000,
+                  request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
+                  max_connections : Int32 = 64,
+                  print_port : Bool = false,
+                  port_file : String? = nil) : Nil forall C, H
+    raise "config queue full" unless RisBoard.post(RisConfig(C, H).new(config))
+    group do |pool|
+      pool.spawn do
+        copied = RisBoard.take(RisConfig(C, H))
+        unless copied.is_a?(Cancelled)
+          Server.answer("127.0.0.1", port, copied.value, handler,
+            stream_bodies: stream_bodies, compress: compress,
+            timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
+            max_connections: max_connections)
+        end
+        0
+      end
+      pool.spawn do
+        unless RisBoard.take(RisStop(H)).is_a?(Cancelled)
+          sleep(50)
+          pool.cancel_children
+        end
+        0
+      end
+      if print_port || port_file
+        wait(handler)
+        puts port if print_port
+        File.write(port_file, port.to_s) if port_file
+      end
+      0
+    end
+  end
+end
+
+@[OnTape]
+struct RisLatencyResult
+  getter times : Array(Int64)
+
+  def initialize(@times)
+  end
+end
+
+class RisLatency1Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisLatency1Handler)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    RisExerciseServer.stop(RisLatency1Handler) if req.path == "/stop"
+    answer(req.path, res)
+  end
+end
+
+class RisLatency2Handler
+  @tls : TlsServerConfig
+  @identity : TlsIdentity
+
+  def initialize(config : {String, String})
+    identity = TlsIdentity.new(File.read(ris_heap_text(config[0])), File.read(ris_heap_text(config[1])))
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
+    @tls.alpn << "http/1.1"
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisLatency2Handler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    RisExerciseServer.stop(RisLatency2Handler) if req.path == "/stop"
+    answer(req.path, res)
+  end
+end
+
+class RisLatency3Handler
+  @tls : TlsServerConfig
+  @identity : TlsIdentity
+
+  def initialize(config : {String, String})
+    identity = TlsIdentity.new(File.read(ris_heap_text(config[0])), File.read(ris_heap_text(config[1])))
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
+    @tls.alpn << "http/1.1"
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisLatency3Handler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    RisExerciseServer.stop(RisLatency3Handler) if req.path == "/quit"
+    res.body << "ok"
+  end
+end
+
+class RisLatency4Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisLatency4Handler)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    RisExerciseServer.stop(RisLatency4Handler) if req.path == "/stop"
+    answer(req.path, res)
+  end
+end
+
+import std/http::{HTTP, HTTPClient, Response, Server, Incoming, Outgoing}
+import std/socket::{IyiSocket}
+import std/tls::{TlsClient, TlsConfig, TlsError, TlsIdentity, TlsServerConfig}
+import std/x509::{RisCertificateStore, Certificate}
+import std/file::{File}
+
+# A PEM text's certificates, kept in *store*; a text that does not read
+# panics with the reason.
+def pem_certs(store : RisCertificateStore, text : String) : Array(Certificate)
+  if problem = store.read_pem(text)
+    raise problem.message
+  end
+  store.kept_certificates
+end
+
+BOUND_MS = 15
+
+def median_ns(samples : Array(Int64)) : Int64
+  sorted = samples.sorted
+  sorted[sorted.size // 2]
+end
+
+def ms(ns : Int64) : String
+  "#{ns // 1000000_i64}.#{(ns % 1000000_i64 // 10000_i64).to_s.rjust(2, '0')} ms"
+end
+
+# The line for *label*: under the bound, or past it, and the median.
+def report(label : String, samples : Array(Int64)) : Nil
+  median = median_ns(samples)
+  if median < BOUND_MS.to_i64 * 1000000_i64
+    puts "#{label}: under #{BOUND_MS} ms (median #{ms(median)} of #{samples.size})"
+  else
+    puts "#{label}: #{ms(median)}, past #{BOUND_MS} ms (the median of #{samples.size})"
+  end
+end
+
+# COUNT GETs of *url*, timed: each on a new connection, or with *idle*
+# all on the one the first made.
+# *tls*: the client's own roots, built in the task that asks.
+def gets(url : String, count : Int32, idle : Int32 = 0, tls : TlsConfig? = nil) : Array(Int64)
+  client = HTTPClient.new(idle: idle, timeout_ms: 10000, tls: tls)
+  samples = [] of Int64
+  (count + 1).times do |round|
+    started = __iyi_monotonic_ns
+    client.get(url).or_panic
+    samples << __iyi_monotonic_ns - started if round > 0
+  end
+  raise "#{url}: #{client.connections_made} connections for #{count + 1} GETs on a kept one" if idle > 0 && client.connections_made != 1
+  client.close
+  samples
+end
+
+# The server's answer for *path*: "ok" whole, or for /stream the same as
+# the block writes it - the head, then a chunk, then the last chunk, each
+# a write of its own. On a kept connection, past the start where the
+# kernel acknowledges at once, the chunk behind the head waited under
+# Nagle for the client's delayed ACK.
+def answer(path : String, res : Outgoing) : Nil
+  unless path == "/stream"
+    res.body << "ok"
+    return
+  end
+  res.stream do |w|
+    w.write("ok")
+  end
+end
+
+# One GET over TLS to *port* at localhost from a socket with Nagle on:
+# the handshake and the request and answer, until the server closes. A
+# client flight in several writes waits on Nagle here for the server's
+# delayed ACK.
+def nagle_get(port : Int32, config : TlsConfig) : Int64
+  started = __iyi_monotonic_ns
+  socket = IyiSocket.connect("127.0.0.1", port).or_panic
+  socket.nodelay = false
+  socket.read_timeout_ms = 10000
+  tls = TlsClient.new(socket, "localhost", config)
+  problem = tls.over
+  raise "no handshake: #{problem.message}" if problem
+  tls.write("GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
+  heard = ""
+  while true
+    got = tls.read
+    break if got.is_a?(TlsError) || got.empty?
+    heard << got
+  end
+  took = __iyi_monotonic_ns - started
+  tls.close
+  raise "no answer: #{heard.inspect}" unless heard.starts_with?("HTTP/1.")
+  took
+end
+
+def nagle_gets(port : Int32, config : TlsConfig, count : Int32) : Array(Int64)
+  nagle_get(port, config)
+  samples = [] of Int64
+  count.times { samples << nagle_get(port, config) }
+  samples
+end
+
+# Fills *config* to trust *root*'s certificates, kept in *store*: read
+# into the store before the config views it.
+macro client_config(config, store, root)
+  if problem = {{store}}.read_pem(File.read({{root}}))
+    raise problem.message
+  end
+  {{config}}.roots = {{store}}.kept_certificates
+  {{config}}.alpn << "http/1.1"
+end
+
+args = Program.args
+mode = args.size > 0 ? args[0] : ""
+
+if mode == "self" || mode == "once"
+  # Task captures are Share values or text: each task builds its own
+  # config from the paths.
+  chain = args[1]
+  key = args[2]
+  ca = args[3]
+  count = mode == "self" ? args[4].to_i : 0
+  plain = RisExerciseServer.port
+  tls = RisExerciseServer.port
+  group do |g|
+    g.spawn do
+      RisExerciseServer.answer(plain, 0, RisLatency1Handler)
+      0
+    end
+    RisExerciseServer.wait(RisLatency1Handler)
+    g.spawn do
+      RisExerciseServer.answer(tls, {chain.as_tape, key.as_tape}, RisLatency2Handler)
+      0
+    end
+    RisExerciseServer.wait(RisLatency2Handler)
+    g.spawn do
+      client = TlsConfig.new
+      store = RisCertificateStore.new
+      client_config(client, store, ca)
+      if mode == "once"
+        once = HTTPClient.new(tls: client)
+        once.get("https://localhost:#{tls}/").or_panic
+        nil
+      else
+        report("plain http://, std/http at both ends, a GET on a new connection", gets("http://127.0.0.1:#{plain}/", count))
+        report("plain http://, a kept connection, an answer the server streams", gets("http://127.0.0.1:#{plain}/stream", count, 1))
+        report("https://, std/http at both ends, a GET on a new connection", gets("https://localhost:#{tls}/", count, 0, client))
+        report("https://, a kept connection, an answer the server streams", gets("https://localhost:#{tls}/stream", count, 1, client))
+        report("https://, Nagle on at the client, its handshake and a GET", nagle_gets(tls, client, count))
+      end
+      HTTP.get("http://127.0.0.1:#{plain}/stop")
+      stopper = HTTPClient.new(tls: client)
+      stopper.get("https://localhost:#{tls}/stop")
+      0
+    end
+  end
+  exit 0
+end
+
+if mode == "s_server"
+  port = args[1].to_i
+  config = TlsConfig.new
+  store = RisCertificateStore.new
+  client_config(config, store, args[2])
+  rounds = args[3].to_i
+  report("https:// to s_server, a GET on a new connection", gets("https://localhost:#{port}/", rounds, 0, config))
+  report("https:// to s_server, Nagle on at the client, its handshake and a GET", nagle_gets(port, config, rounds))
+  exit 0
+end
+
+if mode == "serve"
+  listener = RisExerciseServer.port
+  RisExerciseServer.answer(listener, {args[2].as_tape, args[3].as_tape}, RisLatency3Handler, port_file: args[1])
+  exit 0
+end
+
+# No arguments: what holds with nothing but this program, as CI's runs of
+# every bench program ask - TCP_NODELAY read back on a connected and an
+# accepted socket, and an answer the server streams on a kept connection,
+# in the clear, under the bound - its lines properties alone, no port or
+# time, so a run reads the same everywhere. Over TLS a debug build's
+# handshake is too slow on a shared runner to hold to the bound; the gate
+# times that built --release.
+unless mode.empty?
+  puts "usage: std_http_latency [self | s_server | serve | once] ..."
+  exit 2
+end
+probe = IyiSocket.listen("127.0.0.1", 0)
+client = IyiSocket.connect("127.0.0.1", probe.local_port).or_panic
+accepted = probe.accept.or_panic
+raise "nodelay: the connected socket has Nagle on (TCP_NODELAY reads 0)" unless client.nodelay?
+raise "nodelay: the accepted socket has Nagle on (TCP_NODELAY reads 0)" unless accepted.nodelay?
+client.nodelay = false
+raise "nodelay: TCP_NODELAY still set after nodelay = false" if client.nodelay?
+client.close
+accepted.close
+probe.close
+served = RisExerciseServer.port
+puts "nodelay: TCP_NODELAY set on the connected and the accepted socket, and cleared by nodelay = false"
+streamed = [] of Int64
+group do |g|
+  g.spawn do
+    RisExerciseServer.answer(served, 0, RisLatency4Handler)
+    0
+  end
+  RisExerciseServer.wait(RisLatency4Handler)
+  g.spawn do
+    measured = gets("http://127.0.0.1:#{served}/stream", 30, 1)
+    HTTP.get("http://127.0.0.1:#{served}/stop")
+    raise "latency queue full" unless RisBoard.post(RisLatencyResult.new(Array(Int64).new(measured.size) { |i| measured[i] }))
+    0
+  end
+end
+result = RisBoard.take(RisLatencyResult)
+raise "latency cancelled" if result.is_a?(Cancelled)
+streamed = Array(Int64).new(result.times.size) { |i| result.times[i] }
+median = median_ns(streamed)
+raise "a streamed answer on a kept connection: #{ms(median)}, past #{BOUND_MS} ms (the median of #{streamed.size})" unless median < BOUND_MS.to_i64 * 1000000_i64
+puts "a streamed answer on a kept connection: under #{BOUND_MS} ms, the median of #{streamed.size}"
+puts "ALL CHECKS PASSED"

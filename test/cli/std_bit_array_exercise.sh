@@ -30,7 +30,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -48,12 +48,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_bit_array_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_bit_array_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -127,12 +127,12 @@ prove_fails() {
   fi
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/bit_array.iyi").read_text()
+src = Path("$REPO/src/std/bit_array.ri").read_text()
 old = """$old"""
 new = """$new"""
 if old not in src:
     raise SystemExit(f"patch site missing for {old!r}")
-Path("$WORK/patched-$name/std/bit_array.iyi").write_text(src.replace(old, new, 1))
+Path("$WORK/patched-$name/std/bit_array.ri").write_text(src.replace(old, new, 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  $label: the patch did not apply"
@@ -144,7 +144,7 @@ PY
   # and that proves nothing about whether the exercise catches the break.
   local flags=""
   [ -n "$mode" ] && flags="--release"
-  if ! IYI_PATH="$WORK/patched-$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build $flags -o "$WORK/$name.bin" "$REPO/test/cli/std_bit_array_exercise.iyi" >"$WORK/$name.mut.out" 2>&1; then
+  if ! RIS_PATH="$WORK/patched-$name${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build $flags -o "$WORK/$name.bin" "$REPO/test/cli/std_bit_array_exercise.ri" >"$WORK/$name.mut.out" 2>&1; then
     echo "  $label: the broken copy did not compile"
     sed -n '1,6p' "$WORK/$name.mut.out"
     status=1
@@ -211,7 +211,7 @@ echo "== what bit_array refuses"
 
 refuses() {
   local label="$1" name="$2" phrase="$3" body="$4"
-  cat <<EOF > "$WORK/$name.iyi"
+  cat <<EOF > "$WORK/$name.ri"
 module main
 
 import std/bit_array::{BitArray}
@@ -219,7 +219,7 @@ import std/bit_array::{BitArray}
 $body
 EOF
 
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -238,7 +238,7 @@ EOF
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 
 refuses "negative size" neg_size "Negative bit array size: -5" 'BitArray.new(-5)'

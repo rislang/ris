@@ -1,7 +1,6 @@
 # A local protocol double publishes the same atomic PEM/cache entries as
 # ACME finalization. It owns all mutable state on its flight task.
-import std/autocert::{Autocert, AutocertConfig, AutocertView,
-  AutocertOrder, AutocertDirCache, AutocertError}
+import std/autocert::{Autocert, AutocertConfig, AutocertView, AutocertOrder, AutocertDirCache, AutocertError}
 import std/file::{File}
 import std/http::{Incoming, Outgoing, Field}
 import std/text
@@ -70,13 +69,16 @@ end
 @[OnTape]
 struct ManagerConfig
   getter config : AutocertConfig
+
   def initialize(@config : AutocertConfig)
   end
 end
+
 @[OnTape]
 struct ReaderConfig
   getter config : AutocertConfig
   getter left_ms : Int32
+
   def initialize(@config : AutocertConfig, @left_ms : Int32 = 3000)
   end
 end
@@ -111,8 +113,10 @@ end
 
 struct ServerReady
 end
+
 struct ServerReloaded
 end
+
 struct ServeAfterStop
 end
 
@@ -238,12 +242,12 @@ group do |service|
   raise "failure too late" if view.cached_failure("localhost", until_ms)
   same = view.identity_for("localhost", nil, 1)
   raise "remembered failure" unless same.is_a?(TlsError) &&
-    same.message.includes?("autocert: the local CA refused this order")
+                                    same.message.includes?("autocert: the local CA refused this order")
   remaining = until_ms - Time.utc.to_unix_ms
   sleep(remaining.to_i32 + 10) if remaining > 0
   retried = view.identity_for("localhost", nil)
   raise "retry after expiry" unless retried.is_a?(TlsError) &&
-    count(failure_config) == 2
+                                    count(failure_config) == 2
   Autocert.stop
   raise "failure manager stop" unless manager.value == true
 end
@@ -285,7 +289,7 @@ puts "PASS: autocert cancellation cleans the flight and cache"
 # Real challenge material is read by a separately configured server task.
 view = AutocertView.new(config)
 raise "challenge publish" unless view.add_challenge("localhost", "token",
-  "token.thumbprint").nil?
+                                   "token.thumbprint").nil?
 group do |readers|
   RisBoard.post(ReaderConfig.new(config))
   task = readers.spawn do
@@ -305,9 +309,9 @@ group do |readers|
 end
 view.remove_challenge("localhost", "token")
 raise "challenge retired" unless view.identity_for("localhost",
-  ["acme-tls/1"]).is_a?(TlsError)
+                                   ["acme-tls/1"]).is_a?(TlsError)
 raise "host policy" unless view.identity_for("evil.example",
-  nil).is_a?(TlsError)
+                             nil).is_a?(TlsError)
 puts "PASS: autocert cached TLS/HTTP challenges and task-local TLS config"
 
 # Reuse: views, caches and held certificates are task-tape values, not

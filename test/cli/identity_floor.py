@@ -67,7 +67,7 @@ ALLOWED_PATHS: list[tuple[str, str]] = [
     (r"^bin/check-compiler-flag$", "builds the compatibility binary twice"),
     (r"^test/cli/(machine_probe|dependency_floor|build_tool_floor|build_tool_scan)", "measures the compatibility binary, its libraries, and build tools"),
     (r"^test/compiler/util_test\.cr$", "specs Crystal's own util module"),
-    (r"^samples/iyi/", "programs whose comments compare iyi with Crystal"),
+    (r"^samples/ris/", "programs whose comments compare iyi with Crystal"),
 ]
 
 # Lines that name Crystal legitimately inside a file that is otherwise iyi's.
@@ -151,10 +151,10 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     # server named after the binary that was typed.
     (r"CRYSTAL_DAEMON_(BIN|SOCKET)", "the other command surface's own daemon"),
     # A message that has to name the language the *file* is written in: this
-    # compiler reads both, and reporting a `.iyi` file of unreadable bytes as
+    # compiler reads both, and reporting a `.ri` file of unreadable bytes as
     # "not a valid Crystal source file" named the wrong one. The line is the
     # choice between them, so it mentions both by necessity.
-    (r'ends_with\?\(".iyi"\) \? "iyi" : "Crystal"', "the line that picks which language a file is"),
+    (r'ends_with\?\(".ri"\) \? "iyi" : "Crystal"', "the line that picks which language a file is"),
     (r"Crystal (caches|runs|raises|takes|answers|defines)", "a sentence about the other language"),
     # kostya's benchmark suite for the other language is a repository named
     # `crystal-metric`; iyi's port of it is measured against it by name.
@@ -181,7 +181,7 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     # And the driver's, for the same reason: `crystal-lang/crystal-sqlite3` is
     # where `shards install` looks and there is no other spelling of it.
     (r"github: crystal-lang/", "a shard's own coordinates"),
-    # `samples/iyi/hello.iyi` line 115 builds `User.new("crystal")`, so the
+    # `samples/ris/hello_iyi.ri` line 115 builds `User.new("crystal")`, so the
     # greeting it prints carries that name. The hero quotes the run, and the
     # word is data the program printed rather than a language being renamed.
     (r"Hello, crystal!", "a line a sample prints, quoted from a real run"),
@@ -262,7 +262,7 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     (r'parsed\["crystal"\]|"crystal" *=>', "shards' own manifest key"),
     (r"crystal-release|src/compiler/crystal\.cr|clean_cache crystal", "the compatibility binary's build"),
     (r"names crystal in the same banner|program_name = \"crystal\"", "the spec that pins the compatibility name"),
-    (r"from-crystal|reads CRYSTAL_PATH when IYI_PATH", "the spec that pins the Crystal env-var fallback"),
+    (r"from-crystal|reads CRYSTAL_PATH when RIS_PATH", "the spec that pins the Crystal env-var fallback"),
     # Backticks required. A bare `CRYSTAL_DAEMON` matched the Makefile's
     # `CRYSTAL_DAEMON_BIN`, which the cutover had renamed to `IYI_DAEMON_BIN`,
     # and so hid a real break: upstream's new `check_daemon_matches` expanded
@@ -271,14 +271,14 @@ ALLOWED_LINES: list[tuple[str, str]] = [
     # defect is not an allowlist entry.
     (r"CRYSTAL_#\{name\}|`CRYSTAL_DAEMON(_SOCKET)?`|crystal docker image", "the fallback that keeps Crystal's env vars working"),
     # The same fallback, in the sentence that refuses a cache directory.
-    # `Config.env` reads `IYI_CACHE_DIR` and then `CRYSTAL_CACHE_DIR`, so the
+    # `Config.env` reads `RIS_CACHE_DIR` and then `CRYSTAL_CACHE_DIR`, so the
     # refusal names whichever of the two is set: a sentence about
-    # `IYI_CACHE_DIR` read by somebody who set the other one names a variable
+    # `RIS_CACHE_DIR` read by somebody who set the other one names a variable
     # they do not have. Backticked or quoted, by the rule above — a bare
     # `CRYSTAL_CACHE_DIR` would cover a slip as well as this.
     (r'`CRYSTAL_CACHE_DIR`|: "CRYSTAL_CACHE_DIR"', "the variable the other command surface's author set"),
     # The linker's search path, in the gate that proves the binaries build
-    # with bdw-gc unreachable. `IYI_LIBRARY_PATH` is not a substitute: it adds
+    # with bdw-gc unreachable. `RIS_LIBRARY_PATH` is not a substitute: it adds
     # to the default search path where `CRYSTAL_LIBRARY_PATH` replaces it, and
     # the swap made that gate pass with the collector back on the binaries,
     # which is to say it stopped measuring anything. The build runs through
@@ -414,7 +414,7 @@ def main() -> int:
         print("iyi owns its name")
         return 0
 
-    print("CRYSTAL'S NAME IS STANDING IN FOR IYI'S")
+    print("CRYSTAL'S NAME IS STANDING IN FOR RIS'S")
     print()
     limit = None if show_all else 30
     for rel in path_hits[:limit]:

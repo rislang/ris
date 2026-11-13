@@ -4,8 +4,8 @@ import std/log::{Log, Logger, Severity, RisMemoryBackend}
 
 # Loggers named in constants: their text outlives the initializer that made
 # it, and a def run later does not overwrite it.
-DB = Log.for("db")
-POOL = Log.for("db.pool")
+DB     = Log.for("db")
+POOL   = Log.for("db.pool")
 ROOTED = Logger.on_program("rooted")
 
 def noise : String

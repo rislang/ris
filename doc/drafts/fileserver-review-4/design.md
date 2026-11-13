@@ -3,18 +3,18 @@
 Verdict: ready after one Major wording fix. MB1-MB6 resolved; MB5's
 new text adds an inaccuracy.
 
-Checked: region.iyi:523-529, log.iyi:400-402, check.sh:64,
-check.sh:1187-1188, http.iyi:2213-2256.
+Checked: region.ri:523-529, log.ri:400-402, check.sh:64,
+check.sh:1187-1188, http.ri:2213-2256.
 
 ## Major
 
 1. Lines 455-461, 627-629: "about 256 GiB ... that is
    `Server.answer`'s cost today with one builder" is wrong. Today
-   Outgoing has one growing builder, `@body` (http.iyi:2225, 2231),
+   Outgoing has one growing builder, `@body` (http.ri:2225, 2231),
    about 128 GiB at 1024 answers; the new `@text` doubles it. Say
    so, or give `@text` a fixed capacity that skips the side reserve,
    and recheck P4's "0 side regions".
-2. Lines 583-586: http.iyi:2214-2216 says the body is "the one value
+2. Lines 583-586: http.ri:2214-2216 says the body is "the one value
    that grows"; false once `@text` grows. Replace that sentence.
 
 ## Nits

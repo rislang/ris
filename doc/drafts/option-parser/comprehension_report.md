@@ -22,7 +22,7 @@ registered and formats help when asked. No SPEC or compiler change.
 
 ## How the existing system works, per this document
 
-`OptionParser` lives in `src/std/option_parser.iyi`, a file shared with
+`OptionParser` lives in `src/std/option_parser.ri`, a file shared with
 iyi. `on(flag, desc) { |v| … }` stores the block as a `String -> Nil`
 proc and adds a help line built on `on`'s scratch to a field.
 `parse(args)` walks the arguments, calls the stored procs, panics on
@@ -64,7 +64,7 @@ never does, is unstated; "the gate" is unnamed.
 ## Resolution (author)
 
 Checking the `ris_no_gc` finding changed the design: the compiler adds
-`ris_no_gc` to every program (compiler.cr:2834), and `bin/iyi` is the
+`ris_no_gc` to every program (compiler.cr:2834), and `bin/ris` is the
 same binary as `bin/ris`. Run on minitest at 6173b7918,
 `bench/std_option_parser_exercise.sh` fails at its first block ("this
 block becomes a proc … `name : String`"). There is no iyi build that

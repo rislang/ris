@@ -1,15 +1,19 @@
 module p8
 class Keep
   @blocks : Array((-> Nil)?)
+
   def initialize
     @blocks = [] of (-> Nil)?
   end
+
   def on(&block : -> Nil) : Nil
     @blocks << block
   end
+
   def on_none : Nil
     @blocks << nil
   end
+
   def run(args : Array(String)) : Nil
     args.each_with_index do |a, i|
       b = @blocks[i % @blocks.size]?
@@ -17,6 +21,7 @@ class Keep
     end
   end
 end
+
 verbose = false
 n = 0
 k = Keep.new

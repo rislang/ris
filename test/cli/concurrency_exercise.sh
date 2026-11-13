@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives test/cli/concurrency_exercise.iyi: the concurrency runtime's gate
+# Drives test/cli/concurrency_exercise.ri: the concurrency runtime's gate
 # (iyi SPEC III.4, built in III.4.8's order).
 #
 #     bash test/cli/concurrency_exercise.sh
@@ -11,7 +11,7 @@
 #      the release arm is not decoration: the context switch is naked asm,
 #      and the optimiser is the thing that corrupted it until @[NoInline]
 #      said not to. And a fiber reading stdin parks, and is cancelled
-#      there (test/cli/stdin_park.iyi, fed by a pipe), which a read made the
+#      there (test/cli/stdin_park.ri, fed by a pipe), which a read made the
 #      blocking call it was is refused for.
 #   2. The binary keeps the dependency floor (III.9): on Linux the runtime
 #      is raw syscalls and must add zero undefined symbols; on darwin the
@@ -37,7 +37,7 @@ ulimit -n 8192
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 # the wrapper in bin is a posix shell script, so a caller that already has a
 # compiler of its own names it through the environment.
-IYI="${IYI:-$REPO/bin/ris}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 
@@ -67,7 +67,7 @@ step() { echo "== $1"; }
 
 # ── 1. The exercise, twice ────────────────────────────────────────────────
 step "exercise, plain build"
-if ! "$IYI" build "$REPO/test/cli/concurrency_exercise.iyi" -o exercise > build.log 2>&1; then
+if ! "$RIS" build "$REPO/test/cli/concurrency_exercise.ri" -o exercise > build.log 2>&1; then
   echo "build failed:"
   tail -5 build.log
   exit 1
@@ -87,7 +87,7 @@ if grep -q 'a done fiber was scheduled' answers.txt; then
 fi
 
 step "exercise, release build"
-if ! "$IYI" build --release "$REPO/test/cli/concurrency_exercise.iyi" -o exercise-release > build-release.log 2>&1; then
+if ! "$RIS" build --release "$REPO/test/cli/concurrency_exercise.ri" -o exercise-release > build-release.log 2>&1; then
   echo "release build failed:"
   tail -5 build-release.log
   exit 1
@@ -105,12 +105,12 @@ if grep -q 'a done fiber was scheduled' answers-release.txt; then
 fi
 
 # ── 1b. A fiber reading stdin parks, and is cancelled there ───────────────
-# test/cli/stdin_park.iyi, fed by a pipe that answers a second after the
+# test/cli/stdin_park.ri, fed by a pipe that answers a second after the
 # program has started and again two seconds later. On Windows the read is a
 # thread's of its own (`IyiStdinReader`); here, it was the program's
 # thread's, and the proof below puts that back.
 step "a fiber reading stdin parks, and is cancelled there"
-if ! "$IYI" build "$REPO/test/cli/stdin_park.iyi" -o stdin_park > build-stdin.log 2>&1; then
+if ! "$RIS" build "$REPO/test/cli/stdin_park.ri" -o stdin_park > build-stdin.log 2>&1; then
   echo "stdin exercise failed to build:"
   tail -5 build-stdin.log
   exit 1
@@ -130,17 +130,17 @@ fi
 sed 's/^/  /' stdin.txt | grep -v 'every property held'
 
 step "failure proof: a stdin read that holds the thread is refused"
-# Copies sit under a src/iyi/ path: the compiler knows runtime files by it
+# Copies sit under a src/ris/ path: the compiler knows runtime files by it
 # (a program file outside it is refused `private def` at the top level).
-mkdir -p blocking/src/iyi
-cp "$REPO"/src/iyi/*.iyi blocking/src/iyi/
+mkdir -p blocking/src/ris
+cp "$REPO"/src/ris/*.ri blocking/src/ris/
 sed 's/^        outcome = iyi_read(0, buffer, count)$/        outcome = __iyi_read(0, buffer, count)/' \
-  "$REPO/src/iyi/io.iyi" > blocking/src/iyi/io.iyi
-if [ "$(diff "$REPO/src/iyi/io.iyi" blocking/src/iyi/io.iyi | grep -c '^>')" -lt 1 ]; then
+  "$REPO/src/ris/io.ri" > blocking/src/ris/io.ri
+if [ "$(diff "$REPO/src/ris/io.ri" blocking/src/ris/io.ri | grep -c '^>')" -lt 1 ]; then
   echo "the sed found no stdin read to make blocking"
   exit 1
 fi
-if ! IYI_PATH="$WORK/blocking/src${PSEP}$REPO/src" "$IYI" build "$REPO/test/cli/stdin_park.iyi" -o stdin_blocking > build-blocking.log 2>&1; then
+if ! RIS_PATH="$WORK/blocking/src${PSEP}$REPO/src" "$RIS" build "$REPO/test/cli/stdin_park.ri" -o stdin_blocking > build-blocking.log 2>&1; then
   echo "the blocking copy failed to build:"
   tail -5 build-blocking.log
   exit 1
@@ -239,13 +239,13 @@ fi
 
 # ── 3. Failure proof: a deadlock dies loudly ──────────────────────────────
 step "failure proof: deadlock is a diagnosis, not a hang"
-cat > deadlock.iyi <<'IYI'
+cat > deadlock.ri <<'RIS'
 record Never, n : Int32
 
 value = RisBoard.take(Never)
 puts value.is_a?(Never)
-IYI
-if ! "$IYI" build deadlock.iyi -o deadlock > build-deadlock.log 2>&1; then
+RIS
+if ! "$RIS" build deadlock.ri -o deadlock > build-deadlock.log 2>&1; then
   echo "deadlock probe failed to build:"
   tail -5 build-deadlock.log
   exit 1
@@ -267,7 +267,7 @@ grep -q 'deadlock' deadlock.txt || { echo "died without naming the deadlock:"; c
 # overflow"; two tasks waiting on each other ended the process without
 # the owner's cleanups. It is the root fiber's panic now, on its own stack.
 step "a deadlock found in a task's park is named once, and every cleanup runs"
-cat > taskdeadlock.iyi <<'IYI'
+cat > taskdeadlock.ri <<'RIS'
 module taskdeadlock
 
 def compute(n : Int32) : Int32
@@ -321,8 +321,8 @@ if Program.args[0] == "crossed"
 else
   waits(Program.args[0])
 end
-IYI
-if ! "$IYI" build taskdeadlock.iyi -o taskdeadlock > build-taskdeadlock.log 2>&1; then
+RIS
+if ! "$RIS" build taskdeadlock.ri -o taskdeadlock > build-taskdeadlock.log 2>&1; then
   echo "task deadlock probe failed to build:"
   tail -5 build-taskdeadlock.log
   exit 1
@@ -351,7 +351,7 @@ done
 # waited for a sibling's minute-long sleep - a minute each, and forever
 # beside a parked accept loop.
 step "an owner that exits or panics does not wait out a sleeping task"
-cat > ending.iyi <<'IYI'
+cat > ending.ri <<'RIS'
 module ending
 
 group do |g|
@@ -363,8 +363,8 @@ group do |g|
   exit(4) if Program.args[0] == "exit"
   raise "the owner panicked"
 end
-IYI
-if ! "$IYI" build ending.iyi -o ending > build-ending.log 2>&1; then
+RIS
+if ! "$RIS" build ending.ri -o ending > build-ending.log 2>&1; then
   echo "ending probe failed to build:"
   tail -5 build-ending.log
   exit 1
@@ -387,7 +387,7 @@ done
 # anything: it returned at once, and a task polling a flag with it spun
 # fifty million times while the task that would set the flag never ran.
 step "sleep(0) lets a runnable task run"
-cat > yielding.iyi <<'IYI'
+cat > yielding.ri <<'RIS'
 module yielding
 
 record YieldFlag, n : Int32
@@ -413,8 +413,8 @@ group do |g|
   end
   0
 end
-IYI
-if ! "$IYI" build yielding.iyi -o yielding > build-yielding.log 2>&1; then
+RIS
+if ! "$RIS" build yielding.ri -o yielding > build-yielding.log 2>&1; then
   echo "yielding probe failed to build:"
   tail -5 build-yielding.log
   exit 1
@@ -432,7 +432,7 @@ fi
 # return from. The refusal said "can't return from captured block, use
 # next", about a `return` nobody wrote; it names `!` and the way out now.
 step "a \`!\` in a task's body is refused with its own sentence"
-cat > bang_task.iyi <<'IYI'
+cat > bang_task.ri <<'RIS'
 module bang_task
 
 struct Missing
@@ -453,8 +453,8 @@ end
 group do |g|
   t = g.spawn { lookup("ab")! }
 end
-IYI
-if "$IYI" build bang_task.iyi -o bang_task > build-bang.log 2>&1; then
+RIS
+if "$RIS" build bang_task.ri -o bang_task > build-bang.log 2>&1; then
   echo "a \`!\` in a task's body compiled"
   exit 1
 fi
@@ -471,7 +471,7 @@ fi
 # {1, 2}); the general form answers Nil there, and the `!` with nothing to
 # propagate names the group's rule instead of only the type.
 step "an \`end!\` on a group that answers its own expression is refused as itself"
-cat > bang_tail.iyi <<'IYI'
+cat > bang_tail.ri <<'RIS'
 module bang_tail
 
 def pair : Tuple(Int32, Int32) | Cancelled | Panicked
@@ -483,8 +483,8 @@ def pair : Tuple(Int32, Int32) | Cancelled | Panicked
 end
 
 puts pair
-IYI
-if "$IYI" build bang_tail.iyi -o bang_tail > build-bang-tail.log 2>&1; then
+RIS
+if "$RIS" build bang_tail.ri -o bang_tail > build-bang-tail.log 2>&1; then
   echo "an \`end!\` on a group whose block ends in its own expression compiled"
   exit 1
 fi
@@ -500,7 +500,7 @@ fi
 # returning", exited 0, and the task never ran. III.4.1 says a task cannot
 # outlive the scope that started it, so the spawn is the bug, said there.
 step "a task spawned on a group whose block has ended is refused at run time"
-cat > late_spawn.iyi <<'IYI'
+cat > late_spawn.ri <<'RIS'
 module late_spawn
 
 saved = nil.as(IyiGroup?)
@@ -515,8 +515,8 @@ if late = saved
   end
 end
 puts "the late spawn returned"
-IYI
-if ! "$IYI" build late_spawn.iyi -o late_spawn > build-late-spawn.log 2>&1; then
+RIS
+if ! "$RIS" build late_spawn.ri -o late_spawn > build-late-spawn.log 2>&1; then
   echo "late spawn probe failed to build:"
   tail -5 build-late-spawn.log
   exit 1
@@ -536,7 +536,7 @@ fi
 # children newest first and named "a task panicked: second", where III.4.3
 # says the first failing task is the one that leaves the group.
 step "a group's join re-raises the first task that panicked"
-cat > two_panics.iyi <<'IYI'
+cat > two_panics.ri <<'RIS'
 module two_panics
 
 def bomb(m : String) : Int32
@@ -547,8 +547,8 @@ group do |g|
   g.spawn { bomb("first") }
   g.spawn { bomb("second") }
 end
-IYI
-if ! "$IYI" build two_panics.iyi -o two_panics > build-two-panics.log 2>&1; then
+RIS
+if ! "$RIS" build two_panics.ri -o two_panics > build-two-panics.log 2>&1; then
   echo "two panics probe failed to build:"
   tail -5 build-two-panics.log
   exit 1
@@ -564,8 +564,8 @@ fi
 
 # ── 4. Failure proof: the interleaving assert is reachable ────────────────
 step "failure proof: a wrong order is refused"
-sed 's/== "bababa"/== "aaabbb"/' "$REPO/test/cli/concurrency_exercise.iyi" > misordered.iyi
-if ! "$IYI" build misordered.iyi -o misordered > build-misordered.log 2>&1; then
+sed 's/== "bababa"/== "aaabbb"/' "$REPO/test/cli/concurrency_exercise.ri" > misordered.ri
+if ! "$RIS" build misordered.ri -o misordered > build-misordered.log 2>&1; then
   echo "misordered probe failed to build:"
   tail -5 build-misordered.log
   exit 1
@@ -586,16 +586,16 @@ fi
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     step "failure proof: a switch that drops xmm6-xmm15 is caught"
-    mkdir -p dropped/src/iyi
-    cp -R "$REPO/src/iyi/." dropped/src/iyi/
+    mkdir -p dropped/src/ris
+    cp -R "$REPO/src/ris/." dropped/src/ris/
     awk '/^         movups [0-9]+\(%rsp\), %xmm[0-9]+$/ { found = found + 1; next } { print }
          END { if (found != 10) exit 3 }' \
-      "$REPO/src/iyi/concurrency.iyi" > dropped/src/iyi/concurrency.iyi
+      "$REPO/src/ris/concurrency.ri" > dropped/src/ris/concurrency.ri
     if [ $? -ne 0 ]; then
       echo "the ten restores this proof removes are not in the switch any more; update the proof"
       exit 1
     fi
-    if ! IYI_PATH="$WORK/dropped/src;$REPO/src" "$IYI" build --release "$REPO/test/cli/concurrency_exercise.iyi" \
+    if ! RIS_PATH="$WORK/dropped/src;$REPO/src" "$RIS" build --release "$REPO/test/cli/concurrency_exercise.ri" \
          -o dropped-exercise > build-dropped.log 2>&1; then
       echo "the patched runtime did not build:"
       tail -5 build-dropped.log
@@ -616,19 +616,19 @@ esac
 
 # ── 6. Failure proof: a stack mapped at spawn is caught ─────────────────
 step "failure proof: a stack mapped when a task is spawned is caught"
-mkdir -p eager/src/iyi
-cp -R "$REPO/src/iyi/." eager/src/iyi/
+mkdir -p eager/src/ris
+cp -R "$REPO/src/ris/." eager/src/ris/
 # The stack made at spawn again: a fiber that has one is not given another
 # at its first switch, so this alone puts every spawn back on a mapping.
 awk '/^    IyiScheduler.register\(fiber\)$/ { print "    fiber.prepare_stack"; found = found + 1 }
      { print }
      END { if (found != 1) exit 3 }' \
-  "$REPO/src/iyi/concurrency.iyi" > eager/src/iyi/concurrency.iyi
+  "$REPO/src/ris/concurrency.ri" > eager/src/ris/concurrency.ri
 if [ $? -ne 0 ]; then
   echo "the line this proof adds to is not where it was; update the proof"
   exit 1
 fi
-if ! IYI_PATH="$WORK/eager/src${PSEP}$REPO/src" "$IYI" build "$REPO/test/cli/concurrency_exercise.iyi" \
+if ! RIS_PATH="$WORK/eager/src${PSEP}$REPO/src" "$RIS" build "$REPO/test/cli/concurrency_exercise.ri" \
      -o eager-exercise > build-eager.log 2>&1; then
   echo "the patched runtime did not build:"
   tail -5 build-eager.log
@@ -645,14 +645,14 @@ echo "  caught: $(grep -m1 'FAIL: burst' eager.txt)"
 # ── 7. Failure proofs: a walked sleep queue, and one out of order ────────
 sleep_proof() { # sleep_proof <label> <dir> <awk program> <phrase>
   step "failure proof: $1 is caught"
-  mkdir -p "$2/src/iyi"
-  cp -R "$REPO/src/iyi/." "$2/src/iyi/"
-  awk "$3" "$REPO/src/iyi/concurrency.iyi" > "$2/src/iyi/concurrency.iyi"
+  mkdir -p "$2/src/ris"
+  cp -R "$REPO/src/ris/." "$2/src/ris/"
+  awk "$3" "$REPO/src/ris/concurrency.ri" > "$2/src/ris/concurrency.ri"
   if [ $? -ne 0 ]; then
     echo "the line this proof changes is not where it was; update the proof"
     exit 1
   fi
-  if ! IYI_PATH="$WORK/$2/src${PSEP}$REPO/src" "$IYI" build "$REPO/test/cli/concurrency_exercise.iyi" \
+  if ! RIS_PATH="$WORK/$2/src${PSEP}$REPO/src" "$RIS" build "$REPO/test/cli/concurrency_exercise.ri" \
        -o "$2-exercise" > "build-$2.log" 2>&1; then
     echo "the patched runtime did not build:"
     tail -5 "build-$2.log"

@@ -30,9 +30,9 @@ sections below and are listed here in order:
 
 * std on the tape, found porting the HTTP handlers (drift report in
   doc/drafts/server-answer-features.md): Router's `Pattern.parse` (SPEC
-  1.9, router.iyi:189), the HTTPS client (`records_handshake` returns
-  an owner, http.iyi:4847; blocks samples/iyi/autocert.iyi),
-  `Zstd.decompress` (view check, zstd.iyi:1410), `Cookie.parse_header`
+  1.9, router.ri:189), the HTTPS client (`records_handshake` returns
+  an owner, http.ri:4847; blocks samples/ris/autocert.ri),
+  `Zstd.decompress` (view check, zstd.ri:1410), `Cookie.parse_header`
   and `HTTP.cookie_pairs` (a Hash from a def). Then give `Incoming`
   back `form`, `multipart` and `cookies`, which `Request` had.
 
@@ -183,58 +183,59 @@ Unknown must be refused (SPEC 3.6).
   `::String.view(::String.view("page.eiy"))` and panics `cannot read`.
 * test/cli/packages_get.sh: 9 FAIL (get/reach/doc/mod context), 31 on main
   before ris check; test/cli/verbs_exercise.sh: a reopen of String (now a
-  struct) and `fix printed its edit` (split.iyi already clean).
+  struct) and `fix printed its edit` (split.ri already clean).
 
 * Build each test/cli program, group refusals by message, fix per group.
-  2026-11-12, minitest with the rebuilt compiler: 101 of 133 programs
-  pass `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 32 fail.
-  The same compiler's baseline was 93 pass, 40 fail. The earlier
-  139-program count and groups were stale. This item remains open:
-  30 routine ports and two deferred fixtures still do not build.
-  Names omit std_ and _exercise where present; each failure appears once.
+  2026-11-14, minitest: 106 of 130 programs pass
+  `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 24 fail (was
+  100 of 130 on this compiler before the round). Names omit std_ and
+  _exercise where present; each failure appears once.
 
-  - TLS/HPKE/upgrade owners, 8: http2, tls, autocert, http_latency,
-    http_resume, hpke, http and http_stop. Declare identities, configs,
-    clients, HPKE contexts and Upgraded at their callers.
-  - Block/round storage, 3: big, user and websocket. Keep backing on the
-    receiving owner, append into caller-owned builders, and avoid
-    rebinding outer locals to scratch. Big also needs explicit results.
-  - Procs outliving their tape, 3: file, router and http_https_records.
-    Keep resources and callbacks inside their owners.
-  - Decoder/source backing, 3: compress, tar and zstd. Keep backing with
-    the consumer or write output into caller-owned destinations.
-  - Program-owned retained data, 3: log, ocsp and x509. Copy retained
-    parents, zones and certificates to their actual owner explicitly.
-  - Scratch results, 2: toml and yaml nested derived readers. Supply
-    backing that survives the construction block; TOML also hits dig?.
-  - Reset/growth views, 2: csv and zip. Consume before refill or copy
-    retained views; reduce suspected summary errors before checker edits.
-  - Retained def data, 1: acme challenge data and HTTPS endpoint backing.
-  - API drift, 1: fuzz's byte views, owner factories and removed
-    Server.parse_request/handle surface.
-  - Returned owner, 1: benchmark's jobs and IPS entry storage.
-  - Opaque callback, 1: iterator's mapped/sliced to_a consumer.
+  Built this round: http2, http_latency, http_resume, http_stop, zstd
+  and number. TLS callers declare TlsIdentity, TlsServerConfig,
+  TlsClient and Upgraded as owners; roots are read into the store
+  before a config views them (a def taking the store and config is
+  refused, a macro is not). Zstd.decompress copies into one tagged
+  String (as Bzip2's); MathInterpreter folds a constant through its
+  `__ris_program_init` block. Built but failing at run time: http2 and
+  http_stop (HTTP/2 PROTOCOL_ERROR reset on the first GET), http_resume
+  ("new roots" resumes) and number (panic: not a number "\u20281e-3").
+
+  - TLS owners, 4: tls (2000 lines, ~25 sites: from_pem, TlsClient.over,
+    TlsServer.over), autocert (std/autocert's AutocertIssuer#client
+    returns an AcmeClient owner it makes lazily), hpke (std/hpke's
+    single-shot seal/open and HpkePrivateKey.from_bytes return values of
+    their own scratch; the test's sender/recipient port is done) and
+    http (Server.parse_request is gone, see below; HTTP.upgrade callers).
+  - Block/round storage, 3: big (BigInt operators return scratch),
+    user and websocket.
+  - Procs outliving their tape, 4: file, router, http_https_records and
+    benchmark (Job#report keeps a block's proc in an Entry; bm and ips
+    return their owner job).
+  - Decoder/source backing, 2: compress and tar.
+  - Program-owned retained data, 3: log, ocsp and x509. A Time constant
+    (`NOW = Time.utc(...)`, even with copy_to(Program.tape)) and a
+    constant of certificates are refused at time.ri's Zone#initialize;
+    the same Time made in a def builds. x509's `cert(hex)` returns a
+    Certificate viewing its def's bytes.
+  - Scratch results, 2: toml (dig?) and yaml (Array(T).new block).
+  - Reset/growth views, 2: csv and zip.
+  - Retained def data, 1: acme.
+  - API drift, 1: fuzz.
+  - Opaque callback, 1: iterator's to_a (a loop without the block trades
+    it for a live-view refusal: a checker question).
   - Runtime Array of growing owners, 1: p256 private keys.
-  - Invalid constant, 1: number's compound modulo FOLDED_SIZE.
-  - Deferred decisions, 2 in this glob: wasm32 GC and xml XPath APIs.
-    Also skip the three private http2_tape_* comparisons (outside this
-    glob); the user will decide their public replacement or retirement.
 
-  The eight newly passing programs also build with code generation and
-  run: bzip2, eiy, file_utils, rsa, slice, sse, xz and tls_probe.
-  Reader.read_str now appends through custom readers; SSE drops a partial
-  ID on reconnect; RSA borrows String messages and compares its PSS hash
-  through the byte view. Each bug has a regression in test/ris/check.sh.
-  No checker, SPEC.md or CHANGELOG.md changes; no new design decision.
-  Final minitest `bash test/ris/check.sh`: PASS: all ris checks;
-  367 runs, 343 refusals, 13 heap cases, zero FAILED lines.
+  Earlier round (2026-11-12): bzip2, eiy, file_utils, rsa, slice, sse,
+  xz and tls_probe built and ran; each bug has a regression in
+  test/ris/check.sh. No checker, SPEC.md or CHANGELOG.md changes.
 
   Known outside this round: format fails on main; text panics at
   "string: chomp cr".
 * std_http_exercise's and std_fuzz's parse checks call
   `Server.parse_request`, gone with `Request`: read through
   `Server.parse_head` or a socket round trip. Most of
-  std_http_exercise.sh's mutation patterns no longer match http.iyi.
+  std_http_exercise.sh's mutation patterns no longer match http.ri.
 
 ## 8. Speed
 
@@ -285,13 +286,13 @@ change. Gates stay structural.
 * TlsConfig system roots: check whether SystemRoots (00130b97e) already
   keeps them. If still read per handshake, make Certificate copyable to
   Program.tape to keep them once.
-* Autocert part B: test/cli/std_autocert_exercise.iyi and its driver, with
+* Autocert part B: test/cli/std_autocert_exercise.ri and its driver, with
   real TLS deadline and parallel-server cases, Pebble, restarts and
   mutation checks (part A's gates: test/ris/autocert.ri, autocert_wire.ri).
 * std_process: the `handlers` mutation proof (child keeps this program's
   TERM handler) is not caught.
 * Add 128-bit formatting, IDNA and URI resolution.
-* src/iyi/float.iyi's parser has a copy in src/iyi/tape.iyi: merge them.
+* src/ris/float.ri's parser has a copy in src/ris/tape.ri: merge them.
 
 ## 11. macOS arm64
 
@@ -313,10 +314,10 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
   three times of three. Find the race or the load-dependent fault.
 
 * Every growing tape value reserves 128 MiB of address space, even a
-  128-byte builder (SIDE_RESERVE, region.iyi:529). Under
+  128-byte builder (SIDE_RESERVE, region.ri:529). Under
   `vm.overcommit_memory=2` each is charged: a FileServer answer holds
   up to eight (doc/drafts/fileserver-outgoing.md, Memory).
-* A constant's initializer runs on the program tape only in a .ri/.iyi
+* A constant's initializer runs on the program tape only in a .ri
   file; a compiler_test example (source "spec") still needs
   `.copy_to(Program.tape)` for a constant or class variable (SPEC 7.5).
 * A branch that cannot be typed (`raise "#{f}"` with `f` untyped) does
@@ -325,10 +326,10 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
   growing text and names `::RisTextGrowth` (iyi_test.cr, std/int case).
 * test/cli/concurrency_exercise.sh needs `ulimit -n 8192` and is not in
   check.sh; recheck on minitest.
-* test/cli/parallel_exercise.iyi:124 (a task value's Panicked arm) and
-  test/speed/metric/metric.iyi (Array of the tape type Planet) do not
+* test/cli/parallel_exercise.ri:124 (a task value's Panicked arm) and
+  test/speed/metric/metric.ri (Array of the tape type Planet) do not
   typecheck; recheck on minitest.
-* test/cli/std_websocket_exercise.iyi appends to an `io` builder and reads
+* test/cli/std_websocket_exercise.ri appends to an `io` builder and reads
   it back: move it to a String local, then recheck the artifact
   comparison on minitest.
 * test/compiler/iyimod_test.cr's getter/defer case cannot resolve

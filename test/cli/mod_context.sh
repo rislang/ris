@@ -11,9 +11,9 @@
 # complete. A model reading it concludes the module does not exist.
 #
 # The check is the one comparison that matters: a file that *builds* must
-# ground. Nine imports in `samples/iyi` did not, every one of them a
+# ground. Nine imports in `samples/ris` did not, every one of them a
 # `std/…` — `mod context` resolved the requirement table and the entry
-# file's directory and never looked at `IYI_PATH`, which is where the
+# file's directory and never looked at `RIS_PATH`, which is where the
 # library is.
 #
 # Exits non-zero if any import of a building file is not grounded.
@@ -27,7 +27,7 @@ case "$(uname -s)" in
   *) PSEP=':' ;;
 esac
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 case "$(uname -s)" in
@@ -38,7 +38,7 @@ case "$(uname -s)" in
 esac
 trap 'rm -rf "$WORK"' EXIT
 
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 status=0
 grounded=0
 ungrounded=""
@@ -46,9 +46,9 @@ ungrounded=""
 # The samples are the corpus: every one of them builds, they are written to
 # document the language rather than to exercise this, and between them they
 # import a local module, a package-shaped path and the library.
-for source in "$REPO"/samples/iyi/*.iyi; do
-  name="$(basename "$source" .iyi)"
-  if ! "$IYI" mod context "$source" > "$WORK/$name.txt" 2>&1; then
+for source in "$REPO"/samples/ris/*.ri; do
+  name="$(basename "$source" .ri)"
+  if ! "$RIS" mod context "$source" > "$WORK/$name.txt" 2>&1; then
     echo "  $name: mod context failed"
     sed -n '1,6p' "$WORK/$name.txt" | sed 's/^/    /'
     status=1
@@ -74,7 +74,7 @@ echo
 if [ -n "$ungrounded" ]; then
   echo "FAIL: imports left ungrounded:$ungrounded"
 else
-  echo "every import in samples/iyi is grounded: $grounded of them, across $(ls "$REPO"/samples/iyi/*.iyi | wc -l | tr -d ' ') files"
+  echo "every import in samples/ris is grounded: $grounded of them, across $(ls "$REPO"/samples/ris/*.ri | wc -l | tr -d ' ') files"
 fi
 
 # The same resolution, asked by the other command that uses it. `check
@@ -84,23 +84,23 @@ fi
 # consumer sitting beside it: nothing affected, all compile, about a change
 # that breaks the next build.
 mkdir -p "$WORK/affected"
-cat > "$WORK/affected/consumer.iyi" <<'EOF'
+cat > "$WORK/affected/consumer.ri" <<'EOF'
 module consumer
 
 import std/text
 
 puts "x"
 EOF
-cat > "$WORK/affected/stranger.iyi" <<'EOF'
+cat > "$WORK/affected/stranger.ri" <<'EOF'
 module stranger
 
 puts "y"
 EOF
-answer="$(cd "$WORK/affected" && "$IYI" check types --affected "$REPO/src/std/text.iyi" --json 2>&1)"
+answer="$(cd "$WORK/affected" && "$RIS" check types --affected "$REPO/src/std/text.ri" --json 2>&1)"
 case "$answer" in
-  *'"consumer.iyi"'*)
+  *'"consumer.ri"'*)
     case "$answer" in
-      *'"stranger.iyi"'*)
+      *'"stranger.ri"'*)
         echo "FAIL: check --affected named a file that does not import the change"
         echo "  $answer"
         status=1
@@ -111,7 +111,7 @@ case "$answer" in
     esac
     ;;
   *)
-    echo "FAIL: check --affected did not name the consumer of src/std/text.iyi"
+    echo "FAIL: check --affected did not name the consumer of src/std/text.ri"
     echo "  $answer"
     status=1
     ;;
@@ -123,9 +123,9 @@ esac
 # no consumer, all compile.
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
-    answer="$(cd "$WORK/affected" && "$IYI" check types --affected "\\\\?\\$(cygpath -w "$REPO/src/std/text.iyi")" --json 2>&1)"
+    answer="$(cd "$WORK/affected" && "$RIS" check types --affected "\\\\?\\$(cygpath -w "$REPO/src/std/text.ri")" --json 2>&1)"
     case "$answer" in
-      *'"consumer.iyi"'*) echo "check --affected of a change spelled \\\\?\\ names its consumer" ;;
+      *'"consumer.ri"'*) echo "check --affected of a change spelled \\\\?\\ names its consumer" ;;
       *)
         echo "FAIL: check --affected of a change spelled \\\\?\\ named no consumer"
         echo "  $answer"
@@ -135,23 +135,23 @@ case "$(uname -s)" in
     ;;
 esac
 
-# And the workspace R-1 exists for: the dependency is a `.iyimod` and its
+# And the workspace R-1 exists for: the dependency is a `.rimod` and its
 # source is gone (III.7). A build reads it because it was told to with a
 # flag; these verbs have no flag and read `mods` beside the root, for a
 # module whose source is not there. Before that they answered `can't find
-# module` about a module `build --use-iyimod` compiles fine against — the
+# module` about a module `build --use-rimod` compiles fine against — the
 # agent loop's first two steps, broken in the one workspace the boundary
 # is for.
 mkdir -p "$WORK/artifact-only/app"
 cd "$WORK/artifact-only" || exit 1
-cat > app/base.iyi <<'EOF'
+cat > app/base.ri <<'EOF'
 module app/base
 
 pub def value : Int32
   42
 end
 EOF
-cat > main.iyi <<'EOF'
+cat > main.ri <<'EOF'
 module main
 
 import app/base::{value}
@@ -163,26 +163,26 @@ end
 
 puts run
 EOF
-export IYI_PATH="$REPO/src${PSEP}$WORK/artifact-only"
-if ! "$IYI" build --emit-iyimod mods -o out main.iyi > emit.log 2>&1; then
+export RIS_PATH="$REPO/src${PSEP}$WORK/artifact-only"
+if ! "$RIS" build --emit-rimod mods -o out main.ri > emit.log 2>&1; then
   echo "FAIL: the artifact-only workspace does not build from source"
   sed -n '1,6p' emit.log | sed 's/^/  /'
   status=1
 else
-  rm -f app/base.iyi
-  if ! "$IYI" build --use-iyimod mods -o out2 main.iyi > use.log 2>&1; then
+  rm -f app/base.ri
+  if ! "$RIS" build --use-rimod mods -o out2 main.ri > use.log 2>&1; then
     echo "FAIL: the build cannot read the artifacts it just wrote"
     sed -n '1,6p' use.log | sed 's/^/  /'
     status=1
   else
-    if "$IYI" check types main.iyi > check.log 2>&1; then
+    if "$RIS" check types main.ri > check.log 2>&1; then
       echo "check types a file whose dependency is only an artifact"
     else
       echo "FAIL: check refuses a file the build compiles"
       sed -n '1,6p' check.log | sed 's/^/  /'
       status=1
     fi
-    if "$IYI" doc main.iyi > doc.log 2>&1 && grep -q "^module main" doc.log; then
+    if "$RIS" doc main.ri > doc.log 2>&1 && grep -q "^module main" doc.log; then
       echo "doc reads a module whose dependency is only an artifact"
     else
       echo "FAIL: doc refuses a file the build compiles"
@@ -197,7 +197,7 @@ fi
 # test importing a library module has to be among them.
 mkdir -p "$WORK/selection"
 cd "$WORK/selection" || exit 1
-cat > uses_library_test.iyi <<'EOF'
+cat > uses_library_test.ri <<'EOF'
 module uses_library_test
 
 import std/text
@@ -208,13 +208,13 @@ end
 
 test_join
 EOF
-cat > stranger_test.iyi <<'EOF'
+cat > stranger_test.ri <<'EOF'
 module stranger_test
 
 puts "nothing to do with it"
 EOF
-export IYI_PATH="$REPO/src"
-selected="$("$IYI" test --affected "$REPO/src/std/text.iyi" 2>&1 | tail -1)"
+export RIS_PATH="$REPO/src"
+selected="$("$RIS" test --affected "$REPO/src/std/text.ri" 2>&1 | tail -1)"
 case "$selected" in
   "1 passed, 0 failed, 1 skipped"*)
     echo "test --affected runs the test that imports a library module, and only it"
@@ -230,17 +230,17 @@ cd "$WORK" || exit 1
 # modules are source, its library is an artifact. `mod context` compiles
 # an import alone to read its surface, and that compile has the same
 # imports the module has — so grounding `app/mid` meant compiling it
-# against an `app/base` that is only a `.iyimod`.
+# against an `app/base` that is only a `.rimod`.
 mkdir -p "$WORK/mixed/app"
 cd "$WORK/mixed" || exit 1
-cat > app/base.iyi <<'EOF'
+cat > app/base.ri <<'EOF'
 module app/base
 
 pub def value : Int32
   42
 end
 EOF
-cat > app/mid.iyi <<'EOF'
+cat > app/mid.ri <<'EOF'
 module app/mid
 
 import app/base::{value}
@@ -249,28 +249,28 @@ pub def doubled : Int32
   value * 2
 end
 EOF
-cat > main.iyi <<'EOF'
+cat > main.ri <<'EOF'
 module main
 
 import app/mid::{doubled}
 
 puts doubled
 EOF
-export IYI_PATH="$REPO/src${PSEP}$WORK/mixed"
-if ! "$IYI" build --emit-iyimod mods -o out main.iyi > emit.log 2>&1; then
+export RIS_PATH="$REPO/src${PSEP}$WORK/mixed"
+if ! "$RIS" build --emit-rimod mods -o out main.ri > emit.log 2>&1; then
   echo "FAIL: the mixed workspace does not build from source"
   sed -n '1,6p' emit.log | sed 's/^/  /'
   status=1
 else
-  rm -f app/base.iyi
-  answer="$("$IYI" run main.iyi 2>&1 | tail -1)"
+  rm -f app/base.ri
+  answer="$("$RIS" run main.ri 2>&1 | tail -1)"
   if [ "$answer" = "84" ]; then
     echo "run answers through a source module whose own import is an artifact"
   else
     echo "FAIL: run answered '$answer', expected 84"
     status=1
   fi
-  if "$IYI" mod context main.iyi > ctx.log 2>&1 && ! grep -q "does not" ctx.log; then
+  if "$RIS" mod context main.ri > ctx.log 2>&1 && ! grep -q "does not" ctx.log; then
     echo "mod context grounds a source module whose own import is an artifact"
   else
     echo "FAIL: mod context left the mixed workspace ungrounded"
@@ -281,42 +281,42 @@ fi
 cd "$WORK" || exit 1
 
 # And the shape a developer is in most of the time: artifacts left over
-# from an earlier `--emit-iyimod` run, and a source they have since
+# from an earlier `--emit-rimod` run, and a source they have since
 # edited. The source wins — which is the whole of why these verbs read
 # artifacts *after* sources. Read the other way round the artifact no
 # longer describes its module, and a plain build would refuse (IV.3)
 # about a file the developer is looking at.
 mkdir -p "$WORK/stale/app"
 cd "$WORK/stale" || exit 1
-cat > app/base.iyi <<'EOF'
+cat > app/base.ri <<'EOF'
 module app/base
 
 pub def value : Int32
   1
 end
 EOF
-cat > main.iyi <<'EOF'
+cat > main.ri <<'EOF'
 module main
 
 import app/base::{value}
 
 puts value
 EOF
-export IYI_PATH="$REPO/src${PSEP}$WORK/stale"
-if ! "$IYI" build --emit-iyimod mods -o seed main.iyi > emit.log 2>&1; then
+export RIS_PATH="$REPO/src${PSEP}$WORK/stale"
+if ! "$RIS" build --emit-rimod mods -o seed main.ri > emit.log 2>&1; then
   echo "FAIL: the stale-artifact workspace does not build from source"
   sed -n '1,6p' emit.log | sed 's/^/  /'
   status=1
 else
   # The edit the artifacts do not know about.
-  cat > app/base.iyi <<'EOF'
+  cat > app/base.ri <<'EOF'
 module app/base
 
 pub def value : Int32
   2
 end
 EOF
-  answer="$("$IYI" run main.iyi 2>&1 | tail -1)"
+  answer="$("$RIS" run main.ri 2>&1 | tail -1)"
   if [ "$answer" = "2" ]; then
     echo "a left-over artifact loses to the source beside it"
   else
@@ -332,15 +332,15 @@ cd "$WORK" || exit 1
 # used; `std/static_array`'s `macro []` on `::StaticArray` was not in the
 # artifact at all; `mod context --json` had no macro anywhere; and a
 # module's own `pub macro` was its line without the doc comment above it.
-export IYI_PATH="$REPO/src"
+export RIS_PATH="$REPO/src"
 mkdir -p "$WORK/macros"
 cd "$WORK/macros" || exit 1
-"$IYI" doc std/eiy > eiy.txt 2>&1
-"$IYI" doc std/static_array > static_array.txt 2>&1
-"$IYI" doc std/derives > derives.txt 2>&1
-printf 'import std/eiy::{Eiy}\n\nputs Eiy::Buffer.new.to_s\n' > uses_eiy.iyi
-"$IYI" mod context uses_eiy.iyi > eiy_context.txt 2>&1
-"$IYI" mod context --json uses_eiy.iyi > eiy_context.json 2>&1
+"$RIS" doc std/eiy > eiy.txt 2>&1
+"$RIS" doc std/static_array > static_array.txt 2>&1
+"$RIS" doc std/derives > derives.txt 2>&1
+printf 'import std/eiy::{Eiy}\n\nputs Eiy::Buffer.new.to_s\n' > uses_eiy.ri
+"$RIS" mod context uses_eiy.ri > eiy_context.txt 2>&1
+"$RIS" mod context --json uses_eiy.ri > eiy_context.json 2>&1
 missing=""
 for line in "  macro embed(filename, io_name)" "  macro render(filename)" "  macro def_to_s(filename)"; do
   grep -qxF -- "$line" eiy.txt || missing="$missing doc:'$line'"
@@ -370,16 +370,16 @@ cd "$WORK" || exit 1
 # The corpus is the samples again, and the comparison is the file's own
 # `import` lines: every one that names a module living under `samples/`
 # has to appear in the tree. `-i` because the samples are reached through
-# `IYI_PATH`, and everything on the search path is library code to this
+# `RIS_PATH`, and everything on the search path is library code to this
 # tool — that part is Crystal's rule and stays.
 cd "$REPO" || exit 1
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 edges=0
 missing=""
-for source in "$REPO"/samples/iyi/*.iyi; do
-  name="$(basename "$source" .iyi)"
+for source in "$REPO"/samples/ris/*.ri; do
+  name="$(basename "$source" .ri)"
   tree="$WORK/$name.deps"
-  if ! "$IYI" tool dependencies -i "$REPO/samples" -f flat "$source" > "$tree" 2>&1; then
+  if ! "$RIS" tool dependencies -i "$REPO/samples" -f flat "$source" > "$tree" 2>&1; then
     echo "FAIL: tool dependencies failed on $name"
     sed -n '1,4p' "$tree" | sed 's/^/  /'
     status=1
@@ -390,8 +390,8 @@ for source in "$REPO"/samples/iyi/*.iyi; do
   # posix by grammar (R-1). One spelling before the comparison.
   tr '\\' '/' < "$tree" > "$tree.posix" && mv "$tree.posix" "$tree"
   while read -r module; do
-    [ -f "$REPO/samples/iyi/$module.iyi" ] || continue
-    if grep -qF "samples/iyi/$module.iyi" "$tree"; then
+    [ -f "$REPO/samples/ris/$module.ri" ] || continue
+    if grep -qF "samples/ris/$module.ri" "$tree"; then
       edges=$((edges + 1))
     else
       missing="$missing $name->$module"
@@ -405,7 +405,7 @@ done
 if [ -n "$missing" ]; then
   echo "FAIL: tool dependencies left these edges out of its tree:$missing"
 else
-  echo "tool dependencies draws every local import in samples/iyi: $edges edges"
+  echo "tool dependencies draws every local import in samples/ris: $edges edges"
 fi
 cd "$WORK" || exit 1
 
@@ -414,14 +414,14 @@ cd "$WORK" || exit 1
 # compiler keeps variables there too: definition typing writes
 # `__iyi_dt_*` probes — an `uninitialized` receiver and return value in an
 # `if false` — to check a def against its own declaration. They were
-# printed as the author's: `tool types samples/iyi/calc.iyi` answered with
-# twenty-three of them and one real variable, and `samples/iyi/modules.iyi`
+# printed as the author's: `tool types samples/ris/calc.ri` answered with
+# twenty-three of them and one real variable, and `samples/ris/modules.ri`
 # was twenty-three out of twenty-three. The language server's own list is
 # step 12b of `test/cli/lsp_session.py`; this is the other path to the same
 # names.
 mkdir -p "$WORK/names"
 cd "$WORK/names" || exit 1
-cat > shape.iyi <<'EOF'
+cat > shape.ri <<'EOF'
 struct Point
   getter x : Int32
 
@@ -436,8 +436,8 @@ end
 spot = Point.new(2)
 puts spot.double
 EOF
-export IYI_PATH="$REPO/src"
-"$IYI" tool types shape.iyi > types.txt 2>&1
+export RIS_PATH="$REPO/src"
+"$RIS" tool types shape.ri > types.txt 2>&1
 invented="$(grep -c '^__' types.txt || true)"
 if ! grep -q '^spot : Point' types.txt; then
   echo "FAIL: tool types did not name the variable the file writes"
@@ -464,7 +464,7 @@ cd "$WORK" || exit 1
 # reader to reach with `import geo/shape::{…}`.
 mkdir -p "$WORK/impls/geo"
 cd "$WORK/impls" || exit 1
-cat > geo/shape.iyi <<'EOF'
+cat > geo/shape.ri <<'EOF'
 module geo/shape
 
 pub trait Shape
@@ -485,14 +485,14 @@ impl Shape for Box
   end
 end
 EOF
-cat > main.iyi <<'EOF'
+cat > main.ri <<'EOF'
 import geo/shape::{Box}
 
 b = Box.new(3)
 puts b.area
 EOF
-export IYI_PATH="$REPO/src${PSEP}$WORK/impls"
-"$IYI" mod context main.iyi > surface.txt 2>&1
+export RIS_PATH="$REPO/src${PSEP}$WORK/impls"
+"$RIS" mod context main.ri > surface.txt 2>&1
 if ! grep -q '^impl Shape for Box$' surface.txt; then
   echo "FAIL: the caller's view does not write the impl in iyi's own names"
   grep -n 'impl ' surface.txt | sed 's/^/  /' | head -3
@@ -516,20 +516,20 @@ cd "$WORK" || exit 1
 # check` said what was wrong and where.
 mkdir -p "$WORK/broken/kit"
 cd "$WORK/broken" || exit 1
-cat > kit/all.iyi <<'EOF'
+cat > kit/all.ri <<'EOF'
 module kit/all
 
 pub def make : Int32
   nonesuch_helper(1)
 end
 EOF
-cat > main.iyi <<'EOF'
+cat > main.ri <<'EOF'
 import kit/all::{make}
 
 puts make
 EOF
-export IYI_PATH="$REPO/src${PSEP}$WORK/broken"
-"$IYI" mod context main.iyi > broken.txt 2>&1
+export RIS_PATH="$REPO/src${PSEP}$WORK/broken"
+"$RIS" mod context main.ri > broken.txt 2>&1
 if grep -q 'while importing' broken.txt; then
   echo "FAIL: mod context answered with the wrapper instead of the diagnostic"
   grep 'does not compile' broken.txt | sed 's/^/  /' | head -2
@@ -547,7 +547,7 @@ fi
 scratch="$WORK/doc-tmp"
 mkdir -p "$scratch"
 TMPDIR="$scratch" TEMP="$(cygpath -w "$scratch" 2>/dev/null || echo "$scratch")" TMP="$(cygpath -w "$scratch" 2>/dev/null || echo "$scratch")" \
-  "$IYI" doc kit/all > broken_doc.txt 2>&1
+  "$RIS" doc kit/all > broken_doc.txt 2>&1
 if [ -n "$(ls -A "$scratch")" ]; then
   echo "FAIL: iyi doc of a module that does not compile left $(ls "$scratch" | head -1) behind"
   status=1
@@ -565,14 +565,14 @@ cd "$WORK" || exit 1
 # is right, about a surface it never showed.
 mkdir -p "$WORK/facade/deep"
 cd "$WORK/facade" || exit 1
-cat > deep/core.iyi <<'EOF'
+cat > deep/core.ri <<'EOF'
 module deep/core
 
 pub def core_value : Int32
   7
 end
 EOF
-cat > facade.iyi <<'EOF'
+cat > facade.ri <<'EOF'
 module facade
 
 pub import deep/core
@@ -584,18 +584,18 @@ EOF
 # deep/core is reached through the facade's `pub import` and nothing of
 # main's own: an `import deep/core::*` would import it here, and then it would
 # be main's dependency and no re-export at all.
-cat > main.iyi <<'EOF'
+cat > main.ri <<'EOF'
 import facade::{facade_value}
 
 puts Deep::Core.core_value + facade_value
 EOF
-export IYI_PATH="$REPO/src${PSEP}$WORK/facade"
-if ! "$IYI" run main.iyi > facade_run.txt 2>&1 || [ "$(tail -1 facade_run.txt)" != "8" ]; then
+export RIS_PATH="$REPO/src${PSEP}$WORK/facade"
+if ! "$RIS" run main.ri > facade_run.txt 2>&1 || [ "$(tail -1 facade_run.txt)" != "8" ]; then
   echo "FAIL: the facade fixture does not run"
   sed -n '1,4p' facade_run.txt | sed 's/^/  /'
   status=1
 else
-  "$IYI" mod context main.iyi > facade_pack.txt 2>&1
+  "$RIS" mod context main.ri > facade_pack.txt 2>&1
   if ! grep -q 'pub def core_value : Int32' facade_pack.txt; then
     echo "FAIL: the pack does not carry what the facade re-exports"
     grep '^── import' facade_pack.txt | sed 's/^/  /'
@@ -622,7 +622,7 @@ cd "$WORK" || exit 1
 # which every platform links, asked of the dump.
 mkdir -p "$WORK/libs/m"
 cd "$WORK/libs" || exit 1
-cat > m/netty.iyi <<'EOF'
+cat > m/netty.ri <<'EOF'
 module m/netty
 
 pub class Box
@@ -635,30 +635,30 @@ pub class Box
   end
 end
 EOF
-printf 'import m/netty::{Box}\n\nputs Box.c(-3)\n' > main.iyi
-export IYI_PATH="$REPO/src${PSEP}$WORK/libs"
-if ! "$IYI" build --emit-iyimod mods -o libs_main main.iyi > libs_build.txt 2>&1; then
+printf 'import m/netty::{Box}\n\nputs Box.c(-3)\n' > main.ri
+export RIS_PATH="$REPO/src${PSEP}$WORK/libs"
+if ! "$RIS" build --emit-rimod mods -o libs_main main.ri > libs_build.txt 2>&1; then
   echo "FAIL: the lib fixture does not build"
   sed -n '1,4p' libs_build.txt | sed 's/^/  /'
   status=1
-elif "$IYI" mod dump mods/m/netty.iyimod | sed -n '/^libs/,/^[a-z]/p' | grep -q 'M::Netty::Box::LibMathy'; then
+elif "$RIS" mod dump mods/m/netty.rimod | sed -n '/^libs/,/^[a-z]/p' | grep -q 'M::Netty::Box::LibMathy'; then
   echo "an artifact names the lib its object code calls"
 else
   echo "FAIL: the artifact's object code calls LibMathy and its libs do not say so"
-  "$IYI" mod dump mods/m/netty.iyimod | grep -n '^libs\|^object code' | sed 's/^/  /'
+  "$RIS" mod dump mods/m/netty.rimod | grep -n '^libs\|^object code' | sed 's/^/  /'
   status=1
 fi
 cd "$WORK" || exit 1
 
-# An entry below its project's root, `app/main.iyi` declaring `module
+# An entry below its project's root, `app/main.ri` declaring `module
 # app/main`: its import of `app/util` is resolved from above `app`, as a
 # build resolves it, and not reported as not resolving, exit 0.
 mkdir -p "$WORK/headed/app"
 cd "$WORK/headed" || exit 1
-printf 'module app/util\n\npub def answer : Int32\n  42\nend\n' > app/util.iyi
-printf 'module app/main\n\nimport app/util::{answer}\n\nputs answer\n' > app/main.iyi
-unset IYI_PATH
-"$IYI" mod context app/main.iyi > headed.txt 2>&1
+printf 'module app/util\n\npub def answer : Int32\n  42\nend\n' > app/util.ri
+printf 'module app/main\n\nimport app/util::{answer}\n\nputs answer\n' > app/main.ri
+unset RIS_PATH
+"$RIS" mod context app/main.ri > headed.txt 2>&1
 if grep -q "does not resolve" headed.txt || ! grep -q "pub def answer : Int32" headed.txt; then
   echo "FAIL: an entry below its root did not ground its import by the header's root"
   sed -n '1,4p' headed.txt | sed 's/^/  /'
@@ -669,7 +669,7 @@ fi
 cd "$WORK" || exit 1
 
 # A project whose directory's name holds the platform's path-list
-# separator: the module's root travelled as the front of `IYI_PATH`, and
+# separator: the module's root travelled as the front of `RIS_PATH`, and
 # `a;b` (`a:b` elsewhere) arrived as two entries, so `iyi doc` and `mod
 # context` answered "can't find module" about a module `iyi run` builds.
 case "$(uname -s)" in
@@ -678,10 +678,10 @@ case "$(uname -s)" in
 esac
 mkdir -p "$listed/app"
 cd "$listed" || exit 1
-printf 'module app/lib\n\npub def value : Int32\n  7\nend\n' > app/lib.iyi
-printf 'import app/lib::{value}\n\nputs value\n' > user.iyi
-"$IYI" doc app/lib > listed_doc.txt 2>&1
-"$IYI" mod context user.iyi > listed_ctx.txt 2>&1
+printf 'module app/lib\n\npub def value : Int32\n  7\nend\n' > app/lib.ri
+printf 'import app/lib::{value}\n\nputs value\n' > user.ri
+"$RIS" doc app/lib > listed_doc.txt 2>&1
+"$RIS" mod context user.ri > listed_ctx.txt 2>&1
 if grep -q "pub def value : Int32" listed_doc.txt && grep -q "pub def value : Int32" listed_ctx.txt; then
   echo "a project in $(basename "$listed") is documented and grounded"
 else
@@ -697,11 +697,11 @@ cd "$WORK" || exit 1
 # doc line is `#`: `iyi doc String` ended six lines in `# `.
 mkdir -p "$WORK/spelled/app"
 cd "$WORK/spelled" || exit 1
-printf 'module app/nest\n\npub def value : Int32\n  7\nend\n' > app/nest.iyi
-"$IYI" doc app/nest > spelled_doc.txt 2>&1
-"$IYI" doc String > string_doc.txt 2>&1
-if "$IYI" doc app/Nest > other_case.txt 2>&1 || grep -q '^module app/nest' other_case.txt; then
-  echo "FAIL: \`iyi doc app/Nest\` answered for app/nest"
+printf 'module app/nest\n\npub def value : Int32\n  7\nend\n' > app/nest.ri
+"$RIS" doc app/nest > spelled_doc.txt 2>&1
+"$RIS" doc String > string_doc.txt 2>&1
+if "$RIS" doc app/Nest > other_case.txt 2>&1 || grep -q '^module app/nest' other_case.txt; then
+  echo "FAIL: \`ris doc app/Nest\` answered for app/nest"
   sed -n '1,2p' other_case.txt | sed 's/^/  /'
   status=1
 elif ! grep -q '^pub def value : Int32' spelled_doc.txt || grep -q ' $' string_doc.txt; then
@@ -710,7 +710,7 @@ elif ! grep -q '^pub def value : Int32' spelled_doc.txt || grep -q ' $' string_d
   grep -n ' $' string_doc.txt | head -3 | sed 's/^/  /'
   status=1
 else
-  echo "\`iyi doc app/Nest\` is refused as app/nest's, and String's doc has no line ending in a space"
+  echo "\`ris doc app/Nest\` is refused as app/nest's, and String's doc has no line ending in a space"
 fi
 cd "$WORK" || exit 1
 
@@ -721,11 +721,11 @@ cd "$WORK" || exit 1
 # differed on a Windows checkout.
 mkdir -p "$WORK/endings/lf" "$WORK/endings/crlf"
 cd "$WORK/endings" || exit 1
-printf 'module lib\n\n# Doubles *x*.\n#\n# Second paragraph.\npub def twice(x : Int32) : Int32\n  x * 2\nend\n' > lf/lib.iyi
-awk '{ printf "%s\r\n", $0 }' lf/lib.iyi > crlf/lib.iyi
+printf 'module lib\n\n# Doubles *x*.\n#\n# Second paragraph.\npub def twice(x : Int32) : Int32\n  x * 2\nend\n' > lf/lib.ri
+awk '{ printf "%s\r\n", $0 }' lf/lib.ri > crlf/lib.ri
 for ending in lf crlf; do
-  printf 'module use\n\nimport lib::{twice}\n\nputs twice(1)\n' > "$ending/use.iyi"
-  (cd "$ending" && "$IYI" doc lib.iyi > "../$ending.doc" 2>&1 && "$IYI" mod context --json use.iyi > "../$ending.json" 2>&1)
+  printf 'module use\n\nimport lib::{twice}\n\nputs twice(1)\n' > "$ending/use.ri"
+  (cd "$ending" && "$RIS" doc lib.ri > "../$ending.doc" 2>&1 && "$RIS" mod context --json use.ri > "../$ending.json" 2>&1)
 done
 if cmp -s lf.doc crlf.doc && grep -qF '"doc":"Doubles *x*.\n\nSecond paragraph."' crlf.json; then
   echo "a CRLF file's doc comments read as the LF file's, in doc and in the context pack"
@@ -748,7 +748,7 @@ cd "$WORK" || exit 1
 # A blank doc line came out as `# `, with a trailing space.
 mkdir -p "$WORK/whole/app"
 cd "$WORK/whole" || exit 1
-cat > app/surf.iyi <<'EOF'
+cat > app/surf.ri <<'EOF'
 module app/surf
 
 # The limit.
@@ -789,12 +789,12 @@ end
 
 pub alias Num = Int32 | Float64
 EOF
-printf 'import app/surf::{double}\n\nputs double(2)\n' > main.iyi
-export IYI_PATH="$REPO/src${PSEP}$WORK/whole"
-"$IYI" doc app/surf > whole_doc.txt 2>&1
-"$IYI" mod context main.iyi > whole_ctx.txt 2>&1
+printf 'import app/surf::{double}\n\nputs double(2)\n' > main.ri
+export RIS_PATH="$REPO/src${PSEP}$WORK/whole"
+"$RIS" doc app/surf > whole_doc.txt 2>&1
+"$RIS" mod context main.ri > whole_ctx.txt 2>&1
 hint='import app/surf::{double, twice, LIMIT, Container, Num, Outer, Size}'
-printf '%s\n\nputs twice(LIMIT) + Outer::WIDTH + Size::Big.value + Outer::Inner.new.val\n' "$hint" > hint.iyi
+printf '%s\n\nputs twice(LIMIT) + Outer::WIDTH + Size::Big.value + Outer::Inner.new.val\n' "$hint" > hint.ri
 absent=""
 for line in 'pub LIMIT = 5' 'pub macro twice(x)' '  Small = 1' '  Big = 10' '  WIDTH = 3' \
   '  # Inner.' '  struct Inner' '    def val : Int32' '  type Elem' 'pub alias Num = Int32 | Float64'; do
@@ -802,7 +802,7 @@ for line in 'pub LIMIT = 5' 'pub macro twice(x)' '  Small = 1' '  Big = 10' '  W
 done
 after_alias="$(grep -A1 -xF 'pub alias Num = Int32 | Float64' whole_doc.txt | sed -n '2p')"
 if [ -z "$absent" ] && [ "$after_alias" != "end" ] && ! grep -q ' $' whole_doc.txt &&
-   grep -qF "#   $hint" whole_ctx.txt && "$IYI" check types hint.iyi > hint_check.txt 2>&1; then
+   grep -qF "#   $hint" whole_ctx.txt && "$RIS" check types hint.ri > hint_check.txt 2>&1; then
   echo "doc and mod context list members, nested types, associated types, constants and macros, and the import line names them"
 else
   echo "FAIL: the surface of app/surf left something out"

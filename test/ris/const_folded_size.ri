@@ -1,0 +1,7 @@
+# A constant's value is wrapped in `::__ris_program_init do ... end`; a
+# StaticArray size read from it folds the block's body. `C = 3 + 3`
+# was "invalid constant value" in StaticArray(Int32, C).
+SUM = 3 + 3
+MOD = -7 % 3 + 3
+raise "sum size" unless sizeof(StaticArray(Int32, SUM)) == 24
+raise "mod size" unless sizeof(StaticArray(Int32, MOD)) == 8

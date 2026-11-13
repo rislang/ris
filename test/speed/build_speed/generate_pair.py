@@ -3,7 +3,7 @@
 
 `hello` is the only pair in this bench that needs no argument about being a
 pair — one line, one `puts`. It is also the pair that says nothing about what
-happens when there is user code, and `webapp.iyi` costing the same as `hello`
+happens when there is user code, and `webapp.ri` costing the same as `hello`
 is the measurement that made that worth fixing (iyi SPEC 0.1.0 item 5).
 
 Writing a second pair by hand invites the question this bench exists to avoid:
@@ -112,8 +112,8 @@ def main_go(types):
 
 
 def write_pair(directory, types):
-    """Writes `medium.iyi` and `medium.go` into *directory*, returning both paths."""
-    iyi = directory / "medium.iyi"
+    """Writes `medium.ri` and `medium.go` into *directory*, returning both paths."""
+    iyi = directory / "medium.ri"
     go = directory / "medium.go"
     iyi.write_text(HEADER_IYI + "".join(widget_iyi(i) for i in range(types)) + main_iyi(types))
     go.write_text(HEADER_GO + "".join(widget_go(i) for i in range(types)) + main_go(types))

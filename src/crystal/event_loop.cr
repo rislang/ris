@@ -17,7 +17,7 @@ abstract class Crystal::EventLoop
       {% elsif flag?("evloop=kqueue") || flag?(:darwin) || flag?(:freebsd) || flag?(:openbsd) %}
         Crystal::EventLoop::Kqueue
       {% else %}
-        {% raise "No event loop for this target: iyi carries epoll, kqueue and io_uring" %}
+        {% raise "No event loop for this target: ris carries epoll, kqueue and io_uring" %}
       {% end %}
     {% elsif flag?(:win32) %}
       Crystal::EventLoop::IOCP
@@ -171,7 +171,7 @@ end
     # above cover every platform this builds for. A unix that lands here
     # needs one of them written for it, which is a better failure than a
     # link against a library that may not be here.
-    {% raise "No event loop for this target: iyi carries epoll, kqueue and io_uring" %}
+    {% raise "No event loop for this target: ris carries epoll, kqueue and io_uring" %}
   {% end %}
 {% elsif flag?(:win32) %}
   require "./event_loop/iocp"

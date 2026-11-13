@@ -1,6 +1,6 @@
 # iyi: the piece that turns a manifest into search roots. `iyi build` calls
 # this once, before semantic: if the project root (`Compiler.entry_root_of`)
-# has an `iyi.mod`, its requirements are resolved (MVS, resolver.cr), every
+# has an `ris.mod`, its requirements are resolved (MVS, resolver.cr), every
 # selection is checked out (fetcher.cr), and the program gets a prefix
 # table the import resolver consults — longest prefix first, so
 # `github.com/user/lib/v2` wins over `github.com/user/lib` when both are
@@ -14,24 +14,32 @@ require "./reach"
 
 module Iyi::Mod
   module Installer
-    # ris: a ris module is named by `ris.mod`; an iyi package's `iyi.mod`
-    # is read where there is no `ris.mod`, so iyi packages stay requirable.
-    MANIFEST     = "ris.mod"
-    IYI_MANIFEST = "iyi.mod"
-    MANIFESTS    = {MANIFEST, IYI_MANIFEST}
+    # ris: a ris module is named by `ris.mod`, its pins by `ris.sum`.
+    # iyi's names are refused, never read (SPEC 6.10): the sum's hash
+    # lines have ris.sum's format, so a rename loses no pin.
+    MANIFEST  = "ris.mod"
+    MANIFESTS = {MANIFEST}
 
-    # The manifest in *dir*: `ris.mod`, else an existing `iyi.mod`, else
-    # where a new `ris.mod` would go.
-    def self.manifest_in(dir : String) : String
-      ris = File.join(dir, MANIFEST)
-      return ris if File.file?(ris)
-      iyi = File.join(dir, IYI_MANIFEST)
-      File.file?(iyi) ? iyi : ris
+    # Raises the refusal when *dir* holds `iyi.mod` or `iyi.sum`.
+    def self.refuse_iyi_files(dir : String) : Nil
+      {"iyi.mod", "iyi.sum"}.each do |name|
+        path = File.join(dir, name)
+        if File.file?(path)
+          raise Iyi::Error.new(Iyi::Lexer.iyi_miscased_sentence(path))
+        end
+      end
     end
 
-    # Whether *dir* holds a module manifest of either name.
+    # The manifest in *dir*: `ris.mod`, or where a new one would go.
+    def self.manifest_in(dir : String) : String
+      refuse_iyi_files(dir)
+      File.join(dir, MANIFEST)
+    end
+
+    # Whether *dir* holds a module manifest.
     def self.manifest?(dir : String) : Bool
-      MANIFESTS.any? { |name| File.file?(File.join(dir, name)) }
+      refuse_iyi_files(dir)
+      File.file?(File.join(dir, MANIFEST))
     end
 
     # The prefix table for the program answered from *entry_dir* - the root
@@ -95,13 +103,13 @@ module Iyi::Mod
       selections = self.selections(dir, root)
 
       # Fact against policy, before anything is compiled: every selection's
-      # checkout is hashed against `iyi.sum`, a mismatch is a refusal, and a
+      # checkout is hashed against `ris.sum`, a mismatch is a refusal, and a
       # missing entry is recorded — the tool writes facts down (III.7 step 2).
       # A replaced module is none of that: it is a directory somebody is
       # editing, and a hash of it would refuse the next keystroke.
       # A `reaches` limit, before anything is recorded: a version that
       # reaches past what its line allows is refused by name, and neither
-      # iyi.sum nor - in a `get` - iyi.mod is written. Paid only by lines
+      # ris.sum nor - in a `get` - ris.mod is written. Paid only by lines
       # that write one.
       root.requirements.each do |requirement|
         next unless allowed = requirement.reaches
@@ -126,7 +134,7 @@ module Iyi::Mod
     end
 
     # What *root*'s graph selects, and nothing else: no checkout beyond the
-    # manifests the walk reads, and `iyi.sum` neither checked nor written.
+    # manifests the walk reads, and `ris.sum` neither checked nor written.
     # The question `mod tidy` asks of manifests it has not written yet.
     def self.selections(dir : String, root : ModFile) : Array(Selection)
       replaced = replaced_directories(dir, root)
@@ -150,7 +158,7 @@ module Iyi::Mod
     end
 
     # The manifest at a replacement's directory, which has to be the module
-    # it stands in for: a directory is not a module until its `iyi.mod`
+    # it stands in for: a directory is not a module until its `ris.mod`
     # says whose it is, and a replacement pointed at the wrong checkout is
     # the mistake this catches before any import resolves into it.
     private def self.local_manifest(path : String, local : String, written : String) : ModFile

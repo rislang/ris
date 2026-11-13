@@ -5,9 +5,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -43,12 +43,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_random_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_random_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -96,7 +96,7 @@ echo "== what rand refuses"
 # A bound or range that holds no value is a panic that says so, never a
 # zero or an end of the range made up. One probe program, the case named
 # by its argument.
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/random::{Random}
@@ -111,8 +111,8 @@ when "float"     then puts r.rand(0.0)
 when "floats"    then puts r.rand(2.0..1.0)
 when "bytes"     then puts Random::Secure.random_bytes(-1).size
 end
-IYI
-if ! "$IYI" build -o "$WORK/refuse" "$WORK/refuse.iyi" >"$WORK/refuse.build" 2>&1; then
+RIS
+if ! "$RIS" build -o "$WORK/refuse" "$WORK/refuse.ri" >"$WORK/refuse.build" 2>&1; then
   echo "  the probe did not build"
   sed -n '1,10p' "$WORK/refuse.build"
   status=1
@@ -125,7 +125,7 @@ else
       echo "  $case_name: refused without saying why: $(sed -n '1p' "$WORK/refuse.out")"
       status=1
     else
-      echo "  $case_name: $(sed -n '1p' "$WORK/refuse.out" | sed 's/^iyi: panic: //')"
+      echo "  $case_name: $(sed -n '1p' "$WORK/refuse.out" | sed 's/^ris: panic: //')"
     fi
   done
 fi
@@ -181,7 +181,7 @@ except OSError as e:
         print("skip: getrandom answered " + str(e)); sys.exit(3)
 os.execv(sys.argv[1], sys.argv[1:])
 PY
-cat >"$WORK/fallback.iyi" <<'IYI'
+cat >"$WORK/fallback.ri" <<'RIS'
 module fallback
 
 import std/random::{Random}
@@ -190,14 +190,14 @@ import std/random::{Random}
   bytes = Random::Secure.random_bytes(32)
   puts bytes.map { |b| (b.to_i32 < 16 ? "0" : "") + b.to_i32.to_s(16) }.join
 end
-IYI
+RIS
 printf 'A%.0s' $(seq 1 4096) >"$WORK/not-a-device"
-# fallback_build <copy of random.iyi> <label> [device]: the probe built
+# fallback_build <copy of random.ri> <label> [device]: the probe built
 # over that copy, its `URANDOM` line naming *device* when one is given, as
 # $WORK/fallback-<label>. Fails when the line is missing or the build does.
 fallback_build() {
   rm -rf "$WORK/devcopy" && mkdir -p "$WORK/devcopy/std"
-  "$PY" - "$1" "$WORK/devcopy/std/random.iyi" "${3:-/dev/urandom}" <<'PY' || return 1
+  "$PY" - "$1" "$WORK/devcopy/std/random.ri" "${3:-/dev/urandom}" <<'PY' || return 1
 import sys
 src = open(sys.argv[1], encoding="utf-8").read()
 old = 'URANDOM = "/dev/urandom"'
@@ -205,7 +205,7 @@ if src.count(old) != 1:
     raise SystemExit("the device's line is missing or not one")
 open(sys.argv[2], "w", encoding="utf-8", newline="\n").write(src.replace(old, 'URANDOM = "' + sys.argv[3] + '"', 1))
 PY
-  IYI_PATH="$WORK/devcopy${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/fallback-$2" "$WORK/fallback.iyi" >"$WORK/fallback-$2.build" 2>&1
+  RIS_PATH="$WORK/devcopy${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/fallback-$2" "$WORK/fallback.ri" >"$WORK/fallback-$2.build" 2>&1
 }
 # device_read <label>: under the filter, two draws of 32 bytes, different
 # and not all zero - what the device gives.
@@ -228,7 +228,7 @@ esac
 fallback_ready=no
 if [ "$fallback_os" = no ] || [ -z "$PY" ]; then
   echo "  skipped: the fallback and seccomp are Linux's, and this is $(uname -s) (or no python3 to install the filter)"
-elif ! fallback_build "$REPO/src/std/random.iyi" device; then
+elif ! fallback_build "$REPO/src/std/random.ri" device; then
   echo "  the probe did not build"
   sed -n '1,10p' "$WORK/fallback-device.build"
   status=1
@@ -244,12 +244,12 @@ else
       echo "  FAIL: getrandom hidden, the device read: $(sed -n '1,2p' "$WORK/fallback-device.out" | tr '\n' ' ')"
       status=1
     fi
-    if ! fallback_build "$REPO/src/std/random.iyi" file "$WORK/not-a-device"; then
+    if ! fallback_build "$REPO/src/std/random.ri" file "$WORK/not-a-device"; then
       echo "  FAIL: the copy naming a regular file could not be made or built"
       sed -n '1,6p' "$WORK/fallback-file.build"
       status=1
     elif file_refused file; then
-      echo "  a regular file where the device was: $(grep -m1 'panic' "$WORK/fallback-file.out" | sed 's/^iyi: panic: //' | sed "s|$WORK/||")"
+      echo "  a regular file where the device was: $(grep -m1 'panic' "$WORK/fallback-file.out" | sed 's/^ris: panic: //' | sed "s|$WORK/||")"
     else
       echo "  FAIL: a regular file where the device was is read: $(sed -n '1p' "$WORK/fallback-file.out")"
       status=1
@@ -276,7 +276,7 @@ else
     phrase="$(PROOF="$label" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/random.iyi").read_text()
+src = Path("$REPO/src/std/random.ri").read_text()
 proofs = {
     "bounded": ("result.unsafe_mod(bound).to_i32", "0", ""),
     "stream": ("@inc = (sequence << 1) | 1_u64", "@inc = (seed << 1) | 1_u64", ""),
@@ -294,14 +294,14 @@ proofs = {
 old, new, phrase = proofs[os.environ["PROOF"]]
 if src.count(old) != 1:
     raise SystemExit("patch site missing or not unique")
-Path("$WORK/patched/std/random.iyi").write_text(src.replace(old, new, 1))
+Path("$WORK/patched/std/random.ri").write_text(src.replace(old, new, 1))
 print(phrase)
 PY
 )"
     if [ $? -ne 0 ]; then
       echo "  $label: the patch did not apply"
       status=1
-    elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_random_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+    elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_random_exercise.ri" >"$WORK/mut.out" 2>&1; then
       echo "  $label: the exercise PASSED on a broken module"
       status=1
     elif [ -n "$phrase" ] && ! grep -qF -- "$phrase" "$WORK/mut.out"; then
@@ -309,7 +309,7 @@ PY
       sed -n '1,3p' "$WORK/mut.out" | sed 's/^/    /'
       status=1
     else
-      echo "  $label: caught - $(grep -m1 'panic' "$WORK/mut.out" | sed 's/^iyi: panic: //')"
+      echo "  $label: caught - $(grep -m1 'panic' "$WORK/mut.out" | sed 's/^ris: panic: //')"
     fi
   done
   # The fallback's two checks, each broken in a copy: the device's kind
@@ -319,7 +319,7 @@ PY
   if [ "$fallback_ready" = yes ]; then
     for label in unchecked offset; do
       rm -rf "$WORK/patched" && mkdir -p "$WORK/patched/std"
-      PROOF="$label" "$PY" - "$REPO/src/std/random.iyi" "$WORK/patched/std/random.iyi" <<'PY'
+      PROOF="$label" "$PY" - "$REPO/src/std/random.ri" "$WORK/patched/std/random.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 old, new = {
@@ -334,7 +334,7 @@ PY
         echo "  $label: the patch did not apply"
         status=1
       elif [ "$label" = unchecked ]; then
-        if ! fallback_build "$WORK/patched/std/random.iyi" unchecked "$WORK/not-a-device"; then
+        if ! fallback_build "$WORK/patched/std/random.ri" unchecked "$WORK/not-a-device"; then
           echo "  unchecked: the broken copy did not build"
           status=1
         elif file_refused unchecked; then
@@ -344,14 +344,14 @@ PY
           echo "  unchecked: caught at \"a regular file where the device was\" - it read $(sed -n '1p' "$WORK/fallback-unchecked.out" | cut -c1-16)..."
         fi
       else
-        if ! fallback_build "$WORK/patched/std/random.iyi" offset; then
+        if ! fallback_build "$WORK/patched/std/random.ri" offset; then
           echo "  offset: the broken copy did not build"
           status=1
         elif device_read offset; then
           echo "  offset: the device was still read with st_mode taken from the wrong bytes"
           status=1
         else
-          echo "  offset: caught at \"/dev/urandom read\" - $(grep -m1 'panic' "$WORK/fallback-offset.out" | sed 's/^iyi: panic: //')"
+          echo "  offset: caught at \"/dev/urandom read\" - $(grep -m1 'panic' "$WORK/fallback-offset.out" | sed 's/^ris: panic: //')"
         fi
       fi
     done

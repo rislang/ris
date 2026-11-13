@@ -8,7 +8,7 @@ IYI=.build23/ris bash test/speed/http2_tape.sh
 
 The default baseline reads HEAD's two modules with `git show`; it writes
 nothing to `.git`. An optional argument names another baseline module
-root containing `std/http.iyi` and `std/hpack.iyi`.
+root containing `std/http.ri` and `std/hpack.ri`.
 
 Each workload runs 20,000 times, baseline and tape interleaved seven
 times. Time is the fastest run of each variant. Heap bytes are the

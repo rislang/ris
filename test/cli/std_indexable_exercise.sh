@@ -11,16 +11,16 @@
 #   4. Out-of-bounds positive and negative indexing raises.
 #   5. Empty collection handling for boundary methods.
 #   6. Release build with optimizations.
-#   7. Failure proofs using patched copies via IYI_PATH.
+#   7. Failure proofs using patched copies via RIS_PATH.
 #
 # Exits non-zero if any check fails.
 
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -52,10 +52,10 @@ status=0
 # into the tree where the identity floor could see it.
 export PATH="/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 export LIBRARY_PATH="/opt/homebrew/opt/bdw-gc/lib:${LIBRARY_PATH:-}"
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 echo "== the exercise, plain build"
-if ! "$IYI" build -o "$WORK/exercise" "$REPO/test/cli/std_indexable_exercise.iyi" \
+if ! "$RIS" build -o "$WORK/exercise" "$REPO/test/cli/std_indexable_exercise.ri" \
      >"$WORK/exercise.build.log" 2>&1; then
   echo "  build failed"
   sed -n '1,12p' "$WORK/exercise.build.log"
@@ -90,7 +90,7 @@ done
 
 echo
 echo "== the same program with release optimisation"
-if ! "$IYI" build --release -o "$WORK/exercise-release" "$REPO/test/cli/std_indexable_exercise.iyi" \
+if ! "$RIS" build --release -o "$WORK/exercise-release" "$REPO/test/cli/std_indexable_exercise.ri" \
      >"$WORK/exercise-release.build.log" 2>&1; then
   echo "  optimised build failed"
   sed -n '1,12p' "$WORK/exercise-release.build.log"
@@ -111,7 +111,7 @@ fi
 
 echo
 echo "== failure proofs: out-of-range and boundary raises"
-# Run probe modes built into test/cli/std_indexable_exercise.iyi; a fourth
+# Run probe modes built into test/cli/std_indexable_exercise.ri; a fourth
 # argument names another build of it, which the broken-library proofs use.
 run_probe() {
   local label="$1" mode="$2" expected_phrase="$3" program="${4:-$WORK/exercise}"
@@ -156,14 +156,14 @@ run_probe "delete_at out of range" probe_delete_at_out_of_range "index -2 out of
 echo
 echo "== failure proofs: checks fail when Indexable is broken"
 # Proves that the exercise checks are load-bearing by running against
-# a patched copy of src/std/indexable.iyi via IYI_PATH.
+# a patched copy of src/std/indexable.ri via RIS_PATH.
 prove_fails() {
   local label="$1" dir="$2" expected_phrase="$3" sed_script="$4"
   mkdir -p "$WORK/$dir/std"
-  sed "$sed_script" "$REPO/src/std/indexable.iyi" > "$WORK/$dir/std/indexable.iyi"
+  sed "$sed_script" "$REPO/src/std/indexable.ri" > "$WORK/$dir/std/indexable.ri"
 
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run \
-       "$REPO/test/cli/std_indexable_exercise.iyi" >"$WORK/$dir.out" 2>&1; then
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run \
+       "$REPO/test/cli/std_indexable_exercise.ri" >"$WORK/$dir.out" 2>&1; then
     local code=$?
     if grep -q "$expected_phrase" "$WORK/$dir.out" 2>/dev/null; then
       printf '  %s: caught expected failure matching "%s" (exit %s)\n' \
@@ -234,9 +234,9 @@ prove_fails "join grown by + again" broken_join "indexable join in linear time" 
 #    is not reached by `prove_fails`, so the broken copy is built here and
 #    the probe run against it must fail.
 mkdir -p "$WORK/broken_fill_end/std"
-sed 's/if count > size - offset$/if offset + count > size/' "$REPO/src/std/indexable.iyi" > "$WORK/broken_fill_end/std/indexable.iyi"
-if ! IYI_PATH="$WORK/broken_fill_end${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build \
-     -o "$WORK/broken_fill_end/exercise" "$REPO/test/cli/std_indexable_exercise.iyi" >"$WORK/broken_fill_end.build" 2>&1; then
+sed 's/if count > size - offset$/if offset + count > size/' "$REPO/src/std/indexable.ri" > "$WORK/broken_fill_end/std/indexable.ri"
+if ! RIS_PATH="$WORK/broken_fill_end${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build \
+     -o "$WORK/broken_fill_end/exercise" "$REPO/test/cli/std_indexable_exercise.ri" >"$WORK/broken_fill_end.build" 2>&1; then
   echo "  fill refusal from an end: the patched library did not build"
   sed -n '1,6p' "$WORK/broken_fill_end.build"
   status=1
@@ -248,7 +248,7 @@ else
     held_status=1
   else
     printf '  fill refusal from an end: caught, the probe read "%s"\n' \
-      "$(grep -m1 'panic' "$WORK/probe-probe_fill_huge_count.out" | sed 's/^iyi: panic: //')"
+      "$(grep -m1 'panic' "$WORK/probe-probe_fill_huge_count.out" | sed 's/^ris: panic: //')"
   fi
   status=$held_status
 fi

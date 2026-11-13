@@ -23,7 +23,7 @@ require "socket"
 # The measurements behind this are in iyi SPEC IV.1a/IV.1b. The prelude is ~87% of
 # a small build's front end, and a fork restores it in about a millisecond, which
 # is a floor no serialised artifact can beat. So the daemon is not a substitute
-# for `.iyimod` — it cannot cross machines or sessions, and it is not the basis
+# for `.rimod` — it cannot cross machines or sessions, and it is not the basis
 # of separate compilation — but it delivers the same front-end win today.
 #
 # The output of a build has to reach the client as it happens, with `stdout` and
@@ -37,7 +37,7 @@ require "socket"
 #
 # Requests are a little-endian length followed by that many bytes of JSON,
 # `{"cwd": ..., "args": [...], "version": ..., "env": {...}}`. The environment
-# is the client's and the child runs with it; `IYI_PATH` is compared rather
+# is the client's and the child runs with it; `RIS_PATH` is compared rather
 # than applied, because the prelude a daemon holds came from its own. The
 # version is checked, along
 # with the server's own executable, so that a rebuilt compiler cannot be served
@@ -49,7 +49,7 @@ class Iyi::Command
   # A daemon that cannot serve *this* build — rebuilt compiler, other
   # version, other library — rather than a build that failed. Its own frame
   # because the answer depends on who asked: `iyi daemon build` wanted this
-  # daemon and is told no, while a build that only found `IYI_DAEMON_SOCKET`
+  # daemon and is told no, while a build that only found `RIS_DAEMON_SOCKET`
   # in the environment wanted a binary and gets one, built without it.
   DAEMON_FRAME_REFUSE = 3_u8
 
@@ -72,7 +72,7 @@ class Iyi::Command
         from another:
 
             #{Command.program_name} daemon start
-            #{Command.program_name} daemon build hello.iyi
+            #{Command.program_name} daemon build hello.ri
 
         Command:
             start (default)      run the daemon in the foreground
@@ -81,7 +81,7 @@ class Iyi::Command
         Switches:
             --socket PATH        socket to listen on / connect to
 
-        Set IYI_DAEMON_SOCKET and an ordinary `#{Command.program_name} build`
+        Set RIS_DAEMON_SOCKET and an ordinary `#{Command.program_name} build`
         is served by that daemon too, falling back to a normal build if it is
         not there.
         USAGE
@@ -104,7 +104,7 @@ class Iyi::Command
     # user did not ask for, and say nothing about it.
     if (override = Config.env("DAEMON")) && !override.empty?
       unless File.info?(override).try(&.file?)
-        STDERR.puts "IYI_DAEMON points at #{override}, which is not a file"
+        STDERR.puts "RIS_DAEMON points at #{override}, which is not a file"
         exit 1
       end
       Process.exec(override, ["daemon", "start"] + options)
@@ -115,8 +115,8 @@ class Iyi::Command
     # and different command surfaces, and a server is the compiler it was built
     # from — an `iyi daemon start` served by `crystal-daemon` would hold the
     # wrong prelude and answer `iyi help` questions in the wrong language.
-    # ris: the server is iyi's, `iyi-daemon`, beside `iyi` that `ris` links to.
-    server_name = "#{Command.program_name == "ris" ? "iyi" : Command.program_name}-daemon"
+    # ris: the server is `ris-daemon`, beside `ris` (DRAFT ri-extension 7.6).
+    server_name = "#{Command.program_name}-daemon"
 
     candidates = [] of String
     if executable = Process.executable_path
@@ -132,7 +132,7 @@ class Iyi::Command
     # neither of which Windows has, so there is no daemon binary to build
     # there (`Makefile.win`). The sentence below told a Windows user to
     # `make iyi-daemon`, a target that does not exist for them. An
-    # IYI_DAEMON the user set is still run above: they named it.
+    # RIS_DAEMON the user set is still run above: they named it.
     {% if flag?(:win32) %}
       STDERR.puts "The build daemon forks a child per build, and Windows has no fork: " \
                   "there is no daemon on Windows, and every build runs on its own"
@@ -148,13 +148,13 @@ class Iyi::Command
       Looked in:
       #{candidates.join('\n') { |candidate| "    #{candidate}" }}
 
-      Set IYI_DAEMON to point at it directly.
+      Set RIS_DAEMON to point at it directly.
       MSG
     exit 1
   end
 
   # Lets `crystal build` go through a daemon without the user retyping the
-  # command: set IYI_DAEMON_SOCKET and ordinary builds are served by it.
+  # command: set RIS_DAEMON_SOCKET and ordinary builds are served by it.
   #
   # Opt-in, and it falls back to building normally when nothing is listening —
   # with a line saying so, because a daemon that quietly died should not look
@@ -513,18 +513,18 @@ class Iyi::Command
 
       client_env = request["env"]?.try(&.as_h?)
       if client_env
-        # The library, not the spelling: an unset `IYI_PATH` and one naming
+        # The library, not the spelling: an unset `RIS_PATH` and one naming
         # the directory the default already resolves to are the same library,
         # and refusing over the difference would refuse most of the gates
         # that pass a path explicitly. `default_paths` is what an unset one
         # means, and `expand_paths` is what the compiler itself compares.
-        theirs = client_env["IYI_PATH"]?.try(&.as_s?)
-        ours = ENV["IYI_PATH"]?
+        theirs = client_env["RIS_PATH"]?.try(&.as_s?)
+        ours = ENV["RIS_PATH"]?
         if daemon_library_key(theirs) != daemon_library_key(ours)
           daemon_refuse(client, <<-MSG)
             The build daemon analysed a different library than this build asks for.
-            Daemon: IYI_PATH=#{ours || "(unset)"} -> #{daemon_library_key(ours)}
-            Client: IYI_PATH=#{theirs || "(unset)"} -> #{daemon_library_key(theirs)}
+            Daemon: RIS_PATH=#{ours || "(unset)"} -> #{daemon_library_key(ours)}
+            Client: RIS_PATH=#{theirs || "(unset)"} -> #{daemon_library_key(theirs)}
             The prelude is what a daemon holds, so this one cannot serve that
             build. Start a daemon in that environment, or build without one.
             MSG
@@ -563,7 +563,7 @@ class Iyi::Command
         # that the client does not is not this build's either.
         #
         # Except the one that names a daemon. This build *is* the daemon's
-        # build, and a client that reached here by `IYI_DAEMON_SOCKET` sends
+        # build, and a client that reached here by `RIS_DAEMON_SOCKET` sends
         # that variable along with the rest: the child then found a daemon
         # too, connected to this very server, and was served by a fork that
         # found it again. Nothing in that recursion ever finishes a build, so
@@ -577,7 +577,7 @@ class Iyi::Command
               ENV[name] = text
             end
           end
-          ENV.delete("IYI_DAEMON_SOCKET")
+          ENV.delete("RIS_DAEMON_SOCKET")
           ENV.delete("CRYSTAL_DAEMON_SOCKET")
         end
 
@@ -592,7 +592,7 @@ class Iyi::Command
       builds << DaemonBuild.new(client, out_r, err_r, pid.not_nil!, args, cwd)
     end
 
-    # Which library an `IYI_PATH` means, by the one file that decides it.
+    # Which library an `RIS_PATH` means, by the one file that decides it.
     # Comparing the paths themselves says no to builds that mean yes: unset
     # resolves to a list — `lib`, the installed share, the tree beside the
     # binary — and a path naming one of those directories resolves to itself,
@@ -600,7 +600,7 @@ class Iyi::Command
     # file. That file is what a daemon holds.
     # Both of them, because a daemon holds both: it analyses Crystal's at
     # start — that is the mode it is for (IV.1d) — and warms iyi's after the
-    # first `.iyi` build. A path that finds either somewhere else is another
+    # first `.ri` build. A path that finds either somewhere else is another
     # library.
     private def daemon_library_key(value : String?) : String
       paths =
@@ -609,7 +609,7 @@ class Iyi::Command
         else
           Iyi::IyiPath.default_paths
         end
-      ["iyi/prelude.iyi", "prelude.cr"].join(" ") do |name|
+      ["ris/prelude.ri", "prelude.cr"].join(" ") do |name|
         found = paths.each do |directory|
           candidate = File.join(directory, name)
           break candidate if File.file?(candidate)
@@ -645,7 +645,7 @@ class Iyi::Command
     #
     # **In the client's directory, and that is not a detail.** The reasoning
     # above was incomplete: a succeeded build's arguments are still bad input
-    # somewhere else, and `-o out app.iyi` names two relative paths. Parsed
+    # somewhere else, and `-o out app.ri` names two relative paths. Parsed
     # here, in the daemon's own directory, `gather_sources` could not find the
     # file and `abort!` exited — so the daemon died *after serving a build
     # correctly*, on the ordinary case of a client that typed a relative path.
@@ -793,9 +793,9 @@ class Iyi::Command
     # consumed: `crystal daemon build -o x y.cr` is `crystal build -o x y.cr`.
     # The environment travels with the request. A daemon is a held prelude
     # and not a second shell: the child it forks inherited *its* variables,
-    # so a build sent from a terminal with `IYI_CACHE_DIR` or
-    # `IYI_MOD_MIRROR` set was resolved without them — a package went to the
-    # network instead of to the mirror beside it. `IYI_PATH` is the one a
+    # so a build sent from a terminal with `RIS_CACHE_DIR` or
+    # `RIS_MOD_MIRROR` set was resolved without them — a package went to the
+    # network instead of to the mirror beside it. `RIS_PATH` is the one a
     # daemon cannot take, because the prelude it holds came from its own;
     # the server refuses that rather than compiling against a library this
     # build did not ask for.

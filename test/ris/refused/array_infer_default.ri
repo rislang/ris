@@ -1,4 +1,5 @@
 def bad(a = [])
   a
 end
+
 bad

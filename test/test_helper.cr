@@ -60,11 +60,11 @@ def ris_prelude(code : String) : {String, Bool}
 end
 
 private def with_ris_prelude(node : ASTNode) : ASTNode
-  req = Iyi::Require.new("iyi/prelude").tap(&.iyi_prelude=(true))
+  req = Iyi::Require.new("ris/prelude").tap(&.iyi_prelude=(true))
   Iyi::Expressions.new([req, node] of ASTNode)
 end
 
-# An .iyi example without the prelude: its text literals are
+# An .ri example without the prelude: its text literals are
 # `String.view(...)`, which the prelude defines; this stands in for it.
 def with_text_view(node : ASTNode) : ASTNode
   stub = parse(<<-CR)
@@ -92,7 +92,7 @@ def semantic(code : String, wants_doc = false, inject_primitives = false, flags 
   node = parse(code, wants_doc: wants_doc, filename: filename, warnings: warnings)
   node = inject_primitives(node) if inject_primitives
   node = with_ris_prelude(node) if prelude
-  node = with_text_view(node) if !prelude && filename.try(&.ends_with?(".iyi"))
+  node = with_text_view(node) if !prelude && filename.try(&.ends_with?(".ri"))
   semantic node, warnings: warnings, wants_doc: wants_doc, flags: flags
 end
 
@@ -380,7 +380,7 @@ def run(code, filename : String? = nil, inject_primitives = true, debug = Iyi::D
     code = ast.to_s
 
     compiler = create_spec_compiler
-    compiler.prelude = "iyi/prelude"
+    compiler.prelude = "ris/prelude"
     compiler.debug = debug
     compiler.flags.concat flags if flags
     apply_program_flags(compiler.flags)

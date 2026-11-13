@@ -28,7 +28,7 @@ set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 # Overridable, so CI can point it at the tarball's compiler, which is the
 # one that runs beside wasmtime.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 WASI_SDK="${WASI_SDK:-/opt/wasi-sdk}"
 WASMTIME="${WASMTIME:-$HOME/.wasmtime/bin/wasmtime}"
 mkdir -p "$REPO/test/cli/.work"
@@ -231,14 +231,14 @@ EOF
   fi
 
   # Measure overhead on honest iyi program
-  "$IYI" build --cross-compile --target wasm32-wasi -o "$WORK/hello_native" "$REPO/samples/iyi/hello.iyi" > "$WORK/hello.link" 2>&1
-  "$WASI_SDK/bin/clang" "$WORK/hello_native.wasm" -o "$WORK/hello_native.wasm.linked" --target=wasm32-wasi -L"$REPO/.build/../lib/iyi"
+  "$RIS" build --cross-compile --target wasm32-wasi -o "$WORK/hello_native" "$REPO/samples/ris/hello_iyi.ri" > "$WORK/hello.link" 2>&1
+  "$WASI_SDK/bin/clang" "$WORK/hello_native.wasm" -o "$WORK/hello_native.wasm.linked" --target=wasm32-wasi -L"$REPO/.build/../lib/ris"
   "$WASM_OPT" --asyncify "$WORK/hello_native.wasm.linked" -o "$WORK/hello_async.wasm"
 
   sz_nat=$(wc -c < "$WORK/hello_native.wasm.linked" | tr -d ' ')
   sz_asy=$(wc -c < "$WORK/hello_async.wasm" | tr -d ' ')
   pct=$(( (sz_asy - sz_nat) * 100 / sz_nat ))
-  pass "asyncify code size overhead on hello.iyi: ${sz_nat}B -> ${sz_asy}B (+${pct}%)"
+  pass "asyncify code size overhead on hello.ri: ${sz_nat}B -> ${sz_asy}B (+${pct}%)"
 else
   echo "  skip: wasm-opt not found in PATH"
 fi
@@ -252,7 +252,7 @@ fi
 # -----------------------------------------------------------------------------
 step "4. iyi compiler refusal for group on wasm32-wasi"
 # -----------------------------------------------------------------------------
-cat << 'EOF' > "$WORK/group_refusal.iyi"
+cat << 'EOF' > "$WORK/group_refusal.ri"
 group do |g|
   t = g.spawn do
     42
@@ -261,7 +261,7 @@ group do |g|
 end
 EOF
 
-"$IYI" build --cross-compile --target wasm32-wasi -o "$WORK/group_refusal" "$WORK/group_refusal.iyi" > "$WORK/group_build.log" 2>&1
+"$RIS" build --cross-compile --target wasm32-wasi -o "$WORK/group_refusal" "$WORK/group_refusal.ri" > "$WORK/group_build.log" 2>&1
 ec=$?
 if [ $ec -ne 0 ] && grep -q "group is not available on wasm32-wasi: WebAssembly cannot switch stacks" "$WORK/group_build.log"; then
   pass "compiler refuses group on wasm32-wasi with explicit reason naming iyi SPEC III.4"
@@ -271,11 +271,11 @@ fi
 
 # `sleep` is the runtime's other name a plain program reaches for, and it
 # was a bare "undefined method 'sleep'" where `group` had its reason.
-cat << 'EOF' > "$WORK/sleep_refusal.iyi"
+cat << 'EOF' > "$WORK/sleep_refusal.ri"
 sleep(50)
 puts "slept"
 EOF
-"$IYI" build --cross-compile --target wasm32-wasi -o "$WORK/sleep_refusal" "$WORK/sleep_refusal.iyi" > "$WORK/sleep_build.log" 2>&1
+"$RIS" build --cross-compile --target wasm32-wasi -o "$WORK/sleep_refusal" "$WORK/sleep_refusal.ri" > "$WORK/sleep_build.log" 2>&1
 ec=$?
 if [ $ec -ne 0 ] && grep -q "sleep is not available on wasm32-wasi: it parks a task on the scheduler" "$WORK/sleep_build.log"; then
   pass "compiler refuses sleep on wasm32-wasi by name"
@@ -285,10 +285,10 @@ else
 fi
 
 # Failure proof: honest program without group compiles cleanly
-cat << 'EOF' > "$WORK/honest.iyi"
+cat << 'EOF' > "$WORK/honest.ri"
 puts 42
 EOF
-"$IYI" build --cross-compile --target wasm32-wasi -o "$WORK/honest" "$WORK/honest.iyi" > "$WORK/honest_build.log" 2>&1
+"$RIS" build --cross-compile --target wasm32-wasi -o "$WORK/honest" "$WORK/honest.ri" > "$WORK/honest_build.log" 2>&1
 if [ $? -eq 0 ]; then
   pass "failure proof: program without group compiles cleanly for wasm32-wasi"
 else

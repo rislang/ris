@@ -4,7 +4,7 @@
 # package if anything is still missing.
 #
 # The list is not curated, and that is the point. Every release before
-# this script existed shipped a `bin/iyi` that could not start without
+# this script existed shipped a `bin/ris` that could not start without
 # the exact libLLVM it linked against, and no gate saw it because every
 # proof of the tarball ran where that library is present by
 # construction. Two rounds of "surely that is the last one" followed
@@ -163,8 +163,8 @@ if [ "$mode" != "--verify-only" ]; then
   # libLLVM, because one in `lib/` would mean the link quietly went
   # shared after all. Which direction applies is read off the binary,
   # not assumed.
-  if ldd "$root/bin/iyi" 2>/dev/null | grep -q 'libLLVM' ||
-     otool -L "$root/bin/iyi" 2>/dev/null | grep -q 'libLLVM'; then
+  if ldd "$root/bin/ris" 2>/dev/null | grep -q 'libLLVM' ||
+     otool -L "$root/bin/ris" 2>/dev/null | grep -q 'libLLVM'; then
     ls "$lib" | grep -q 'libLLVM' || {
       echo "bundle-runtime-libs: no libLLVM landed in $lib — the package would"
       echo "need the host's, which is the bug this script exists for."

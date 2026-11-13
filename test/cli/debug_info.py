@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`iyi build --debug` works, and the fields it describes are the fields
+"""`ris build --debug` works, and the fields it describes are the fields
 the object has.
 
 iyi does not keep a class's type id in the object's struct: it lives in
@@ -14,7 +14,7 @@ What that cost, measured rather than reasoned about:
 
   * LLVM 21 and later, which is what a current distribution ships:
     `LLVMOffsetOfElement` past the last field calls
-    `report_fatal_error`, so `iyi build --debug` aborted (SIGABRT) on
+    `report_fatal_error`, so `ris build --debug` aborted (SIGABRT) on
     every program it was given, `puts 1` included.
   * LLVM 20 and earlier: no abort, a garbage offset. The debug info
     said every field lived one field along, so a debugger showed the
@@ -47,7 +47,7 @@ def compiler(spec):
     """An absolute path to the compiler.
 
     One step below runs in the temporary directory so the `.ll` lands
-    there, and `./bin/iyi` means nothing from inside it."""
+    there, and `./bin/ris` means nothing from inside it."""
     if os.path.isabs(spec):
         return spec
     local = REPO / spec
@@ -56,7 +56,7 @@ def compiler(spec):
     return shutil.which(spec) or spec
 
 
-IYI = compiler(os.environ.get("IYI", "./bin/iyi"))
+RIS = compiler(os.environ.get("RIS", "./bin/ris"))
 
 # Three fields of known sizes, so the offsets are arithmetic and not a
 # guess: two Int32s and a reference, which is 0, 4, 8 under iyi's layout
@@ -96,11 +96,11 @@ def step(name, ok, detail=""):
 
 def main():
     work = Path(tempfile.mkdtemp(prefix="iyi-debug-info"))
-    source = work / "shape.iyi"
+    source = work / "shape.ri"
     source.write_text(FIXTURE)
     binary = work / "shape"
 
-    built = subprocess.run([IYI, "build", "--debug", str(source),
+    built = subprocess.run([RIS, "build", "--debug", str(source),
                             "-o", str(binary)],
                            capture_output=True, text=True, cwd=REPO)
     # A compiler that dies here dies on a signal, and "exit code -6" is
@@ -116,7 +116,7 @@ def main():
              f"printed {ran.stdout.strip()!r}, wanted '12'")
 
     # The offsets, from the compiler's own IR.
-    emitted = subprocess.run([IYI, "build", "--debug", "--emit", "llvm-ir",
+    emitted = subprocess.run([RIS, "build", "--debug", "--emit", "llvm-ir",
                               str(source), "-o", str(work / "shape-ir")],
                              capture_output=True, text=True, cwd=work)
     listing = next(iter(sorted(work.glob("*.ll"))), None)
@@ -138,11 +138,11 @@ def main():
              f"{found}, wanted {WANTED}")
 
     # Every sample, because "every program" is the claim the abort broke.
-    samples = sorted((REPO / "samples/iyi").glob("*.iyi"))
+    samples = sorted((REPO / "samples/ris").glob("*.ri"))
     broken = []
     for sample in samples:
         out = work / (sample.stem + ".bin")
-        result = subprocess.run([IYI, "build", "--debug", str(sample),
+        result = subprocess.run([RIS, "build", "--debug", str(sample),
                                  "-o", str(out)],
                                 capture_output=True, text=True, cwd=REPO)
         if result.returncode != 0:
@@ -165,7 +165,7 @@ def main():
               "unchecked; the offsets above are the claim")
     else:
         session = subprocess.run(
-            [debugger, "-q", "-batch", "-ex", "break shape.iyi:15",
+            [debugger, "-q", "-batch", "-ex", "break shape.ri:15",
              "-ex", "run", "-ex", "print *shape", str(binary)],
             capture_output=True, text=True, cwd=work, timeout=120)
         said = session.stdout

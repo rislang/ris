@@ -4,8 +4,8 @@
 codebase-details.md and the draft's memory section only.)
 
 Verified: to_rfc1123 builds a String via HTTP_DATE.format
-(time.iyi:2183); the parser holds `@why` Builder(128)
-(time.iyi:2726). Under the draft's rule (504) both are uncounted
+(time.ri:2183); the parser holds `@why` Builder(128)
+(time.ri:2726). Under the draft's rule (504) both are uncounted
 128 MiB reservations; "counted per answer, from the code" is false
 for serve.
 

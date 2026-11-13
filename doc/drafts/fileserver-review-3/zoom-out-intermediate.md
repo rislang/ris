@@ -8,13 +8,13 @@ The draft holds together. No Blockers, two Majors, three Nits.
 
 The only new code outside the change's purpose; the draft plans to
 delete it (667-668). A7 calls the std/time fix "unrelated", but P6
-puts it at time.iyi:2776 (`fail` stores an interpolated
+puts it at time.ri:2776 (`fail` stores an interpolated
 `TimeParseError` in `@error`): the same scratch-escape class. The
 repair looks local (keep `what` and `@pos`, build on demand as
 `refuse` at :2785 does), but :3635 is a second refusal of unknown
 cost. Probe both first: if small, fix std/time as its own phase and
 drop the helpers, MONTHS table and pivot (418-421); if not, keep the
-parser and give A7 the real reason; note mail.iyi:1052. Do not fall
+parser and give A7 the real reason; note mail.ri:1052. Do not fall
 back to fixdate-only: RFC 9110 5.6.7 requires all three forms.
 
 ## Major 2: Prerequisite and negative gate (130-140, 558-559, 664)

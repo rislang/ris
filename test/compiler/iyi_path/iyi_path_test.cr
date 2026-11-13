@@ -100,7 +100,7 @@ describe Iyi::IyiPath do
   assert_doesnt_find "test_files/missing_file.cr"
   assert_doesnt_find __FILE__[1..-1], path: ":"
 
-  # Don't find in IYI_PATH if the path is relative (#4742)
+  # Don't find in RIS_PATH if the path is relative (#4742)
   assert_doesnt_find "./iyi_path_spec", relative_to: Path["test_files", "file_one.cr"].to_s, expected_relative_to: Path["test_files"].to_s
   assert_doesnt_find "./iyi_path_test.cr", relative_to: Path["test_files", "file_one.cr"].to_s, expected_relative_to: Path["test_files"].to_s
   assert_doesnt_find "../iyi_path/test_files/file_one"
@@ -108,7 +108,7 @@ describe Iyi::IyiPath do
   # Don't find relative filenames in src or shards
   assert_doesnt_find "../../src/file_three", relative_to: Path["test_files", "test_folder", "test_folder.cr"].to_s, expected_relative_to: Path["test_files", "test_folder"].to_s
 
-  # iyi: the `.iyi` candidate comes first wherever the name does not already
+  # iyi: the `.ri` candidate comes first wherever the name does not already
   # end in `.cr`, so an iyi file shadows a Crystal one of the same name.
   describe "#each_file_expansion" do
     path = Iyi::IyiPath.new
@@ -124,7 +124,7 @@ describe Iyi::IyiPath do
     it "foo.cr/bar" do
       assert_iterates_yielding [
         "x/foo.cr/bar.ri",
-        "x/foo.cr/bar.iyi",
+        "x/foo.cr/bar.ri",
         "x/foo.cr/bar.cr",
         "x/foo.cr/src/bar.cr",
         "x/foo.cr/src/foo.cr/bar.cr",
@@ -148,7 +148,7 @@ describe Iyi::IyiPath do
     it "foo" do
       assert_iterates_yielding [
         "x/foo.ri",
-        "x/foo.iyi",
+        "x/foo.ri",
         "x/foo.cr",
         "x/foo/foo.cr",
         "x/foo/src/foo.cr",
@@ -158,7 +158,7 @@ describe Iyi::IyiPath do
     it "./foo" do
       assert_iterates_yielding [
         "x/./foo.ri",
-        "x/./foo.iyi",
+        "x/./foo.ri",
         "x/./foo.cr",
         "x/./foo/foo.cr",
       ], path.each_file_expansion("./foo", "x")
@@ -174,7 +174,7 @@ describe Iyi::IyiPath do
     it "foo/bar" do
       assert_iterates_yielding [
         "x/foo/bar.ri",
-        "x/foo/bar.iyi",
+        "x/foo/bar.ri",
         "x/foo/bar.cr",
         "x/foo/src/bar.cr",
         "x/foo/src/foo/bar.cr",
@@ -187,7 +187,7 @@ describe Iyi::IyiPath do
     it "./foo/bar" do
       assert_iterates_yielding [
         "x/./foo/bar.ri",
-        "x/./foo/bar.iyi",
+        "x/./foo/bar.ri",
         "x/./foo/bar.cr",
         "x/./foo/bar/bar.cr",
       ], path.each_file_expansion("./foo/bar", "x")
@@ -196,7 +196,7 @@ describe Iyi::IyiPath do
     it "foo/bar/baz" do
       assert_iterates_yielding [
         "x/foo/bar/baz.ri",
-        "x/foo/bar/baz.iyi",
+        "x/foo/bar/baz.ri",
         "x/foo/bar/baz.cr",
         "x/foo/src/bar/baz.cr",
         "x/foo/src/foo/bar/baz.cr",
@@ -209,7 +209,7 @@ describe Iyi::IyiPath do
     it "./foo/bar/baz" do
       assert_iterates_yielding [
         "x/./foo/bar/baz.ri",
-        "x/./foo/bar/baz.iyi",
+        "x/./foo/bar/baz.ri",
         "x/./foo/bar/baz.cr",
         "x/./foo/bar/baz/baz.cr",
       ], path.each_file_expansion("./foo/bar/baz", "x")
@@ -219,16 +219,16 @@ describe Iyi::IyiPath do
   it "includes 'lib' by default" do
     # Both names, because the setting has two: the compiler falls back to
     # `CRYSTAL_PATH` so the compatibility binary keeps working, and
-    # `bin/crystal` exports it. Clearing only `IYI_PATH` left the wrapper's
+    # `bin/crystal` exports it. Clearing only `RIS_PATH` left the wrapper's
     # `./lib:…/src` answering for "no path configured".
-    with_env("IYI_PATH": nil, "CRYSTAL_PATH": nil) do
+    with_env("RIS_PATH": nil, "CRYSTAL_PATH": nil) do
       iyi_path = Iyi::IyiPath.new
       iyi_path.entries[0].should eq("lib")
     end
   end
 
   it "overrides path with environment variable" do
-    with_env("IYI_PATH": "foo#{Process::PATH_DELIMITER}bar") do
+    with_env("RIS_PATH": "foo#{Process::PATH_DELIMITER}bar") do
       iyi_path = Iyi::IyiPath.new
       iyi_path.entries.should eq(%w(foo bar))
     end

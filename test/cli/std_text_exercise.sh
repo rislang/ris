@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Text processing standard library exercise driver.
 # Runs the text exercise in plain and release mode, checks every section
-# reported, and proves the checks can fail by patching copies of std/text.iyi.
+# reported, and proves the checks can fail by patching copies of std/text.ri.
 #
 #     bash test/cli/std_text_exercise.sh
 #
@@ -15,9 +15,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -46,7 +46,7 @@ status=0
 run_case() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_text_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_text_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     sed -n '1,12p' "$WORK/$name.build.log"
@@ -95,9 +95,9 @@ echo "== proving the checks can fail when text operations are broken"
 prove_fails() {
   local label="$1" dir="$2" phrase="$3" sed_script="$4"
   mkdir -p "$WORK/$dir/std"
-  sed -e "$sed_script" "$REPO/src/std/text.iyi" > "$WORK/$dir/std/text.iyi"
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/std_text_exercise.iyi" \
+  sed -e "$sed_script" "$REPO/src/std/text.ri" > "$WORK/$dir/std/text.ri"
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/std_text_exercise.ri" \
        >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched text library did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
@@ -118,7 +118,7 @@ prove_fails() {
     return
   fi
   printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" \
-    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
 }
 
 # 1. ASCII letter predicate broken
@@ -216,16 +216,16 @@ prove_fails "tr range not expanded" no_tr_range "string: tr range" \
 # `size` and has to agree with itself. Patched where they live.
 prove_fails_prelude() {
   local label="$1" dir="$2" phrase="$3" sed_script="$4"
-  mkdir -p "$WORK/$dir/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
-  sed -e "$sed_script" "$REPO/src/iyi/string.iyi" > "$WORK/$dir/iyi/string.iyi"
-  if cmp -s "$REPO/src/iyi/string.iyi" "$WORK/$dir/iyi/string.iyi"; then
+  mkdir -p "$WORK/$dir/ris"
+  cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
+  sed -e "$sed_script" "$REPO/src/ris/string.ri" > "$WORK/$dir/ris/string.ri"
+  if cmp -s "$REPO/src/ris/string.ri" "$WORK/$dir/ris/string.ri"; then
     echo "  $label: the patch changed nothing, so this proves nothing"
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/std_text_exercise.iyi" \
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/std_text_exercise.ri" \
        >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched prelude did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
@@ -246,7 +246,7 @@ prove_fails_prelude() {
     return
   fi
   printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" \
-    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
 }
 
 # 8. Multi-byte char to_s encoding broken, in the prelude
@@ -308,8 +308,8 @@ echo "== the prelude's own String at its edges, which is a panic with a name"
 # no next line to check.
 panics_with() { # panics_with <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
-  printf 'module main\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -334,7 +334,7 @@ panics_with() { # panics_with <label> <name> <phrase> <expression>
     return
   fi
   printf '  %s: exits 1 at "%s"\n' "$label" \
-    "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+    "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 
 panics_with "a negative repeat" mul_negative "negative count: -3" '"ab" * -3'
@@ -349,8 +349,8 @@ panics_with "an index past the end" index_past \
 panics_with "a build that does not fit" build_overflow \
   "past the 2147483647 bytes a string holds" \
   'String.build { |io| io << "ab"; io.write("x".to_unsafe, 2147483647) }'
-printf 'module main\n\nbig = ("a" * 1025) * 1047553\nio = String::Builder.new\nio << big << "b"\nputs io.bytesize\n' > "$WORK/build_gib.iyi"
-if "$IYI" build -o "$WORK/build_gib" "$WORK/build_gib.iyi" > "$WORK/build_gib.build" 2>&1; then
+printf 'module main\n\nbig = ("a" * 1025) * 1047553\nio = String::Builder.new\nio << big << "b"\nputs io.bytesize\n' > "$WORK/build_gib.ri"
+if "$RIS" build -o "$WORK/build_gib" "$WORK/build_gib.ri" > "$WORK/build_gib.build" 2>&1; then
   gib="$("$WORK/build_gib" 2>&1 | sed -n '1p')"
   if [ "$gib" = "1073741826" ]; then
     echo "  a build past 1 GiB: 1073741826 bytes"
@@ -368,8 +368,8 @@ echo
 echo "== what std/text refuses, which is a panic with its own sentence"
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
-  printf 'module main\n\nimport std/text\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/text\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -389,7 +389,7 @@ refuses() { # refuses <label> <name> <phrase> <expression>
     return
   fi
   printf '  %s: exits %s at "%s"\n' "$label" "$code" \
-    "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+    "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 
 refuses "a tr range that runs backwards" tr_backwards \

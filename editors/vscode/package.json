@@ -59,7 +59,7 @@
           "iyi"
         ],
         "extensions": [
-          ".iyi"
+          ".ri"
         ],
         "configuration": "./language-configuration.json"
       }
@@ -67,7 +67,7 @@
     "grammars": [
       {
         "language": "iyi",
-        "scopeName": "source.iyi",
+        "scopeName": "source.ri",
         "path": "./syntaxes/iyi.tmLanguage.json"
       }
     ],

@@ -26,7 +26,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -44,7 +44,7 @@ esac
 trap 'chmod -R u+rwX "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 # GNU tar, when `tar` is GNU's: bsdtar and busybox read and write other
 # dialects and are not what this checks against. Not on Windows: Git's
@@ -263,7 +263,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_tar_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_tar_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -397,8 +397,8 @@ echo "== what the module refuses, by name"
 refuses() { # refuses <label> <name> <phrase> <statements>
   local label="$1" name="$2" phrase="$3" statements="$4"
   printf 'module main\n\nimport std/tar::{TarReader, TarWriter, TarEntry, TarError}\nimport std/io::{Memory}\n\n%s\nputs "ANSWERED"\n' \
-    "$statements" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$statements" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -411,7 +411,7 @@ refuses() { # refuses <label> <name> <phrase> <statements>
     status=1
     return
   fi
-  if ! grep -qxF "iyi: panic: $phrase" "$WORK/$name.out"; then
+  if ! grep -qxF "ris: panic: $phrase" "$WORK/$name.out"; then
     echo "  $label: refused, but not with '$phrase' (exit $code)"
     tail -2 "$WORK/$name.out"
     status=1
@@ -474,17 +474,17 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/tar.iyi").read_text()
+src = Path("$REPO/src/std/tar.ri").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing: " + os.environ["OLD"])
-Path("$WORK/patched/std/tar.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/tar.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
   # Build first, then run: a patch that does not compile would also "fail",
   # and that proves nothing about whether the exercise catches the break.
-  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_tar_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_tar_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the $1 copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1

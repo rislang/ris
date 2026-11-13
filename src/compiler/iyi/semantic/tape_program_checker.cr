@@ -742,7 +742,7 @@ class Iyi::TapeProgramChecker
   private def program_target?(origin : Origin, node : ASTNode, type : Type?) : Bool
     return false if origin.request?
     file = node.location.try(&.original_filename)
-    if file && file.ends_with?(".ri") && !TapeRules.std?(node.location)
+    if file && file.ends_with?(".ri") && !TapePointerCheckerLibrary.library?(node.location)
       return true if origin.kind == :program || !type
       return root_type?(type)
     end
@@ -822,7 +822,7 @@ class Iyi::TapeProgramChecker
 
   private def user?(target : Def) : Bool
     file = target.location.try(&.original_filename)
-    !!file && file.ends_with?(".ri") && !TapeRules.std?(target.location)
+    !!file && file.ends_with?(".ri") && !TapePointerCheckerLibrary.library?(target.location)
   end
 
   private def touches_program?(target : Def) : Bool

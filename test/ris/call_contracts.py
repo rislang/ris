@@ -86,29 +86,29 @@ end
     program("  App::Effects.clear(b)\n  puts App::Effects.view(b)"
             "\n  App::Effects.pause(b)")
     mods = work / "mods"
-    build(main, "--emit-iyimod", mods)
+    build(main, "--emit-rimod", mods)
     library.unlink()
-    build(main, "--use-iyimod", mods)
+    build(main, "--use-rimod", mods)
     print("accepts  imported checked contract (source removed)")
 
     program("  v = b.finish\n  App::Effects.pause(b)\n  puts v")
-    build(main, "--use-iyimod", mods)
+    build(main, "--use-rimod", mods)
     print("accepts  imported suspension contract with live view")
 
     program("  v = b.finish\n  App::Effects.clear(b)\n  puts v")
-    build(main, "--use-iyimod", mods,
+    build(main, "--use-rimod", mods,
           refused="cannot shrink tape storage with a live view")
     print("refused  imported shrink contract")
 
     program("  v = App::Effects.view(b)\n  b.clear\n  puts v")
-    build(main, "--use-iyimod", mods,
+    build(main, "--use-rimod", mods,
           refused="cannot shrink tape storage with a live view")
     print("refused  imported result-view contract")
 
-    artifact = mods / "app/effects.iyimod"
+    artifact = mods / "app/effects.rimod"
     original = artifact.read_bytes()
     artifact.write_bytes(without_contract(original, "3;0;0;0,1"))
-    build(main, "--use-iyimod", mods,
+    build(main, "--use-rimod", mods,
           refused="imported def lacks a checked tape contract")
     print("refused  imported def without checked contract")
 

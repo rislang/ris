@@ -22,7 +22,7 @@ mistake is -32602 and an unknown method -32601), the module opens with no
 diagnostics, and the process exits 0 on `shutdown`.
 
 **One server per module, and the memory is the server's problem now.**
-`iyi lsp` is the same binary as the compiler and carries no collector
+`ris lsp` is the same binary as the compiler and carries no collector
 (iyi SPEC III.9, `-Dgc_none`), so a process that compiles module after module
 never gives a byte back: this sweep against one long-lived *single-process*
 server was killed by the kernel at 19 GB, and that is the honest upper bound
@@ -53,7 +53,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lsp_session import Client, file_uri, tree_mb  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
-MODULES = sorted((REPO / "src/std").glob("*.iyi"))
+MODULES = sorted((REPO / "src/std").glob("*.ri"))
 
 # Asked at every position: the questions an editor sends on a cursor move,
 # a keystroke and a hover. Each takes a `TextDocumentPositionParams`.
@@ -237,12 +237,12 @@ def prove_it_can_fail(stride: int) -> None:
     """
     work = REPO / ".lsp_positions_broken"
     (work / "std").mkdir(parents=True, exist_ok=True)
-    broken = (REPO / "src/std/bool.iyi").read_text().replace(
+    broken = (REPO / "src/std/bool.ri").read_text().replace(
         "module std/bool", "module std/bool\n\npub def __broken : Int32\n  \"not an Int32\"\nend", 1)
-    target = work / "std/bool.iyi"
+    target = work / "std/bool.ri"
     target.write_text(broken)
-    saved = os.environ.get("IYI_PATH")
-    os.environ["IYI_PATH"] = f"{work}{os.pathsep}{REPO / 'src'}"
+    saved = os.environ.get("RIS_PATH")
+    os.environ["RIS_PATH"] = f"{work}{os.pathsep}{REPO / 'src'}"
     before = len(FAILURES)
     try:
         asked, _ = sweep(target, stride)
@@ -260,9 +260,9 @@ def prove_it_can_fail(stride: int) -> None:
             FAILURES.extend(internal)
     finally:
         if saved is None:
-            os.environ.pop("IYI_PATH", None)
+            os.environ.pop("RIS_PATH", None)
         else:
-            os.environ["IYI_PATH"] = saved
+            os.environ["RIS_PATH"] = saved
         target.unlink()
         (work / "std").rmdir()
         work.rmdir()

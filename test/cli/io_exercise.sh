@@ -9,9 +9,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs whatever compiler the caller names; `bin/iyi` is a shell
+# The gate runs whatever compiler the caller names; `bin/ris` is a shell
 # wrapper, and on Windows the caller has to point at the built exe itself.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -40,7 +40,7 @@ run_case() {
   local label="$1" name="$2"
   shift 2
   echo "== $label"
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/io_exercise.iyi" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/io_exercise.ri" >"$WORK/$name.build.log" 2>&1; then
     echo "  $label: build failed"
     sed -n '1,12p' "$WORK/$name.build.log"
     status=1
@@ -81,11 +81,11 @@ echo "== the checks fail when the mechanism is broken"
 
 prove_fails() {
   local label="$1" dir="$2" phrase="$3" script="$4"
-  mkdir -p "$WORK/$dir/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
-  awk "$script" "$REPO/src/iyi/io.iyi" > "$WORK/$dir/iyi/io.iyi"
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/io_exercise.iyi" \
+  mkdir -p "$WORK/$dir/ris"
+  cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
+  awk "$script" "$REPO/src/ris/io.ri" > "$WORK/$dir/ris/io.ri"
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/io_exercise.ri" \
        >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched library did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
@@ -106,7 +106,7 @@ prove_fails() {
     return
   fi
   printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" \
-    "$(tr -d '\0' < "$WORK/$dir/out" | grep -m1 "$phrase" | sed 's/^iyi: panic: //')"
+    "$(tr -d '\0' < "$WORK/$dir/out" | grep -m1 "$phrase" | sed 's/^ris: panic: //')"
 }
 
 # 1. Flush broken: flush is a no-op so unflushed write never reaches disk
@@ -154,10 +154,10 @@ case "$(uname -s)" in
     done
     echo
     echo "== a console's end of input and its long lines"
-    printf 'module main\n\nwhile line = STDIN.gets(true)\n  puts "got #{line.bytesize}"\nend\nputs "the end of input"\nsleep(3000)\n' > "$WORK/console.iyi"
+    printf 'module main\n\nwhile line = STDIN.gets(true)\n  puts "got #{line.bytesize}"\nend\nputs "the end of input"\nsleep(3000)\n' > "$WORK/console.ri"
     if [ -z "$PY" ]; then
       echo "  no python3 on this machine, so the console is unmeasured"
-    elif ! "$IYI" build -o "$WORK/console" "$WORK/console.iyi" > "$WORK/console.build" 2>&1; then
+    elif ! "$RIS" build -o "$WORK/console" "$WORK/console.ri" > "$WORK/console.build" 2>&1; then
       echo "  the console program did not build"; sed -n '1,10p' "$WORK/console.build"; status=1
     else
       "$PY" - "$WORK/console.exe" > "$WORK/console.out" 2>&1 <<'PY'
@@ -226,14 +226,14 @@ PY
     #    `GC.free` of a stack address fails in `free_large`, under the
     #    lock, and the program never ended. The sentence -
     #    `__iyi_write(2, ...)` - is converted on the stack now, and the
-    #    program says "iyi: munmap failed" and exits 1. Python runs it in
+    #    program says "ris: munmap failed" and exits 1. Python runs it in
     #    a console of its own and ends it after 20 seconds.
     echo
     echo "== a fatal sentence on a console, the heap lock held"
-    printf 'module badfree\n\nimport std/gc::{GC}\n\nputs "freeing"\nx = 5\nGC.free(pointerof(x).as(Void*))\nputs "survived"\n' > "$WORK/badfree.iyi"
+    printf 'module badfree\n\nimport std/gc::{GC}\n\nputs "freeing"\nx = 5\nGC.free(pointerof(x).as(Void*))\nputs "survived"\n' > "$WORK/badfree.ri"
     if [ -z "$PY" ]; then
       echo "  no python3 on this machine, so the console is unmeasured"
-    elif ! "$IYI" build -o "$WORK/badfree" "$WORK/badfree.iyi" > "$WORK/badfree.build" 2>&1; then
+    elif ! "$RIS" build -o "$WORK/badfree" "$WORK/badfree.ri" > "$WORK/badfree.build" 2>&1; then
       echo "  the fatal-sentence program did not build"; sed -n '1,10p' "$WORK/badfree.build"; status=1
     else
       cat > "$WORK/fatal.py" <<'PY'
@@ -266,8 +266,8 @@ PY
       "$PY" "$WORK/fatal.py" "$WORK/badfree.exe" "$WORK/fatal.result" > "$WORK/fatal.out" 2>&1
       if grep -q '^UNMEASURED' "$WORK/fatal.out"; then
         echo "  no console here, so the fatal sentence is unmeasured: $(cat "$WORK/fatal.out")"
-      elif grep -qx 'exit 1' "$WORK/fatal.out" && grep -qx 'iyi: munmap failed' "$WORK/fatal.out"; then
-        echo "  the program said 'iyi: munmap failed' on its console and exited 1"
+      elif grep -qx 'exit 1' "$WORK/fatal.out" && grep -qx 'ris: munmap failed' "$WORK/fatal.out"; then
+        echo "  the program said 'ris: munmap failed' on its console and exited 1"
       else
         echo "  the program did not end with its sentence:"; sed 's/^/    /' "$WORK/fatal.out"; status=1
       fi
@@ -281,10 +281,10 @@ PY
     #    the program in it and reads the mode after.
     echo
     echo "== the console's mode after the program"
-    printf 'module main\n\nputs "hello"\nSTDERR.puts "there"\n' > "$WORK/vtmode.iyi"
+    printf 'module main\n\nputs "hello"\nSTDERR.puts "there"\n' > "$WORK/vtmode.ri"
     if [ -z "$PY" ]; then
       echo "  no python3 on this machine, so the mode is unmeasured"
-    elif ! "$IYI" build -o "$WORK/vtmode" "$WORK/vtmode.iyi" > "$WORK/vtmode.build" 2>&1; then
+    elif ! "$RIS" build -o "$WORK/vtmode" "$WORK/vtmode.ri" > "$WORK/vtmode.build" 2>&1; then
       echo "  the mode program did not build"; sed -n '1,10p' "$WORK/vtmode.build"; status=1
     else
       cat > "$WORK/vtmode.py" <<'PY'
@@ -329,7 +329,7 @@ PY
     #    and reads the screen.
     echo
     echo "== a file opened on the console"
-    cat > "$WORK/confile.iyi" <<'EOF'
+    cat > "$WORK/confile.ri" <<'EOF'
 module confile
 
 import std/file::{File}
@@ -343,7 +343,7 @@ end
 EOF
     if [ -z "$PY" ]; then
       echo "  no python3 on this machine, so the console is unmeasured"
-    elif ! "$IYI" build -o "$WORK/confile" "$WORK/confile.iyi" > "$WORK/confile.build" 2>&1; then
+    elif ! "$RIS" build -o "$WORK/confile" "$WORK/confile.ri" > "$WORK/confile.build" 2>&1; then
       echo "  the console-file program did not build"; sed -n '1,10p' "$WORK/confile.build"; status=1
     else
       cat > "$WORK/confile.py" <<'PY'
@@ -415,8 +415,8 @@ PY
     #    (11.6 s in a plain build).
     echo
     echo "== a stream past a gibibyte"
-    printf 'module main\n\npath = Program.args[1]\nif Program.args[0] == "all"\n  puts "read_all #{File.read(path).bytesize}"\nelse\n  line = File.open(path).read_line\n  puts "read_line #{line ? line.bytesize : -1}"\nend\n' > "$WORK/big.iyi"
-    if ! "$IYI" build --release -o "$WORK/big" "$WORK/big.iyi" > "$WORK/big.build" 2>&1; then
+    printf 'module main\n\npath = Program.args[1]\nif Program.args[0] == "all"\n  puts "read_all #{File.read(path).bytesize}"\nelse\n  line = File.open(path).read_line\n  puts "read_line #{line ? line.bytesize : -1}"\nend\n' > "$WORK/big.ri"
+    if ! "$RIS" build --release -o "$WORK/big" "$WORK/big.ri" > "$WORK/big.build" 2>&1; then
       echo "  the big-stream program did not build"; sed -n '1,10p' "$WORK/big.build"; status=1
     else
       for size in 268435456 1288490188 2147483648; do
@@ -434,8 +434,8 @@ PY
       }
       big_case all 1288490188 "read_all 1288490188"
       big_case line 1288490188 "read_line 1288490188"
-      big_case all 2147483648 "iyi: panic: the stream is past the 2147483647 bytes a string holds"
-      big_case line 2147483648 "iyi: panic: a line is past the 2147483647 bytes a string holds"
+      big_case all 2147483648 "ris: panic: the stream is past the 2147483647 bytes a string holds"
+      big_case line 2147483648 "ris: panic: a line is past the 2147483647 bytes a string holds"
       # And how much of the machine a read of the file takes: grown by
       # doubling and then copied into the string, 256 MB peaked at 774 MB
       # of working set; read into a string the file's size, it is the file.
@@ -478,10 +478,10 @@ PY
     #    each event and reads the mode after.
     echo
     echo "== the console's mode after Ctrl-C and Ctrl-Break"
-    printf 'module interrupted\n\nputs "hello"\nsleep(10000)\nputs "slept"\n' > "$WORK/interrupted.iyi"
+    printf 'module interrupted\n\nputs "hello"\nsleep(10000)\nputs "slept"\n' > "$WORK/interrupted.ri"
     if [ -z "$PY" ]; then
       echo "  no python3 on this machine, so the mode is unmeasured"
-    elif ! "$IYI" build -o "$WORK/interrupted" "$WORK/interrupted.iyi" > "$WORK/interrupted.build" 2>&1; then
+    elif ! "$RIS" build -o "$WORK/interrupted" "$WORK/interrupted.ri" > "$WORK/interrupted.build" 2>&1; then
       echo "  the interrupted program did not build"; sed -n '1,10p' "$WORK/interrupted.build"; status=1
     else
       cat > "$WORK/interrupted.py" <<'PY'

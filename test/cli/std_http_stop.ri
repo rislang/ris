@@ -1,0 +1,400 @@
+# A server stopped while clients hold connections to it: std/http's
+# `serve` closes them, over TLS with close_notify, and nothing panics.
+#
+#   ./bin/ris run test/cli/std_http_stop.ri
+#   ./bin/ris run test/cli/std_http_stop.ri serve PORTFILE CHAIN.pem KEY.pem
+#
+# With no arguments it runs std/http's server over TLS (ALPN h2 and
+# http/1.1, under the test PKI below) and in the clear in one program,
+# and clients that keep a connection to each: HTTP/1.1 and HTTP/2 over
+# TLS, HTTP/1.1 and h2c in the clear, a std/tls client that sent one
+# request and waits for the next answer, and an upgrade over each whose
+# block reads until the connection ends and then says goodbye. Then both
+# listeners close, by a request, with every one of those connections
+# still open, and each line says what a connection was told: the waiting
+# TLS client close_notify, the upgrades that they are closed. A line
+# that is not what it should be is followed by "FAIL <check>: <found>,
+# not <wanted>", and the run ends "ALL CHECKS PASSED" or exits 1. A
+# panic anywhere is printed by the task it happened in, which no check
+# here can see: test/cli/std_http_exercise.sh counts them in the output.
+#
+# `serve` is the TLS server alone, HTTP/1.1, until a GET of /stop, for a
+# client the gate writes in Python to hold a connection to while it stops.
+
+module bench/std_http_stop
+
+# The probe owns its socket only until it chooses a nonzero pool port.
+# Ready and Stop are keyed by factory, so simultaneous pools do not steal
+# one another's lifecycle messages. Stop gives the response time to flush.
+# These exercises still use std's legacy String APIs and assertions.
+# Board messages themselves own copied tape text; this is the heap adapter.
+def ris_heap_text(value : String) : String
+  value.to_s
+end
+
+import std/file::{File}
+
+module RisExerciseServer
+  struct RisReady(H)
+  end
+
+  struct RisStop(H)
+  end
+
+  struct RisStopped(H)
+  end
+
+  def self.stopped(handler : H.class) : Nil forall H
+    result = RisBoard.take(RisStopped(H), 10000_i64)
+    raise "cancelled before stop" if result.is_a?(Cancelled)
+    raise "server did not stop within 10 s" unless result[1]
+  end
+
+  @[OnTape]
+  struct RisConfig(C, H)
+    getter value : C
+
+    def initialize(@value)
+    end
+  end
+
+  def self.port : Int32
+    probe = IyiSocket.listen("127.0.0.1", 0)
+    port = probe.local_port
+    probe.close
+    port
+  end
+
+  def self.ready(handler : H.class) : Nil forall H
+    raise "ready queue full" unless RisBoard.post(RisReady(H).new)
+  end
+
+  def self.wait(handler : H.class) : Nil forall H
+    ready = RisBoard.take(RisReady(H), 10000_i64)
+    raise "cancelled before listening" if ready.is_a?(Cancelled)
+    raise "server did not listen within 10 s" unless ready[1]
+  end
+
+  def self.stop(handler : H.class) : Nil forall H
+    raise "stop queue full" unless RisBoard.post(RisStop(H).new)
+  end
+
+  def self.answer(port : Int32, config : C, handler : H.class,
+                  stream_bodies : Bool = false, compress : Bool = false,
+                  timeout_ms : Int32 = 60000,
+                  request_timeout_ms : Int32 = Server::REQUEST_TIMEOUT,
+                  max_connections : Int32 = 64,
+                  print_port : Bool = false,
+                  port_file : String? = nil) : Nil forall C, H
+    raise "config queue full" unless RisBoard.post(RisConfig(C, H).new(config))
+    group do |pool|
+      pool.spawn do
+        copied = RisBoard.take(RisConfig(C, H))
+        unless copied.is_a?(Cancelled)
+          Server.answer("127.0.0.1", port, copied.value, handler,
+            stream_bodies: stream_bodies, compress: compress,
+            timeout_ms: timeout_ms, request_timeout_ms: request_timeout_ms,
+            max_connections: max_connections)
+        end
+        0
+      end
+      pool.spawn do
+        unless RisBoard.take(RisStop(H)).is_a?(Cancelled)
+          sleep(50)
+          pool.cancel_children
+        end
+        0
+      end
+      if print_port || port_file
+        wait(handler)
+        puts port if print_port
+        File.write(port_file, port.to_s) if port_file
+      end
+      0
+    end
+    raise "stopped queue full" unless RisBoard.post(RisStopped(H).new)
+  end
+end
+
+@[OnTape]
+struct RisStopObservation
+  getter message : String
+
+  def initialize(@message)
+  end
+end
+
+class RisStop1Handler
+  @tls : TlsServerConfig
+  @identity : TlsIdentity
+
+  def initialize(config)
+    identity = TlsIdentity.new(LEAF_PEM + ROOT_PEM, KEY_PEM)
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
+    @tls.alpn << "h2" << "http/1.1"
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisStop1Handler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    RisExerciseServer.stop(RisStop1Handler) if req.path == "/stop"
+    answer(req, res)
+  end
+
+  # After the 101 of /upgrade: hold the connection until the client goes.
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
+    hold_until_closed(socket)
+  end
+end
+
+class RisStop2Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisStop2Handler)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    RisExerciseServer.stop(RisStop2Handler) if req.path == "/stop"
+    answer(req, res)
+  end
+
+  # After the 101 of /upgrade: hold the connection until the client goes.
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
+    hold_until_closed(socket)
+  end
+end
+
+class RisStop3Handler
+  @tls : TlsServerConfig
+  @identity : TlsIdentity
+
+  def initialize(config : {String, String})
+    identity = TlsIdentity.new(ris_heap_text(config[0]), ris_heap_text(config[1]))
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
+    @tls.alpn << "http/1.1"
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisStop3Handler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    RisExerciseServer.stop(RisStop3Handler) if req.path == "/stop"
+    res.body << "ok"
+  end
+end
+
+import std/http::{HTTP, HTTPClient, Incoming, Outgoing, Response, Server, TlsStream, Upgraded}
+import std/socket::{IyiSocket, SocketError}
+import std/tls::{TlsIdentity, TlsClient, TlsConfig, TlsError, TlsServerConfig}
+import std/x509::{RisCertificateStore, Certificate}
+import std/file::{File}
+
+# A PEM text's certificates, kept in *store*; a text that does not read
+# panics with the reason.
+def pem_certs(store : RisCertificateStore, text : String) : Array(Certificate)
+  if problem = store.read_pem(text)
+    raise problem.message
+  end
+  store.kept_certificates
+end
+
+# A test PKI of this program's own, for the run with no arguments: a root
+# and a leaf for localhost it signed, Ed25519, valid from 2025 to 9999 so
+# that no clock retires them.
+# The leaf's key is in the open on purpose: it guards nothing but this
+# test. Made once with Python's cryptography.
+LEAF_PEM = "-----BEGIN CERTIFICATE-----\n" \
+           "MIIBQzCB9qADAgECAgEDMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
+           "dDAgFw0yNTAxMDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1OVowFDESMBAGA1UEAwwJ\n" \
+           "bG9jYWxob3N0MCowBQYDK2VwAyEAOeskudtTVi76JObK6QHqJy6M7PaEu/aLlC5H\n" \
+           "B5OLks+jZjBkMBQGA1UdEQQNMAuCCWxvY2FsaG9zdDAMBgNVHRMBAf8EAjAAMB0G\n" \
+           "A1UdDgQWBBQN8ZJay/U7zf07disj78hKukvGAjAfBgNVHSMEGDAWgBSNjkTWVhBs\n" \
+           "a874Ao2cPFX4w4saajAFBgMrZXADQQAcAgj9qe58GnzceRkYfxyfNHxmqWOgDJkn\n" \
+           "b3rO1pz+8OCRioO1P+BhFa1FR/FMHSH9bOFEKfXfy3Nwr+y+GkMM\n" \
+           "-----END CERTIFICATE-----\n"
+ROOT_PEM = "-----BEGIN CERTIFICATE-----\n" \
+           "MIIBJDCB16ADAgECAgEBMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
+           "dDAgFw0yNTAxMDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1OVowGTEXMBUGA1UEAwwO\n" \
+           "aXlpIGJlbmNoIHJvb3QwKjAFBgMrZXADIQCQIEeX9suXr4DL8DiLdBUfoWaJU+Hv\n" \
+           "7JhN3IpqspsuOqNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYw\n" \
+           "HQYDVR0OBBYEFI2ORNZWEGxrzvgCjZw8VfjDixpqMAUGAytlcANBAFEfpUf437+b\n" \
+           "PwJvPGD/gB0zIegp6+3cJzF42Tx6Hj8tIJgdtXVKA58EXmitGetqb788+xoJ49My\n" \
+           "4Wc3L1uxxAI=\n" \
+           "-----END CERTIFICATE-----\n"
+KEY_PEM = "-----BEGIN PRIVATE KEY-----\n" \
+          "MC4CAQAwBQYDK2VwBCIEIOYKs3OzEJYJ/j+ZQYLoAU929MQeanF9kupAR9HpeHJ8\n" \
+          "-----END PRIVATE KEY-----\n"
+
+# The block an upgrade hands the connection to: it reads until the
+# connection ends - the server's stop closes it under the block - and
+# then says goodbye, as std/websocket does: it asks `closed?` first, since
+# `IyiSocket#write` refuses a closed socket by panicking, and writes only
+# to a connection that is not. What it found goes in *said*: "closed"
+# from both, the TLS stream's `closed?` reading the socket under it.
+def hold_until_closed(socket : IyiSocket | TlsStream) : Nil
+  while true
+    got = socket.read(4096)
+    # The prefork stop cancels this owning task. Cooperate before the
+    # protocol considers a goodbye; the worker's defers close too.
+    socket.close if IyiScheduler.current.cancelled
+    break unless got.is_a?(String) && !got.empty?
+  end
+  if socket.closed?
+    raise "close result queue full" unless RisBoard.post(RisStopObservation.new("closed".as_tape))
+    return
+  end
+  wrote = socket.write("bye")
+  message = (wrote.is_a?(Int32) ? "wrote #{wrote}" : wrote.is_a?(SocketError) ? "a SocketError" : "cancelled")
+  raise "close result queue full" unless RisBoard.post(RisStopObservation.new(message.as_tape))
+  nil
+end
+
+def answer(req : Incoming, res : Outgoing) : Nil
+  if req.path == "/upgrade"
+    res.header("Upgrade", "hold")
+    res.upgrade
+    return
+  end
+  res.body << req.version
+end
+
+args = Program.args
+mode = args.size > 0 ? args[0] : ""
+
+# One check's line, *label* and what was found; and when it is not
+# *wanted*, a FAIL line naming the check, what was found and what
+# should have been.
+def check(label : String, got : String, wanted : String, failures : Array(String)) : Nil
+  puts "#{label}: #{got}"
+  return if got == wanted
+  puts "FAIL #{label}: #{got}, not #{wanted}"
+  failures << label
+end
+
+# A std/tls client's request, and its answer read whole - a head and a
+# body of 8 bytes, "HTTP/1.1" - so that the server waits for the next.
+def asked(tls : TlsClient) : String
+  tls.write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+  heard = ""
+  until heard.ends_with?("\r\n\r\nHTTP/1.1")
+    got = tls.read
+    return "no answer: #{got.message}" if got.is_a?(TlsError)
+    return "no answer: the connection ended" if got.empty?
+    heard << got
+  end
+  heard.split("\r\n").first
+end
+
+if mode.empty?
+  tls = RisExerciseServer.port
+  plain = RisExerciseServer.port
+  secure_base = "https://localhost:#{tls}"
+  plain_base = "http://127.0.0.1:#{plain}"
+  said = String::Builder.new(64)
+  failures = [] of String
+  # Task captures are Share values and text: the client task builds its
+  # own configs and failures, and answers how many failed.
+  failed = 0
+  group do |g|
+    g.spawn do
+      RisExerciseServer.answer(tls, 0, RisStop1Handler)
+      0
+    end
+    RisExerciseServer.wait(RisStop1Handler)
+    g.spawn do
+      RisExerciseServer.answer(plain, 0, RisStop2Handler)
+      0
+    end
+    RisExerciseServer.wait(RisStop2Handler)
+    client_task = g.spawn do
+      pem_store_1 = RisCertificateStore.new
+      roots = pem_certs(pem_store_1, ROOT_PEM)
+      h1 = TlsConfig.new
+      h1.roots = roots
+      h1.alpn << "http/1.1"
+      h2 = TlsConfig.new
+      h2.roots = roots
+      h2.alpn << "h2" << "http/1.1"
+      seen = [] of String
+      over_h1 = HTTPClient.new(tls: h1)
+      first = over_h1.get(secure_base + "/").or_panic
+      over_h2 = HTTPClient.new(tls: h2)
+      second = over_h2.get(secure_base + "/").or_panic
+      in_clear = HTTPClient.new
+      in_clear.get(plain_base + "/").or_panic
+      h2c = HTTPClient.new(prior_knowledge: true)
+      third = h2c.get(plain_base + "/").or_panic
+      check("kept", "TLS #{first.body}, TLS #{second.body}, clear #{in_clear.get(plain_base + "/").or_panic.body}, clear #{third.body}",
+        "TLS HTTP/1.1, TLS HTTP/2, clear HTTP/1.1, clear HTTP/2", seen)
+      waiting = TlsClient.new("localhost", h1)
+      if problem = waiting.connect(tls, 10000)
+        raise problem.message
+      end
+      check("a std/tls client's request", asked(waiting), "HTTP/1.1 200 OK", seen)
+      up_tls = Upgraded.new
+      unless up_tls.connect(secure_base + "/upgrade", "hold", client: over_h1).nil?
+        raise "up_tls: the upgrade failed"
+      end
+      up_plain = Upgraded.new
+      unless up_plain.connect(plain_base + "/upgrade", "hold").nil?
+        raise "up_plain: the upgrade failed"
+      end
+      check("upgraded", "#{up_tls.response.status} and #{up_plain.response.status}", "101 and 101", seen)
+      over_h1.get(secure_base + "/stop").or_panic
+      HTTP.get(plain_base + "/stop").or_panic
+      RisExerciseServer.stopped(RisStop1Handler)
+      RisExerciseServer.stopped(RisStop2Handler)
+      ended = waiting.read
+      check("the waiting std/tls client, on the stop", ended.is_a?(TlsError) ? ended.message : (ended.empty? ? "close_notify" : "#{ended.bytesize} bytes more"),
+        "close_notify", seen)
+      waiting.close
+      up_tls.socket.close
+      up_plain.socket.close
+      over_h1.close
+      over_h2.close
+      in_clear.close
+      h2c.close
+      seen.size
+    end
+    failed = client_task.value.or(1)
+  end
+  2.times do
+    observation = RisBoard.take(RisStopObservation)
+    raise "close result cancelled" if observation.is_a?(Cancelled)
+    said << observation.message
+    said << "\n"
+  end
+  check("the upgrades' last writes", said.finish.split("\n").reject(&.empty?).sorted.join(", "), "closed, closed", failures)
+  exit 1 unless failures.empty? && failed == 0
+  puts "ALL CHECKS PASSED"
+  exit 0
+end
+
+if mode == "serve"
+  listener = RisExerciseServer.port
+  RisExerciseServer.answer(listener, {File.read(args[2]).as_tape, File.read(args[3]).as_tape}, RisStop3Handler, port_file: args[1])
+  puts "stopped"
+  exit 0
+end
+
+puts "usage: std_http_stop [serve PORTFILE CHAIN.pem KEY.pem]"
+exit 2

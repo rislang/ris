@@ -8,9 +8,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -46,7 +46,7 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 export HOME=/home/gate
 export PWD=/pwd/gate
 # This shell rewrites an exported value that looks like a POSIX path before
@@ -60,7 +60,7 @@ esac
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_path_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_path_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -144,17 +144,17 @@ if [ -z "$PY" ]; then
 else
   mkdir -p "$WORK/patched_dot/std"
   "$PY" - <<PY
-src = open("$REPO/src/std/path.iyi").read()
+src = open("$REPO/src/std/path.ri").read()
 old = 'elsif part == ".."'
 # break only the first when ".." in normalize if present
 if old not in src:
     raise SystemExit("patch site missing")
-open("$WORK/patched_dot/std/path.iyi", "w").write(src.replace(old, 'elsif part == "..x"', 1))
+open("$WORK/patched_dot/std/path.ri", "w").write(src.replace(old, 'elsif part == "..x"', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched_dot${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" HOME=/home/gate PWD=/pwd/gate "$IYI" run "$REPO/test/cli/std_path_exercise.iyi" >"$WORK/dot.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched_dot${PSEP}$REPO/src${PSEP}$REPO/samples/ris" HOME=/home/gate PWD=/pwd/gate "$RIS" run "$REPO/test/cli/std_path_exercise.ri" >"$WORK/dot.out" 2>&1; then
     echo "  the exercise PASSED with .. not folded"
     status=1
   else
@@ -170,16 +170,16 @@ caught_at() {
   rm -rf "$WORK/patched_fix" && mkdir -p "$WORK/patched_fix/std"
   OLD="$old" NEW="$new" "$PY" - <<PY
 import os
-src = open("$REPO/src/std/path.iyi").read()
+src = open("$REPO/src/std/path.ri").read()
 old, new = os.environ["OLD"], os.environ["NEW"]
 if old not in src:
     raise SystemExit("patch site missing")
-open("$WORK/patched_fix/std/path.iyi", "w").write(src.replace(old, new, 1))
+open("$WORK/patched_fix/std/path.ri", "w").write(src.replace(old, new, 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  $label: the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched_fix${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" HOME=/home/gate PWD=/pwd/gate "$IYI" run "$REPO/test/cli/std_path_exercise.iyi" >"$WORK/fix.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched_fix${PSEP}$REPO/src${PSEP}$REPO/samples/ris" HOME=/home/gate PWD=/pwd/gate "$RIS" run "$REPO/test/cli/std_path_exercise.ri" >"$WORK/fix.out" 2>&1; then
     echo "  $label: the exercise PASSED on a broken module"
     status=1
   elif ! grep -qF "$expect" "$WORK/fix.out"; then

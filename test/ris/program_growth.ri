@@ -1,6 +1,7 @@
 class State
   @@values = Array(Int32).new(1)
   @@padding = String.new("after the array")
+
   def self.request
     raise "padding" unless @@padding == "after the array"
     tape do
@@ -17,5 +18,6 @@ class State
     raise "growth" unless @@values.size == 4096 && @@values[4095] == 4095
   end
 end
+
 10000.times { State.request }
 puts "PASS: program growth"

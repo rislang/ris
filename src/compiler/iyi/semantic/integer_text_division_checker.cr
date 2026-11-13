@@ -24,7 +24,7 @@ class Iyi::IntegerTextDivisionChecker
     return false unless file
     file = File.expand_path(file).gsub('\\', '/')
     !file.ends_with?(".cr") &&
-      !file.includes?("/src/iyi/") &&
+      !file.includes?("/src/ris/") &&
       !file.includes?("/src/std/") &&
       !file.includes?("/src/compiler/")
   end

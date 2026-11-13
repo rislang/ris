@@ -51,6 +51,6 @@ outcome = group do |g|
   end.value
 end
 refused = outcome.is_a?(Panicked) &&
-  outcome.message.includes?("reader is closed")
+          outcome.message.includes?("reader is closed")
 raise "closed reader: #{outcome.inspect}" unless refused
 puts "PASS: pipe writer waits"

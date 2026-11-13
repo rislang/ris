@@ -26,8 +26,7 @@ struct Coded
   end
 
   def coding(path : String) : String
-    path == "/gzip" || path == "/bad" ? "gzip" :
-      (path == "/zstd" ? "zstd" : "deflate")
+    path == "/gzip" || path == "/bad" ? "gzip" : (path == "/zstd" ? "zstd" : "deflate")
   end
 
   def coded(path : String) : String

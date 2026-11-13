@@ -29,7 +29,7 @@ change. Gates stay structural. No item below changes SPEC.
   mark, find what `allocates?` counts there. Gate: IR specs that a
   byte loop in a def has no mark and a loop in a def that pushes to
   a Builder keeps it; check.sh and RIS_TAPE_STATS unchanged.
-* String#hash (src/iyi/tape.iyi:218) is byte-at-a-time FNV-32. perf
+* String#hash (src/ris/tape.ri:218) is byte-at-a-time FNV-32. perf
   on ninja gen-small: `Hash#find` is 34% of the run, 70% of it
   hashing; ninja is at 1.40x. Hash 8 bytes a step like Goose
   (doc/reference/goose/docs/stdlib.md, Hashing), never read past a

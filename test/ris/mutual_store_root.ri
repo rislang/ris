@@ -1,6 +1,7 @@
 @[OnTape]
 struct N
   getter a : Int32
+
   def initialize(@a : Int32 = -1)
   end
 end
@@ -26,5 +27,6 @@ struct P
     pipe(d)
   end
 end
+
 p = P.new
 puts p.pipe(0)

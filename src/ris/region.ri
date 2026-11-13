@@ -1,0 +1,940 @@
+# Ordinary tapes start at 64 MiB; Linux growing payloads reserve separately.
+# Sizes are checked before state changes.
+# Fatal size errors write literals and stack-buffer numbers, then exit.
+class RisRegion
+  OFF_CURSOR =  0_u64
+  OFF_LIMIT  =  8_u64
+  OFF_PARENT = 16_u64
+  OFF_MAP    = 24_u64
+  # Every live mapping is on one list, for the collector to scan: the
+  # links live in the mapping's own header, so the list has no bound.
+  OFF_NEXT = 32_u64
+  OFF_PREV = 40_u64
+  # This tape's growing payload reservations (`growing_state`), linked
+  # through their OFF_PARENT words and released with it.
+  OFF_SIDE  =         48_u64
+  DATA      =         64_u64
+  UNDER     =         16_u64
+  CAPACITY  =   67108864_u64
+  MAX_COUNT = 2147483647_u64
+  # A mapping's length is a whole number of these: 64 KiB covers the
+  # 4 KiB pages of x86_64, the 16 KiB of Apple's and Asahi's arm64, the
+  # 64 KiB of some arm64 servers and Windows' allocation granularity,
+  # so the limit is the mapping's real end on every one of them.
+  GRAIN = 65536_u64
+
+  # Released mappings the thread keeps warm, newest first, linked
+  # through their OFF_PARENT words: one per scope open at once, up to
+  # SPARES. A handler that parks inside its request's scope lets the
+  # next connection open one too; with a single spare every such scope
+  # took a fresh mapping and faulted in each page it wrote (a 364 KB
+  # page: 85 faults a request, 2,500 requests/s where 4,400 were warm).
+  @[ThreadLocal]
+  @@spare : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@spares : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@side_spare : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@side_spares : UInt64 = 0_u64
+  SPARES = 64_u64
+  # A spare keeps this much of what it was written warm; the pages past
+  # it go back to the kernel, so one large scope does not stay resident.
+  KEEP_WARM = 1048576_u64
+  @@first_region : UInt64 = 0_u64
+  @@registered : UInt64 = 0_u64
+
+  # What the tapes did, for `RIS_TAPE_STATS` (`report_stats`): counted
+  # on the slow paths only, per thread, and added to the totals under
+  # the runtime lock when a thread ends.
+  @[ThreadLocal]
+  @@scopes : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@mapped : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@unmapped : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@moved : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@moved_bytes : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@sides : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@side_bytes : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@grown : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@results : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@result_bytes : UInt64 = 0_u64
+  @@total_scopes : UInt64 = 0_u64
+  @@total_mapped : UInt64 = 0_u64
+  @@total_unmapped : UInt64 = 0_u64
+  @@total_moved : UInt64 = 0_u64
+  @@total_moved_bytes : UInt64 = 0_u64
+  @@total_sides : UInt64 = 0_u64
+  @@total_side_bytes : UInt64 = 0_u64
+  @@total_grown : UInt64 = 0_u64
+  @@total_results : UInt64 = 0_u64
+  @@total_result_bytes : UInt64 = 0_u64
+
+  # A def's fresh result moved down to its caller's boundary (SPEC 1.5,
+  # 6.6): counted for RIS_TAPE_STATS.
+  def self.result_moved(bytes : UInt64) : Nil
+    @@results = @@results &+ 1_u64
+    @@result_bytes = @@result_bytes &+ bytes
+  end
+
+  # The running fiber's tape, or 0: `IyiScheduler.switch_to` swaps it
+  # with the fiber's own slot.
+  @[ThreadLocal]
+  @@tape : UInt64 = 0_u64
+
+  @[AlwaysInline]
+  def self.tape : UInt64
+    @@tape
+  end
+
+  def self.tape=(region : UInt64) : UInt64
+    @@tape = region
+  end
+
+  # The program owns one chain, independently of every fiber's chain.
+  @@program_tape : UInt64 = 0_u64
+  @@program_depth : Int32 = 0
+
+  def self.program_scope(&)
+    return yield if @@program_depth > 0
+    saved = @@tape
+    @@program_tape = acquire(CAPACITY) if @@program_tape == 0
+    @@tape = @@program_tape
+    @@program_depth = 1
+    defer program_restore(saved)
+    yield
+  end
+
+  # A once initializer that starts inside another program initializer
+  # (a constant Regex reading Unicode's tables the first time) must not put
+  # its value on the program tape: that tape is the outer initializer's
+  # working tape, and the outer defs reset their scratch on it when they
+  # return. Its `copy_to(Program.tape)` goes to program storage instead,
+  # which never frees.
+  def self.once_scope(&)
+    return yield if @@program_depth == 0
+    saved_tape = @@tape
+    saved_program = @@program_tape
+    @@program_storage = acquire(CAPACITY) if @@program_storage == 0
+    @@program_tape = @@program_storage
+    @@program_depth = 0
+    defer once_restore(saved_tape, saved_program)
+    yield
+  end
+
+  def self.once_restore(saved_tape : UInt64, saved_program : UInt64) : Nil
+    @@program_storage = @@program_tape
+    @@program_tape = saved_program
+    @@program_depth = 1
+    @@tape = saved_tape
+  end
+
+  def self.program_restore(saved : UInt64) : Nil
+    @@program_tape = @@tape
+    @@program_depth = 0
+    @@tape = saved
+  end
+
+  # Stable program-owned storage, sharded by allocating thread. These
+  # chains stay registered as roots until exit, including after a worker
+  # ends. Allocation cannot park a fiber, so restoring its tape is direct.
+  @[ThreadLocal]
+  @@program_storage : UInt64 = 0_u64
+
+  def self.program_bytes(size : UInt64, clear : Bool = false,
+                         type_id : UInt64 = 0_u64) : UInt64
+    saved = @@tape
+    @@program_storage = acquire(CAPACITY) if @@program_storage == 0
+    old = @@program_storage
+    @@tape = @@program_storage
+    address = take(@@tape, size, clear, type_id)
+    @@program_storage = @@tape
+    # Inside storage_scope the saved tape is program storage itself.
+    @@tape = saved == old ? @@program_storage : saved
+    note_program(size)
+    address
+  end
+
+  # Runs the block with program storage as the tape, for runtime objects
+  # that live until exit (the standard streams' buffers): no mapping of
+  # its own, unlike `program_scope`. It never frees, so keep it small.
+  def self.storage_scope(&)
+    saved = @@tape
+    @@program_storage = acquire(CAPACITY) if @@program_storage == 0
+    @@tape = @@program_storage
+    defer storage_restore(saved)
+    yield
+  end
+
+  def self.storage_restore(saved : UInt64) : Nil
+    @@program_storage = @@tape
+    @@tape = saved
+  end
+
+  # Bytes taken from program storage, which never frees: RIS_TAPE_STATS
+  # reports it, and a server's count must stop growing once warm.
+  @@program_taken : UInt64 = 0_u64
+
+  def self.note_program(size : UInt64) : Nil
+    IyiRuntimeLock.lock
+    @@program_taken = @@program_taken &+ size
+    IyiRuntimeLock.unlock
+  end
+
+  def self.storage_taken : UInt64
+    @@program_taken
+  end
+
+  # Codegen initializes ordinary defaults and records this concrete type,
+  # so virtual calls see program-owned instances as well as heap ones.
+  def self.program_object(type : T.class) : T forall T
+    {% if ([T] + T.ancestors).any? { |t| t.methods.any? { |m| m.name == "finalize" } } %}
+      {% raise "Program-owned objects cannot finalize; close their resources explicitly." %}
+    {% end %}
+    type.allocate_on_program
+  end
+
+  def self.release_program : Nil
+    # Readers may still be running when main returns. The OS releases
+    # this chain at process exit once kernel threads have been started.
+    {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+            (flag?(:darwin) && flag?(:aarch64)) ||
+            (flag?(:win32) && flag?(:x86_64)) %}
+      return if IyiScheduler.shared?
+    {% end %}
+    saved = @@tape
+    @@tape = @@program_tape
+    @@program_tape = 0_u64
+    release_tape if @@tape != 0
+    @@tape = @@program_storage
+    @@program_storage = 0_u64
+    release_tape if @@tape != 0
+    @@tape = saved
+  end
+
+  def self.program_active? : Bool
+    @@program_depth > 0
+  end
+
+  # A growing value remembers its owner, even when another tape is active.
+  def self.owned_resize(start : UInt64, stop : UInt64, used : UInt64,
+                        bytes : UInt64, side : Pointer(UInt64),
+                        program : UInt64, width : UInt64 = 1_u64) : UInt64
+    if program != 0
+      program_scope { tape_resize(start, stop, used, bytes, side, width) }
+    else
+      tape_resize(start, stop, used, bytes, side, width)
+    end
+  end
+
+  # The outermost scope owns the tape; a scope inside it (a handler
+  # calling a helper that opens its own) runs on the same tape and
+  # frees nothing, because what it made may already be held by values
+  # of the outer one.
+  def self.tape_scope(capacity : UInt64, &)
+    return yield if @@tape != 0
+    @@tape = acquire(capacity)
+    defer ::__iyi_tape_release
+    yield
+  end
+
+  def self.restore_tape(saved : UInt64) : Nil
+    release_tape
+    @@tape = saved
+  end
+
+  def self.release_tape : Nil
+    @@scopes = @@scopes &+ 1_u64
+    # The tape may have grown past its first mapping (`grow_onto`): the
+    # running one is the newest, and each names the one before it.
+    region = @@tape
+    @@tape = 0_u64
+    while region != 0
+      parent = IyiHeap.read64(region &+ OFF_PARENT)
+      IyiHeap.write64(region &+ OFF_PARENT, 0_u64)
+      release(region)
+      region = parent
+    end
+  end
+
+  # These helpers never format a String or allocate on an error path.
+  @[NoInline]
+  def self.size_error(message : String, value : UInt64) : NoReturn
+    RisHeap.text(message)
+    RisHeap.number(value)
+    RisHeap.text("\n")
+    __iyi_exit(1)
+  end
+
+  @[NoInline]
+  def self.overflow(a : UInt64, op : String, b : UInt64) : NoReturn
+    RisHeap.text("ris: tape size overflow: ")
+    RisHeap.number(a)
+    RisHeap.text(op)
+    RisHeap.number(b)
+    RisHeap.text("\n")
+    __iyi_exit(1)
+  end
+
+  @[AlwaysInline]
+  def self.size_add(a : UInt64, b : UInt64) : UInt64
+    overflow(a, " + ", b) if a > 18446744073709551615_u64 - b
+    a &+ b
+  end
+
+  @[AlwaysInline]
+  def self.size_mul(a : UInt64, b : UInt64) : UInt64
+    if b != 0 && a > 18446744073709551615_u64 // b
+      overflow(a, " * ", b)
+    end
+    a &* b
+  end
+
+  def self.nonnegative(value : Int64) : UInt64
+    if value < 0
+      RisHeap.text("ris: tape bad size: -")
+      RisHeap.number(0_u64 &- value.unsafe_to_u64)
+      RisHeap.text("\n")
+      __iyi_exit(1)
+    end
+    value.to_u64
+  end
+
+  # Scanner offsets may move backwards, but must remain representable.
+  @[AlwaysInline]
+  def self.offset_add(offset : Int32, count : Int32) : Int32
+    sum = offset.to_i64 + count.to_i64
+    if sum < -2147483648_i64 || sum > 2147483647_i64
+      offset_overflow(sum)
+    end
+    sum.to_i32
+  end
+
+  @[NoInline]
+  def self.offset_overflow(value : Int64) : NoReturn
+    RisHeap.text("ris: tape offset overflow: ")
+    RisHeap.text("-") if value < 0
+    magnitude = value < 0 ? (0_u64 &- value.unsafe_to_u64) : value.to_u64
+    RisHeap.number(magnitude)
+    RisHeap.text("\n")
+    __iyi_exit(1)
+  end
+
+  # String lengths and Array/RisTree element counts are signed 32-bit values.
+  def self.count(value : UInt64) : UInt64
+    size_error("ris: tape size exceeds 2147483647: ", value) \
+      if value > MAX_COUNT
+    value
+  end
+
+  @[NoInline]
+  def self.no_tape : NoReturn
+    __iyi_write(2, "ris: a tape value made outside a tape block\n" \
+                   .to_unsafe.as(Void*), 44_u64)
+    __iyi_exit(1)
+  end
+
+  # Bytes on the tape, uncleared, with no header: a tape value's storage
+  # is never an object the collector or dispatch reads.
+  @[AlwaysInline]
+  def self.tape_bytes(size : UInt64) : UInt64
+    region = @@tape
+    no_tape if region == 0
+    take(region, size, false, 0_u64)
+  end
+
+  # Fixed instances keep dispatch headers and never move. Check before
+  # codegen runs field defaults or initialize, using the fatal tape path.
+  def self.tape_object(size : UInt64, type_id : UInt64) : UInt64
+    region = @@tape
+    no_tape if region == 0
+    take(region, size, true, type_id)
+  end
+
+  # Construct growing storage before any element can be published. State
+  # stays on the ordinary tape; Linux payloads each own a guarded virtual
+  # reservation, returned to the side spares at the owning scope's end.
+  def self.growing_state(bytes : UInt64, width : UInt64,
+                         words : UInt64 = 5_u64) : Pointer(UInt64)
+    {% if flag?(:linux) || flag?(:darwin) %}
+      capacity = side_capacity(width)
+      payload = bytes &- 40_u64
+      capacity = payload if payload > capacity
+      state = Pointer(UInt64).new(tape_bytes(words * 8_u64))
+      own = acquire_side(capacity)
+      region = @@tape
+      IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(region &+ OFF_SIDE))
+      IyiHeap.write64(region &+ OFF_SIDE, own)
+      start = own &+ DATA
+      IyiHeap.write64(own &+ OFF_CURSOR,
+        (start &+ payload &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64)
+      state.value = start
+      (state + 3_i64).value = own
+      state
+    {% else %}
+      state = Pointer(UInt64).new(tape_bytes(bytes + (words - 5_u64) * 8_u64))
+      state.value = state.address &+ words * 8_u64
+      (state + 3_i64).value = 0_u64
+      state
+    {% end %}
+  end
+
+  @[ThreadLocal]
+  @@text_reservations : UInt64 = 0_u64
+  @[ThreadLocal]
+  @@text_copied_bytes : UInt64 = 0_u64
+
+  def self.text_reservations : UInt64
+    @@text_reservations
+  end
+
+  def self.text_copied_bytes : UInt64
+    @@text_copied_bytes
+  end
+
+  def self.text_initial_copy(bytes : UInt64) : Nil
+    @@text_reservations &+= 1_u64
+    @@text_copied_bytes &+= bytes
+  end
+
+  def self.text_reset_copy(bytes : UInt64) : Nil
+    @@text_copied_bytes &+= bytes
+  end
+
+  # A lazy reservation needs a side-list boundary that already exists
+  # at its declaration, even before this tape has made its first side.
+  # So a tape's first text slot takes one empty side region; it returns to
+  # the spares with the tape and is reused, and counts as no transfer.
+  def self.text_anchor(home : UInt64) : UInt64
+    return 0_u64 if home == 0
+    side = IyiHeap.read64(home &+ OFF_SIDE)
+    return side unless side == 0
+    side = acquire_side(0_u64)
+    IyiHeap.write64(side &+ OFF_PARENT, 0_u64)
+    IyiHeap.write64(home &+ OFF_SIDE, side)
+    side
+  end
+
+  # Lazy text may first grow while a shorter-lived caller tape is active.
+  # Link its state and payload directly to its construction-time owner.
+  # Metadata occupies the first 40 bytes of the private reservation.
+  # *after* is the home's newest side region when the text's slot was
+  # made (0: none): the reservation is linked just behind it, as if taken
+  # then, so a scope begun since then does not release it at its end.
+  def self.text_state(home : UInt64, capacity : UInt64,
+                      after : UInt64 = 0_u64) : Pointer(UInt64)
+    no_tape if home == 0
+    reservation = side_capacity(1_u64)
+    reservation = capacity if capacity > reservation
+    own = acquire_side(size_add(reservation, 40_u64))
+    if after != 0
+      IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(after &+ OFF_PARENT))
+      IyiHeap.write64(after &+ OFF_PARENT, own)
+    else
+      IyiHeap.write64(own &+ OFF_PARENT, 0_u64)
+      tail = IyiHeap.read64(home &+ OFF_SIDE)
+      if tail == 0
+        IyiHeap.write64(home &+ OFF_SIDE, own)
+      else
+        while (following = IyiHeap.read64(tail &+ OFF_PARENT)) != 0
+          tail = following
+        end
+        IyiHeap.write64(tail &+ OFF_PARENT, own)
+      end
+    end
+    state = Pointer(UInt64).new(own &+ DATA)
+    start = state.address &+ 40_u64
+    state.value = start
+    (state + 1_i64).value = size_add(start, capacity)
+    (state + 2_i64).value = start
+    (state + 3_i64).value = own
+    (state + 4_i64).value = 0_u64
+    IyiHeap.write64(own &+ OFF_CURSOR,
+      size_add(size_add(start, capacity), 7_u64) & 0xFFFFFFFFFFFFFFF8_u64)
+    state
+  end
+
+  # Linux growing values own their reservation before publishing elements.
+  # MAP_NORESERVE commits pages on touch; the final grain is PROT_NONE.
+  # A raw, unpublished extent may acquire a reservation on first growth;
+  # a displaced published extent is refused rather than copied.
+  # Other targets retain the legacy moving side-region implementation.
+  def self.tape_resize(start : UInt64, stop : UInt64, used : UInt64,
+                       bytes : UInt64, side : Pointer(UInt64),
+                       width : UInt64 = 1_u64) : UInt64
+    region = @@tape
+    no_tape if region == 0
+    own = side.value
+    home = own != 0 ? own : region
+    size_error("ris: tape resize used exceeds size: ", used) if used > bytes
+    fresh = size_add(size_add(start, bytes), 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+    # stop is an existing mapped extent; its alignment cannot wrap.
+    # OFF_LIMIT bounds payload bytes; mapping_length includes tail padding.
+    if ((stop &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64) ==
+         IyiHeap.read64(home &+ OFF_CURSOR) &&
+       size_add(start, bytes) <= IyiHeap.read64(home &+ OFF_LIMIT)
+      IyiHeap.write64(home &+ OFF_CURSOR, fresh)
+      return start
+    end
+    {% if flag?(:linux) || flag?(:darwin) %}
+      if own != 0
+        size_error("ris: tape side reservation exhausted: ", bytes)
+      end
+      size_error("ris: use growing_state before publishing tape bytes: ", used) \
+        if used != 0
+      capacity = side_capacity(width)
+      size_error("ris: tape side reservation exhausted: ", bytes) \
+        if bytes > capacity
+      own = acquire_side(capacity)
+    {% else %}
+      # Migration: these targets still move when a side mapping fills.
+      capacity = size_mul(bytes, 4_u64)
+      capacity = SIDE_FIRST if capacity < SIDE_FIRST
+      own = acquire(capacity)
+      @@moved = @@moved &+ 1_u64
+      @@moved_bytes = @@moved_bytes &+ used
+    {% end %}
+    {% unless flag?(:linux) || flag?(:darwin) %}
+      @@sides = @@sides &+ 1_u64
+      @@side_bytes = @@side_bytes &+ used
+    {% end %}
+    IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(region &+ OFF_SIDE))
+    IyiHeap.write64(region &+ OFF_SIDE, own)
+    side.value = own
+    # acquire reserved capacity >= bytes, including alignment room.
+    moved = own &+ DATA
+    IyiHeap.write64(own &+ OFF_CURSOR,
+      (moved &+ bytes &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64)
+    {% unless flag?(:linux) || flag?(:darwin) %}
+      LibTapeCopy.memcpy(Pointer(UInt8).new(moved),
+        Pointer(UInt8).new(start), used, false)
+    {% end %}
+    moved
+  end
+
+  # Linux policy: reserve 128 MiB per growing payload, or its initial
+  # capacity if larger. No reservation grows or relocates: exhaustion is
+  # checked before mutation. MAX_COUNT still bounds the element count.
+  # MAP_NORESERVE avoids commit accounting; scope rollback reuses spares.
+  # The allocation graph must recognize growing_state so those rollbacks
+  # are retained even when constructors no longer call tape_bytes directly.
+  SIDE_RESERVE = 134217728_u64
+  SIDE_FIRST   = CAPACITY
+
+  def self.side_capacity(width : UInt64) : UInt64
+    maximum = size_mul(MAX_COUNT, width)
+    maximum < SIDE_RESERVE ? maximum : SIDE_RESERVE
+  end
+
+  {% if flag?(:darwin) %}
+    # libSystem, as the prelude's darwin arm: raw syscalls are no stable ABI.
+    # MAP_NORESERVE has no effect there; pages still commit on touch.
+    def self.sys_mmap(length : UInt64, flags : Int64) : UInt64
+      LibC.mmap(Pointer(Void).new(0_u64), length, 3, 0x1002, -1, 0_i64).address
+    end
+
+    def self.sys_mprotect(address : UInt64, length : UInt64, prot : Int64) : Int32
+      LibC.mprotect(Pointer(Void).new(address), length, prot.to_i32)
+    end
+  {% end %}
+
+  {% if flag?(:linux) %}
+    # Raw syscalls, as the prelude's `__iyi_mmap`: a Linux program names
+    # no libc symbol for its tape (test/cli/floor_base.sh). Each answers
+    # what libc's would: an address or all ones, 0 or -1.
+    def self.sys_mmap(length : UInt64, flags : Int64) : UInt64
+      result = uninitialized Int64
+      {% if flag?(:x86_64) %}
+        asm("syscall" : "={rax}"(result)
+                      : "{rax}"(9_i64), "{rdi}"(0_i64), "{rsi}"(length), "{rdx}"(3_i64),
+                        "{r10}"(flags), "{r8}"(-1_i64), "{r9}"(0_i64)
+                      : "rcx", "r11", "memory"
+                      : "volatile")
+      {% else %}
+        asm("svc #0" : "={x0}"(result)
+                     : "{x8}"(222_i64), "{x0}"(0_i64), "{x1}"(length), "{x2}"(3_i64),
+                       "{x3}"(flags), "{x4}"(-1_i64), "{x5}"(0_i64)
+                     : "memory"
+                     : "volatile")
+      {% end %}
+      return 0xFFFFFFFFFFFFFFFF_u64 if result < 0 && result >= -4095
+      result.unsafe_to_u64
+    end
+
+    def self.sys_mprotect(address : UInt64, length : UInt64, prot : Int64) : Int32
+      result = uninitialized Int64
+      {% if flag?(:x86_64) %}
+        asm("syscall" : "={rax}"(result)
+                      : "{rax}"(10_i64), "{rdi}"(address), "{rsi}"(length), "{rdx}"(prot)
+                      : "rcx", "r11", "memory"
+                      : "volatile")
+      {% else %}
+        asm("svc #0" : "={x0}"(result)
+                     : "{x8}"(226_i64), "{x0}"(address), "{x1}"(length), "{x2}"(prot)
+                     : "memory"
+                     : "volatile")
+      {% end %}
+      result < 0 ? -1 : 0
+    end
+
+  {% end %}
+
+  {% if flag?(:linux) || flag?(:darwin) %}
+    def self.acquire_side(capacity : UInt64) : UInt64
+      usable = mapping_length(capacity)
+      length = size_add(usable, GRAIN)
+      # Mixed element widths can have different reservation limits. Search
+      # the bounded list so an unlike head cannot force a mmap per scope.
+      previous = 0_u64
+      spare = @@side_spare
+      while spare != 0
+        following = IyiHeap.read64(spare &+ OFF_PARENT)
+        if IyiHeap.read64(spare &+ OFF_MAP) == length &&
+           IyiHeap.read64(spare &+ OFF_LIMIT) == spare &+ DATA &+ capacity
+          if previous == 0
+            @@side_spare = following
+          else
+            IyiHeap.write64(previous &+ OFF_PARENT, following)
+          end
+          @@side_spares = @@side_spares &- 1_u64
+          IyiHeap.write64(spare &+ OFF_PARENT, 0_u64)
+          return spare
+        end
+        previous = spare
+        spare = following
+      end
+      region = side_slice(length)
+      if sys_mprotect(region &+ usable, GRAIN, 0_i64) != 0
+        RisHeap.mapping_failure(length)
+      end
+      @@mapped = @@mapped &+ 1_u64
+      IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
+      IyiHeap.write64(region &+ OFF_LIMIT, region &+ DATA &+ capacity)
+      IyiHeap.write64(region &+ OFF_MAP, length)
+      register(region)
+      region
+    end
+  {% end %}
+
+  {% if flag?(:linux) || flag?(:darwin) %}
+    # A standard side reservation is carved from a shared arena instead
+    # of its own mmap, and is never unmapped: release keeps every one on
+    # the side spares. A scope that makes thousands of small arrays then
+    # costs one mprotect per slice it has never used, not an mmap,
+    # mprotect and munmap per array.
+    ARENA_SLICES = 512_u64
+    @[ThreadLocal]
+    @@arena_next : UInt64 = 0_u64
+    @[ThreadLocal]
+    @@arena_end : UInt64 = 0_u64
+
+    def self.arena_length : UInt64
+      size_add(mapping_length(side_capacity(1_u64)), GRAIN)
+    end
+
+    # MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, read/write on touch.
+    def self.side_slice(length : UInt64) : UInt64
+      unless length == arena_length
+        region = sys_mmap(length, 0x4022_i64)
+        RisHeap.mapping_failure(length) if region == 0xFFFFFFFFFFFFFFFF_u64
+        return region
+      end
+      if @@arena_next == @@arena_end
+        bytes = size_mul(length, ARENA_SLICES)
+        chunk = sys_mmap(bytes, 0x4022_i64)
+        RisHeap.mapping_failure(bytes) if chunk == 0xFFFFFFFFFFFFFFFF_u64
+        @@arena_next = chunk
+        @@arena_end = chunk &+ bytes
+      end
+      region = @@arena_next
+      @@arena_next = region &+ length
+      region
+    end
+  {% end %}
+
+  def self.acquire(capacity : UInt64) : UInt64
+    length = mapping_length(capacity)
+    spare = @@spare
+    if spare != 0 && IyiHeap.read64(spare &+ OFF_MAP) >= length
+      @@spare = IyiHeap.read64(spare &+ OFF_PARENT)
+      @@spares = @@spares &- 1_u64
+      IyiHeap.write64(spare &+ OFF_CURSOR, spare &+ DATA)
+      IyiHeap.write64(spare &+ OFF_PARENT, 0_u64)
+      IyiHeap.write64(spare &+ OFF_SIDE, 0_u64)
+      return spare
+    end
+    region = __iyi_mmap(length).address
+    @@mapped = @@mapped &+ 1_u64
+    IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
+    IyiHeap.write64(region &+ OFF_LIMIT, region &+ length)
+    IyiHeap.write64(region &+ OFF_MAP, length)
+    register(region)
+    region
+  end
+
+  def self.mapping_length(capacity : UInt64) : UInt64
+    size_add(size_add(capacity, DATA), GRAIN - 1_u64) & 0xFFFFFFFFFFFF0000_u64
+  end
+
+  # Initial tape and reserved side mappings have separate spare lists.
+  # Pages past KEEP_WARM go back to the kernel; excess spares and grown
+  # tape mappings are unmapped, including a side reservation's guard.
+  def self.release(region : UInt64) : Nil
+    side = IyiHeap.read64(region &+ OFF_SIDE)
+    IyiHeap.write64(region &+ OFF_SIDE, 0_u64)
+    while side != 0
+      following = IyiHeap.read64(side &+ OFF_PARENT)
+      IyiHeap.write64(side &+ OFF_PARENT, 0_u64)
+      release(side)
+      side = following
+    end
+    used = IyiHeap.read64(region &+ OFF_CURSOR) &- region
+    IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
+    length = IyiHeap.read64(region &+ OFF_MAP)
+    {% if flag?(:linux) || flag?(:darwin) %}
+      # Reserved side mappings have a guard beyond OFF_LIMIT. Keep a
+      # separate spare list so normal tape allocation cannot use it.
+      if IyiHeap.read64(region &+ OFF_LIMIT) < region &+ length &&
+         (length == arena_length || @@side_spares < SPARES)
+        if used > KEEP_WARM
+          __iyi_release_pages(region &+ KEEP_WARM, used &- KEEP_WARM)
+        end
+        IyiHeap.write64(region &+ OFF_PARENT, @@side_spare)
+        @@side_spare = region
+        @@side_spares = @@side_spares &+ 1_u64
+        return
+      end
+    {% end %}
+    if length == mapping_length(CAPACITY) && @@spares < SPARES
+      if used > KEEP_WARM
+        __iyi_release_pages(region &+ KEEP_WARM, used &- KEEP_WARM)
+      end
+      IyiHeap.write64(region &+ OFF_PARENT, @@spare)
+      @@spare = region
+      @@spares = @@spares &+ 1_u64
+    else
+      @@unmapped = @@unmapped &+ 1_u64
+      unregister(region)
+      __iyi_munmap(region, length)
+    end
+  end
+
+  # The thread's counts added to the totals, when the thread ends.
+  def self.add_stats : Nil
+    IyiRuntimeLock.lock
+    @@total_scopes = @@total_scopes &+ @@scopes
+    @@total_mapped = @@total_mapped &+ @@mapped
+    @@total_unmapped = @@total_unmapped &+ @@unmapped
+    @@total_moved = @@total_moved &+ @@moved
+    @@total_moved_bytes = @@total_moved_bytes &+ @@moved_bytes
+    @@total_sides = @@total_sides &+ @@sides
+    @@total_side_bytes = @@total_side_bytes &+ @@side_bytes
+    @@total_grown = @@total_grown &+ @@grown
+    @@total_results = @@total_results &+ @@results
+    @@total_result_bytes = @@total_result_bytes &+ @@result_bytes
+    IyiRuntimeLock.unlock
+    @@results = 0_u64
+    @@result_bytes = 0_u64
+    @@scopes = 0_u64
+    @@mapped = 0_u64
+    @@unmapped = 0_u64
+    @@moved = 0_u64
+    @@moved_bytes = 0_u64
+    @@sides = 0_u64
+    @@side_bytes = 0_u64
+    @@grown = 0_u64
+  end
+
+  # What the tapes did, on standard error, when `RIS_TAPE_STATS` is
+  # set: run as the program ends. Side regions count copying transfers,
+  # not construction reservations. Both copy counts are zero on Linux;
+  # scopes reuse reserved side spares.
+  def self.report_stats : Nil
+    return unless stats_asked?
+    add_stats
+    RisHeap.text("ris tape limits: start ")
+    RisHeap.number(CAPACITY)
+    RisHeap.text(", grain ")
+    RisHeap.number(GRAIN)
+    RisHeap.text(", max elements ")
+    RisHeap.number(MAX_COUNT)
+    RisHeap.text("\nris tape limits: max mapping ")
+    RisHeap.number(0xFFFFFFFFFFFF0000_u64)
+    RisHeap.text("\nris tape limits: side reservation ")
+    RisHeap.number(SIDE_RESERVE)
+    RisHeap.text(", cached regions per kind ")
+    RisHeap.number(SPARES)
+    RisHeap.text("\nris tape limits: region count has no fixed cap\n")
+    {% if (flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64))) ||
+            (flag?(:darwin) && flag?(:aarch64)) ||
+            (flag?(:win32) && flag?(:x86_64)) %}
+      RisHeap.text("ris tape limits: live tasks per group ")
+      RisHeap.number(RisGroupSlot::MAX_LIVE.to_u64)
+      RisHeap.text("\nris tape limits: fiber stack ")
+      RisHeap.number(IyiFiber::STACK_BYTES)
+      RisHeap.text(" bytes; main stack is OS-limited\n")
+    {% end %}
+    RisHeap.text("ris tape: ")
+    RisHeap.number(@@total_scopes)
+    RisHeap.text(" scopes, ")
+    RisHeap.number(@@total_mapped)
+    RisHeap.text(" mappings made, ")
+    RisHeap.number(@@total_unmapped)
+    RisHeap.text(" unmapped, ")
+    RisHeap.number(@@total_grown)
+    RisHeap.text(" tapes grown onto a new mapping, ")
+    RisHeap.number(@@total_moved)
+    RisHeap.text(" growth moves off the tape's end (")
+    RisHeap.number(@@total_moved_bytes)
+    RisHeap.text(" bytes copied), ")
+    RisHeap.number(@@total_sides)
+    RisHeap.text(" side regions (")
+    RisHeap.number(@@total_side_bytes)
+    RisHeap.text(" transfer bytes copied)\n")
+    RisHeap.text("ris tape results: ")
+    RisHeap.number(@@total_results)
+    RisHeap.text(" moved down (")
+    RisHeap.number(@@total_result_bytes)
+    RisHeap.text(" bytes)\n")
+    RisHeap.text("ris program storage: ")
+    RisHeap.number(storage_taken)
+    RisHeap.text(" bytes taken\n")
+  end
+
+  # Whether `RIS_TAPE_STATS` is set. On POSIX the environment follows
+  # `argv` on the stack the program began with: read there, not by
+  # `Program.env`, whose `environ` would be one more undefined symbol
+  # in every program, for a flag almost none of them is run with.
+  def self.stats_asked? : Bool
+    {% if flag?(:win32) %}
+      !Program.env("RIS_TAPE_STATS").nil?
+    {% else %}
+      wanted = "RIS_TAPE_STATS=".to_unsafe
+      entry = ARGV_UNSAFE + (ARGC_UNSAFE + 1)
+      while entry.value.address != 0_u64
+        name = entry.value
+        index = 0
+        while index < 15 && name[index] == wanted[index]
+          index = index + 1
+        end
+        return true if index == 15
+        entry = entry + 1
+      end
+      false
+    {% end %}
+  end
+
+  # The thread's spares back to the kernel, when the thread ends.
+  def self.drop_spares : Nil
+    add_stats
+    side = @@side_spare
+    @@side_spare = 0_u64
+    @@side_spares = 0_u64
+    while side != 0
+      following = IyiHeap.read64(side &+ OFF_PARENT)
+      unregister(side)
+      __iyi_munmap(side, IyiHeap.read64(side &+ OFF_MAP))
+      side = following
+    end
+    region = @@spare
+    @@spare = 0_u64
+    @@spares = 0_u64
+    while region != 0
+      following = IyiHeap.read64(region &+ OFF_PARENT)
+      unregister(region)
+      __iyi_munmap(region, IyiHeap.read64(region &+ OFF_MAP))
+      region = following
+    end
+  end
+
+  # A fixed table of 256 regions ended the program at the 257th tape
+  # alive at once - a server with that many requests in flight. The list
+  # runs through the mappings' headers instead.
+  def self.register(region : UInt64) : Nil
+    IyiHeap.lock
+    first = @@first_region
+    IyiHeap.write64(region &+ OFF_NEXT, first)
+    IyiHeap.write64(region &+ OFF_PREV, 0_u64)
+    IyiHeap.write64(first &+ OFF_PREV, region) if first != 0
+    @@first_region = region
+    @@registered = @@registered &+ 1_u64
+    IyiHeap.unlock
+  end
+
+  def self.unregister(region : UInt64) : Nil
+    IyiHeap.lock
+    following = IyiHeap.read64(region &+ OFF_NEXT)
+    previous = IyiHeap.read64(region &+ OFF_PREV)
+    if previous != 0
+      IyiHeap.write64(previous &+ OFF_NEXT, following)
+    else
+      @@first_region = following
+    end
+    IyiHeap.write64(following &+ OFF_PREV, previous) if following != 0
+    @@registered = @@registered &- 1_u64
+    IyiHeap.unlock
+  end
+
+  @[AlwaysInline]
+  def self.take(region : UInt64, size : UInt64, clear : Bool,
+                type_id : UInt64) : UInt64
+    cursor = IyiHeap.read64(region &+ OFF_CURSOR)
+    bytes = size_add(size, 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+    need = size_add(bytes, UNDER)
+    if need > IyiHeap.read64(region &+ OFF_LIMIT) - cursor
+      region = grow_onto(region, need)
+      cursor = IyiHeap.read64(region &+ OFF_CURSOR)
+    end
+    # The mapping now has need bytes; these pointer additions are bounded.
+    object = cursor &+ UNDER
+    stop = object &+ bytes
+    IyiHeap.write64(region &+ OFF_CURSOR, stop)
+    IyiHeap.write64(cursor, size)
+    IyiHeap.write64(cursor &+ 8_u64, type_id.unsafe_shl(IyiHeap::TYPE_SHIFT))
+    IyiHeap.clear_block(object, bytes) if clear
+    object
+  end
+
+  # A full tape grows: a new mapping twice the size (or the block's,
+  # if larger), naming the full one as its parent, becomes the running
+  # tape. Nothing on the old one moves, so every tape value stays where
+  # it is, and the scope's end releases the whole chain. A full tape
+  # used to end the program with "region full".
+  @[NoInline]
+  def self.grow_onto(region : UInt64, need : UInt64) : UInt64
+    capacity = size_mul(IyiHeap.read64(region &+ OFF_MAP) - DATA, 2_u64)
+    capacity = need if capacity < need
+    length = mapping_length(capacity)
+    fresh = __iyi_mmap(length).address
+    @@mapped = @@mapped &+ 1_u64
+    @@grown = @@grown &+ 1_u64
+    IyiHeap.write64(fresh &+ OFF_CURSOR, fresh &+ DATA)
+    IyiHeap.write64(fresh &+ OFF_LIMIT, fresh &+ length)
+    IyiHeap.write64(fresh &+ OFF_MAP, length)
+    IyiHeap.write64(fresh &+ OFF_PARENT, region)
+    register(fresh)
+    @@tape = fresh
+    fresh
+  end
+
+  # Every region's used words, as roots: a region object may hold the
+  # only reference to a collected one.
+  def self.each_root(visit : Proc(UInt64, Nil)) : Nil
+    {% unless flag?(:gc_none) %}
+      region = @@first_region
+      while region != 0
+        IyiRoots.scan_range(region &+ DATA,
+          IyiHeap.read64(region &+ OFF_CURSOR), visit)
+        region = IyiHeap.read64(region &+ OFF_NEXT)
+      end
+    {% end %}
+  end
+end

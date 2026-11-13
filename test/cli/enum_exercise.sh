@@ -3,10 +3,10 @@
 #
 #     bash test/cli/enum_exercise.sh
 #
-# `test/cli/enum_exercise.iyi` is the program. It runs plain and optimised, and
+# `test/cli/enum_exercise.ri` is the program. It runs plain and optimised, and
 # then each check is proved capable of failing by patching a *copy of the
-# prelude* — `src/iyi/enum.iyi` with one method broken — and building against
-# it through `IYI_PATH`. A check that cannot fail is not a check.
+# prelude* — `src/ris/enum.ri` with one method broken — and building against
+# it through `RIS_PATH`. A check that cannot fail is not a check.
 #
 # What is being protected is not only the methods. The compiler gives an enum
 # `value` and `new` and nothing else, and three things it writes depend on this
@@ -20,9 +20,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs whatever compiler the caller names; `bin/iyi` is a shell
+# The gate runs whatever compiler the caller names; `bin/ris` is a shell
 # wrapper, and on Windows the caller has to point at the built exe itself.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -50,7 +50,7 @@ status=0
 run_case() { # run_case <label> <name> [build flags...]
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/enum_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/enum_exercise.ri" \
        > "$WORK/$name.build" 2>&1; then
     echo "  $label: the exercise did not build"
     sed -n '1,12p' "$WORK/$name.build"
@@ -81,19 +81,19 @@ run_case "release" release --release
 
 echo
 echo "== the sample a program reads, which is what asked for the surface"
-if "$IYI" run "$REPO/samples/iyi/enums.iyi" > "$WORK/sample.out" 2>&1; then
+if "$RIS" run "$REPO/samples/ris/enums.ri" > "$WORK/sample.out" 2>&1; then
   # Two lines out of it, because the whole point is that a member prints as
   # its name and a flags enum prints as the bits it holds.
   if grep -q "^level: Warn$" "$WORK/sample.out" &&
      grep -q "^mode: Read | Write$" "$WORK/sample.out"; then
-    echo "  samples/iyi/enums.iyi: a member is its name, and a flag set is its bits"
+    echo "  samples/ris/enums.ri: a member is its name, and a flag set is its bits"
   else
-    echo "  samples/iyi/enums.iyi: ran, but not printing the names"
+    echo "  samples/ris/enums.ri: ran, but not printing the names"
     sed -n '1,6p' "$WORK/sample.out"
     status=1
   fi
 else
-  echo "  samples/iyi/enums.iyi: did not run"
+  echo "  samples/ris/enums.ri: did not run"
   tail -3 "$WORK/sample.out"
   status=1
 fi
@@ -102,7 +102,7 @@ echo
 echo "== an exported enum across a module boundary, which is iyi's own thesis"
 
 # Two modules and two builds of the consumer: one against the exporter's
-# source, one against its `.iyimod`. The answers have to be the same string,
+# source, one against its `.rimod`. The answers have to be the same string,
 # because the enum a consumer reads is a *declaration* — its members and the
 # numbers they were given — and the surface is stencilled onto it by the
 # consumer's own prelude.
@@ -114,7 +114,7 @@ echo "== an exported enum across a module boundary, which is iyi's own thesis"
 # doesn't implement instance_vars`); and an enum's members read as code inside
 # a type body, so the module could not be imported from an artifact at all.
 mkdir -p "$WORK/boundary/mods"
-cat > "$WORK/boundary/level.iyi" <<'IYI'
+cat > "$WORK/boundary/level.ri" <<'RIS'
 module level
 
 pub enum Level : Int32
@@ -131,8 +131,8 @@ end
 pub def loudest : Level
   Level::Warn
 end
-IYI
-cat > "$WORK/boundary/main.iyi" <<'IYI'
+RIS
+cat > "$WORK/boundary/main.ri" <<'RIS'
 module main
 
 import level::{Level, Mode, loudest}
@@ -148,11 +148,11 @@ puts(case l
 puts "members: #{Level.values.size}"
 puts "parsed: #{Level.parse?("debug").to_s}"
 puts "bits: #{(Mode::Read | Mode::Write).to_s}"
-IYI
+RIS
 
 (
   cd "$WORK/boundary" || exit 1
-  "$IYI" run main.iyi > source.out 2>&1
+  "$RIS" run main.ri > source.out 2>&1
 ) || {
   echo "  the source arm did not run"
   tail -3 "$WORK/boundary/source.out"
@@ -161,8 +161,8 @@ IYI
 
 if (
   cd "$WORK/boundary" || exit 1
-  "$IYI" build --emit-iyimod mods -o exporter main.iyi > emit.log 2>&1 &&
-    "$IYI" build --use-iyimod mods -o consumer main.iyi > use.log 2>&1 &&
+  "$RIS" build --emit-rimod mods -o exporter main.ri > emit.log 2>&1 &&
+    "$RIS" build --use-rimod mods -o consumer main.ri > use.log 2>&1 &&
     ./consumer > artifact.out 2>&1
 ); then
   if diff -u "$WORK/boundary/source.out" "$WORK/boundary/artifact.out" > "$WORK/boundary/diff"; then
@@ -182,22 +182,22 @@ fi
 echo
 echo "== proving the checks can fail, one broken method at a time"
 
-# A copy of the whole prelude with one method patched, on `IYI_PATH` ahead of
-# the tree's own. The default prelude resolves `iyi/prelude` on that path,
+# A copy of the whole prelude with one method patched, on `RIS_PATH` ahead of
+# the tree's own. The default prelude resolves `ris/prelude` on that path,
 # so the copy is what the build reads.
 prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
   local label="$1" dir="$2" phrase="$3" script="$4"
-  mkdir -p "$WORK/$dir/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
-  sed -e "$script" "$REPO/src/iyi/enum.iyi" > "$WORK/$dir/iyi/enum.iyi"
-  if cmp -s "$REPO/src/iyi/enum.iyi" "$WORK/$dir/iyi/enum.iyi"; then
+  mkdir -p "$WORK/$dir/ris"
+  cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
+  sed -e "$script" "$REPO/src/ris/enum.ri" > "$WORK/$dir/ris/enum.ri"
+  if cmp -s "$REPO/src/ris/enum.ri" "$WORK/$dir/ris/enum.ri"; then
     echo "  $label: the patch changed nothing, so this proves nothing"
     status=1
     return
   fi
 
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/enum_exercise.iyi" \
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/enum_exercise.ri" \
        > "$WORK/$dir/build" 2>&1; then
     # A patch that stops the build is a failure the exercise cannot report,
     # and it is still the check firing: say which way it went.
@@ -225,7 +225,7 @@ prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
     return
   fi
   printf '  %s: exits %s at "%s"\n' "$label" "$code" \
-    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
 }
 
 # 1. Equality inverted: `==` is what `case`, `!=`, `===` and every question

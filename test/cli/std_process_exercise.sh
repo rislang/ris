@@ -51,7 +51,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -64,25 +64,25 @@ if [ "$PLATFORM" = windows ]; then
   WORK="$(cygpath -m "$WORK")"
 fi
 
-ORIG_IYI_PATH="${IYI_PATH:-}"
+ORIG_IYI_PATH="${RIS_PATH:-}"
 cleanup() {
   rm -rf "$WORK"
   if [ -n "$ORIG_IYI_PATH" ]; then
-    export IYI_PATH="$ORIG_IYI_PATH"
+    export RIS_PATH="$ORIG_IYI_PATH"
   else
-    unset IYI_PATH
+    unset RIS_PATH
   fi
 }
 trap cleanup EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
-EXERCISE="$REPO/test/cli/std_process_exercise.iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
+EXERCISE="$REPO/test/cli/std_process_exercise.ri"
 
 build() { # build <name> <search path> [flags...]
   local name="$1" path="$2"
   shift 2
-  if ! IYI_PATH="$path" "$IYI" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
+  if ! RIS_PATH="$path" "$RIS" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
     echo "  $name: build failed"
     tail -12 "$WORK/$name.build.log" | sed 's/^/    /'
     status=1
@@ -93,7 +93,7 @@ build() { # build <name> <search path> [flags...]
 build_and_run() { # build_and_run <label> <name> [flags...]
   local label="$1" name="$2"
   shift 2
-  build "$name" "$IYI_PATH" "$@" || return 1
+  build "$name" "$RIS_PATH" "$@" || return 1
   "$WORK/$name" >"$WORK/$name.out" 2>&1
   local exit_code=$?
   sed 's/^/  /' "$WORK/$name.out"
@@ -173,8 +173,8 @@ echo "== std/process compiles beside std/bool"
 # A bare `Bool` in std/process named std/bool's module once both were
 # imported, and a program importing the two did not compile.
 printf 'module beside_bool\nimport std/process::{Process}\nimport std/bool\nputs Process.executable.nil? ^ true\n' \
-  >"$WORK/beside_bool.iyi"
-if "$IYI" build -o "$WORK/beside_bool" "$WORK/beside_bool.iyi" >"$WORK/beside_bool.log" 2>&1; then
+  >"$WORK/beside_bool.ri"
+if "$RIS" build -o "$WORK/beside_bool" "$WORK/beside_bool.ri" >"$WORK/beside_bool.log" 2>&1; then
   echo "  built"
 else
   echo "  std/process beside std/bool: build failed"
@@ -183,7 +183,7 @@ else
 fi
 
 echo "== what a spawned child's handle refuses, and the sentence it says"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/process::{Process, Redirect}
@@ -202,8 +202,8 @@ when "closed"
 when "missing"
   Process.spawn("no-such-program-iyi-spawn").or_panic
 end
-IYI
-if ! "$IYI" build -o "$WORK/refuse" "$WORK/refuse.iyi" >"$WORK/refuse.log" 2>&1; then
+RIS
+if ! "$RIS" build -o "$WORK/refuse" "$WORK/refuse.ri" >"$WORK/refuse.log" 2>&1; then
   echo "  the refusal program did not build"
   tail -5 "$WORK/refuse.log" | sed 's/^/    /'
   status=1
@@ -234,7 +234,7 @@ patched() {
   local name="$1"
   shift
   mkdir -p "$WORK/$name-std/src/std"
-  "$PY" - "$REPO/src/std/process.iyi" "$WORK/$name-std/src/std/process.iyi" "$@" <<'PY'
+  "$PY" - "$REPO/src/std/process.ri" "$WORK/$name-std/src/std/process.ri" "$@" <<'PY'
 import sys
 src = open(sys.argv[1], encoding="utf-8").read()
 pairs = sys.argv[3:]
@@ -255,7 +255,7 @@ prove() {
     status=1
     return
   fi
-  build "$name" "$WORK/$name-std/src${PSEP}$IYI_PATH" || return
+  build "$name" "$WORK/$name-std/src${PSEP}$RIS_PATH" || return
   "$WORK/$name" >"$WORK/$name.out" 2>&1
   local code=$?
   if [ "$code" -eq 0 ]; then
@@ -326,7 +326,7 @@ else
            "pidfd = __iyi_conc_syscall3(SYS_PIDFD_OPEN, @pid.to_i64, 0_i64, 0_i64)" "pidfd = -1_i64"; then
         echo "  the patch for nopidfd did not apply"
         status=1
-      elif build nopidfd "$WORK/nopidfd-std/src${PSEP}$IYI_PATH"; then
+      elif build nopidfd "$WORK/nopidfd-std/src${PSEP}$RIS_PATH"; then
         if "$WORK/nopidfd" >"$WORK/nopidfd.out" 2>&1 && grep -q "ALL CHECKS PASSED" "$WORK/nopidfd.out"; then
           echo "  without a pidfd, as on a kernel before 5.3, every check holds: the end is polled"
         else
@@ -413,7 +413,7 @@ else
       status=1
       return
     fi
-    build "$name" "$WORK/$name-std/src${PSEP}$IYI_PATH" || return
+    build "$name" "$WORK/$name-std/src${PSEP}$RIS_PATH" || return
     "$PY" -c 'import os, signal, sys; signal.signal(signal.SIGPIPE, signal.SIG_DFL); os.execv(sys.argv[1], sys.argv[1:])' \
       "$WORK/$name" >"$WORK/$name.out" 2>&1
     local code=$?

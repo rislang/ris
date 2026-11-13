@@ -33,7 +33,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 case "$(uname -s)" in
@@ -46,7 +46,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 # Python's cryptography with deterministic ECDSA (OpenSSL 3.2 and later
 # underneath) is the oracle where it is installed; without it the
@@ -63,7 +63,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_p256_exercise.iyi" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_p256_exercise.ri" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -275,15 +275,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/p256.iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/p256.ri").read_text(encoding="utf-8")
 if src.count(os.environ["OLD"]) != 1:
     raise SystemExit("patch site missing or not one")
-Path("$WORK/patched/std/p256.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
+Path("$WORK/patched/std/p256.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_p256_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_p256_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF "$2" "$WORK/mut.out"; then

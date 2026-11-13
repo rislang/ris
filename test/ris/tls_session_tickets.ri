@@ -2,8 +2,7 @@
 import std/int
 import std/env::{ENV}
 import std/time::{Time}
-import std/tls::{RisTlsSessionSlot, TlsConfig, TlsHeldTicket, TlsMadeUnder,
-                 TlsSession}
+import std/tls::{RisTlsSessionSlot, TlsConfig, TlsHeldTicket, TlsMadeUnder, TlsSession}
 import std/x509::{Certificate, X509Error}
 
 # Linux's resident pages and mappings, as in scope_frees.
@@ -175,10 +174,10 @@ changed = Certificate.parse(changed_der)
 raise "changed root fixture" if changed.is_a?(X509Error)
 roots[0] = changed
 raise "mutated roots accepted" if session.take("certificate.test", 443,
-                                        config, 1_i64)
+                                    config, 1_i64)
 roots[0] = certificate
 raise "restored roots refused" unless session.take("certificate.test", 443,
-                                            config, 1_i64)
+                                        config, 1_i64)
 config.roots = nil
 
 config.now = Time.from_unix(1_924_992_000_i64)
@@ -197,7 +196,7 @@ ENV["SSL_CERT_DIR"] = "/nonexistent/ris-roots"
 refresh_error = refresh_config.read_system
 raise "empty trust accepted" unless refresh_error
 raise "old trust resumed" if refresh_session.take("local0.test", 443,
-                                            refresh_config, 100_i64)
+                               refresh_config, 100_i64)
 if old_file
   ENV["SSL_CERT_FILE"] = old_file
 else

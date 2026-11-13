@@ -10,7 +10,7 @@ table (436).
 
 1. Lines 358, 650-651: Phase 1 says seven `parse` defs end in an
    `_answer` call; the std/time section cites six sites
-   (time.iyi:3635-3639, 2457-2466, 3656, 3672, 3689, 3704). List
+   (time.ri:3635-3639, 2457-2466, 3656, 3672, 3689, 3704). List
    all seven or fix the count.
 
 ## Nits

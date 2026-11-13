@@ -24,7 +24,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -42,7 +42,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 # Python's `cryptography` (OpenSSL underneath) is the oracle where it is
 # installed; without it the comparisons say so and the rest still runs.
@@ -54,7 +54,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_curve25519_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_curve25519_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -116,7 +116,7 @@ fi
 #     v <public> <message> <signature> -> true | false
 #
 # Everything is hex; an empty message is "-".
-cat >"$WORK/oracle.iyi" <<'IYI'
+cat >"$WORK/oracle.ri" <<'RIS'
 module oracle
 
 import std/curve25519::{X25519, Ed25519, CurveError}
@@ -158,10 +158,10 @@ while line = STDIN.gets(chomp: true)
     puts Ed25519.verify(b(f[1]), b(f[2]), b(f[3]))
   end
 end
-IYI
+RIS
 ORACLE_OK=0
 if [ "$HAVE_CRYPTOGRAPHY" -eq 1 ]; then
-  if "$IYI" build -o "$WORK/oracle" "$WORK/oracle.iyi" >"$WORK/oracle.build.log" 2>&1; then
+  if "$RIS" build -o "$WORK/oracle" "$WORK/oracle.ri" >"$WORK/oracle.build.log" 2>&1; then
     ORACLE_OK=1
   else
     echo "  the oracle program did not build: $(tail -1 "$WORK/oracle.build.log")"
@@ -387,7 +387,7 @@ echo "== what a ladder, a signature and a verification take"
 # Recorded, not held to a figure: the time is the machine's as much as the
 # code's. The best of five runs of 200, --release, in microseconds, against
 # cryptography's when it is here.
-cat >"$WORK/cost.iyi" <<'IYI'
+cat >"$WORK/cost.ri" <<'RIS'
 module cost
 
 import std/curve25519::{X25519, Ed25519}
@@ -414,8 +414,8 @@ sign = best_of { Ed25519.sign(seed, "a message of some length, as a message is")
 verify = best_of { ok = ok && Ed25519.verify(public, "a message of some length, as a message is", signature) }
 raise "the timed signature did not verify" unless ok
 puts "iyi: x25519 #{ladder} us, ed25519 sign #{sign} us, verify #{verify} us"
-IYI
-if "$IYI" build --release -o "$WORK/cost" "$WORK/cost.iyi" >"$WORK/cost.build.log" 2>&1 && "$WORK/cost" >"$WORK/cost.out" 2>&1; then
+RIS
+if "$RIS" build --release -o "$WORK/cost" "$WORK/cost.ri" >"$WORK/cost.build.log" 2>&1 && "$WORK/cost" >"$WORK/cost.out" 2>&1; then
   echo "  $(cat "$WORK/cost.out")"
   if [ "$HAVE_CRYPTOGRAPHY" -eq 1 ]; then
     "$PY" - <<'PY'
@@ -447,7 +447,7 @@ fi
 
 echo
 echo "== what curve25519 refuses"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/curve25519::{X25519, Ed25519}
@@ -467,9 +467,9 @@ when "ed25519-long-seed"
   Ed25519.sign("s" * 64, "message")
 end
 puts "accepted"
-IYI
+RIS
 refuse() { # refuse <case> <phrase>
-  if "$IYI" run "$WORK/refuse.iyi" -- "$1" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
   elif ! grep -qF "$2" "$WORK/refuse.out"; then
@@ -500,15 +500,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/curve25519.iyi").read_text()
+src = Path("$REPO/src/std/curve25519.ri").read_text()
 if src.count(os.environ["OLD"]) != 1:
     raise SystemExit("patch site missing or not unique")
-Path("$WORK/patched/std/curve25519.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/curve25519.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_curve25519_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_curve25519_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF "$2" "$WORK/mut.out"; then

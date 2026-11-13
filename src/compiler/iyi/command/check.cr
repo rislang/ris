@@ -7,7 +7,7 @@ require "../mod/installer"
 
 class Iyi::Command
   # Everyone the change can reach, each compiled alone. The universe is
-  # every .iyi file under the current directory; membership is the same
+  # every .ri file under the current directory; membership is the same
   # parsed closure `test --affected` trusts. Failures are collected, not
   # raised: the caller asked about the whole ripple, and stopping at the
   # first consumer would answer a smaller question than the one asked.
@@ -17,7 +17,7 @@ class Iyi::Command
     # What was typed, beside the expanded path the closures are matched
     # against: the verdict names a file the way the caller did, as `test
     # --affected` does. Chopped back from the expanded path, it came out
-    # `calc\add.iyi` on Windows for a caller who wrote `calc/add.iyi`.
+    # `calc\add.ri` on Windows for a caller who wrote `calc/add.ri`.
     typed = [] of String
     while option = options.shift?
       case option
@@ -131,7 +131,7 @@ class Iyi::Command
     # The manifest is not a module, so no closure holds it — and a change
     # to it moves the code under every module at once: `import
     # example.test/user/liba` resolves through the requirement it names.
-    # `--affected iyi.mod` answered "0 consumer(s) checked, all compile",
+    # `--affected ris.mod` answered "0 consumer(s) checked, all compile",
     # which is a clean verdict about nothing.
     manifest_changed = typed.select do |path|
       Iyi::Mod::Installer::MANIFESTS.includes?(File.basename(path)) || Iyi::Mod::Sum::FILES.includes?(File.basename(path))
@@ -141,7 +141,7 @@ class Iyi::Command
     # compiles, and a file that is not a module, which one reaches through
     # a macro (`Eiy.embed`, `read_file`). No closure holds either, and a
     # syntax error in `page.eiy` was answered "0 consumer(s) checked, all
-    # compile" while `iyi check page_test.iyi` failed in page.eiy.
+    # compile" while `iyi check page_test.ri` failed in page.eiy.
     unimported = typed.select do |path|
       File.file?(path) && !manifest_changed.includes?(path) && outside_every_closure?(path)
     end
@@ -149,7 +149,12 @@ class Iyi::Command
     consumers = [] of String
     # The extension in any case, so that `UP.IYI` is refused by name rather
     # than left out of the ripple in silence (`Lexer.iyi_miscased?`).
+    # ris: and a `.iyi` file is refused by the same sentence (SPEC 6.10).
     Dir.glob("**/*.[iI][yY][iI]") do |candidate|
+      next unless File.file?(candidate)
+      abort! Lexer.iyi_miscased_sentence(candidate), :USAGE_ERROR
+    end
+    Dir.glob("**/*.[rR][iI]") do |candidate|
       abort! Lexer.iyi_miscased_sentence(candidate), :USAGE_ERROR if Lexer.iyi_miscased?(candidate)
       closure = test_import_closure(candidate)
       consumers << candidate if closure.nil? || !manifest_changed.empty? || !unimported.empty? ||
@@ -179,7 +184,7 @@ class Iyi::Command
   private def check_one_alone(path : String) : CodeError?
     expanded = File.expand_path(path)
     compiler = Compiler.new
-    compiler.prelude = "iyi/prelude"
+    compiler.prelude = "ris/prelude"
     compiler.no_codegen = true
     compiler.stdout = IO::Memory.new
     compiler.stderr = IO::Memory.new
@@ -189,9 +194,9 @@ class Iyi::Command
     compiler.iyi_mod_table = Mod::Installer.table_for(root)
     # iyi: the artifacts a workspace keeps, for a module whose source is not
     # there — the same reading the language server does, and for the same
-    # reason. A library arrives as `.iyimod` files (III.7), and `check` on a
+    # reason. A library arrives as `.rimod` files (III.7), and `check` on a
     # file importing one answered `can't find module` about a module `build
-    # --use-iyimod` compiles against. See `Compiler.workspace_artifacts`.
+    # --use-rimod` compiles against. See `Compiler.workspace_artifacts`.
     if artifacts = Compiler.workspace_artifacts(root)
       compiler.use_iyimod = artifacts
       compiler.iyi_prefers_source = true

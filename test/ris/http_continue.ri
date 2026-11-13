@@ -7,19 +7,19 @@ import std/http::{Server, Incoming, Outgoing, HTTPError, Conn, BodyReader}
 import std/tuple
 
 {% if flag?(:linux) %}
-lib ContinueSocket
-  fun setsockopt(fd : Int32, level : Int32, option : Int32,
-                 value : Void*, size : UInt32) : Int32
-end
+  lib ContinueSocket
+    fun setsockopt(fd : Int32, level : Int32, option : Int32,
+                   value : Void*, size : UInt32) : Int32
+  end
 
-# A reset makes the interim write fail before a body read can run.
-def reset(socket : IyiSocket) : Nil
-  linger = {1, 0}
-  result = ContinueSocket.setsockopt(socket.fd, 1, 13,
-    pointerof(linger).as(Void*), 8_u32)
-  raise "setsockopt" unless result == 0
-  socket.close
-end
+  # A reset makes the interim write fail before a body read can run.
+  def reset(socket : IyiSocket) : Nil
+    linger = {1, 0}
+    result = ContinueSocket.setsockopt(socket.fd, 1, 13,
+      pointerof(linger).as(Void*), 8_u32)
+    raise "setsockopt" unless result == 0
+    socket.close
+  end
 {% end %}
 
 def read_to_close(socket : IyiSocket) : String
@@ -33,12 +33,16 @@ end
 
 struct Listening
 end
+
 struct Pending
 end
+
 struct Proceed
 end
+
 struct Checked
   getter passed : Bool
+
   def initialize(@passed)
   end
 end
@@ -75,10 +79,9 @@ struct Handler
       fault = reader.read(1)
       again = reader.read(1)
       if @reset_peer
-        expected = @chunked ? "the connection failed before the body" :
-          "the body ended after 0 of its 3 bytes"
+        expected = @chunked ? "the connection failed before the body" : "the body ended after 0 of its 3 bytes"
         passed = fault.is_a?(HTTPError) && fault.reason == expected &&
-          again.is_a?(HTTPError) && again.reason == expected
+                 again.is_a?(HTTPError) && again.reason == expected
       else
         passed = fault.is_a?(Cancelled) && again.is_a?(Cancelled)
       end
@@ -87,7 +90,7 @@ struct Handler
       RisBoard.post(Pending.new)
       rest = reader.read_all.or_panic
       passed = first == "a" && rest == "bc" &&
-        reader.read(1).or_panic.empty?
+               reader.read(1).or_panic.empty?
     end
     RisBoard.post(Checked.new(passed))
     nil
@@ -111,7 +114,7 @@ def exchange(chunked : Bool, reset_peer : Bool = false,
     client.read_timeout_ms = 5000
     framing = chunked ? "Transfer-Encoding: chunked" : "Content-Length: 3"
     head = "POST / HTTP/1.1\r\nHost: h\r\n#{framing}\r\n" +
-      "Expect: 100-continue\r\nConnection: close\r\n\r\n"
+           "Expect: 100-continue\r\nConnection: close\r\n\r\n"
     client.write(head).or_panic
     if reset_peer
       RisBoard.take(Pending).or_panic

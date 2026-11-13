@@ -19,9 +19,9 @@ One Blocker, about 15 Majors after merging, Nits.
 Crystal's `IO#puts` calls `to_s(io)` (`src/io.cr:178-181`), so the help
 idiom would print `#<OptionParser:0x…>`.
 
-**Contested, with a probe.** ris's prelude is `src/iyi/`, not
+**Contested, with a probe.** ris's prelude is `src/ris/`, not
 `src/io.cr`: `puts(value)` writes `value.to_s`
-(`src/iyi/io.iyi:365`). p18 prints both `to_s : String` and
+(`src/ris/io.ri:365`). p18 prints both `to_s : String` and
 `to_s(io : String::Builder)`. An `IO` parameter is refused in ris ("a
 text parameter takes `String::Builder`"). The draft now cites p18.
 

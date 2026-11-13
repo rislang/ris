@@ -1,4 +1,4 @@
-# iyi: `iyi mod context FILE.iyi` — the context pack (AI_FIRST.md §2 #2).
+# iyi: `iyi mod context FILE.ri` — the context pack (AI_FIRST.md §2 #2).
 #
 # The minimal text a model needs before editing one module: the exact
 # exported surface of every module the file imports, and nothing's body.
@@ -64,11 +64,11 @@ class Iyi::Command
     end
   end
 
-  # An artifact this run's own compiles wrote: `--emit-iyimod DIR` names a
+  # An artifact this run's own compiles wrote: `--emit-rimod DIR` names a
   # file after the module path, so a re-exported module is already on disk
   # by the time the facade's block is read back.
   private def mod_context_emitted(name : String, emit_dir : String) : IyiMod::Artifact?
-    path = Iyi.native_path(File.join(emit_dir, "#{name}.iyimod"))
+    path = Iyi.native_path(File.join(emit_dir, "#{name}.rimod"))
     return nil unless File.file?(path)
     IyiMod.read(path)
   rescue IyiMod::Error
@@ -78,7 +78,7 @@ class Iyi::Command
   private def mod_context
     # Read from either side of the path, and refuse what is left over. The
     # loop used to stop at the first word that was not a flag, so
-    # `mod context file.iyi --json` printed the *text* pack and exited 0 —
+    # `mod context file.ri --json` printed the *text* pack and exited 0 —
     # the flag the caller wrote was dropped on the floor, and a caller
     # piping that into a JSON reader learns about it somewhere else
     # entirely. A second path went the same way. `mod dump` and `mod diff`
@@ -101,7 +101,7 @@ class Iyi::Command
         abort! "mod context: unknown flag #{option}", :USAGE_ERROR
       else
         if filename
-          abort! "unexpected '#{option}' after the .iyi path", :USAGE_ERROR
+          abort! "unexpected '#{option}' after the .ri path", :USAGE_ERROR
         end
         filename = option
       end
@@ -111,14 +111,14 @@ class Iyi::Command
     end
 
     unless filename && filename.ris_source?
-      abort! "expected a .iyi file", :USAGE_ERROR
+      abort! "expected a .ri file", :USAGE_ERROR
     end
     unless File.file?(filename)
       # A directory that is there is not a file that is missing: "no such
       # file" sends the reader to `ls`, where they find it. The sentence is
       # `doc`'s and `mod dump`'s, because it is the same mistake.
       if Dir.exists?(filename)
-        abort! "#{filename} is a directory, not a .iyi module", :USAGE_ERROR
+        abort! "#{filename} is a directory, not a .ri module", :USAGE_ERROR
       end
       abort! "no such file: #{filename}", :USAGE_ERROR
     end
@@ -128,7 +128,7 @@ class Iyi::Command
     # manifest and the artifacts: IV.6 read backwards, the way a build, the
     # server and `iyi test` read it. A file whose path ends with its own
     # `module` header's path names the root above both, and that is where a
-    # workspace keeps `iyi.mod` and `mods`.
+    # workspace keeps `ris.mod` and `mods`.
     root = Compiler.entry_root_of(filename, File.read(filename))
 
     imports = mod_context_imports(filename)
@@ -350,7 +350,7 @@ class Iyi::Command
   #
   # The compile is of a synthetic one-line entry that *imports* the module,
   # because artifacts are written for what a build imports, not for what it
-  # is. The module's root travels as `IYI_PATH` and the import is the
+  # is. The module's root travels as `RIS_PATH` and the import is the
   # in-package path, so a package's surface is produced without a manifest
   # — which is the point: the module compiles alone (R-1), and this is that
   # fact worn as a tool.
@@ -360,7 +360,7 @@ class Iyi::Command
       # No source anywhere, which is how a library arrives (III.7): the
       # artifact *is* the surface, and reading one costs nothing next to
       # the compile this method does for a module that has a file. A
-      # workspace that builds with `--use-iyimod mods` was told its
+      # workspace that builds with `--use-rimod mods` was told its
       # imports do not resolve — the same hole the language server had,
       # in the answer a model reads.
       if artifact = mod_context_artifact(written, artifact_root)
@@ -378,11 +378,11 @@ class Iyi::Command
     (expected_name.count('/') + 1).times { root = root.parent }
     module_root = root.to_s
 
-    entry = File.join(emit_dir, "context_entry.iyi")
+    entry = File.join(emit_dir, "context_entry.ri")
     File.write(entry, "import #{expected_name}\n")
 
     compiler = Compiler.new
-    compiler.prelude = "iyi/prelude"
+    compiler.prelude = "ris/prelude"
     compiler.no_codegen = true
     compiler.iyi_mod_table = table
     # And the workspace's artifacts, for what *this* module imports: a
@@ -397,7 +397,7 @@ class Iyi::Command
     compiler.stdout = IO::Memory.new
     compiler.stderr = IO::Memory.new
     # The module's root as the project's, where the import is resolved
-    # first - not as the front of `IYI_PATH`, which a `;` in the root's
+    # first - not as the front of `RIS_PATH`, which a `;` in the root's
     # name split in two on Windows (see `iyi doc`).
     compiler.iyi_project_root = module_root
     begin
@@ -412,7 +412,7 @@ class Iyi::Command
       return {written, nil, "does not compile alone: #{deepest.message.to_s.lines.first?}", nil}
     end
 
-    Dir.glob(Iyi.glob_root(emit_dir).join("**", "*.iyimod")) do |candidate|
+    Dir.glob(Iyi.glob_root(emit_dir).join("**", "*.rimod")) do |candidate|
       begin
         artifact = IyiMod.read(candidate)
         return {written, artifact, "", nil} if artifact.module_name == expected_name
@@ -424,7 +424,7 @@ class Iyi::Command
   end
 
   # The same resolution order the build uses: the requirement table by
-  # longest prefix, then the entry file's directory, then `IYI_PATH`. The
+  # longest prefix, then the entry file's directory, then `RIS_PATH`. The
   # name an artifact carries is the in-package path for a package, the
   # written path otherwise.
   private def mod_context_resolve(written : String, entry_dir : String, table : Array({String, String}), header_root : String? = nil) : {String?, String}
@@ -436,7 +436,7 @@ class Iyi::Command
   # beside the root, which is the name the tree's every example uses and
   # the one `Lsp::Analysis` looks under.
   private def mod_context_artifact(written : String, artifact_root : String) : IyiMod::Artifact?
-    path = Iyi.native_path(File.join(artifact_root, Compiler::ARTIFACT_DIR, "#{written}.iyimod"))
+    path = Iyi.native_path(File.join(artifact_root, Compiler::ARTIFACT_DIR, "#{written}.rimod"))
     return nil unless File.file?(path)
     IyiMod.read(path)
   rescue IyiMod::Error
@@ -445,8 +445,8 @@ class Iyi::Command
 
   # The file an import names and the module name it means, whether or not
   # the file is there. A module's path is its file's path (iyi SPEC R-1), so
-  # `import app/lib` names `app/lib.iyi` after the file is deleted exactly
-  # as it did before — which is what lets `check --affected app/lib.iyi`
+  # `import app/lib` names `app/lib.ri` after the file is deleted exactly
+  # as it did before — which is what lets `check --affected app/lib.ri`
   # find the importers a deletion breaks.
   private def mod_context_names(written : String, entry_dir : String, table : Array({String, String}), header_root : String? = nil) : {String, String}
     # A short name the manifest gives is the path it names, as in a build.
@@ -461,19 +461,19 @@ class Iyi::Command
         else
           next
         end
-      return {File.join(checkout, "#{inner}.iyi"), inner}
+      return {File.join(checkout, "#{inner}.ri"), inner}
     end
 
     # ris: `.ri` first, as a build resolves (`SemanticVisitor`); only
-    # `.iyi` was probed, so `test --affected x.ri` reached no closure.
+    # `.ri` was probed, so `test --affected x.ri` reached no closure.
     if ri = mod_context_ri(entry_dir, written)
       return {ri, written}
     end
-    local = File.join(entry_dir, "#{written}.iyi")
+    local = File.join(entry_dir, "#{written}.ri")
     return {local, written} if File.file?(local)
 
     # Then the root the entry's own header names, as a build asks it
-    # (`SemanticVisitor#resolve_import`): `app/main.iyi` declaring `module
+    # (`SemanticVisitor#resolve_import`): `app/main.ri` declaring `module
     # app/main` imports `app/util` from the directory above `app`, and this
     # answered "does not resolve" - exit 0 - about the module the same
     # file builds against.
@@ -481,12 +481,12 @@ class Iyi::Command
       if ri = mod_context_ri(header_root, written)
         return {ri, written}
       end
-      rooted = Iyi.native_path(File.join(header_root, "#{written}.iyi"))
+      rooted = Iyi.native_path(File.join(header_root, "#{written}.ri"))
       return {rooted, written} if File.file?(rooted)
     end
 
     # Then the search path, which is where the library lives: a build
-    # resolves `import std/path` from `IYI_PATH` and this did not look
+    # resolves `import std/path` from `RIS_PATH` and this did not look
     # there at all, so every import of a std module — every import most
     # programs have — was reported as "does not resolve: no file and no
     # requirement covers it" about a module the same file compiles
@@ -495,13 +495,13 @@ class Iyi::Command
     #
     # Probed rather than assumed, and only after the entry's own
     # directory, because a file that is *missing* has to keep naming the
-    # path it would have had: `check --affected app/lib.iyi` finds the
+    # path it would have had: `check --affected app/lib.ri` finds the
     # importers a deletion breaks by that name.
     IyiPath.default_paths.each do |entry|
       if ri = mod_context_ri(entry, written)
         return {ri, written}
       end
-      candidate = File.join(entry, "#{written}.iyi")
+      candidate = File.join(entry, "#{written}.ri")
       return {candidate, written} if File.file?(candidate)
     end
 

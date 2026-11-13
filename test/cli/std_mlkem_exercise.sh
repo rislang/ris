@@ -35,7 +35,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -53,13 +53,13 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 VECTORS="$REPO/test/cli/std_mlkem_fixture/acvp_ml_kem_768.json"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_mlkem_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_mlkem_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -383,7 +383,7 @@ fi
 
 echo
 echo "== what mlkem refuses"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/mlkem::{MlKem768, MlKem768PrivateKey}
@@ -397,9 +397,9 @@ when "short-m"
   MlKem768.encapsulate(MlKem768PrivateKey.from_seed("s" * 64).encapsulation_key, "m" * 31)
 end
 puts "accepted"
-IYI
+RIS
 refuse() { # refuse <case> <phrase>
-  if "$IYI" run "$WORK/refuse.iyi" -- "$1" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
   elif ! grep -qF "$2" "$WORK/refuse.out"; then
@@ -415,13 +415,13 @@ refuse short-m "ML-KEM-768: the randomness of an encapsulation is 32 bytes, not 
 
 echo
 echo "== doc and format"
-if "$IYI" doc "$REPO/src/std/mlkem.iyi" >"$WORK/doc.txt" 2>&1 && grep -q "decapsulate" "$WORK/doc.txt"; then
+if "$RIS" doc "$REPO/src/std/mlkem.ri" >"$WORK/doc.txt" 2>&1 && grep -q "decapsulate" "$WORK/doc.txt"; then
   echo "  iyi doc reads the module"
 else
   echo "  iyi doc: $(tail -2 "$WORK/doc.txt")"
   status=1
 fi
-if "$IYI" check format "$REPO/src/std/mlkem.iyi" "$REPO/test/cli/std_mlkem_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$RIS" check format "$REPO/src/std/mlkem.ri" "$REPO/test/cli/std_mlkem_exercise.ri" >"$WORK/format.log" 2>&1; then
   echo "  formatted"
 else
   sed 's/^/  /' "$WORK/format.log" | tail -5
@@ -442,15 +442,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/mlkem.iyi").read_text()
+src = Path("$REPO/src/std/mlkem.ri").read_text()
 if src.count(os.environ["OLD"]) != 1:
     raise SystemExit("patch site missing or not unique")
-Path("$WORK/patched/std/mlkem.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/mlkem.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_mlkem_exercise.iyi" -- "$VECTORS" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_mlkem_exercise.ri" -- "$VECTORS" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF "$2" "$WORK/mut.out"; then

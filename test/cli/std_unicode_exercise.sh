@@ -6,9 +6,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -44,12 +44,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_unicode_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_unicode_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -165,7 +165,7 @@ fi
 
 echo
 echo "== proving the checks can fail when the module is broken"
-# mutate <label> <old> <new>: patches a copy of std/unicode.iyi and expects
+# mutate <label> <old> <new>: patches a copy of std/unicode.ri and expects
 # the exercise to fail against it.
 mutate() {
   local label="$1" old="$2" new="$3"
@@ -175,10 +175,10 @@ mutate() {
     return 0
   fi
   mkdir -p "$dir/std"
-  if ! OLD="$old" NEW="$new" DST="$dir/std/unicode.iyi" "$PY" - <<PY
+  if ! OLD="$old" NEW="$new" DST="$dir/std/unicode.ri" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/unicode.iyi").read_text()
+src = Path("$REPO/src/std/unicode.ri").read_text()
 old = os.environ["OLD"]
 if old not in src:
     raise SystemExit("patch site missing: " + old)
@@ -187,7 +187,7 @@ PY
   then
     echo "  $label: the patch did not apply"
     status=1
-  elif IYI_PATH="$dir${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_unicode_exercise.iyi" >"$dir/out" 2>&1; then
+  elif RIS_PATH="$dir${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_unicode_exercise.ri" >"$dir/out" 2>&1; then
     echo "  $label: the exercise PASSED on a broken module"
     status=1
   else

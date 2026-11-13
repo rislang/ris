@@ -3,4 +3,5 @@ class CustomCopy
     self
   end
 end
+
 CustomCopy.new.copy_to(Program.tape)

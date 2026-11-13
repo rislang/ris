@@ -19,7 +19,7 @@ puts "PASS: 100000 deep arrays and trees"
 # its child jobs finish, including unequal alignment and zero-sized values.
 tape do
   source = {1_u8, {text: String.new("named"), n: 2_i64},
-    Array(String | Int32 | Nil){String.new("union"), 3, nil}, String::Builder.new(8)}
+            Array(String | Int32 | Nil){String.new("union"), 3, nil}, String::Builder.new(8)}
   source[3].append("builder")
   copied = source.copy_to(Program.tape)
   source[2][0] = String.new("changed")

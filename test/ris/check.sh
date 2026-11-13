@@ -83,7 +83,8 @@ expect byte_char_equal 'A String index is a UInt8 byte'
 for name in yield_owner_field yield_clone_attrs svcb_store \
   rsa_pem_lifetime current_copy_result time_location_kept decoded_maps \
   reader_read_str sse_reconnect_id rsa_string_message \
-  response_owner typed_group_results multipart_owner enumerable_results; do
+  response_owner typed_group_results multipart_owner enumerable_results \
+  const_folded_size zstd_whole_result; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
   if [ "$code" -eq 0 ] && [ -z "$out" ]; then
     echo "runs     $name"
@@ -686,14 +687,14 @@ out=$(
       result=$("$exe" "$mode" 2>&1)
       code=$?
       case "$mode" in
-        negative|negative_realloc|constructor) expected='iyi: tape bad size: -1' ;;
+        negative|negative_realloc|constructor) expected='ris: tape bad size: -1' ;;
         overflow|realloc_overflow)
-          expected='iyi: tape size overflow: 9223372036854775807 * 4' ;;
+          expected='ris: tape size overflow: 9223372036854775807 * 4' ;;
         foreign|foreign_realloc|borrowed_foreign)
-          expected='iyi: SlicePool foreign or invalid run: 0' ;;
-        bounds) expected='iyi: SlicePool index out of bounds: 2' ;;
+          expected='ris: SlicePool foreign or invalid run: 0' ;;
+        bounds) expected='ris: SlicePool index out of bounds: 2' ;;
         slice|run_negative_offset|run_negative_size|run_overflow|run_past_end)
-          expected='iyi: SlicePool slice out of bounds: 0' ;;
+          expected='ris: SlicePool slice out of bounds: 0' ;;
       esac
       if [ "$code" -eq 1 ] && [ "$result" = "$expected" ]; then
         echo "fatal    slice_pool_$mode"
@@ -977,11 +978,11 @@ fi
 
 # Panics end the task; rescue cannot observe a half-built binding.
 # Retained panic text adds one program-owned tape mapping and scope.
-expect owner_construction_rescue 'iyi has no exceptions to rescue'
+expect owner_construction_rescue 'ris has no exceptions to rescue'
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/owner_construction_panic.ri 2>&1)
 if [ "$?" -eq 0 ] &&
     grep -qF 'PASS: owner construction panic cleanup' <<<"$out" &&
-    [ "$(grep -cF 'iyi: panic: expected owner construction panic' <<<"$out")" -eq 100 ] &&
+    [ "$(grep -cF 'ris: panic: expected owner construction panic' <<<"$out")" -eq 100 ] &&
     ! grep -qF 'half-built owner became observable' <<<"$out" &&
     # Per task: its tape and the result region that keeps the panic
     # text until the group ends (one mapping, reused); a nested tape
@@ -1161,7 +1162,7 @@ out=$(
   if "$RIS" build test/ris/defer_no_gc.ri -o "$exe"; then
     "$exe" AGENTS.md 2>"$exe.err"
     code=$?
-    if ! grep -qF 'iyi: panic: expected defer panic' "$exe.err" ||
+    if ! grep -qF 'ris: panic: expected defer panic' "$exe.err" ||
         ! grep -qE 'defer_no_gc.ri:[0-9]+$' "$exe.err" ||
         grep -qF 'heap allocation' "$exe.err"; then
       cat "$exe.err"
@@ -2155,7 +2156,7 @@ if [ "$?" -eq 0 ] && grep -qxF 'PASS: string_hash' <<<"$out"; then
 else
   echo "FAILED   string_hash: $out"; status=1
 fi
-out=$("$RIS" run test/ris/src/iyi/string_hash_page.ri 2>&1)
+out=$("$RIS" run test/ris/src/ris/string_hash_page.ri 2>&1)
 if [ "$?" -eq 0 ] && grep -qxF 'PASS: string_hash_page' <<<"$out"; then
   echo "runs     string_hash_page (ends before a guard page)"
 else
@@ -2462,7 +2463,7 @@ out=$(
     result=$(RIS_HEAP_STATS=1 "$RIS" run \
       "test/ris/$name.ri" 2>&1)
     if [ "$?" -ne 0 ] &&
-        grep -qF 'iyi: panic: base out of range' <<<"$result" &&
+        grep -qF 'ris: panic: base out of range' <<<"$result" &&
         grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$result"; then
       echo "runs     $name (no GC error)"
     else
@@ -2678,7 +2679,7 @@ else
 fi
 out=$("$RIS" run test/ris/side_overflow.ri 2>&1)
 if [ "$?" -eq 1 ] &&
-    [ "$out" = 'iyi: tape side reservation exhausted: 134217729' ]; then
+    [ "$out" = 'ris: tape side reservation exhausted: 134217729' ]; then
   echo "fatal    side_overflow (no GC)"
 else
   echo "FAILED   side_overflow: $out"; status=1
@@ -3174,7 +3175,7 @@ for deep in "$(mktemp -d)"; do
 done
 
 # spec-port pilot base32: module proofs.
-out=$("$RIS" check test src/std/base32.iyi 2>&1)
+out=$("$RIS" check test src/std/base32.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo "runs     spec-port base32"
 else
@@ -3182,7 +3183,7 @@ else
 fi
 
 # spec-port pilot base64: module proofs.
-out=$("$RIS" check test src/std/base64.iyi 2>&1)
+out=$("$RIS" check test src/std/base64.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo "runs     spec-port base64"
 else
@@ -3190,7 +3191,7 @@ else
 fi
 
 # spec-port pilot uuid: module proofs.
-out=$("$RIS" check test src/std/uuid.iyi 2>&1)
+out=$("$RIS" check test src/std/uuid.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo "runs     spec-port uuid"
 else
@@ -3198,7 +3199,7 @@ else
 fi
 
 # spec-port pilot semantic_version: module proofs.
-out=$("$RIS" check test src/std/semantic_version.iyi 2>&1)
+out=$("$RIS" check test src/std/semantic_version.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo "runs     spec-port semantic_version"
 else
@@ -3206,7 +3207,7 @@ else
 fi
 
 # spec-port pilot path: module proofs.
-out=$("$RIS" check test src/std/path.iyi 2>&1)
+out=$("$RIS" check test src/std/path.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo "runs     spec-port path"
 else
@@ -3214,7 +3215,7 @@ else
 fi
 
 # spec-port phase 2 eiy: module proofs.
-out=$("$RIS" check test src/std/eiy.iyi 2>&1)
+out=$("$RIS" check test src/std/eiy.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo "runs     spec-port eiy"
 else
@@ -3222,266 +3223,266 @@ else
 fi
 
 # spec-port phase 2 deque: module proofs.
-out=$("$RIS" check test src/std/deque.iyi 2>&1)
+out=$("$RIS" check test src/std/deque.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo "runs     spec-port deque"
 else
   echo "FAILED   spec-port deque: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/bzip2.iyi 2>&1)
+out=$("$RIS" check test src/std/bzip2.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module bzip2'
 else
   echo "FAILED   spec module bzip2: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/csv.iyi 2>&1)
+out=$("$RIS" check test src/std/csv.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module csv'
 else
   echo "FAILED   spec module csv: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/dns.iyi 2>&1)
+out=$("$RIS" check test src/std/dns.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module dns'
 else
   echo "FAILED   spec module dns: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/fileserver.iyi 2>&1)
+out=$("$RIS" check test src/std/fileserver.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module fileserver'
 else
   echo "FAILED   spec module fileserver: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/format.iyi 2>&1)
+out=$("$RIS" check test src/std/format.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module format'
 else
   echo "FAILED   spec module format: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/hpack.iyi 2>&1)
+out=$("$RIS" check test src/std/hpack.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module hpack'
 else
   echo "FAILED   spec module hpack: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/ini.iyi 2>&1)
+out=$("$RIS" check test src/std/ini.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module ini'
 else
   echo "FAILED   spec module ini: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/json.iyi 2>&1)
+out=$("$RIS" check test src/std/json.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module json'
 else
   echo "FAILED   spec module json: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/mail.iyi 2>&1)
+out=$("$RIS" check test src/std/mail.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module mail'
 else
   echo "FAILED   spec module mail: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/mime.iyi 2>&1)
+out=$("$RIS" check test src/std/mime.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module mime'
 else
   echo "FAILED   spec module mime: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/netip.iyi 2>&1)
+out=$("$RIS" check test src/std/netip.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module netip'
 else
   echo "FAILED   spec module netip: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/number_format.iyi 2>&1)
+out=$("$RIS" check test src/std/number_format.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module number_format'
 else
   echo "FAILED   spec module number_format: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/option_parser.iyi 2>&1)
+out=$("$RIS" check test src/std/option_parser.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module option_parser'
 else
   echo "FAILED   spec module option_parser: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/otp.iyi 2>&1)
+out=$("$RIS" check test src/std/otp.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module otp'
 else
   echo "FAILED   spec module otp: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/password.iyi 2>&1)
+out=$("$RIS" check test src/std/password.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module password'
 else
   echo "FAILED   spec module password: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/png.iyi 2>&1)
+out=$("$RIS" check test src/std/png.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module png'
 else
   echo "FAILED   spec module png: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/query.iyi 2>&1)
+out=$("$RIS" check test src/std/query.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module query'
 else
   echo "FAILED   spec module query: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/regex.iyi 2>&1)
+out=$("$RIS" check test src/std/regex.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module regex'
 else
   echo "FAILED   spec module regex: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/router.iyi 2>&1)
+out=$("$RIS" check test src/std/router.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module router'
 else
   echo "FAILED   spec module router: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/shlex.iyi 2>&1)
+out=$("$RIS" check test src/std/shlex.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module shlex'
 else
   echo "FAILED   spec module shlex: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/smtp.iyi 2>&1)
+out=$("$RIS" check test src/std/smtp.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module smtp'
 else
   echo "FAILED   spec module smtp: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/sse.iyi 2>&1)
+out=$("$RIS" check test src/std/sse.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module sse'
 else
   echo "FAILED   spec module sse: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/tar.iyi 2>&1)
+out=$("$RIS" check test src/std/tar.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module tar'
 else
   echo "FAILED   spec module tar: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/toml.iyi 2>&1)
+out=$("$RIS" check test src/std/toml.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module toml'
 else
   echo "FAILED   spec module toml: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/udp.iyi 2>&1)
+out=$("$RIS" check test src/std/udp.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module udp'
 else
   echo "FAILED   spec module udp: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/websocket.iyi 2>&1)
+out=$("$RIS" check test src/std/websocket.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module websocket'
 else
   echo "FAILED   spec module websocket: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/xml.iyi 2>&1)
+out=$("$RIS" check test src/std/xml.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module xml'
 else
   echo "FAILED   spec module xml: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/xz.iyi 2>&1)
+out=$("$RIS" check test src/std/xz.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module xz'
 else
   echo "FAILED   spec module xz: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/yaml.iyi 2>&1)
+out=$("$RIS" check test src/std/yaml.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module yaml'
 else
   echo "FAILED   spec module yaml: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/zip.iyi 2>&1)
+out=$("$RIS" check test src/std/zip.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module zip'
 else
   echo "FAILED   spec module zip: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/big.iyi 2>&1)
+out=$("$RIS" check test src/std/big.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module big'
 else
   echo "FAILED   spec module big: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/dir.iyi 2>&1)
+out=$("$RIS" check test src/std/dir.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module dir'
 else
   echo "FAILED   spec module dir: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/io.iyi 2>&1)
+out=$("$RIS" check test src/std/io.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module io'
 else
   echo "FAILED   spec module io: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/text.iyi 2>&1)
+out=$("$RIS" check test src/std/text.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module text'
 else
   echo "FAILED   spec module text: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/time.iyi 2>&1)
+out=$("$RIS" check test src/std/time.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module time'
 else
   echo "FAILED   spec module time: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/tls.iyi 2>&1)
+out=$("$RIS" check test src/std/tls.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module tls'
 else
   echo "FAILED   spec module tls: $out"; status=1
 fi
 
-out=$("$RIS" check test src/std/uri.iyi 2>&1)
+out=$("$RIS" check test src/std/uri.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module uri'
 else

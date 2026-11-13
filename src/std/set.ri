@@ -1,0 +1,167 @@
+# The set algebra the prelude's `Set(T)` does not have.
+#
+# The prelude's `Set(T)` (src/ris/set.ri) answers "have I seen this":
+# `add`, `includes?`, `delete`, `each`, `to_a`, `-`, `size`, `empty?`.
+# This module reopens that one type rather than defining a second one, so
+# `[1, 2].to_set | other` works on the set the prelude hands out, and a
+# program has one `Set`. It adds:
+#
+#   * union `|` (and `+`, the same thing), intersection `&`, symmetric
+#     difference `^`; `-` is the prelude's;
+#   * the relations `subset_of?`, `proper_subset_of?`, `superset_of?`,
+#     `proper_superset_of?`, `disjoint?`, `intersects?`;
+#   * `==` by membership (the prelude's `Object#==` is identity), and a
+#     `hash` that agrees with it, so a set can be a hash key;
+#   * `<<`, `concat`, `dup`.
+#
+# Every operator answers a new set, in this set's order first; nothing
+# here moves the receiver except `<<` and `concat`, which say so.
+#
+# `impl Enumerable for Set(T)` lives in std/enumerable beside `Array`'s —
+# the module that owns the trait is the one R-3 lets say it — so with
+# `import std/enumerable` a set also has `map`, `select`, `sum`, `min`,
+# `max`, `to_a` and the rest. This module imports it, so a caller of
+# std/set gets both.
+
+module std/set
+
+import std/enumerable::{Enumerable}
+
+struct ::Set(T)
+  # Adds value and answers the set, for chaining: `set << 1 << 2`.
+  def <<(value : T) : Set(T)
+    add(value)
+    self
+  end
+
+  # Adds every element of other; answers the set.
+  def concat(other : Set(T)) : Set(T)
+    other.each { |v| add(v) }
+    self
+  end
+
+  # A copy with the same elements in the same order.
+  def dup : Set(T)
+    Set(T).new(self, self, SET_COPY)
+  end
+
+  SET_COPY  = 0
+  SET_UNION = 1
+  SET_BOTH  = 2
+  SET_ONE   = 3
+
+  # The set *kind* makes of *a* and *b*: a copy of *a*, their union,
+  # intersection (in *a*'s order) or symmetric difference. A `new`, so it
+  # builds in its caller's destination (SPEC 1.5), which each operator
+  # hands on.
+  def self.new(a : Set(A), b : Set(B), kind : Int32) : Set(T) forall A, B
+    result = new
+    # `&` makes a Set(T) of a wider *b*: its kinds never add b's members,
+    # but each branch compiles for it, so b's are cast to T, which a
+    # union's T always covers.
+    case kind
+    when SET_COPY
+      a.each { |v| result.add(v) }
+    when SET_UNION
+      a.each { |v| result.add(v) }
+      b.each { |v| result.add(v.as(T)) }
+    when SET_BOTH
+      a.each { |v| result.add(v) if b.has_member?(v) }
+    else
+      a.each { |v| result.add(v) unless b.has_member?(v) }
+      b.each { |v| result.add(v.as(T)) unless a.has_member?(v) }
+    end
+    result
+  end
+
+  # Union: everything in either, this set's elements first. The other set
+  # may be of another element type, as everything below may: the union of
+  # a `Set(Int32)` and a `Set(Int32?)` is a `Set(Int32?)`, either way round.
+  # Restricted to `Set(T)`, a set of the narrower type was taken for the
+  # wider one and not back, and where the body then asked the narrower set
+  # about a member of the wider type it failed to compile inside this file:
+  # `Set(Int32?) == Set(Int32)`, `&`, `^`, `subset_of?` and the rest, while
+  # `Set(Int32) == Set(Int32?)` answered false for the same members.
+  def |(other : Set(U)) : Set(T | U) forall U
+    Set(T | U).new(self, other, SET_UNION)
+  end
+
+  # `+` is union: two sets added are one set.
+  def +(other : Set(U)) : Set(T | U) forall U
+    self | other
+  end
+
+  # Intersection: what is in both, in this set's order.
+  def &(other : Set(U)) : Set(T) forall U
+    Set(T).new(self, other, SET_BOTH)
+  end
+
+  # Symmetric difference: what is in exactly one of the two.
+  def ^(other : Set(U)) : Set(T | U) forall U
+    Set(T | U).new(self, other, SET_ONE)
+  end
+
+  # Every element of this set is in other. The empty set is a subset of
+  # every set, itself included.
+  def subset_of?(other : Set(U)) : Bool forall U
+    return false if size > other.size
+    each { |v| return false unless other.has_member?(v) }
+    true
+  end
+
+  # A subset that is not the same set.
+  def proper_subset_of?(other : Set(U)) : Bool forall U
+    size < other.size && subset_of?(other)
+  end
+
+  def superset_of?(other : Set(U)) : Bool forall U
+    other.subset_of?(self)
+  end
+
+  def proper_superset_of?(other : Set(U)) : Bool forall U
+    other.proper_subset_of?(self)
+  end
+
+  # No element in common; two empty sets are disjoint.
+  def disjoint?(other : Set(U)) : Bool forall U
+    each { |v| return false if other.has_member?(v) }
+    true
+  end
+
+  # At least one element in common.
+  def intersects?(other : Set(U)) : Bool forall U
+    !disjoint?(other)
+  end
+
+  # The same members, in any order, where one element type holds the
+  # other, as tuples compare (src/ris/object.ri).
+  def ==(other : Set(U)) : Bool forall U
+    {{ T <= U || U <= T }} && size == other.size && subset_of?(other)
+  end
+
+  # Whether value, of any type, is a member: one this set's type cannot
+  # hold is not.
+  protected def has_member?(value) : Bool
+    value.is_a?(T) && includes?(value)
+  end
+
+  # Equal sets hash alike, and unequal ones apart. Each member's hash goes
+  # through splitmix64's finaliser before a wrapping sum, which does not
+  # care about order the way the sets do not, and the size is folded in
+  # after, as `Array#hash` folds it. The members' hashes summed as they
+  # were put a set of small integers at their total, `Int32#hash` being the
+  # value: {1, 4} and {2, 3} were one key, the 11,175 sets {i, j} with
+  # i < j < 150 had 297 hashes between them, and a table of such keys grew
+  # quadratically.
+  def hash : Int32
+    sum = 0_u64
+    each do |v|
+      x = v.hash.to_i64.unsafe_to_u64
+      x = (x ^ x.unsafe_shr(30_u64)) &* 0xBF58476D1CE4E5B9_u64
+      x = (x ^ x.unsafe_shr(27_u64)) &* 0x94D049BB133111EB_u64
+      sum = sum &+ (x ^ x.unsafe_shr(31_u64))
+    end
+    value = (sum ^ size.to_i64.unsafe_to_u64) &* 0x100000001B3_u64
+    (value ^ value.unsafe_shr(29_u64)).hash
+  end
+end

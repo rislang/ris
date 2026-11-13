@@ -1,3 +1,4 @@
 class BoardPostReference
 end
+
 RisBoard.post(BoardPostReference.new)

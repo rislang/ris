@@ -10,9 +10,9 @@ unchanged.
 
 ris modifies iyi's sources. Every file ris changed carries a comment naming
 the change ("ris:" or "PROTOTYPE (ris"). The tape memory is ris's own work:
-`src/iyi/tape.iyi`, `src/compiler/iyi/semantic/tape_checker.cr`, and the
-tape parts of `src/iyi/prelude.iyi`, `src/iyi/concurrency.iyi`,
-`src/iyi/string.iyi` and `src/compiler/iyi/semantic/cleanup_transformer.cr`.
+`src/ris/tape.ri`, `src/compiler/iyi/semantic/tape_checker.cr`, and the
+tape parts of `src/ris/prelude.ri`, `src/ris/concurrency.ri`,
+`src/ris/string.ri` and `src/compiler/iyi/semantic/cleanup_transformer.cr`.
 
 `samples/ris/respond.ri` is a port of the `respond` benchmark of Goose
 (https://github.com/aardappel/goose, Copyright Wouter van Oortmerssen,
@@ -69,7 +69,7 @@ Crystal standard library uses the following libraries, which have their own lice
 iyi's own standard library includes code derived from, and its benches a
 port of:
 
-- [Arm optimized-routines][] (`Math.exp`, `exp2`, `log`, `log2` and `pow` in `src/std/math.iyi`, and
+- [Arm optimized-routines][] (`Math.exp`, `exp2`, `log`, `log2` and `pow` in `src/std/math.ri`, and
   `test/cli/libm_oracle/`) - [MIT][]
 - fdlibm, as glibc carries it (`Math.log10`, `expm1`, `log1p`, `sinh`, `cosh`,
   `tanh` and the Bessel functions, and their
@@ -77,11 +77,11 @@ port of:
   Sun Microsystems' notice: "Permission to use, copy, modify, and
   distribute this software is freely granted, provided that this notice is
   preserved."
-- [musl][] (`Math.fma`'s software arm in `src/std/math.iyi`) - [MIT][]
+- [musl][] (`Math.fma`'s software arm in `src/std/math.ri`) - [MIT][]
 - [CORE-MATH][], as glibc 2.43 carries it and as published (`Math.erf`,
   `erfc`, `asinh`, `acosh`, `atanh`, `lgamma`, `tgamma`, `atan`, `asin`,
   `acos`, `sin`, `cos`, `tan`, `cbrt`, `hypot` and `atan2` in
-  `src/std/math.iyi`, and `test/cli/libm_oracle/core_math/`) - [MIT][]
+  `src/std/math.ri`, and `test/cli/libm_oracle/core_math/`) - [MIT][]
 - [crystal-metric][] (`test/speed/metric/`) - [MIT][]
 
 Its benches vendor test vectors:

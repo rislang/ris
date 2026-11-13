@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds crystal-metric's port (`test/speed/metric/metric.iyi`) with --release
+# Builds crystal-metric's port (`test/speed/metric/metric.ri`) with --release
 # and requires all twenty-six answers.
 #
 # Each benchmark checks its result against the one the Crystal program
@@ -25,7 +25,7 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/speed/.work"
 WORK="$(mktemp -d "$REPO/test/speed/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -44,16 +44,16 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src"
+export RIS_PATH="$REPO/src"
 
 # In a directory of its own: a full --release run writes `results.js`
 # beside its source, which is where the port keeps the times the other
 # modes are scored against.
 mkdir -p "$WORK/port"
-cp "$REPO/test/speed/metric/metric.iyi" "$WORK/port/metric.iyi"
+cp "$REPO/test/speed/metric/metric.ri" "$WORK/port/metric.ri"
 
 echo "== the port, --release"
-if ! (cd "$WORK/port" && "$IYI" build --release -o metric metric.iyi) > "$WORK/build.log" 2>&1; then
+if ! (cd "$WORK/port" && "$RIS" build --release -o metric metric.ri) > "$WORK/build.log" 2>&1; then
   echo "  the port did not build:"
   sed -n '1,20p' "$WORK/build.log" | sed 's/^/    /'
   exit 1
@@ -81,7 +81,7 @@ broken() { # broken <label> <module> <benchmark> <old> <new>
   fi
   rm -rf "$WORK/patched"
   mkdir -p "$WORK/patched/std"
-  OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/$module.iyi" "$WORK/patched/std/$module.iyi" <<'PY'
+  OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/$module.ri" "$WORK/patched/std/$module.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 old = os.environ["OLD"]
@@ -94,7 +94,7 @@ PY
     status=1
     return
   fi
-  if ! (cd "$WORK/port" && IYI_PATH="$WORK/patched${PSEP}$REPO/src" "$IYI" build --release -o broken metric.iyi) \
+  if ! (cd "$WORK/port" && RIS_PATH="$WORK/patched${PSEP}$REPO/src" "$RIS" build --release -o broken metric.ri) \
        > "$WORK/broken.log" 2>&1; then
     echo "  $label: the broken copy did not build"
     sed -n '1,8p' "$WORK/broken.log" | sed 's/^/    /'

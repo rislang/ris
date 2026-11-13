@@ -44,7 +44,7 @@ import sys
 import tempfile
 import time
 
-IYI = os.path.abspath(os.environ.get("IYI", "./bin/iyi"))
+RIS = os.path.abspath(os.environ.get("RIS", "./bin/ris"))
 SAMPLES = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "samples", "iyi"))
 ROUNDS = 5
 
@@ -58,8 +58,8 @@ MAGIC = b"IYIMOD\0\0"
 MONO_BODIES = 6
 
 # The entries whose imports pull the corpus's modules through the emitter.
-ENTRIES = ["immutable.iyi", "collections.iyi", "derive.iyi", "calc.iyi",
-           "webapp.iyi", "modules.iyi"]
+ENTRIES = ["immutable.ri", "collections.ri", "derive.ri", "calc.ri",
+           "webapp.ri", "modules.ri"]
 
 # R-4 as built, pinned on two modules at the ends of the spectrum.
 ALL_GENERIC = "std/list"    # every def is on List(T): bodies travel, no object code
@@ -144,18 +144,18 @@ def main():
         for entry in ENTRIES:
             # A full build: object code is codegen's, and codegen is what
             # says which module has some.
-            run([IYI, "build", "--emit-iyimod", mods, "-o",
+            run([RIS, "build", "--emit-rimod", mods, "-o",
                  os.path.join(work, "out"), entry], cwd=corpus)
 
         rows = []
         for dirpath, _, names in os.walk(mods):
             for name in sorted(names):
-                if not name.endswith(".iyimod"):
+                if not name.endswith(".rimod"):
                     continue
                 path = os.path.join(dirpath, name)
                 # A module's name is written with `/` on every platform;
-                # the path it came from is `calc\lexer.iyimod` on Windows.
-                module = os.path.relpath(path, mods)[:-len(".iyimod")].replace(os.sep, "/")
+                # the path it came from is `calc\lexer.rimod` on Windows.
+                module = os.path.relpath(path, mods)[:-len(".rimod")].replace(os.sep, "/")
                 rows.append((module, os.path.getsize(path), sections_of(path)))
         rows.sort()
 
@@ -220,10 +220,10 @@ def main():
         unexplained = 0
         std = os.path.join(os.path.dirname(SAMPLES), "..", "src")
         for module, _, _ in rows:
-            path = os.path.join(mods, *module.split("/")) + ".iyimod"
+            path = os.path.join(mods, *module.split("/")) + ".rimod"
             source = ""
             for base in (corpus, std):
-                candidate = os.path.join(base, *module.split("/")) + ".iyi"
+                candidate = os.path.join(base, *module.split("/")) + ".ri"
                 if os.path.exists(candidate):
                     with open(candidate) as f:
                         source = f.read()
@@ -243,13 +243,13 @@ def main():
         # front end only, arms alternated, minimum of ROUNDS. The artifact
         # arm compiles List(T)'s bodies too; R-4's dictionary is what
         # would take that out, and this is the room it has.
-        consumer = "immutable.iyi"
+        consumer = "immutable.ri"
         source_t, artifact_t = [], []
         for _ in range(ROUNDS):
             for arm, extra, bucket in (("source", [], source_t),
-                                       ("artifact", ["--use-iyimod", mods], artifact_t)):
+                                       ("artifact", ["--use-rimod", mods], artifact_t)):
                 start = time.monotonic()
-                run([IYI, "build", "--no-codegen", "-o", os.path.join(work, "out"), consumer] + extra, cwd=corpus)
+                run([RIS, "build", "--no-codegen", "-o", os.path.join(work, "out"), consumer] + extra, cwd=corpus)
                 bucket.append(time.monotonic() - start)
         print(f"\n{consumer} <- {ALL_GENERIC}, front end, min of {ROUNDS}: "
               f"from source {min(source_t) * 1000:.0f} ms, from artifacts {min(artifact_t) * 1000:.0f} ms "

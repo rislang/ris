@@ -1,6 +1,6 @@
 # iyi for Vim and Neovim
 
-This runtime plugin detects `*.iyi` files and highlights comments, strings
+This runtime plugin detects `*.ri` files and highlights comments, strings
 and nested interpolation, characters, decimal/binary/octal/hex numbers,
 keywords, types, method definitions (including receivers, setters, and
 operators), symbols, and instance variables. It also handles percent literals,
@@ -42,7 +42,7 @@ vim.cmd("filetype plugin on")
 vim.cmd("syntax enable")
 ```
 
-Open an `.iyi` file and check `:set filetype?`; it should report `iyi`.
+Open an `.ri` file and check `:set filetype?`; it should report `iyi`.
 To update the plugin, copy these files again from a newer checkout.
 
 ## Language server

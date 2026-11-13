@@ -26,7 +26,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -44,7 +44,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 # What libbzip2 writes, through Python's `bz2`, at levels 1 and 9, for
 # iyi to read: nothing, one byte, text, a long run, a period of two, runs
@@ -115,7 +115,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_bzip2_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_bzip2_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -161,7 +161,7 @@ import bz2, os, sys
 d = sys.argv[1]
 failed = False
 names = ["empty", "byte", "text", "repeat", "ab", "runs", "random", "every", "multi"]
-pairs = [(f"{n}.iyi{level}.bz2", f"{n}.bin") for n in names for level in (1, 9)] + [("many.iyi.bz2", "many.bin")]
+pairs = [(f"{n}.ri{level}.bz2", f"{n}.bin") for n in names for level in (1, 9)] + [("many.ri.bz2", "many.bin")]
 for stream, plain in pairs:
     data = open(os.path.join(d, stream), "rb").read()
     want = open(os.path.join(d, plain), "rb").read()
@@ -196,8 +196,8 @@ echo
 echo "== what iyi wrote, tested by bzip2(1)"
 if command -v bzip2 >/dev/null 2>&1; then
   tested=0
-  for f in "$WORK"/fixtures/*.iyi*.bz2; do
-    plain="$WORK/fixtures/$(basename "$f" | sed 's/\.iyi[0-9]*\.bz2$/.bin/')"
+  for f in "$WORK"/fixtures/*.ri*.bz2; do
+    plain="$WORK/fixtures/$(basename "$f" | sed 's/\.ri[0-9]*\.bz2$/.bin/')"
     if ! bzip2 -t "$f" 2>/dev/null || ! bzip2 -dc "$f" | cmp -s - "$plain"; then
       echo "  $(basename "$f"): bzip2 does not read it back"
       status=1
@@ -230,7 +230,7 @@ todo="std/bzip2"
 while [ -n "$todo" ]; do
   next=""
   for module in $todo; do
-    for imported in $(sed -n 's/^import \(std\/[a-z_0-9]*\).*/\1/p' "$REPO/src/$module.iyi"); do
+    for imported in $(sed -n 's/^import \(std\/[a-z_0-9]*\).*/\1/p' "$REPO/src/$module.ri"); do
       case " $reached " in
         *" $imported "*) ;;
         *) reached="$reached $imported"; next="$next $imported" ;;
@@ -241,7 +241,7 @@ while [ -n "$todo" ]; do
 done
 bound=""
 for module in $reached; do
-  if grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)|__iyi_' "$REPO/src/$module.iyi" \
+  if grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)|__iyi_' "$REPO/src/$module.ri" \
       | grep -qvE 'llvm\.(ctpop|ctlz|cttz)\.'; then
     bound="$bound $module"
   fi
@@ -258,8 +258,8 @@ echo "== what a caller's mistake panics with, by name"
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
   printf 'module main\n\nimport std/bzip2::{Bzip2, Bzip2Reader, Bzip2Error}\n\nputs (%s).to_s.bytesize\n' \
-    "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -300,18 +300,18 @@ mutate() { # mutate <label> <old> <new> <phrase>
   if ! OLD="$old" NEW="$new" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/bzip2.iyi").read_text()
+src = Path("$REPO/src/std/bzip2.ri").read_text()
 old = os.environ["OLD"]
 if old not in src:
     raise SystemExit("patch site missing: " + old)
-Path("$WORK/patched/std/bzip2.iyi").write_text(src.replace(old, os.environ["NEW"], 1))
+Path("$WORK/patched/std/bzip2.ri").write_text(src.replace(old, os.environ["NEW"], 1))
 PY
   then
     echo "  $label: the patch did not apply"
     status=1
   # Build first, then run: a patch that does not compile would also "fail",
   # and that proves nothing about whether the exercise catches the break.
-  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_bzip2_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_bzip2_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the broken copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1

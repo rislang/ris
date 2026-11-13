@@ -31,8 +31,8 @@ module Iyi
     #
     # This was `true_filename`, which swapped the expansion for the calling
     # file and kept the line and column the frame had inside the expansion:
-    # a place that is nowhere. `puts bad("a")` on line 4 of main.iyi, where
-    # `bad` expands to `"a".upcse`, was reported at main.iyi:1:7, the
+    # a place that is nowhere. `puts bad("a")` on line 4 of main.ri, where
+    # `bad` expands to `"a".upcse`, was reported at main.ri:1:7, the
     # `module` header; the language server underlined the header, and `iyi
     # fix` spliced the did-you-mean in there, `module app/main` becoming
     # `moduleupcasemain`.
@@ -230,7 +230,7 @@ module Iyi
 
   # iyi: text a build parsed under a filename that is not a file to read.
   #
-  # The declarations from a `.iyimod` are parsed under the artifact's own path,
+  # The declarations from a `.rimod` are parsed under the artifact's own path,
   # so that a location points at the module an error came from rather than at
   # nothing. The artifact is binary, so showing "the line" showed the bytes of
   # the container the declarations travelled in — a screen of mojibake under a

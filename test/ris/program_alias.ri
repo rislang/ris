@@ -1,9 +1,11 @@
 class State
   @@log = Array(String).new
+
   def self.log
     @@log
   end
 end
+
 alias_of_global = State.log
 tape do
   alias_of_global << String.new("request").copy_to(Program.tape)

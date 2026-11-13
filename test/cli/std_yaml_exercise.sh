@@ -7,9 +7,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -45,12 +45,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_yaml_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_yaml_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -152,7 +152,7 @@ echo
 echo "== what the derive refuses, each in its own program"
 refuse_program() {
   local name="$1" sentence="$2" body="$3"
-  cat >"$WORK/refuse_$name.iyi" <<IYI
+  cat >"$WORK/refuse_$name.ri" <<RIS
 module refuse_$name
 
 import std/yaml::{YAML, yaml_serializable}
@@ -166,11 +166,11 @@ end
 
 $body
 puts "accepted"
-IYI
-  if "$IYI" run "$WORK/refuse_$name.iyi" >"$WORK/refuse_$name.out" 2>&1; then
+RIS
+  if "$RIS" run "$WORK/refuse_$name.ri" >"$WORK/refuse_$name.out" 2>&1; then
     echo "  accepted: $body"
     status=1
-  elif ! grep -qxF "iyi: panic: $sentence" "$WORK/refuse_$name.out"; then
+  elif ! grep -qxF "ris: panic: $sentence" "$WORK/refuse_$name.out"; then
     echo "  refused, but not with \"$sentence\":"
     sed 's/^/    /' "$WORK/refuse_$name.out"
     status=1
@@ -189,7 +189,7 @@ if [ -z "$PY" ]; then
   echo "  skipped: no working python3, so the broken copy could not be made"
 else
   mkdir -p "$WORK/patched_dup/std"
-  SRC="$REPO/src/std/yaml.iyi" DST="$WORK/patched_dup/std/yaml.iyi" "$PY" - <<'PY'
+  SRC="$REPO/src/std/yaml.ri" DST="$WORK/patched_dup/std/yaml.ri" "$PY" - <<'PY'
 import os
 from pathlib import Path
 src = Path(os.environ["SRC"]).read_text()
@@ -203,7 +203,7 @@ PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched_dup${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_yaml_exercise.iyi" >"$WORK/dup.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched_dup${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_yaml_exercise.ri" >"$WORK/dup.out" 2>&1; then
     echo "  the exercise PASSED with duplicate keys accepted"
     status=1
   else
@@ -217,7 +217,7 @@ if [ -z "$PY" ]; then
   echo "  skipped: no working python3, so the broken copy could not be made"
 else
   mkdir -p "$WORK/patched_alias/std"
-  SRC="$REPO/src/std/yaml.iyi" DST="$WORK/patched_alias/std/yaml.iyi" "$PY" - <<'PY'
+  SRC="$REPO/src/std/yaml.ri" DST="$WORK/patched_alias/std/yaml.ri" "$PY" - <<'PY'
 import os
 from pathlib import Path
 src = Path(os.environ["SRC"]).read_text()
@@ -231,7 +231,7 @@ PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched_alias${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" timeout 60 "$IYI" run "$REPO/test/cli/std_yaml_exercise.iyi" >"$WORK/alias.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched_alias${PSEP}$REPO/src${PSEP}$REPO/samples/ris" timeout 60 "$RIS" run "$REPO/test/cli/std_yaml_exercise.ri" >"$WORK/alias.out" 2>&1; then
     echo "  the exercise PASSED with alias expansion unbounded"
     status=1
   else
@@ -252,7 +252,7 @@ prove_caught() {
     return
   fi
   mkdir -p "$WORK/patched_$name/std"
-  if ! OLD="$old" NEW="$new" SRC="$REPO/src/std/yaml.iyi" DST="$WORK/patched_$name/std/yaml.iyi" "$PY" - <<'PY'
+  if ! OLD="$old" NEW="$new" SRC="$REPO/src/std/yaml.ri" DST="$WORK/patched_$name/std/yaml.ri" "$PY" - <<'PY'
 import os
 from pathlib import Path
 src = Path(os.environ["SRC"]).read_text()
@@ -264,7 +264,7 @@ PY
   then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched_$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" timeout 60 "$IYI" run "$REPO/test/cli/std_yaml_exercise.iyi" >"$WORK/$name.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched_$name${PSEP}$REPO/src${PSEP}$REPO/samples/ris" timeout 60 "$RIS" run "$REPO/test/cli/std_yaml_exercise.ri" >"$WORK/$name.out" 2>&1; then
     echo "  the exercise PASSED with $what"
     status=1
   elif ! grep -qF -- "ASSERTION FAILED: $message" "$WORK/$name.out"; then

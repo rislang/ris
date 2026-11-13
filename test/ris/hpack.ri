@@ -2,8 +2,7 @@
 # without Huffman, and refuses malformed blocks. No heap.
 module test/ris/hpack
 
-import std/hpack::{Encoder, Decoder, HpackError,
-                  TapeHeaders, TapeHeaderField, IndexingMode, DynamicTable}
+import std/hpack::{Encoder, Decoder, HpackError, TapeHeaders, TapeHeaderField, IndexingMode, DynamicTable}
 
 encoder = Encoder.new
 decoder = Decoder.new
@@ -58,6 +57,7 @@ tape do
   raise "size limit" unless size.is_a?(HpackError)
   raise "size error" unless size.message.starts_with?("Decompression bomb")
 end
+
 # A connection owns its runs; request text never becomes table storage.
 def churn(table : DynamicTable, index : Int32) : Nil
   table.add("key#{index % 3}", "v" * (index % 23 + 1))

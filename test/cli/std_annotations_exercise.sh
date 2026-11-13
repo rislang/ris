@@ -32,7 +32,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -50,12 +50,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_annotations_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_annotations_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -105,16 +105,16 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the broken-module proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/annotations.iyi").read_text()
+src = Path("$REPO/src/std/annotations.ri").read_text()
 old = 'pub alias Flags = ::Flags'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/annotations.iyi").write_text(src.replace(old, 'alias Flags = ::Flags', 1))
+Path("$WORK/patched/std/annotations.ri").write_text(src.replace(old, 'alias Flags = ::Flags', 1))
 PY
 then
   echo "  the patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_annotations_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_annotations_exercise.ri" >"$WORK/mut.out" 2>&1; then
   echo "  the exercise PASSED on a broken module"
   status=1
 else
@@ -128,18 +128,18 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the dummy-annotation proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/annotations.iyi").read_text()
+src = Path("$REPO/src/std/annotations.ri").read_text()
 for name in ("Deprecated", "Flags", "Link", "Experimental", "TargetFeature"):
     old = f"pub alias {name} = ::{name}"
     if old not in src:
         raise SystemExit(f"dummy patch site missing: {name}")
     src = src.replace(old, f"pub annotation {name}\nend", 1)
-Path("$WORK/dummy/std/annotations.iyi").write_text(src)
+Path("$WORK/dummy/std/annotations.ri").write_text(src)
 PY
 then
   echo "  the dummy patch did not apply"
   status=1
-elif IYI_PATH="$WORK/dummy${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_annotations_exercise.iyi" >"$WORK/dummy.out" 2>&1; then
+elif RIS_PATH="$WORK/dummy${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_annotations_exercise.ri" >"$WORK/dummy.out" 2>&1; then
   echo "  the exercise PASSED on dummy annotation types"
   status=1
 else
@@ -150,8 +150,8 @@ echo
 echo "== what annotations refuse"
 refuses() { # refuses <label> <name> <phrase> <code_snippet>
   local label="$1" name="$2" phrase="$3" snippet="$4"
-  printf 'module %s\nimport std/annotations::{Deprecated, Experimental, TargetFeature, Link}\n%s\n' "$name" "$snippet" > "$WORK/$name.iyi"
-  if "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build.log" 2>&1; then
+  printf 'module %s\nimport std/annotations::{Deprecated, Experimental, TargetFeature, Link}\n%s\n' "$name" "$snippet" > "$WORK/$name.ri"
+  if "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build.log" 2>&1; then
     echo "  $label: unexpectedly succeeded"
     status=1
     return 1
@@ -199,8 +199,8 @@ printf '%s\n' \
   '  end' \
   'end' \
   'puts G.new.old_hi' \
-  > "$WORK/dep_warn.iyi"
-if ! "$IYI" build -o "$WORK/dep_warn" "$WORK/dep_warn.iyi" > "$WORK/dep_warn.build.log" 2>&1; then
+  > "$WORK/dep_warn.ri"
+if ! "$RIS" build -o "$WORK/dep_warn" "$WORK/dep_warn.ri" > "$WORK/dep_warn.build.log" 2>&1; then
   echo "  dep_warn: build failed"
   sed -n '1,8p' "$WORK/dep_warn.build.log" | sed 's/^/    /'
   status=1

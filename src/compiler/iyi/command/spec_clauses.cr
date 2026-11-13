@@ -15,7 +15,7 @@
 require "json"
 
 class Iyi::Command
-  private SPEC_EXTENSIONS = {".ri", ".iyi", ".cr", ".sh", ".py"}
+  private SPEC_EXTENSIONS = {".ri", ".cr", ".sh", ".py"}
 
   private class SpecError < Exception
   end
@@ -118,7 +118,7 @@ class Iyi::Command
 
   private def spec_load_or_abort : {String, Array(SpecClause), Array(SpecTest)}
     root = spec_root || abort!("spec: no SPEC.md here: none in the root (the nearest directory with ris.mod or " \
-                               "iyi.mod) nor in the current directory", :USAGE_ERROR)
+                               "ris.mod) nor in the current directory", :USAGE_ERROR)
     begin
       @spec_blocks = spec_blocks_of(root)
       @spec_lock = spec_lock_of(root)
@@ -128,12 +128,12 @@ class Iyi::Command
     end
   end
 
-  # The nearest directory holding ris.mod or iyi.mod, else the current one
+  # The nearest directory holding ris.mod, else the current one
   # when it holds a spec (ris's own repository has no manifest).
   private def spec_root : String?
     dir = Dir.current
     loop do
-      return dir if {"ris.mod", "iyi.mod"}.any? { |name| File.file?(File.join(dir, name)) }
+      return dir if Mod::Installer.manifest?(dir)
       parent = File.dirname(dir)
       break if parent == dir
       dir = parent
@@ -147,7 +147,7 @@ class Iyi::Command
     src = File.join(root, "src")
     return false unless Dir.exists?(src) && !File.symlink?(src)
     files = [] of String
-    project_walk(src, files) { |name| name.ends_with?(".ri") || name.ends_with?(".iyi") }
+    project_walk(src, files) { |name| name.ends_with?(".ri") }
     files.any? do |file|
       File.read_lines(file).any? do |line|
         line.starts_with?("# ") && spec_number?(line[2..].split.first? || "", chapter_ok: false)
@@ -299,7 +299,7 @@ class Iyi::Command
     src = File.join(root, "src")
     return unless Dir.exists?(src) && !File.symlink?(src)
     files = [] of String
-    project_walk(src, files) { |name| name.ends_with?(".ri") || name.ends_with?(".iyi") }
+    project_walk(src, files) { |name| name.ends_with?(".ri") }
     modules = {} of String => String
     files.sort!.each do |file|
       path = ::Path[file].relative_to(src).to_s
@@ -415,7 +415,7 @@ class Iyi::Command
         end
       end
     end
-    if file.ends_with?(".ri") || file.ends_with?(".iyi")
+    if file.ends_with?(".ri")
       lines.each do |line|
         if reason = spec_todo_reason(line)
           test.todo = reason
@@ -426,13 +426,13 @@ class Iyi::Command
     test
   end
 
-  # ris: every spec block in a `.ri` / `.iyi` file under *root*, walked
+  # ris: every spec block in a `.ri` / `.ri` file under *root*, walked
   # as `ris test` walks (5.9): blocks in src/ count too (bug B2).
   private def spec_blocks_of(root : String) : Array(SpecBlock)
     files = [] of String
     project_walk(root, files) do |name|
       lower = name.downcase
-      lower.ends_with?(".ri") || lower.ends_with?(".iyi")
+      lower.ends_with?(".ri")
     end
     blocks = [] of SpecBlock
     files.sort!.each do |file|

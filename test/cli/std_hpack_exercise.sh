@@ -11,9 +11,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -49,12 +49,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_hpack_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_hpack_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -114,16 +114,16 @@ else
   mkdir -p "$WORK/patched/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/hpack.iyi").read_text()
+src = Path("$REPO/src/std/hpack.ri").read_text()
 old = 'if val < prefix_max'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/hpack.iyi").write_text(src.replace(old, 'if false', 1))
+Path("$WORK/patched/std/hpack.ri").write_text(src.replace(old, 'if false', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_hpack_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_hpack_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on a broken module"
     status=1
   else
@@ -137,16 +137,16 @@ else
   mkdir -p "$WORK/patched2/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/hpack.iyi").read_text()
+src = Path("$REPO/src/std/hpack.ri").read_text()
 old = 'if @pending_min_table_size < @pending_table_size'
 if old not in src:
     raise SystemExit("two-update patch site missing")
-Path("$WORK/patched2/std/hpack.iyi").write_text(src.replace(old, 'if false', 1))
+Path("$WORK/patched2/std/hpack.ri").write_text(src.replace(old, 'if false', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the two-update patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched2${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_hpack_exercise.iyi" >"$WORK/mut2.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched2${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_hpack_exercise.ri" >"$WORK/mut2.out" 2>&1; then
     echo "  the exercise PASSED without RFC 4.2 two size updates"
     status=1
   else
@@ -167,18 +167,18 @@ fix_proof() { # fix_proof <label> <name> <phrase> <line it must not reach> <old>
   if ! "$PY" - "$@" <<PY
 import sys
 from pathlib import Path
-src = Path("$REPO/src/std/hpack.iyi").read_text()
+src = Path("$REPO/src/std/hpack.ri").read_text()
 pairs = sys.argv[1:]
 for k in range(0, len(pairs), 2):
     if pairs[k] not in src:
         raise SystemExit("patch site missing: " + pairs[k])
     src = src.replace(pairs[k], pairs[k + 1])
-Path("$WORK/$name/std/hpack.iyi").write_text(src)
+Path("$WORK/$name/std/hpack.ri").write_text(src)
 PY
   then
     echo "  the patch for $label did not apply"
     status=1
-  elif IYI_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_hpack_exercise.iyi" >"$WORK/$name.out" 2>&1; then
+  elif RIS_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_hpack_exercise.ri" >"$WORK/$name.out" 2>&1; then
     echo "  the exercise PASSED with $label"
     status=1
   elif grep -qF -- "$phrase" "$WORK/$name.out" && { [ -z "$unreached" ] || ! grep -qF -- "$unreached" "$WORK/$name.out"; }; then
@@ -244,8 +244,8 @@ echo
 echo "== what integer encoding and the codec constructors refuse"
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expr="$4"
-  printf 'module main\n\nimport std/hpack::{Integer, Encoder, Decoder, DynamicTable}\n\n%s\n' "$expr" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/hpack::{Integer, Encoder, Decoder, DynamicTable}\n\n%s\n' "$expr" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -264,7 +264,7 @@ refuses() { # refuses <label> <name> <phrase> <expression>
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 refuses "prefix_bits zero" prefix_zero "prefix_bits must be between 1 and 8" 'Integer.encode(10_u64, 0)'
 refuses "prefix_bits nine" prefix_nine "prefix_bits must be between 1 and 8" 'Integer.encode(10_u64, 9)'

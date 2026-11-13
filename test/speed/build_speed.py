@@ -12,7 +12,7 @@ What is measured
 ----------------
 
 * **front end** — `crystal build --no-codegen`. Parse and semantic analysis,
-  no LLVM. This is the number `.iyimod` (Part IV) and prelude-skipping passes
+  no LLVM. This is the number `.rimod` (Part IV) and prelude-skipping passes
   (IV.1d) move, and the one the target is set on.
 * **end to end** — `crystal build`. Reported even though LLVM and the linker
   dominate it, so the claim cannot quietly become a front-end-only claim.
@@ -61,8 +61,8 @@ Limits, stated because they bound the result
   worth more than a NOT MET, and a NOT MET on a machine that has been asleep is
   worth running again.
 * **The corpus is one program.** `hello` is the only pair where "the equivalent
-  Go program" is unambiguous, and iyi has no larger program to offer: its
-  samples explain rules rather than do work. `webapp.iyi` is timed too, but
+  Go program" is unambiguous, and ris has no larger program to offer: its
+  samples explain rules rather than do work. `webapp.ri` is timed too, but
   for iyi alone — its Kemal-shaped router against Go's `net/http` would compare
   three small files with a large precompiled stdlib package, which is not a
   like-for-like build.
@@ -99,7 +99,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # it. At 0.03 s it is not.
 CRYSTAL = ROOT / ".build" / "crystal"
 # iyi: asked for paths, so it has to be the surface that knows them by the
-# names below. `crystal env IYI_PATH` is not an error — the two command
+# names below. `crystal env RIS_PATH` is not an error — the two command
 # surfaces answer in their own vocabularies by design, so it prints an empty
 # line and exits 0, which is the shape that made this bench build nothing at
 # all for as long as it pointed here.
@@ -197,7 +197,7 @@ def compiler_env():
     the wrapper would have run, without paying for the shell on every one.
     """
     result = subprocess.run(
-        [str(WRAPPER), "env", "IYI_PATH", "IYI_LIBRARY_PATH"],
+        [str(WRAPPER), "env", "RIS_PATH", "RIS_LIBRARY_PATH"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
     lines = result.stdout.decode().split() if result.returncode == 0 else []
@@ -206,19 +206,19 @@ def compiler_env():
     # does not know and exits 0, so asking the wrong surface answered "" twice
     # and this returned `{}` — leaving the compiler with no search path at all
     # and every row of the report a dash. The compiler said `can't find file
-    # 'iyi/prelude'` on every run and the bench went on printing a table.
+    # 'ris/prelude'` on every run and the bench went on printing a table.
     #
     # So the answer is checked rather than the status, and a bench that cannot
     # find the path says which one it wanted rather than measuring nothing.
     if not lines or not lines[0]:
         fallback = f"lib:{ROOT / 'src'}"
-        print(f"  note: {WRAPPER.name} did not answer IYI_PATH; using {fallback}",
+        print(f"  note: {WRAPPER.name} did not answer RIS_PATH; using {fallback}",
               file=sys.stderr)
-        return {"IYI_PATH": fallback}
+        return {"RIS_PATH": fallback}
 
-    env = {"IYI_PATH": lines[0]}
+    env = {"RIS_PATH": lines[0]}
     if len(lines) > 1 and lines[1]:
-        env["IYI_LIBRARY_PATH"] = lines[1]
+        env["RIS_LIBRARY_PATH"] = lines[1]
     return env
 
 
@@ -314,7 +314,7 @@ def time_crystal(source, out_dir, codegen, cold, runs = RUNS, linker = None):
             argv.append(f"--link-flags=-fuse-ld={linker}")
         argv.append(str(source))
         env = dict(CRYSTAL_ENV)
-        env["IYI_CACHE_DIR"] = str(cache)
+        env["RIS_CACHE_DIR"] = str(cache)
         return run(argv, env=env)
 
     if not cold:
@@ -346,7 +346,7 @@ def link_seconds(source, out_dir):
     argv = [str(CRYSTAL), "build", "--stats", "-o", str(out_dir / "out_stats"), str(source)]
     env = dict(os.environ)
     env.update(CRYSTAL_ENV)
-    env["IYI_CACHE_DIR"] = str(cache)
+    env["RIS_CACHE_DIR"] = str(cache)
     subprocess.run(argv, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     result = subprocess.run(argv, env=env, capture_output=True)
@@ -384,7 +384,7 @@ def same_program(iyi_source, go_source, out_dir):
     # print them because a second toolchain is absent is how a machine without
     # Go came to report nothing at all about the size that matters.
     if not run([str(CRYSTAL), "build", "-o", str(iyi_binary), str(iyi_source)],
-               env={**CRYSTAL_ENV, "IYI_CACHE_DIR": str(cache)}):
+               env={**CRYSTAL_ENV, "RIS_CACHE_DIR": str(cache)}):
         return False
     if shutil.which("go") is None:
         return None
@@ -452,8 +452,8 @@ def main():
     CRYSTAL_ENV.update(compiler_env())
     version, release = compiler_build()
 
-    hello_iyi = ROOT / "samples" / "iyi" / "hello.iyi"
-    webapp_iyi = ROOT / "samples" / "iyi" / "webapp.iyi"
+    hello_iyi = ROOT / "samples" / "iyi" / "hello.ri"
+    webapp_iyi = ROOT / "samples" / "iyi" / "webapp.ri"
     hello_go = ROOT / "test" / "speed" / "build_speed" / "hello.go"
 
     with tempfile.TemporaryDirectory(prefix="iyi-build-speed-") as tmp:
@@ -510,14 +510,14 @@ def main():
     print()
     print("  program        stage                        cold    warm")
     print("  " + "-" * 56)
-    print(f"  hello.iyi      front end (--no-codegen)   {show(front_hello)}       —")
-    print(f"  hello.iyi      end to end                 {show(e2e_cold)}  {show(e2e_warm)}")
+    print(f"  hello.ri      front end (--no-codegen)   {show(front_hello)}       —")
+    print(f"  hello.ri      end to end                 {show(e2e_cold)}  {show(e2e_warm)}")
     print(f"  hello.go       go build                   {show(go_cold)}  {show(go_warm)}")
     print("  " + "-" * 56)
     if medium_agrees is not False:
         lines = f"{MEDIUM_TYPES} types"
-        print(f"  medium.iyi     front end (--no-codegen)   {show(medium_front)}       —")
-        print(f"  medium.iyi     end to end                 {show(medium_cold)}  {show(medium_warm)}")
+        print(f"  medium.ri     front end (--no-codegen)   {show(medium_front)}       —")
+        print(f"  medium.ri     end to end                 {show(medium_cold)}  {show(medium_warm)}")
         print(f"  medium.go      go build                   {show(medium_go_cold)}  {show(medium_go_warm)}")
         if medium_agrees:
             print(f"                 generated pair, {lines}, verified to print the same")
@@ -526,13 +526,13 @@ def main():
             print("                 were not run against each other and only iyi's")
             print("                 half of this block is a measurement")
     elif medium_agrees is False:
-        print("  medium.iyi/.go the generated pair printed different things —")
+        print("  medium.ri/.go the generated pair printed different things —")
         print("                 not timed, because it is not one program")
     print("  " + "-" * 56)
-    print(f"  webapp.iyi     front end (iyi only)       {show(front_webapp)}       —")
+    print(f"  webapp.ri     front end (iyi only)       {show(front_webapp)}       —")
     if front_only:
         print("  " + "-" * 56)
-        print(f"  hello.iyi      front end, no LLVM linked  {show(front_only)}       —")
+        print(f"  hello.ri      front end, no LLVM linked  {show(front_only)}       —")
     print()
 
     if link_taken and stats_total:
@@ -567,7 +567,7 @@ def main():
     print(f"  slowest of the {GATE_RUNS}:                {slowest:.3f} s")
     # Said out loud, because it is most of the figure above and none of it is
     # analysis: what the front end costs over starting the compiler is the part
-    # `.iyimod` and the prelude move.
+    # `.rimod` and the prelude move.
     print(f"  of which startup:                 {startup:.3f} s, "
           f"leaving {max(fastest - startup, 0.0):.3f} s of front end")
 

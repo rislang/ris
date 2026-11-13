@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Format strings, exercised and driven. Runs the format exercise plain and
 # optimised, checks every section reported, and proves the checks can fail
-# by patching copies of the format library via IYI_PATH.
+# by patching copies of the format library via RIS_PATH.
 #
 #     bash test/cli/format_exercise.sh
 #
@@ -15,9 +15,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs whatever compiler the caller names; `bin/iyi` is a shell
+# The gate runs whatever compiler the caller names; `bin/ris` is a shell
 # wrapper, and on Windows the caller has to point at the built exe itself.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -45,7 +45,7 @@ status=0
 run_case() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/format_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/format_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     sed -n '1,12p' "$WORK/$name.build.log"
@@ -94,12 +94,12 @@ echo "== proving the checks can fail when formatting is broken"
 prove_fails() {
   local label="$1" dir="$2" phrase="$3" sed_script="$4"
   # The library the program imports, not the prelude: `std/format` is a
-  # module now, so the patched copy is `std/` and `IYI_PATH` finds it first.
+  # module now, so the patched copy is `std/` and `RIS_PATH` finds it first.
   mkdir -p "$WORK/$dir/std"
   cp -R "$REPO/src/std/." "$WORK/$dir/std/"
-  sed -e "$sed_script" "$REPO/src/std/format.iyi" > "$WORK/$dir/std/format.iyi"
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build \
-       -o "$WORK/$dir/program" "$REPO/test/cli/format_exercise.iyi" \
+  sed -e "$sed_script" "$REPO/src/std/format.ri" > "$WORK/$dir/std/format.ri"
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
+       -o "$WORK/$dir/program" "$REPO/test/cli/format_exercise.ri" \
        >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched format library did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
@@ -120,7 +120,7 @@ prove_fails() {
     return
   fi
   printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" \
-    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+    "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
 }
 
 # 1. Width padding removed

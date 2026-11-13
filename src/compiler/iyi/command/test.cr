@@ -1,7 +1,7 @@
 # iyi: `iyi test` — the verify loop, with no framework to learn
 # (AI_FIRST.md §2 #4).
 #
-# A test is a plain iyi program named `*_test.iyi`: it asserts by exiting
+# A test is a plain iyi program named `*_test.ri`: it asserts by exiting
 # non-zero, exactly the contract every gate in `test/cli/` already runs on,
 # because this repository's own culture is the framework. No DSL, no
 # registry — a program that prints what failed and exits 1 is a failing
@@ -10,8 +10,8 @@
 # panics with the values and the site. (ris: a module's checks are spec
 # blocks, `spec N.M`; iyi's `test "name" { }` is refused.)
 #
-#     iyi test              # every *_test.iyi under the current directory
-#     iyi test dir file.iyi # these, recursing into directories
+#     iyi test              # every *_test.ri under the current directory
+#     iyi test dir file.ri # these, recursing into directories
 #     iyi test --json       # the run as data, for a harness
 #     iyi test --affected FILE  # only tests whose imports reach FILE
 #
@@ -113,18 +113,18 @@ class Iyi::Command
         candidates = [] of String
         project_walk(path, candidates) do |name|
           lower = name.downcase
-          !test_program_name?(name) && (lower.ends_with?(".ri") || lower.ends_with?(".iyi"))
+          !test_program_name?(name) && (lower.ends_with?(".ri"))
         end
         candidates.each { |file| files << file if spec_module?(file) }
       elsif File.file?(path)
-        # As stored: `X_TEST.IYI` typed on Windows for `x_test.iyi` is it.
+        # As stored: `X_TEST.IYI` typed on Windows for `x_test.ri` is it.
         files << Lexer.stored_name(path)
       else
         abort! "no such file or directory: #{path}", :USAGE_ERROR
       end
     end
     # One run per file, however many ways it was spelled: the list was made
-    # unique as strings, so `iyi test . app\x_test.iyi app/x_test.iyi`
+    # unique as strings, so `iyi test . app\x_test.ri app/x_test.ri`
     # built and ran one test three times and reported "passed":3.
     files.uniq! { |file| Iyi.file_key(File.expand_path(file)) }.sort!
     if miscased = files.find { |file| Lexer.iyi_miscased?(file) }
@@ -132,7 +132,7 @@ class Iyi::Command
     end
 
     if files.empty?
-      abort! "no spec blocks, *_test.ri or *_test.iyi found. A proof is a `spec N.M` block at the end of a module", :USAGE_ERROR
+      abort! "no spec blocks or *_test.ri found. A proof is a `spec N.M` block at the end of a module", :USAGE_ERROR
     end
 
     skipped = 0
@@ -141,7 +141,7 @@ class Iyi::Command
     # and a change to it is the largest change a workspace can make: every
     # `import example.test/user/liba` resolves through the requirement it
     # names, so bumping a version moves the code under every test at once.
-    # `--affected iyi.mod` answered "0 to run, 1 skipped: no test's imports
+    # `--affected ris.mod` answered "0 to run, 1 skipped: no test's imports
     # reach the change", which is an agent bumping a dependency and being
     # told there is nothing to run.
     manifest_changed = affected.select do |changed|
@@ -294,13 +294,13 @@ class Iyi::Command
   # closure can discount anything for it: a file that is not a module
   # (`page.eiy`, a fixture, a `.cr` file), or one of the prelude's, which
   # every program compiles and no import names. `--affected
-  # src/iyi/prelude.iyi` answered "0 to run, 1 skipped".
+  # src/ris/prelude.ri` answered "0 to run, 1 skipped".
   private def outside_every_closure?(path : String) : Bool
-    return true unless File.extname(path).compare(".iyi", case_insensitive: true) == 0 || File.extname(path).compare(".ri", case_insensitive: true) == 0
+    return true unless File.extname(path).compare(".ri", case_insensitive: true) == 0
     key = Iyi.file_key(File.expand_path(path))
     IyiPath.default_paths.each do |entry|
-      prelude = File.expand_path(File.join(entry, "iyi"))
-      next unless File.file?(File.join(prelude, "prelude.iyi"))
+      prelude = File.expand_path(File.join(entry, "ris"))
+      next unless File.file?(File.join(prelude, "prelude.ri"))
       return !Iyi.path_under?(key, Iyi.file_key(prelude)).nil?
     end
     false
@@ -375,7 +375,7 @@ class Iyi::Command
       while path = queue.pop?
         next unless seen.add?(path)
         if Iyi.file_key(path) == key
-          own = File.basename(entry).rchop(".ri").rchop(".iyi")
+          own = File.basename(entry).rchop(".ri")
           other = written.rpartition('/')[2]
           return "the proof of #{own} imports #{other}, which imports " \
                  "#{own}; prove it in #{File.basename(start)}"
@@ -674,7 +674,7 @@ class Iyi::Command
     <<-USAGE
     Usage: #{Command.program_name} test [--json] [-j N] [--timeout SECONDS] [--affected FILE]... [paths]
 
-    Runs every `*_test.ri` and `*_test.iyi` under the given paths (default:
+    Runs every `*_test.ri` under the given paths (default:
     `.`). A test is a plain program: exit 0 is a pass, exit 77 (`todo
     "reason"`) is todo, anything else is a failure that prints its own
     evidence. Only failures make the exit non-zero. `--json` reports the

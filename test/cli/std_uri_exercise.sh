@@ -5,9 +5,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -43,12 +43,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_uri_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_uri_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -99,16 +99,16 @@ else
   mkdir -p "$WORK/patched/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/uri.iyi").read_text()
+src = Path("$REPO/src/std/uri.ri").read_text()
 old = '        uri.host = host\n      end'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/uri.iyi").write_text(src.replace(old, '        # uri.host = host\n      end', 1))
+Path("$WORK/patched/std/uri.ri").write_text(src.replace(old, '        # uri.host = host\n      end', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_uri_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_uri_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on a broken module"
     status=1
   else
@@ -120,16 +120,16 @@ PY
   mkdir -p "$WORK/strict/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/uri.iyi").read_text()
+src = Path("$REPO/src/std/uri.ri").read_text()
 old = '        elsif b == 37_u8 && i + 2 < stop && hex(query[i + 1]) >= 0 && hex(query[i + 2]) >= 0'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/strict/std/uri.iyi").write_text(src.replace(old, '        elsif b == 37_u8 && (i + 2 < stop && hex(query[i + 1]) >= 0 && hex(query[i + 2]) >= 0 || raise "malformed percent escape")', 1))
+Path("$WORK/strict/std/uri.ri").write_text(src.replace(old, '        elsif b == 37_u8 && (i + 2 < stop && hex(query[i + 1]) >= 0 && hex(query[i + 2]) >= 0 || raise "malformed percent escape")', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the strict-form patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/strict${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_uri_exercise.iyi" >"$WORK/strict.out" 2>&1; then
+  elif RIS_PATH="$WORK/strict${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_uri_exercise.ri" >"$WORK/strict.out" 2>&1; then
     echo "  the exercise PASSED with a form reading that panics"
     status=1
   elif grep -q "malformed percent escape" "$WORK/strict.out"; then
@@ -145,16 +145,16 @@ PY
   mkdir -p "$WORK/plus/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/uri.iyi").read_text()
+src = Path("$REPO/src/std/uri.ri").read_text()
 old = '      elsif keep?(b, level) && !(b == 43_u8 && space_to_plus)'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/plus/std/uri.iyi").write_text(src.replace(old, '      elsif keep?(b, level)', 1))
+Path("$WORK/plus/std/uri.ri").write_text(src.replace(old, '      elsif keep?(b, level)', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the plus patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/plus${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_uri_exercise.iyi" >"$WORK/plus.out" 2>&1; then
+  elif RIS_PATH="$WORK/plus${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_uri_exercise.ri" >"$WORK/plus.out" 2>&1; then
     echo "  the exercise PASSED with a '+' kept where a space is '+'"
     status=1
   elif grep -q "is %2B once a space" "$WORK/plus.out"; then
@@ -170,16 +170,16 @@ PY
   mkdir -p "$WORK/escaped/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/uri.iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/uri.ri").read_text(encoding="utf-8")
 old = "    name = host.index('%') ? URI.decode?(host) : host"
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/escaped/std/uri.iyi").write_text(src.replace(old, "    name = host", 1), encoding="utf-8")
+Path("$WORK/escaped/std/uri.ri").write_text(src.replace(old, "    name = host", 1), encoding="utf-8")
 PY
   if [ $? -ne 0 ]; then
     echo "  the escaped-host patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/escaped${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_uri_exercise.iyi" >"$WORK/escaped.out" 2>&1; then
+  elif RIS_PATH="$WORK/escaped${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_uri_exercise.ri" >"$WORK/escaped.out" 2>&1; then
     echo "  the exercise PASSED with a host's escapes left in it"
     status=1
   elif grep -q "ascii host b%C3%BCcher.example" "$WORK/escaped.out"; then

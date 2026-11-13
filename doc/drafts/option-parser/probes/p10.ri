@@ -10,5 +10,6 @@ class Reg
     {% raise "parse(args): use parse(args, found)" %}
   end
 end
+
 r = Reg.new
 r.on("-v") { |v| }

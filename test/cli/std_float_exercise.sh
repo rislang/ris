@@ -25,7 +25,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -43,12 +43,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_float_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_float_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -98,8 +98,8 @@ echo "== what the conversions and the division refuse"
 # truncation the integer does not hold, NaN, and the infinities.
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
-  printf 'module main\n\nimport std/float\nimport std/int\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/float\nimport std/int\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -118,7 +118,7 @@ refuses() { # refuses <label> <name> <phrase> <expression>
     status=1
     return
   fi
-  printf '  %s: exits 1 at "%s"\n' "$label" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits 1 at "%s"\n' "$label" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 refuses "256.0_f32 to_u8" f32_u8_256 "arithmetic overflow" '256.0_f32.to_u8'
 refuses "-1.0_f32 to_u8" f32_u8_neg "arithmetic overflow" '(-1.0_f32).to_u8'
@@ -137,8 +137,8 @@ echo
 echo "== what a program without the import is told"
 told() { # told <label> <name> <phrase> <program>
   local label="$1" name="$2" phrase="$3" program="$4"
-  printf '%s\n' "$program" > "$WORK/$name.iyi"
-  if "$IYI" check types "$WORK/$name.iyi" > "$WORK/$name.check" 2>&1; then
+  printf '%s\n' "$program" > "$WORK/$name.ri"
+  if "$RIS" check types "$WORK/$name.ri" > "$WORK/$name.check" 2>&1; then
     echo "  $label: it type-checked without the import"
     status=1
     return
@@ -161,16 +161,16 @@ if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so the broken-module proof is unmeasured"
 elif ! "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/float.iyi").read_text()
+src = Path("$REPO/src/std/float.ri").read_text()
 old = 'MAX          =  3.40282347e+38_f32'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/float.iyi").write_text(src.replace(old, 'MAX          =  1.0_f32', 1))
+Path("$WORK/patched/std/float.ri").write_text(src.replace(old, 'MAX          =  1.0_f32', 1))
 PY
 then
   echo "  the patch did not apply"
   status=1
-elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_float_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_float_exercise.ri" >"$WORK/mut.out" 2>&1; then
   echo "  the exercise PASSED on a broken module"
   status=1
 else
@@ -188,10 +188,10 @@ breaks() { # breaks <label> <name> <file under src/> <old> <new> <check>
     return
   fi
   mkdir -p "$WORK/$name/$(dirname "$file")"
-  # A prelude file is found beside `prelude.iyi`, so the whole prelude is
+  # A prelude file is found beside `prelude.ri`, so the whole prelude is
   # copied for one of its files to be replaced.
   case "$file" in
-    iyi/*) cp -r "$REPO/src/iyi" "$WORK/$name/" ;;
+    ris/*) cp -r "$REPO/src/ris" "$WORK/$name/" ;;
   esac
   if ! SRC="$REPO/src/$file" DST="$WORK/$name/$file" OLD="$old" NEW="$new" "$PY" - <<'PY'
 import os
@@ -207,7 +207,7 @@ PY
     status=1
     return
   fi
-  IYI_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_float_exercise.iyi" >"$WORK/$name.out" 2>&1
+  RIS_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_float_exercise.ri" >"$WORK/$name.out" 2>&1
   if grep -q "ALL CHECKS PASSED" "$WORK/$name.out"; then
     echo "  $label: the exercise PASSED on a broken module"
     status=1
@@ -219,21 +219,21 @@ PY
     echo "  $label: caught at \"$check\""
   fi
 }
-breaks "trunc through an integer again" trunc std/float.iyi \
+breaks "trunc through an integer again" trunc std/float.ri \
   'whole == 0.0{{ sfx.id }} ? self * 0.0{{ sfx.id }} : whole' 'whole' \
   '(-0.5).trunc is -0.0'
-breaks "remainder of a zero by the sign test" remainder std/float.iyi \
+breaks "remainder of a zero by the sign test" remainder std/float.ri \
   'return self if self == 0.0{{ sfx.id }}' '# return self if self == 0.0{{ sfx.id }}' \
   '(-0.0).remainder(2.0) is -0.0'
-breaks "the prelude's round without its zero" round iyi/float.iyi \
+breaks "the prelude's round without its zero" round ris/float.ri \
   'return self if self == 0.0' '# return self if self == 0.0' \
   '(-0.0).round is -0.0'
-breaks "round(mode) without its zero" round_mode std/number.iyi \
+breaks "round(mode) without its zero" round_mode std/number.ri \
   'return self if self == 0.0' '# return self if self == 0.0' \
   '(-0.0).round(TiesAway) is -0.0'
 # `**` squares its base in double-double and rounds once; with the base
 # squared in plain doubles, `1.0000001 ** Int32::MIN` is 5.444710059167897e-94.
-breaks "** Int32::MIN squared in plain doubles" pow_min iyi/float.iyi \
+breaks "** Int32::MIN squared in plain doubles" pow_min ris/float.ri \
   'base, low = IyiFloatText.product(base, low, base, low) if count > 0' 'base, low = base * base, 0.0 if count > 0' \
   '1.0000001 ** Int32::MIN'
 

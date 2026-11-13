@@ -11,11 +11,32 @@ module Iyi
     # Crystal's own specs, and anyone invoking the compatibility binary, set
     # `CRYSTAL_PATH`, `CRYSTAL_CACHE_DIR`, `CRYSTAL_LIBRARY_PATH`, `CRYSTAL_OPTS`,
     # `CRYSTAL_EXEC_PATH`, `CRYSTAL_DAEMON`, `CRYSTAL_DAEMON_SOCKET`. The
-    # compiler's own names are `IYI_*`. Both have to work, because this is still
-    # Crystal's compiler when the binary is called `crystal`. `IYI_*` wins when
-    # both are set.
+    # compiler's own names are `RIS_*`. Both have to work, because this is still
+    # Crystal's compiler when the binary is called `crystal`. `RIS_*` wins when
+    # both are set. iyi's `IYI_*` names are not read (`notice_iyi_variables`).
     def self.env(name : String) : String?
-      ENV["IYI_#{name}"]? || ENV["CRYSTAL_#{name}"]?
+      ENV["RIS_#{name}"]? || ENV["CRYSTAL_#{name}"]?
+    end
+
+    # ris: the variables a user sets that were `IYI_X` and are `RIS_X` now
+    # (doc/drafts/ri-extension/env-names.md).
+    RENAMED_VARIABLES = %w(PATH CACHE_DIR LIBRARY_PATH OPTS DAEMON
+      DAEMON_SOCKET DAEMON_PRELUDES EXEC_PATH MOD_MIRROR WASI_CC WASMTIME
+      WORKERS LSP_ORIGIN PREFIX AUTO_INLINE DEBUG_CODEGEN DUMP_PREOPT
+      DUMP_TYPE_ID DUMP_TYPE_INFO FORK_CODEGEN FORK_PROBE FORK_SELFTEST
+      FORK_TRACE HEADER_CENSUS INIT_SEED LINK_DRIVER LLVM_ARGS OPEN_TRAVEL
+      PROF SYM TDF VERIFY WARM SPEC_COMPILER_BIN BINARY)
+
+    # ris: one stderr line per `IYI_X` set, non-empty, with no `RIS_X`
+    # beside it: "IYI_X is not read: set RIS_X". A notice, not a refusal:
+    # a stale shell profile must not break every command, and the exit
+    # status is unchanged (DRAFT ri-extension 7.3).
+    def self.notice_iyi_variables(io : IO = STDERR) : Nil
+      RENAMED_VARIABLES.each do |name|
+        next if ENV["IYI_#{name}"]?.presence.nil?
+        next if ENV.has_key?("RIS_#{name}")
+        io.puts "IYI_#{name} is not read: set RIS_#{name}"
+      end
     end
 
     def self.version
@@ -25,7 +46,7 @@ module Iyi
     # iyi: the fork's own version, which is not Crystal's.
     #
     # A file rather than an environment variable because two binaries in this
-    # repository write `.iyimod` artifacts and IV.5 makes the version an
+    # repository write `.rimod` artifacts and IV.5 makes the version an
     # equality test between them. `crystal` built without the variable and
     # `iyi` built with it would disagree about what they are, and the disagreement
     # would show up as an artifact one of them refuses to read.

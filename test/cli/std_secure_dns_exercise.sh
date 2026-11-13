@@ -7,7 +7,7 @@
 # The servers are test/cli/std_secure_dns_server.py, Python's ssl and
 # http.server answering a fixed zone under a test root they make (and
 # HTTP/2 through the `h2` package where it imports). The gate runs
-# test/cli/std_secure_dns_exercise.iyi against them, plain and --release;
+# test/cli/std_secure_dns_exercise.ri against them, plain and --release;
 # asks dig the same questions over the same servers (`+tls`, `+https`,
 # `+https-get`) - HTTPS records (RFC 9460) among them, which dig prints as
 # `SvcbRecord#to_s` does - and holds the two to the same answers, which is what
@@ -20,7 +20,7 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 SERVER_PID=""
@@ -55,7 +55,7 @@ if [ -z "$PY" ] || ! "$PY" -c 'import ssl; from cryptography import x509' >/dev/
 fi
 
 status=0
-export IYI_PATH="$REPO/src"
+export RIS_PATH="$REPO/src"
 SRV="$WORK/servers"
 mkdir -p "$SRV"
 "$PY" "$REPO/test/cli/std_secure_dns_server.py" "$SRV" >"$WORK/server.log" 2>&1 &
@@ -78,7 +78,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_secure_dns_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_secure_dns_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -93,7 +93,7 @@ build_and_run() {
     status=1
     return 1
   fi
-  if grep -q "iyi: panic" "$WORK/$name.out"; then
+  if grep -q "ris: panic" "$WORK/$name.out"; then
     echo "$label: a panic the program outlived"
     status=1
     return 1
@@ -282,8 +282,8 @@ PY
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build -o "$WORK/$dir/program" \
-       "$REPO/test/cli/std_secure_dns_exercise.iyi" >"$WORK/$dir/build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build -o "$WORK/$dir/program" \
+       "$REPO/test/cli/std_secure_dns_exercise.ri" >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the broken copy did not build"
     sed -n '1,8p' "$WORK/$dir/build.log"
     status=1
@@ -299,18 +299,18 @@ PY
     sed -n '$p' "$WORK/$dir/out"
     status=1
   else
-    echo "  $label: caught at \"$(grep -m1 -F -- "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //' | cut -c1-110)\""
+    echo "  $label: caught at \"$(grep -m1 -F -- "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //' | cut -c1-110)\""
   fi
 }
 
-breaks "the server's name not verified" noname "a server whose certificate does not name wrong.test" secure_dns.iyi \
+breaks "the server's name not verified" noname "a server whose certificate does not name wrong.test" secure_dns.ri \
   'tls = TlsClient.over(socket, @name, @config, timeout_ms, @session)' \
   'tls = TlsClient.over(socket, @address, @config, timeout_ms, @session)'
-breaks "the length prefix dropped" noprefix "the encrypted resolver asks over TLS" secure_dns.iyi \
+breaks "the length prefix dropped" noprefix "the encrypted resolver asks over TLS" secure_dns.ri \
   '      framed << (query.bytesize >> 8).to_u8
       framed << (query.bytesize & 255).to_u8
 ' ''
-breaks "the dns parameter sent with its padding" padded "the dns parameter is base64url without padding" secure_dns.iyi \
+breaks "the dns parameter sent with its padding" padded "the dns parameter is base64url without padding" secure_dns.ri \
   '    while size > 0 && text.byte_at(size - 1) == 61_u8
       size = size - 1
     end
@@ -318,56 +318,56 @@ breaks "the dns parameter sent with its padding" padded "the dns parameter is ba
 # Not the slot matching: the server answers a pipelined pair last first,
 # so a client that took answers in arrival order is caught at the first
 # lookup of both families. This takes out the refusal alone.
-breaks "an answer's ID not checked over TLS" noid "an answer with an ID no query has is refused over TLS" secure_dns.iyi \
+breaks "an answer's ID not checked over TLS" noid "an answer with an ID no query has is refused over TLS" secure_dns.ri \
   '        return DnsError.new(DnsError::MALFORMED, "", label, "an answer with the ID #{id}, which no query waiting on the connection has")' \
   '        slot = 0'
-breaks "the plaintext servers asked unasked" silentplain "a dead upstream, no fallback asked for" socket.iyi \
+breaks "the plaintext servers asked unasked" silentplain "a dead upstream, no fallback asked for" socket.ri \
   'if @plaintext_fallback && !@servers.empty?' \
   'if !@servers.empty?'
 # A TC answer's records are not read (std/dns), so taken over a stream it
 # reads as a name without the address: refused, but not as truncated.
-breaks "TC taken over a stream" tcstream "TC over a stream is refused" socket.iyi \
+breaks "TC taken over a stream" tcstream "TC over a stream is refused" socket.ri \
   'return DnsTapeMessage.malformed("the answer is truncated (TC), which an answer over a stream never is").about(name, label) if message.truncated?' ''
-breaks "bytes past the message taken" pastend "a frame longer than its message" socket.iyi \
+breaks "bytes past the message taken" pastend "a frame longer than its message" socket.ri \
   'return DnsTapeMessage.malformed("oversized: #{bytes.bytesize - ends} bytes past the end of the message").about(name, label) if ends < bytes.bytesize' ''
-breaks "a connection per exchange" noreuse "every query over one TLS connection" secure_dns.iyi \
+breaks "a connection per exchange" noreuse "every query over one TLS connection" secure_dns.ri \
   '    if kept = live
       got = over(kept, queries, timeout_ms, true)
     end
 ' '    close
 '
-breaks "an idle connection kept past its timeout" noidle "a connection idle past its timeout is closed" secure_dns.iyi \
+breaks "an idle connection kept past its timeout" noidle "a connection idle past its timeout is closed" secure_dns.ri \
   'if Resolver.now_ms - @used_ms > @idle_ms.to_i64' \
   'if false'
-breaks "a DoH status not read" nostatus "a 500" secure_dns.iyi \
+breaks "a DoH status not read" nostatus "a 500" secure_dns.ri \
   'return DnsError.new(DnsError::REFUSED, "", label, "HTTP #{response.status} #{response.reason}") unless response.status == 200' ''
-breaks "a DoH Content-Type not read" notype "an answer as text/plain" secure_dns.iyi \
+breaks "a DoH Content-Type not read" notype "an answer as text/plain" secure_dns.ri \
   'return DnsError.new(DnsError::MALFORMED, "", label, "an answer of #{said.inspect}, not #{MEDIA}") unless media == MEDIA' ''
-breaks "a DoH query with a random ID" doh_id "a POST's query has the ID 0" secure_dns.iyi \
+breaks "a DoH query with a random ID" doh_id "a POST's query has the ID 0" secure_dns.ri \
   '  def zero_id? : Bool
     true' '  def zero_id? : Bool
     false'
-# std/http.iyi holds a runtime-only mark, so a patched copy of it does
+# std/http.ri holds a runtime-only mark, so a patched copy of it does
 # not build: the DoH client is made without its configuration instead.
-breaks "a DoH client without its TLS configuration" clienttls "over HTTPS from a server without h2" secure_dns.iyi \
+breaks "a DoH client without its TLS configuration" clienttls "over HTTPS from a server without h2" secure_dns.ri \
   '@client = HTTPClient.new(idle: 1, tls: tls)' '@client = HTTPClient.new(idle: 1)'
-breaks "a DoH upstream's address ignored" clientaddress "a URL's host pinned to an address" secure_dns.iyi \
+breaks "a DoH upstream's address ignored" clientaddress "a URL's host pinned to an address" secure_dns.ri \
   '      return at
 ' '      return "127.0.0.2"
 '
-breaks "queries sent unpadded" unpadded "every DoT query is padded" socket.iyi \
+breaks "queries sent unpadded" unpadded "every DoT query is padded" socket.ri \
   'queries << DnsTapeMessage.query(id, name, type, DnsTapeMessage::PADDING_BLOCK)' \
   'queries << DnsTapeMessage.query(id, name, type)'
-breaks "the padding not brought to a block" unblocked "not a multiple of 128" dns.iyi \
+breaks "the padding not brought to a block" unblocked "not a multiple of 128" dns.ri \
   '      size = size + (block - size % block) % block
 ' ''
 # HTTPS records over the upstreams: asked in the clear instead, of a
 # resolver whose upstreams are its only servers; and their data not read
 # as SVCB records when it came over an upstream.
-breaks "HTTPS records asked in the clear despite upstreams" httpsclear "dot: a ServiceMode HTTPS record" socket.iyi \
+breaks "HTTPS records asked in the clear despite upstreams" httpsclear "dot: a ServiceMode HTTPS record" socket.ri \
   'return plaintext(name, type) if @upstreams.empty?' \
   'return plaintext(name, type) if @upstreams.empty? || type == DnsTapeRecord::HTTPS'
-breaks "HTTPS records not parsed when they came over an upstream" httpsparse "dot: a ServiceMode HTTPS record" socket.iyi \
+breaks "HTTPS records not parsed when they came over an upstream" httpsparse "dot: a ServiceMode HTTPS record" socket.ri \
   'record = SvcbRecord.parse(data, owner)' \
   'record = @upstreams.empty? ? SvcbRecord.parse(data, owner) : DnsTapeMessage.malformed("an HTTPS record over an upstream, not read")'
 

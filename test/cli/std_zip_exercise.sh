@@ -30,7 +30,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -48,7 +48,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 # The archives Python writes, each with the `.expect` Python reads from
 # it: a `comment` line (hex), then per entry its name, size, CRC-32,
@@ -345,7 +345,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_zip_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_zip_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -500,8 +500,8 @@ echo "== what the module refuses, by name"
 refuses() { # refuses <label> <name> <phrase> <statements>
   local label="$1" name="$2" phrase="$3" statements="$4"
   printf 'module main\n\nimport std/zip::{ZipReader, ZipWriter, ZipEntry, ZipError, ZipMethod}\nimport std/io::{Memory}\n\n%s\nputs "ANSWERED"\n' \
-    "$statements" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$statements" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -514,7 +514,7 @@ refuses() { # refuses <label> <name> <phrase> <statements>
     status=1
     return
   fi
-  if ! grep -qxF "iyi: panic: $phrase" "$WORK/$name.out"; then
+  if ! grep -qxF "ris: panic: $phrase" "$WORK/$name.out"; then
     echo "  $label: refused, but not with '$phrase' (exit $code)"
     tail -2 "$WORK/$name.out"
     status=1
@@ -581,17 +581,17 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/zip.iyi").read_text()
+src = Path("$REPO/src/std/zip.ri").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing: " + os.environ["OLD"])
-Path("$WORK/patched/std/zip.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/zip.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
   # Build first, then run: a patch that does not compile would also "fail",
   # and that proves nothing about whether the exercise catches the break.
-  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_zip_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_zip_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the $1 copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1
@@ -670,14 +670,14 @@ prove_broken "a decoder's sentence dropped from its refusal" "a stored entry sai
 
 echo
 echo "== doc, format, other platforms and artifacts"
-if "$IYI" doc "$REPO/src/std/zip.iyi" >"$WORK/doc.txt" 2>&1 && grep -q "Zstandard = 93" "$WORK/doc.txt"; then
+if "$RIS" doc "$REPO/src/std/zip.ri" >"$WORK/doc.txt" 2>&1 && grep -q "Zstandard = 93" "$WORK/doc.txt"; then
   echo "  iyi doc reads std/zip ($(grep -c '^ *def ' "$WORK/doc.txt") methods), ZipMethod with bzip2 and Zstandard"
 else
   echo "  iyi doc fails: $(grep -m1 -E 'Error|BUG' "$WORK/doc.txt")"
   status=1
 fi
 if [ -x "$REPO/bin/crystal" ]; then
-  if "$IYI" check format "$REPO/src/std/zip.iyi" "$REPO/test/cli/std_zip_exercise.iyi" >"$WORK/format.log" 2>&1; then
+  if "$RIS" check format "$REPO/src/std/zip.ri" "$REPO/test/cli/std_zip_exercise.ri" >"$WORK/format.log" 2>&1; then
     echo "  the module and its exercise are formatted"
   else
     echo "  not formatted: $(grep -m1 produced "$WORK/format.log")"
@@ -686,7 +686,7 @@ if [ -x "$REPO/bin/crystal" ]; then
 fi
 apart=""
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_zip_exercise.iyi" >"$WORK/cross.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_zip_exercise.ri" >"$WORK/cross.log" 2>&1; then
     echo "  $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross.log")"
     apart="$apart $target"
   fi
@@ -700,8 +700,8 @@ fi
 # With the fixtures, so the other methods' readers are among what the
 # artifacts carry and run.
 mkdir -p "$WORK/r1/mods"
-if (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_zip_exercise.iyi" \
-  && "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_zip_exercise.iyi") >"$WORK/r1/build.log" 2>&1; then
+if (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_zip_exercise.ri" \
+  && "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_zip_exercise.ri") >"$WORK/r1/build.log" 2>&1; then
   "$WORK/r1/from-source" "$WORK/fixtures" >"$WORK/r1/source.out" 2>&1
   "$WORK/r1/from-artifact" "$WORK/fixtures" >"$WORK/r1/artifact.out" 2>&1
   if cmp -s "$WORK/r1/source.out" "$WORK/r1/artifact.out" && grep -q "ALL CHECKS PASSED" "$WORK/r1/artifact.out"; then
