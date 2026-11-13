@@ -194,7 +194,7 @@ module Iyi
 
         with_file "example/spec/example_spec.cr" do |example|
           example.should eq(<<-CODE
-        require "./test_helper"
+        require "./spec_helper"
 
         describe Example do
           # TODO: Write tests

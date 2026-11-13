@@ -458,6 +458,36 @@ ris-tarball: $(O)/ris$(EXE) $(O)/$(IYI_DAEMON_BIN) check_ris_is_release
 	tar -czf "$(O)/$(RIS_PACKAGE).tar.gz" -C "$(O)/ris-package" .
 	@echo "wrote $(O)/$(RIS_PACKAGE).tar.gz"
 
+$(O)/all_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
+	$(call check_llvm_config)
+	@mkdir -p $(O)
+	$(EXPORT_CC) $(EXPORTS) CRYSTAL_SKIP_BUILT=1 ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/all_test.cr
+
+$(O)/std_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
+	$(call check_llvm_config)
+	@mkdir -p $(O)
+	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/std_test.cr
+$(O)/compiler_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
+	$(call check_llvm_config)
+	@mkdir -p $(O)
+	$(EXPORT_CC) CRYSTAL_SKIP_BUILT=1 ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/compiler_test.cr --release
+
+$(O)/primitives_test$(EXE): $(O)/$(CRYSTAL_BIN) $(DEPS) $(SOURCES) $(TEST_SOURCES)
+	@mkdir -p $(O)
+	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/primitives_test.cr
+
+$(O)/cli_test$(EXE): $(O)/$(CRYSTAL_BIN) $(O)/$(IYI_DAEMON_BIN) $(DEPS) $(SOURCES) $(TEST_SOURCES)
+	@mkdir -p $(O)
+	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/cli_test.cr
+
+$(O)/$(CRYSTAL_BIN): $(DEPS) $(SOURCES)
+	$(call check_llvm_config)
+	@mkdir -p $(O)
+	$(EXPORTS) $(EXPORTS_BUILD) ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) -o $(if $(WINDOWS),$(O)/crystal-next.exe,$@) src/compiler/crystal.cr
+	@# NOTE: on MSYS2 it is not possible to overwrite a running program, so the compiler must be first built with
+	@# a different filename and then moved to the final destination.
+	$(if $(WINDOWS),mv $(O)/crystal-next.exe $@)
+
 # iyi: the same compiler under its own name — the commands iyi has, a usage
 # line that names them, and a version that says what it is a fork of. It links
 # what `crystal` links, because it *is* `crystal`; what differs is the surface.

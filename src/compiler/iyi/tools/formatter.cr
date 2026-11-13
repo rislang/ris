@@ -1902,6 +1902,7 @@ module Iyi
       validate = Parser.new(source)
       validate.filename = @filename
       validate.def_nest = @inside_def
+      validate.macro_body_in_def = @inside_def > 0
       validate.parse
 
       formatter, value = subformat(source)
@@ -2447,6 +2448,7 @@ module Iyi
       # operator was the one macro the formatter left alone.
       parser.filename = @filename
       parser.def_nest = @inside_def
+      parser.macro_body_in_def = @inside_def > 0
       nodes = parser.parse(mode)
 
       formatter = Formatter.new(source)

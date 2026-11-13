@@ -263,6 +263,7 @@ end
 describe "Formatter on ris repository sources" do
   assert_iyi_format "a = []"
   assert_iyi_format "a = {}"
+  assert_iyi_format "def consts\n  {% if true %}\n    Foo = 1\n  {% end %}\nend"
   assert_iyi_format "def clock\n  {% if true %}\n    spec = 1\n    spec + 1\n  {% end %}\nend"
   assert_iyi_format "def count\n  {% if true %}\n    seen = 0\n  {% end %}\n  {% if true %}\n    seen += 1\n  {% end %}\nend"
 end

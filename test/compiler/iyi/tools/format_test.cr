@@ -90,7 +90,7 @@ describe Iyi::Command::FormatCommand do
     format_command.status_code.should eq(1)
     stdout.to_s.should be_empty
     stderr.to_s.should contain("format command test")
-    stderr.to_s.should contain("couldn't format 'STDIN.ri', please report a bug including the contents of it: https://github.com/iyilang/iyi/issues")
+    stderr.to_s.should contain("couldn't format 'STDIN.ri', please report a bug including the contents of it: https://github.com/rislang/ris/issues")
   end
 
   it "reads stdin as the language --stdin-filename names" do
@@ -253,7 +253,7 @@ describe Iyi::Command::FormatCommand do
       format_command.run
       format_command.status_code.should eq(1)
       stderr.to_s.should contain("format command test")
-      stderr.to_s.should contain("couldn't format '#{Path[".", "empty.cr"]}', please report a bug including the contents of it: https://github.com/iyilang/iyi/issues")
+      stderr.to_s.should contain("couldn't format '#{Path[".", "empty.cr"]}', please report a bug including the contents of it: https://github.com/rislang/ris/issues")
     end
   end
 
