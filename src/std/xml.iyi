@@ -781,7 +781,7 @@ struct XmlAttributeDecl
 end
 
 @[OnTape]
-struct TapeParser
+pub struct TapeParser
   @input : String
   @len : Int32
   @pos : Int32
@@ -1131,7 +1131,8 @@ struct TapeParser
           bad = TapeParser.first_bad_character(@input, @pos, true)
           if bad[0] >= 0 && (@bad_at < 0 || bad[0] < @bad_at)
             @bad_at = bad[0]
-            @bad_message = bad[1]
+            # Made in this round: kept where the parser outlives it.
+            @bad_message = @tree.keep(bad[1])
           end
         end
       elsif attr_name == "standalone"
@@ -2850,7 +2851,22 @@ pub struct RisXPath
       current.concat(found)
       nil
     end
-    Array(TapeNode).new(current.size) { |k| TapeNode.new(tree, current[k]) }
+    # Descendant steps visit parents before their descendants: their
+    # matches can interleave. Walk the actual tree to order the result,
+    # including trees whose children were appended after other nodes.
+    root = @absolute ? tree.document : context
+    while up = root.parent
+      root = up
+    end
+    result = [] of TapeNode
+    ordered(root, current, result)
+    result
+  end
+
+  private def ordered(node : TapeNode, selected : Array(Int32),
+                      result : Array(TapeNode)) : Nil
+    result << node if selected.includes?(node.index)
+    node.each_child { |child| ordered(child, selected, result) }
   end
 
   # The strings the path selects: an attribute's values, text() nodes'
@@ -2873,6 +2889,14 @@ pub struct RisXPath
       else
         from = held.bytesize
         node.text(held)
+        if last && last.test == RisXPathStep::TEXT
+          following = node.next_sibling
+          while sibling = following
+            break unless sibling.node_type.text? || sibling.node_type.cdata?
+            sibling.text(held)
+            following = sibling.next_sibling
+          end
+        end
         texts << held.finish[from, held.bytesize - from]
       end
       nil
@@ -2908,7 +2932,15 @@ pub struct RisXPath
     tree = node.tree
     matched = [] of Int32
     kept = [] of Int32
-    node.each_child { |child| matched << child.index if match?(step, child); nil }
+    text_run = false
+    node.each_child do |child|
+      texty = child.node_type.text? || child.node_type.cdata?
+      if step.test != RisXPathStep::TEXT || (!text_run && !child.content.empty?)
+        matched << child.index if match?(step, child)
+      end
+      text_run = texty && (text_run || !child.content.empty?)
+      nil
+    end
     index = 0
     while index < step.count
       predicate = @predicates[step.first + index]
@@ -2929,7 +2961,9 @@ pub struct RisXPath
     case step.test
     when RisXPathStep::TEXT then kind.text? || kind.cdata?
     when RisXPathStep::ANY  then kind.element?
-    else                         kind.element? && child.name == step.name
+    else
+      kind.element? && child.name == step.name &&
+        (step.name.includes?(':') || child.namespace_uri.empty?)
     end
   end
 
