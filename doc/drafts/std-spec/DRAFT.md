@@ -162,7 +162,8 @@ lines.
    with module clauses (ok, todo, mismatch, orphan comment, ack, lock).
 3. A one-off script (scratchpad, not committed) per module, alphabetical:
    append the clause comments and blocks to src/std/MODULE.iyi. A clause
-   citing a test gets its checks moved from that test (6.1); a marker reason becomes the
+   citing a test gets its checks moved from that test (6.1); a marker
+   reason becomes the
    block's todo text. Reflow to 80 columns keeps the version.
 4. Gate that none was lost: the script dumps id and version of all 967
    from the old file; `ris spec --json` after must list the same 967
