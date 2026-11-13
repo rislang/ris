@@ -775,7 +775,10 @@ module Iyi
                       "  RisProgram.new(#{program.inspect}, tmp).run(args, stdin, env)\nend\n"
         runner_parser = Parser.new(runner_text)
         runner_parser.filename = @filename
-        kept << runner_parser.parse
+        runner = runner_parser.parse
+        runner_def = runner.is_a?(VisibilityModifier) ? runner.exp : runner
+        runner_def.as(Def).ris_spec_runner = true
+        kept << runner
       end
       rewriter = RisProgramRewriter.new(program)
       main = [] of ASTNode
