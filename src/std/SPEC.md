@@ -160,32 +160,6 @@ This module reads ASN.1 DER values for certificates, keys and signatures.
   decoded text follow SPEC 1.5; borrowed views follow SPEC 3.2.
   <!-- todo: Needs proof -->
 
-## atomic
-
-This module adds weaker memory orderings, bit operations and fences to Atomic.
-
-* atomic.1 The admitted words are Int32, Int64, UInt8 and UInt64; other types
-  are refused by the prelude. (test/cli/std_atomic_exercise.iyi)
-* atomic.2 get_relaxed and set_relaxed are atomic without synchronization;
-  get_acquire and set_release use acquire loads and release stores.
-  (test/cli/std_atomic_exercise.iyi)
-* atomic.3 add, sub and swap with relaxed, acquire, release or acq_rel
-  suffixes use that ordering and return the previous word.
-  (test/cli/std_atomic_exercise.iyi)
-* atomic.4 compare_and_set with an ordering suffix returns the previous word
-  and whether expected was exchanged for desired. Failure is acquire for
-  acquire and acq_rel success, relaxed otherwise.
-  (test/cli/std_atomic_exercise.iyi)
-* atomic.5 and, nand, bitwise_or and xor atomically replace the word with the
-  named bit operation and return its previous value, sequentially
-  consistently. (test/cli/std_atomic_exercise.iyi)
-* atomic.6 max and min return the old word and store the selected extremum,
-  using signed comparison for signed words and unsigned comparison otherwise.
-  (test/cli/std_atomic_exercise.iyi)
-* atomic.7 fence, fence_acquire, fence_release and fence_acq_rel emit the
-  corresponding process-wide LLVM fence. No relaxed fence is supplied.
-  (test/cli/std_atomic_exercise.sh)
-
 ## autocert
 
 Autocert manages on-demand certificate issuance and renewal for task-local

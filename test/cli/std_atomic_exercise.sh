@@ -4,7 +4,7 @@
 #     bash test/cli/std_atomic_exercise.sh
 #
 # Proves:
-#   * test/cli/std_atomic_exercise.iyi passes plain and --release: every verb
+#   * The module blocks pass plain and --release: every verb
 #     on every admitted T, compare_and_set at each ordering, the bitwise
 #     verbs signed and unsigned, four threads counting without loss, and a
 #     release/acquire handoff.
@@ -31,7 +31,7 @@ case "$(uname -s)" in
   *) PSEP=':' ;;
 esac
 
-IYI="${IYI:-$REPO/bin/iyi}"
+IYI="${IYI:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -68,6 +68,17 @@ IR_TARGET=(--cross-compile --target x86_64-unknown-linux-gnu)
 build_and_run() {
   local label="$1" name="$2" source="$3"
   shift 3
+  if ! "$IYI" build --spec "$@" -o "$WORK/$name-spec" \
+       "$REPO/src/std/atomic.iyi" >"$WORK/$name-spec.log" 2>&1; then
+    tail -12 "$WORK/$name-spec.log"
+    status=1
+    return 1
+  fi
+  if ! "$WORK/$name-spec" >"$WORK/$name-spec.out" 2>&1; then
+    tail -12 "$WORK/$name-spec.out"
+    status=1
+    return 1
+  fi
   if ! "$IYI" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -178,7 +189,7 @@ prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build -o "$WORK/$dir/program" "$REPO/test/cli/std_atomic_exercise.iyi" >"$WORK/$dir/build.log" 2>&1; then
+  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build --spec -o "$WORK/$dir/program" "$WORK/$dir/std/atomic.iyi" >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched module did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
     status=1
@@ -187,7 +198,7 @@ prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
   "$WORK/$dir/program" >"$WORK/$dir/out" 2>&1
   local exit_code=$?
   if [ "$exit_code" -eq 0 ]; then
-    echo "  $label: the exercise still passed, so it does not test this"
+    echo "  $label: the module blocks still passed"
     status=1
     return
   fi
