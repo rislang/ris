@@ -7,7 +7,8 @@ No SPEC.md or code change yet.
 ## 1. Problem and decided shape
 
 src/std/SPEC.md (committed in 2739b82d5, 4488 lines) holds 967 clauses
-for 120 std modules, `* json.3 text (test/cli/std_json_exercise.iyi)`. 137 lines say
+for 120 std modules, `* json.3 text (test/cli/std_json_exercise.iyi)`.
+137 lines say
 `<!-- todo: Needs proof -->`, 27 more carry another todo marker. No tool
 reads the file: a clause and its proof drift apart unseen, and an agent
 editing json.iyi never sees json's promises.
