@@ -256,26 +256,6 @@ Base32 and Base32Hex encode and decode binary text using RFC 4648.
   errors append nothing. (src/std/base32.iyi)
   <!-- todo: Header still describes Array(UInt8) input and output. -->
 
-## base64
-
-Base64 encodes binary Strings and reads standard or URL-safe base64 text.
-
-* base64.1 encode writes RFC 4648 section 4's alphabet; urlsafe_encode uses
-  section 5's alphabet. Both pad with = and insert no line breaks.
-  (test/cli/std_base64_exercise.iyi)
-* base64.2 decode accepts both alphabets, even mixed, ignores ASCII space and
-  bytes 9 through 13, and accepts missing padding.
-  (test/cli/std_base64_exercise.iyi)
-* base64.3 Invalid alphabet bytes, padding without a group, excess padding,
-  data after padding and a final single data character panic.
-  (test/cli/std_base64_exercise.iyi)
-* base64.4 Decoding does not require zero unused bits and accepts an
-  incomplete final padding run; this is a permissive decoder rather than
-  canonical RFC 4648 validation.
-  <!-- todo: Needs proof -->
-* base64.5 Results are new binary Strings under SPEC 1.5. Writer overloads
-  append the completed result to the caller's builder. (src/std/base64.iyi)
-
 ## benchmark
 
 Benchmark measures elapsed wall time and reports repeated block throughput.
