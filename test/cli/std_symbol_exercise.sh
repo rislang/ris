@@ -10,9 +10,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -51,12 +51,12 @@ status=0
 # A proof that did not run is counted, so the closing line cannot claim more
 # than was measured.
 unmeasured=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_symbol_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_symbol_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -109,13 +109,13 @@ prove_fails() { # prove_fails <label> <dir> <phrase> <old> <new>
     return 0
   fi
   mkdir -p "$WORK/$dir/std"
-  "$PY" - "$old" "$new" "$WORK/$dir/std/symbol.iyi" <<'PY'
+  "$PY" - "$old" "$new" "$WORK/$dir/std/symbol.ri" <<'PY'
 import sys
 from pathlib import Path
 old = sys.argv[1]
 new = sys.argv[2]
 out_path = Path(sys.argv[3])
-src = Path("src/std/symbol.iyi").read_text()
+src = Path("src/std/symbol.ri").read_text()
 if old not in src:
     raise SystemExit(f"patch site missing: {old!r}")
 out_path.write_text(src.replace(old, new, 1))
@@ -125,7 +125,7 @@ PY
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/$dir/program" "$REPO/test/cli/std_symbol_exercise.iyi" >"$WORK/$dir/build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/$dir/program" "$REPO/test/cli/std_symbol_exercise.ri" >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched module did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
     status=1
@@ -144,7 +144,7 @@ PY
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
 }
 
 prove_fails "inverted <=> ordering" inv_order \

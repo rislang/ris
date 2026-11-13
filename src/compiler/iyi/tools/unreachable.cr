@@ -36,9 +36,9 @@ module Iyi
       unreachable.excludes.concat config.excludes.map { |path| ::Path[path].expand.to_posix.to_s }
       # iyi: and every package the manifest builds from - its checkout in
       # the cache, or the directory a `replace` names. A package is no more
-      # this program's than std is: `iyi vet app.iyi` in an app calling one
+      # this program's than std is: `iyi vet app.ri` in an app calling one
       # of greet's two exports printed `..\cache\mod\example.com\me\greet@v0.1.0\
-      # greet.iyi:7:1  Greet#unused_here` and exited 1, a finding only the
+      # greet.ri:7:1  Greet#unused_here` and exited 1, a finding only the
       # package's author can act on. Rows starting `@` are short names.
       results.each do |compiled|
         compiled.program.iyi_mod_table.each do |(prefix, dir)|
@@ -88,10 +88,10 @@ module Iyi
         location = a_def.location.not_nil!
         relative = ::Path[location.filename.as(String)].relative_to(current_dir)
         # iyi: the formats a program reads name a file the way a repository
-        # does, `app/helpers.iyi`, on every system: codecov keys coverage by
+        # does, `app/helpers.ri`, on every system: codecov keys coverage by
         # the repository's path, and json and csv are compared and joined
-        # across machines. On Windows all three said `app\helpers.iyi`
-        # (`app\\helpers.iyi` in JSON), which no such path matches. The text
+        # across machines. On Windows all three said `app\helpers.ri`
+        # (`app\\helpers.ri` in JSON), which no such path matches. The text
         # a person reads keeps the platform's spelling, as a diagnostic does.
         filename = format.in?("json", "csv", "codecov") ? relative.to_posix.to_s : relative.to_s
         location = Location.new(filename, location.line_number, location.column_number)
@@ -313,7 +313,7 @@ module Iyi
     end
 
     # The def's filename normalised first: a library found through a search
-    # path spelled `$ORIGIN/../src` is read as `.build/../src/std/math.iyi`,
+    # path spelled `$ORIGIN/../src` is read as `.build/../src/std/math.ri`,
     # and the excluded `src` is not one of that spelling's parents, so `iyi
     # vet` on a program that imports std reported every unused std method
     # beside the program's own.

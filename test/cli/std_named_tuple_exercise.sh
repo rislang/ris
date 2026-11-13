@@ -10,9 +10,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -48,12 +48,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_named_tuple_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_named_tuple_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -104,16 +104,16 @@ else
   mkdir -p "$WORK/patched/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/named_tuple.iyi").read_text()
+src = Path("$REPO/src/std/named_tuple.ri").read_text()
 old = '    other.merge(self)'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/named_tuple.iyi").write_text(src.replace(old, '    self.merge(other)', 1))
+Path("$WORK/patched/std/named_tuple.ri").write_text(src.replace(old, '    self.merge(other)', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_named_tuple_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_named_tuple_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on a broken module"
     status=1
   else
@@ -129,7 +129,7 @@ else
   mkdir -p "$WORK/patched_toa/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/named_tuple.iyi").read_text()
+src = Path("$REPO/src/std/named_tuple.ri").read_text()
 old = """    {% if T.keys.size == 0 %}
       [] of {Symbol, NoReturn}
     {% else %}
@@ -146,12 +146,12 @@ new = """    arr = [] of {Symbol, typeof(values[0])}
       arr << {:{{k.id}}, self[:{{k.id}}]}
     {% end %}
     arr"""
-Path("$WORK/patched_toa/std/named_tuple.iyi").write_text(src.replace(old, new, 1))
+Path("$WORK/patched_toa/std/named_tuple.ri").write_text(src.replace(old, new, 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the to_a patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched_toa${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_named_tuple_exercise.iyi" >"$WORK/mut_toa.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched_toa${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_named_tuple_exercise.ri" >"$WORK/mut_toa.out" 2>&1; then
     echo "  the exercise PASSED on a broken to_a"
     status=1
   else
@@ -163,12 +163,12 @@ echo
 echo "== compile-time and runtime refusals for missing keys"
 refuses_compile() {
   local label="$1" name="$2" phrase="$3" code="$4"
-  cat <<IYI >"$WORK/$name.iyi"
+  cat <<RIS >"$WORK/$name.ri"
 module bench/refusal_$name
 import std/named_tuple
 $code
-IYI
-  if "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" >"$WORK/$name.build.log" 2>&1; then
+RIS
+  if "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" >"$WORK/$name.build.log" 2>&1; then
     echo "  $label: COMPILED invalid code"
     status=1
   elif grep -Fq "$phrase" "$WORK/$name.build.log"; then
@@ -182,12 +182,12 @@ IYI
 
 refuses_runtime() {
   local label="$1" name="$2" phrase="$3" code="$4"
-  cat <<IYI >"$WORK/$name.iyi"
+  cat <<RIS >"$WORK/$name.ri"
 module bench/refusal_$name
 import std/named_tuple
 $code
-IYI
-  if "$IYI" run "$WORK/$name.iyi" >"$WORK/$name.out" 2>&1; then
+RIS
+  if "$RIS" run "$WORK/$name.ri" >"$WORK/$name.out" 2>&1; then
     echo "  $label: ACCEPTED invalid key"
     status=1
   elif grep -Fq "$phrase" "$WORK/$name.out"; then

@@ -50,7 +50,7 @@ import tempfile
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-IYI = os.environ.get("IYI", str(ROOT / "bin" / "iyi"))
+RIS = os.environ.get("RIS", str(ROOT / "bin" / "iyi"))
 SMALL, LARGE = 500, 4000
 LIMIT = 12.0
 RUNS = 3
@@ -70,7 +70,7 @@ def best(path: pathlib.Path) -> float:
     times = []
     for _ in range(RUNS):
         started = time.perf_counter()
-        result = subprocess.run([IYI, "build", "--no-codegen", str(path)],
+        result = subprocess.run([RIS, "build", "--no-codegen", str(path)],
                                 capture_output=True, text=True)
         times.append(time.perf_counter() - started)
         if result.returncode != 0:
@@ -94,7 +94,7 @@ def wide_union(count: int, generic: bool) -> str:
 
 def peak_kb(path: pathlib.Path) -> int:
     """The child's own peak resident set, from its own rusage."""
-    child = subprocess.Popen([IYI, "build", "--no-codegen", str(path)],
+    child = subprocess.Popen([RIS, "build", "--no-codegen", str(path)],
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     output = child.stdout.read()
     _, status, usage = os.wait4(child.pid, 0)
@@ -110,7 +110,7 @@ def main() -> None:
     work = pathlib.Path(tempfile.mkdtemp())
     measured = {}
     for count in (SMALL, LARGE):
-        path = work / f"defs_{count}.iyi"
+        path = work / f"defs_{count}.ri"
         path.write_text(program(count))
         measured[count] = best(path)
     ratio = measured[LARGE] / measured[SMALL]
@@ -125,7 +125,7 @@ def main() -> None:
 
     peaks = {}
     for count in (LINES_SMALL, LINES_LARGE):
-        path = work / f"reassigned_{count}.iyi"
+        path = work / f"reassigned_{count}.ri"
         path.write_text(reassignments(count))
         peaks[count] = peak_kb(path)
     grown = peaks[LINES_LARGE] / peaks[LINES_SMALL]
@@ -142,7 +142,7 @@ def main() -> None:
     for generic, what in ((False, "classes"), (True, "instances of one generic")):
         unions = {}
         for count in (CLASSES_SMALL, CLASSES_LARGE):
-            path = work / f"union_{'generic_' if generic else ''}{count}.iyi"
+            path = work / f"union_{'generic_' if generic else ''}{count}.ri"
             path.write_text(wide_union(count, generic))
             unions[count] = best(path)
         widened = unions[CLASSES_LARGE] / unions[CLASSES_SMALL]

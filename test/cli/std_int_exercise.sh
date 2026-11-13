@@ -6,9 +6,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -44,12 +44,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_int_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_int_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -99,8 +99,8 @@ echo "== what the conversions from a double refuse"
 # truncation the integer does not hold, NaN, and the infinities.
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
-  printf 'module main\n\nimport std/int\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/int\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -119,7 +119,7 @@ refuses() { # refuses <label> <name> <phrase> <expression>
     status=1
     return
   fi
-  printf '  %s: exits 1 at "%s"\n' "$label" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits 1 at "%s"\n' "$label" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 refuses "128.0 to_i8" f64_i8_128 "arithmetic overflow" '128.0.to_i8'
 refuses "-129.0 to_i8" f64_i8_neg "arithmetic overflow" '(-129.0).to_i8'
@@ -140,16 +140,16 @@ else
   mkdir -p "$WORK/patched/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/int.iyi").read_text()
+src = Path("$REPO/src/std/int.ri").read_text()
 old = '::Std::Int::RisBits.popcount({{ raw.id }})'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/int.iyi").write_text(src.replace(old, '0', 1))
+Path("$WORK/patched/std/int.ri").write_text(src.replace(old, '0', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_int_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_int_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on a broken module"
     status=1
   else
@@ -161,17 +161,17 @@ PY
   mkdir -p "$WORK/checked/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/int.iyi").read_text()
+src = Path("$REPO/src/std/int.ri").read_text()
 old = "@[::Primitive(:unchecked_convert)]\n          def unsafe_{{ conv[0].id }} : {{ to_name.id }}"
 if old not in src:
     raise SystemExit("patch site missing")
 new = "@[::Primitive(:convert)]\n          @[Raises]\n          def unsafe_{{ conv[0].id }} : {{ to_name.id }}"
-Path("$WORK/checked/std/int.iyi").write_text(src.replace(old, new, 1))
+Path("$WORK/checked/std/int.ri").write_text(src.replace(old, new, 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the unchecked patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/checked${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_int_exercise.iyi" >"$WORK/checked.out" 2>&1; then
+  elif RIS_PATH="$WORK/checked${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_int_exercise.ri" >"$WORK/checked.out" 2>&1; then
     echo "  the exercise PASSED with the unchecked conversions checked"
     status=1
   elif ! grep -q "arithmetic overflow" "$WORK/checked.out"; then
@@ -179,7 +179,7 @@ PY
     sed -n '1,3p' "$WORK/checked.out"
     status=1
   else
-    printf '  unchecked conversions checked: exits at "%s"\n' "$(grep -m1 'arithmetic overflow' "$WORK/checked.out" | sed 's/^iyi: panic: //')"
+    printf '  unchecked conversions checked: exits at "%s"\n' "$(grep -m1 'arithmetic overflow' "$WORK/checked.out" | sed 's/^ris: panic: //')"
   fi
 
   # A negative shift count answering zero again, as it did: the signed
@@ -187,16 +187,16 @@ PY
   mkdir -p "$WORK/shift/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/int.iyi").read_text()
+src = Path("$REPO/src/std/int.ri").read_text()
 old = "count < 0 ? self << (0 - count) : (count >= {{ bits }} ? (self < 0"
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/shift/std/int.iyi").write_text(src.replace(old, "count < 0 ? 0_{{ suffix.id }} : (count >= {{ bits }} ? (self < 0", 1))
+Path("$WORK/shift/std/int.ri").write_text(src.replace(old, "count < 0 ? 0_{{ suffix.id }} : (count >= {{ bits }} ? (self < 0", 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the shift patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/shift${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_int_exercise.iyi" >"$WORK/shift.out" 2>&1; then
+  elif RIS_PATH="$WORK/shift${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_int_exercise.ri" >"$WORK/shift.out" 2>&1; then
     echo "  the exercise PASSED with a negative shift count answering zero"
     status=1
   elif ! grep -q "a negative shift count shifts the other way" "$WORK/shift.out"; then
@@ -204,7 +204,7 @@ PY
     sed -n '1,3p' "$WORK/shift.out"
     status=1
   else
-    printf '  a negative shift count answering zero: exits at "%s"\n' "$(grep -m1 'a negative shift count' "$WORK/shift.out" | sed 's/^iyi: panic: //')"
+    printf '  a negative shift count answering zero: exits at "%s"\n' "$(grep -m1 'a negative shift count' "$WORK/shift.out" | sed 's/^ris: panic: //')"
   fi
 
   # `UInt8` and `UInt64` left without `/(Float64)` again, as the prelude
@@ -213,16 +213,16 @@ PY
   mkdir -p "$WORK/udiv/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/int.iyi").read_text()
+src = Path("$REPO/src/std/int.ri").read_text()
 old = '{% unless from[0] == "Int32" || from[0] == "Int64" %}\n        def /(other : Float64) : Float64'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/udiv/std/int.iyi").write_text(src.replace(old, '{% unless prelude.includes?(from[0]) %}\n        def /(other : Float64) : Float64', 1))
+Path("$WORK/udiv/std/int.ri").write_text(src.replace(old, '{% unless prelude.includes?(from[0]) %}\n        def /(other : Float64) : Float64', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the division patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/udiv${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_int_exercise.iyi" >"$WORK/udiv.out" 2>&1; then
+  elif RIS_PATH="$WORK/udiv${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_int_exercise.ri" >"$WORK/udiv.out" 2>&1; then
     echo "  the exercise PASSED with UInt8 and UInt64 dividing by a single"
     status=1
   elif ! grep -q "UInt8 and UInt64 divided by a double are doubles" "$WORK/udiv.out"; then
@@ -230,7 +230,7 @@ PY
     sed -n '1,3p' "$WORK/udiv.out"
     status=1
   else
-    printf '  UInt8 and UInt64 without /(Float64): exits at "%s"\n' "$(grep -m1 'divided by a double' "$WORK/udiv.out" | sed 's/^iyi: panic: //')"
+    printf '  UInt8 and UInt64 without /(Float64): exits at "%s"\n' "$(grep -m1 'divided by a double' "$WORK/udiv.out" | sed 's/^ris: panic: //')"
   fi
 fi
 

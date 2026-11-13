@@ -4,7 +4,7 @@ require "../../../src/compiler/iyi/formatter"
 # iyi: the formatter on iyi's own syntax.
 #
 # The file name is what the difference hangs on. `Iyi.format` hands it to
-# the parser, which reads `!` as propagation in a `.iyi` file and as a method
+# the parser, which reads `!` as propagation in a `.ri` file and as a method
 # suffix in a `.cr` one, so a spec that left the name off would be formatting
 # a different language from the one it is about.
 #
@@ -15,9 +15,9 @@ require "../../../src/compiler/iyi/formatter"
 # decides the layout.
 private def assert_iyi_format(input, output = input, file = __FILE__, line = __LINE__)
   it "formats #{input.inspect}", file, line do
-    result = Iyi.format("#{input}\n", filename: "spec.iyi")
+    result = Iyi.format("#{input}\n", filename: "spec.ri")
     result.should eq("#{output}\n"), file: file, line: line
-    Iyi.format(result, filename: "spec.iyi").should eq(result), file: file, line: line
+    Iyi.format(result, filename: "spec.ri").should eq(result), file: file, line: line
   end
 end
 
@@ -123,7 +123,7 @@ describe "Formatter on iyi" do
       "def[ f(x : Int32) : Int32\n  x\nend" => "expecting a name after 'def', not '['",
       "def` f : Int32\n  1\nend"            => "parentheses are mandatory",
     }.each do |source, message|
-      expect_raises(Iyi::SyntaxException, message) { Iyi.format(source, filename: "spec.iyi") }
+      expect_raises(Iyi::SyntaxException, message) { Iyi.format(source, filename: "spec.ri") }
     end
   end
 
@@ -207,7 +207,7 @@ describe "Formatter on iyi" do
   # which is what "canonical" means. Lines inside a multi-line string are
   # left as they are, because they are the string.
   it "is a fixed point over the samples, and canonical from ruined indentation" do
-    Dir.glob(File.expand_path("../../../samples/iyi/*.iyi", __DIR__)).sort.each do |path|
+    Dir.glob(File.expand_path("../../../samples/ris/*.ri", __DIR__)).sort.each do |path|
       source = File.read(path)
       once = Iyi.format(source, filename: path)
       once.should eq(source), "#{path} is not formatted as the tree keeps it"
@@ -258,4 +258,16 @@ describe "Formatter on iyi" do
   assert_iyi_format "macro m\n\n{{ 1 }}\nend"
   assert_iyi_format "macro m\n\n{% if true %}puts \"yes\"{% end %}\nend"
   assert_iyi_format "macro twice(x)\n\n# c\n  {{x}}\nend"
+end
+
+describe "Formatter on ris repository sources" do
+  assert_iyi_format "a = []"
+  assert_iyi_format "a = {}"
+  assert_iyi_format "def clock\n  {% if true %}\n    spec = 1\n    spec + 1\n  {% end %}\nend"
+  assert_iyi_format "def count\n  {% if true %}\n    seen = 0\n  {% end %}\n  {% if true %}\n    seen += 1\n  {% end %}\nend"
+end
+
+describe "Formatter token boundaries in ris" do
+  assert_iyi_format "merged.merge!({1 => 30})"
+  assert_iyi_format "puts((/==|!=|<=/).source)"
 end

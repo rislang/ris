@@ -100,7 +100,7 @@ class Iyi::Command
     # And only a tag that holds this package: in a repository that holds
     # other things the tags are theirs too. A new package inside another
     # repository took its `v0.16.2` for its last release, checked the whole
-    # repository out to compare, and answered "v0.16.2 has no iyi.mod".
+    # repository out to compare, and answered "v0.16.2 has no ris.mod".
     ordered = released.sort_by { |version| {version.prerelease.identifiers.empty? ? 1 : 0, version} }.reverse!
     base = ordered.find { |version| mod_release_git(dir, "cat-file", "-e", manifest_at.call("v#{version}")) }
 
@@ -305,11 +305,11 @@ class Iyi::Command
     modules = mod_release_modules(package)
     return {} of String => Hash(String, SurfaceLine) if modules.empty?
 
-    entry = File.join(package, "__iyi_release_entry.iyi")
+    entry = File.join(package, "__iyi_release_entry.ri")
     File.write(entry, modules.map { |name| "import #{name}\n" }.join)
     emit = File.join(scratch, "__iyi_release_mods")
     compiler = Compiler.new
-    compiler.prelude = "iyi/prelude"
+    compiler.prelude = "ris/prelude"
     compiler.no_codegen = true
     compiler.emit_iyimod = emit
     compiler.stdout = IO::Memory.new
@@ -322,7 +322,7 @@ class Iyi::Command
     end
 
     surfaces = {} of String => Hash(String, SurfaceLine)
-    Dir.glob(Iyi.glob_root(emit).join("**", "*.iyimod")) do |candidate|
+    Dir.glob(Iyi.glob_root(emit).join("**", "*.rimod")) do |candidate|
       artifact = IyiMod.read(candidate) rescue next
       next unless modules.includes?(artifact.module_name)
       surfaces[artifact.module_name] = iyi_surface_lines(artifact)
@@ -340,7 +340,7 @@ class Iyi::Command
   # release is v2.0.0" for a release that changed nothing.
   private def mod_release_modules(package : String) : Array(String)
     Mod::Reach.sources(package).compact_map do |file|
-      name = ::Path[file].relative_to(package).to_posix.to_s.rchop(".iyi")
+      name = ::Path[file].relative_to(package).to_posix.to_s.rchop(".ri")
       lines = File.read(file).lchop('\uFEFF').lines
       next unless lines.any? { |line| line.partition('#')[0].split == ["module", name] }
       next unless lines.any? { |line| line.starts_with?("pub") && (after = line[3]?) && after.whitespace? }

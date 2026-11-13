@@ -21,9 +21,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -62,12 +62,12 @@ status=0
 # A proof that did not run is counted, so the closing line cannot claim more
 # than was measured.
 unmeasured=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2" source="$3"
   shift 3
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -120,7 +120,7 @@ PY
 }
 
 echo "== the std/set exercise"
-build_and_run "std_set" exercise-set "$REPO/test/cli/std_set_exercise.iyi"
+build_and_run "std_set" exercise-set "$REPO/test/cli/std_set_exercise.ri"
 
 echo
 echo "== every set section reported"
@@ -154,7 +154,7 @@ fi
 
 echo
 echo "== the same program with optimisation on (--release)"
-build_and_run "std_set release" exercise-set-release "$REPO/test/cli/std_set_exercise.iyi" --release >/dev/null
+build_and_run "std_set release" exercise-set-release "$REPO/test/cli/std_set_exercise.ri" --release >/dev/null
 if [ -z "$PY" ]; then
   echo "  skipped: no working python3, so the optimised build was not compared with the oracle"
   unmeasured=$((unmeasured + 1))
@@ -167,11 +167,11 @@ fi
 
 echo
 echo "== proving the checks can fail when the algebra is broken"
-# The broken copy is of std/set.iyi, or of the prelude's set.iyi when a fifth
+# The broken copy is of std/set.ri, or of the prelude's set.ri when a fifth
 # argument names it: `-` is the prelude's, and the prelude is read from the
 # first entry of the search path that has one, so the whole of it is copied.
-prove_fails() { # prove_fails <label> <name> <phrase> <python replace-expression> [std/set.iyi|iyi/set.iyi]
-  local label="$1" name="$2" phrase="$3" replace="$4" file="${5:-std/set.iyi}"
+prove_fails() { # prove_fails <label> <name> <phrase> <python replace-expression> [std/set.ri|ris/set.ri]
+  local label="$1" name="$2" phrase="$3" replace="$4" file="${5:-std/set.ri}"
   if [ -z "$PY" ]; then
     echo "  $label: skipped, no working python3 to make the broken copy with"
     unmeasured=$((unmeasured + 1))
@@ -179,7 +179,7 @@ prove_fails() { # prove_fails <label> <name> <phrase> <python replace-expression
   fi
   mkdir -p "$WORK/$name/std"
   case "$file" in
-    iyi/*) cp -R "$REPO/src/iyi" "$WORK/$name/iyi" ;;
+    ris/*) cp -R "$REPO/src/ris" "$WORK/$name/ris" ;;
   esac
   "$PY" -c "
 import sys
@@ -189,7 +189,7 @@ if broken == src:
     sys.exit('patch did not apply')
 open('$WORK/$name/$file', 'w').write(broken)
 " || { echo "  $label: the patch did not apply"; status=1; return; }
-  if ! IYI_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/$name/program" "$REPO/test/cli/std_set_exercise.iyi" >"$WORK/$name/build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/$name/program" "$REPO/test/cli/std_set_exercise.ri" >"$WORK/$name/build.log" 2>&1; then
     echo "  $label: the patched library did not build"
     sed -n '1,10p' "$WORK/$name/build.log"
     status=1
@@ -212,7 +212,7 @@ open('$WORK/$name/$file', 'w').write(broken)
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(grep -m1 -F -- "$phrase" "$WORK/$name/out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(grep -m1 -F -- "$phrase" "$WORK/$name/out" | sed 's/^ris: panic: //')"
 }
 
 prove_fails "intersection that unions" broken_and "assertion failed for intersection" \
@@ -230,7 +230,7 @@ prove_fails "equality restricted to its own element type again" broken_eq_type "
 prove_fails "equality across element types one way only" broken_eq_one_way "assertion failed for == of a narrower element type" \
   "src.replace('{{ T <= U || U <= T }}', '{{ T <= U }}')"
 prove_fails "the prelude's - dropping members of a type the other set cannot hold" broken_minus "assertion failed for - of either element type" \
-  "src.replace('unless value.is_a?(U) && other.includes?(value)', 'unless !value.is_a?(U) || other.includes?(value)')" iyi/set.iyi
+  "src.replace('unless value.is_a?(U) && other.includes?(value)', 'unless !value.is_a?(U) || other.includes?(value)')" ris/set.ri
 prove_fails "hash that sums the members unmixed" broken_hash "assertion failed for {1, 4} and {2, 3} hash apart" \
   "src.replace('sum = sum &+ (x ^ x.unsafe_shr(31_u64))', 'sum = sum &+ v.hash.to_i64.unsafe_to_u64')"
 

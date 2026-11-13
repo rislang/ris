@@ -100,7 +100,7 @@ class Iyi::Location
 
   # iyi: whether two filenames name one file. On POSIX that is string
   # equality. On Windows a file has spellings: an imported module's is
-  # `File.join(root, "calc/lexer.iyi")`, which keeps the module path's `/`
+  # `File.join(root, "calc/lexer.ri")`, which keeps the module path's `/`
   # inside a backslashed root, while the same file opened in an editor is
   # all backslashes — and the filesystem ignores case besides. Comparing
   # the strings, every location in an importer's compile was unordered

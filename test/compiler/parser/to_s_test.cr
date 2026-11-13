@@ -349,7 +349,7 @@ describe "ASTNode#to_s" do
   expect_to_s Assign.new("x".var, Expressions.new([1.int32, 2.int32] of ASTNode)), "x = (1\n2)"
 
   # iyi: a node where an expression is read prints in a form that parses
-  # there. A travelling body crosses an `.iyimod` as this text after the
+  # there. A travelling body crosses an `.rimod` as this text after the
   # normalizer expanded it, and `.or_panic` as an argument printed as
   # `twice(__temp = parse(text)` with its `if` on the next line.
   expect_to_s Call.new("foo", Expressions.new([Assign.new("x".var, 1.int32), "x".var] of ASTNode), 2.int32), "foo((x = 1\nx), 2)"

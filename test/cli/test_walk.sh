@@ -10,8 +10,8 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IYI="${IYI:-$REPO/bin/ris}"
-case "$IYI" in /*) ;; *) IYI="$PWD/$IYI" ;; esac
+RIS="${RIS:-$REPO/bin/ris}"
+case "$RIS" in /*) ;; *) RIS="$PWD/$RIS" ;; esac
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 cd "$WORK" || exit 1
@@ -28,7 +28,7 @@ printf '__iyi_exit(0)\n' > root_test.ri
 for args in "" "."; do
   echo "== ris test $args"
   # shellcheck disable=SC2086
-  "$IYI" test --json $args > run.json 2>&1 ||
+  "$RIS" test --json $args > run.json 2>&1 ||
     { echo "FAIL: ris test $args failed:"; cat run.json; exit 1; }
   python3 -c '
 import json,sys

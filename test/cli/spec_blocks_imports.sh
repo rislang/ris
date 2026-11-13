@@ -6,14 +6,14 @@
 #
 # An import in the spec section is for the blocks only: a block that
 # imports std/dir there builds and runs under `ris test`; the plain build,
-# the module's .iyimod and `ris doc` name nothing from it. A test-only
+# the module's .rimod and `ris doc` name nothing from it. A test-only
 # import of a module that imports this one is refused. `ris test
 # --affected F` counts a spec-section import as the module's dependency.
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IYI="${IYI:-$REPO/bin/ris}"
-case "$IYI" in /*) ;; *) IYI="$PWD/$IYI" ;; esac
+RIS="${RIS:-$REPO/bin/ris}"
+case "$RIS" in /*) ;; *) RIS="$PWD/$RIS" ;; esac
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -67,15 +67,15 @@ puts answer
 EOF
 
 echo "== ris test runs a block whose import is test-only"
-"$IYI" test proj/m.ri > t.out 2>&1
+"$RIS" test proj/m.ri > t.out 2>&1
 rc=$?
 [ "$rc" = 0 ] || { fail "ris test proj/m.ri exit $rc, want 0"; cat t.out; }
 has t.out "2 blocks: 2 ok"
 
 echo "== the plain build names nothing from std/dir"
-"$IYI" build proj/m.ri -o plain > b.out 2>&1 \
+"$RIS" build proj/m.ri -o plain > b.out 2>&1 \
   || { fail "build proj/m.ri:"; cat b.out; }
-"$IYI" build --spec proj/m.ri -o specbin > s.out 2>&1 \
+"$RIS" build --spec proj/m.ri -o specbin > s.out 2>&1 \
   || { fail "build --spec proj/m.ri:"; cat s.out; }
 # The probe sees Dir where it is: else the check below proves nothing.
 nm specbin 2>/dev/null | grep -q 'Dir' \
@@ -85,26 +85,26 @@ if [ -f plain ] && nm plain 2>/dev/null | grep -q 'Dir'; then
   nm plain | grep 'Dir' | head -5
 fi
 
-echo "== .iyimod and ris doc name nothing from the section"
-"$IYI" build --emit-iyimod mods -o main main.ri > e.out 2>&1 \
-  || { fail "build --emit-iyimod:"; cat e.out; }
+echo "== .rimod and ris doc name nothing from the section"
+"$RIS" build --emit-rimod mods -o main main.ri > e.out 2>&1 \
+  || { fail "build --emit-rimod:"; cat e.out; }
 if grep -rlE 'std/dir|helper' mods > /dev/null 2>&1; then
-  fail "an .iyimod names a test-only import:"
+  fail "an .rimod names a test-only import:"
   grep -rlE 'std/dir|helper' mods
 fi
-"$IYI" doc proj/m.ri > d.out 2>&1 || { fail "ris doc:"; cat d.out; }
+"$RIS" doc proj/m.ri > d.out 2>&1 || { fail "ris doc:"; cat d.out; }
 if grep -qE 'std/dir|Dir|forty' d.out; then
   fail "ris doc names a test-only import:"; cat d.out
 fi
 
 echo "== ris test --affected counts a spec-section import"
-"$IYI" test --affected proj/helper.ri proj/m.ri > a.out 2>&1
+"$RIS" test --affected proj/helper.ri proj/m.ri > a.out 2>&1
 rc=$?
 [ "$rc" = 0 ] || { fail "--affected helper exit $rc"; cat a.out; }
 has a.out "2 blocks: 2 ok"
 # An unrelated module skips it: else the line above proves nothing.
 printf 'module proj/u\n\npub def u : Int32\n  1\nend\n' > proj/u.ri
-"$IYI" test --affected proj/u.ri proj/m.ri > u.out 2>&1
+"$RIS" test --affected proj/u.ri proj/m.ri > u.out 2>&1
 has u.out "no test's imports reach the change"
 
 echo "== a test-only import of a module importing this one is refused"
@@ -134,7 +134,7 @@ pub def page : String
   "<h1>" + title + "</h1>"
 end
 EOF
-"$IYI" test proj/cyc/post.ri > c.out 2>&1
+"$RIS" test proj/cyc/post.ri > c.out 2>&1
 rc=$?
 [ "$rc" != 0 ] || fail "a cyclic test-only import passed"
 has c.out "the proof of post imports site, which imports post; prove it in site.ri"

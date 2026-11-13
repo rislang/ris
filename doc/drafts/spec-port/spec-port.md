@@ -41,14 +41,14 @@ the like) stay program-level checks; they are not moved.
 
 D6. The test/ris -> test/cli/ris move is dropped. test/ris stays.
 
-D7. The 111 test/cli std_*.iyi asserts move only when their module
+D7. The 111 test/cli std_*.ri asserts move only when their module
 changes for another reason; they are outside this port.
 
 ## 1. Problem
 
 - 43 programs in test/ris/ test one std module each (`base64.ri` tests
   `std/base64`) from outside: they see only exports, and an agent
-  editing src/std/base64.iyi does not see them.
+  editing src/std/base64.ri does not see them.
 - A test names its clause only in a `# spec:` comment; 87 files carry
   one, most of test/ris/ carries none, so `ris spec` cannot say what
   the bulk of the suite proves.
@@ -65,7 +65,7 @@ or Python gate.
 
 | dir           | files | form | tests              | verdict          |
 |---------------|------:|------|--------------------|------------------|
-| cli           |   549 | SH   | 152 .sh, 165 .iyi  | stays (gates)    |
+| cli           |   549 | SH   | 152 .sh, 165 .ri  | stays (gates)    |
 | compiler      |   252 | CR   | 225 files, 7037 it | cannot move      |
 | compiler-cli  |    20 | CR   | 10 files, 50 it    | cannot move      |
 | debug         |    11 | CR   | 10 programs, sh    | cannot move      |
@@ -82,7 +82,7 @@ or Python gate.
 325 "fail" are refused/ 316, forbid/ 2, warned/ 1, fix/ 6; its 39
 "other" are the 20 .sh/.py helpers (2.2 d), expected-output files and
 ris.mod files; each gets a ledger verdict only if it moves. test/cli's
-549 files are 152 .sh, 165 .iyi and 232 fixtures and expected outputs.
+549 files are 152 .sh, 165 .ri and 232 fixtures and expected outputs.
 Only `std-test` runs a Crystal suite in CI; compiler_test and
 primitives_test run by make only.
 
@@ -91,7 +91,7 @@ primitives_test run by make only.
 test/compiler, compiler-cli, debug, llvm-ir, primitives, std, manual
 and support test Crystal code: the compiler (src/compiler/) and the
 Crystal library it is built with (101 `src/*.cr` plus src/<dir>/; not
-src/std/, which is 121 `.iyi` files). A spec block is ris code inside
+src/std/, which is 121 `.ri` files). A spec block is ris code inside
 a ris module; it cannot call `Crystal::Parser` or `String#to_f` of
 the host library. Samples: test/std/base64_test.cr tests Crystal's
 `Base64` with `should eq`, not `std/base64`; test/llvm-ir/*.cr are
@@ -147,10 +147,10 @@ compiler rule), the clause gets a SPEC.md todo marker (D3, 3.2).
 
 ### 2.4 test/cli and test/speed: stay
 
-test/cli: 152 shell gates, 165 .iyi programs and fixtures; 111 are
+test/cli: 152 shell gates, 165 .ri programs and fixtures; 111 are
 `std_*_exercise.sh`, of which 110 call an outside oracle (openssl,
 python3, curl, nc) or build `--release`. The oracle part stays a
-gate; the in-process asserts in each `std_*.iyi` may move into the
+gate; the in-process asserts in each `std_*.ri` may move into the
 module later (section 7). 142 scripts skip by platform (exit 77, uname).
 test/speed: timings, never moved (AGENTS.md).
 
@@ -282,7 +282,7 @@ A port gate for the port only; it is removed when phase 5 ends.
   naming that block's clause and line. A block with no Bool line is
   already refused (spec-blocks D13).
 - check.sh: check_parallel.py loses one case per ported program and
-  gains one `ris check test src/std/<m>.iyi` case per module with
+  gains one `ris check test src/std/<m>.ri` case per module with
   blocks (D4). The gate checks: old cases - ported + modules = new.
 - Gate script: test/cli/spec_port_counts.sh; wired into ris.yml
   alongside the other CLI gates (heap shard), while the port lasts.
@@ -300,7 +300,7 @@ that cannot pass its gate is reverted whole; its ledger lines stay
    ledger target is renamed or a K new is below K old.
 1. Standards clause, then pilot: 8.1 lands first (3.1). Then five
    small modules (base32, base64, uuid, path, semantic_version): each
-   test/ris/<m>.ri becomes blocks at the end of src/std/<m>.iyi; tape
+   test/ris/<m>.ri becomes blocks at the end of src/std/<m>.ri; tape
    lines name 1.1/1.5, format lines 8.1. path's stdout check stays as
    a driver (section 4). Gate: counts and flips for the five; check.sh
    case arithmetic; check.sh's wall time is printed before and after
@@ -339,7 +339,7 @@ None; D6 and D7 settle the last two scope choices.
 - Moving test/ris/ to test/cli/ris/: under D1 test/ keeps several
   dirs anyway, so the move solves none of section 1's problems and
   touches ris.yml, ris-macos.yml, the Makefile and docs.
-- The asserts in test/cli's 111 `std_*.iyi`: they already run, and
+- The asserts in test/cli's 111 `std_*.ri`: they already run, and
   section 1 does not list them. They move when their module is
   touched for another reason.
 - Tagging the ~221 program-level tests that stay with `# spec:`: a
@@ -365,7 +365,7 @@ comprehension, codebase details); no blockers left open.
 - M: check.sh case arithmetic made consistent (4, phase 1).
 - M: only std-test runs a Crystal suite in CI (2.1); ris-macos.yml
   named.
-- M (zoom-out): the test/ris move and the std_*.iyi split dropped
+- M (zoom-out): the test/ris move and the std_*.ri split dropped
   (7); the ledger lists only files that move; the gate is temporary.
 - Minors fixed: 8.3 to 8.1, totals that add up, "rest" batch listed,
   timing threshold, rollback rule, one-import criterion, D5 in 3.
@@ -424,9 +424,9 @@ Minors left:
 - Negative probes: deleting one base32 Bool line gives
   `FAIL: spec port counts: test/ris/base32.ri: 12 new < 13 old`; renaming
   its destination gives `missing target`. Both probes restore the source.
-- Flip copies keep the `std/<module>.iyi` suffix beneath .work. The
+- Flip copies keep the `std/<module>.ri` suffix beneath .work. The
   compiler derives a module root from its header/path agreement; a flat
-  copy of path.iyi was not an equivalent build and failed before testing.
+  copy of path.ri was not an equivalent build and failed before testing.
 - Final pilot totals (including retained shell checks): base32 13 -> 13,
   base64 7 -> 7, path 19 -> 19, semantic_version 18 -> 18, uuid 14 -> 14.
   Format assertions name 8.1; retained copies are checked under 1.5.

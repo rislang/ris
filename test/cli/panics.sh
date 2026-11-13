@@ -13,7 +13,7 @@
 # walk's `iyi_defer` proc reads it live too), and cannot leave its `defer`.
 set -euo pipefail
 
-IYI=${IYI:-./bin/iyi}
+RIS=${RIS:-./bin/ris}
 work=$(mktemp -d /tmp/iyi-panics.XXXXXX)
 trap 'rm -rf "$work"' EXIT
 
@@ -21,8 +21,8 @@ fail() { echo "panics FAIL: $1"; exit 1; }
 step() { echo "panics ok   $1"; }
 
 # The site a panic prints is the file the compiler was handed, in the
-# platform's own form: `/tmp/iyi-panics.XXXX/task.iyi` here and
-# `C:\Users\…\Temp\iyi-panics.XXXX\task.iyi` on Windows, where this
+# platform's own form: `/tmp/iyi-panics.XXXX/task.ri` here and
+# `C:\Users\…\Temp\iyi-panics.XXXX\task.ri` on Windows, where this
 # directory is under `%TEMP%` and every separator is a backslash. So the
 # assertion normalises the output's separators and names the work
 # directory by its own unique tail rather than by the path bash spells it
@@ -34,14 +34,14 @@ site() { # file:line -> fails unless the output named it
 
 run() { # file -> captures stdout+stderr, tolerates nonzero exit
   set +e
-  out=$("$IYI" run "$1" 2>&1)
+  out=$("$RIS" run "$1" 2>&1)
   code=$?
   set -e
 }
 
 # ── 1. a task panics: its defer runs, the boundary re-raises, the
 #      sibling is cancelled, the process exits 1 in order ──────────────
-cat > "$work/task.iyi" <<'EOF'
+cat > "$work/task.ri" <<'EOF'
 module task
 
 pub def work : Int32
@@ -66,18 +66,18 @@ end
 
 puts run_all
 EOF
-run "$work/task.iyi"
+run "$work/task.ri"
 [ "$code" = 1 ] || fail "task panic exit was $code, wanted 1"
-echo "$out" | grep -q "^iyi: panic: boom" || fail "task panic missing message: $out"
-site "task.iyi:5" "task panic missing site"
+echo "$out" | grep -q "^ris: panic: boom" || fail "task panic missing message: $out"
+site "task.ri:5" "task panic missing site"
 echo "$out" | grep -q "task defer ran" || fail "task defer did not run: $out"
-echo "$out" | grep -q "iyi: panic: a task panicked: boom" || fail "boundary re-raise missing: $out"
+echo "$out" | grep -q "ris: panic: a task panicked: boom" || fail "boundary re-raise missing: $out"
 echo "$out" | grep -q "outer defer ran" || fail "outer defer did not run: $out"
 step "a panicking task dies at its boundary, defers ran, sibling cancelled"
 
 # ── 2. a panic with no boundary above it: main's defers run LIFO, then
 #      exit 1 — cleanup that yesterday's panic skipped entirely ────────
-cat > "$work/main.iyi" <<'EOF'
+cat > "$work/main.ri" <<'EOF'
 module main
 
 pub def go : Int32
@@ -89,10 +89,10 @@ end
 
 puts go
 EOF
-run "$work/main.iyi"
+run "$work/main.ri"
 [ "$code" = 1 ] || fail "main panic exit was $code, wanted 1"
-echo "$out" | grep -q "^iyi: panic: on main" || fail "main panic missing message: $out"
-site "main.iyi:6" "main panic missing site"
+echo "$out" | grep -q "^ris: panic: on main" || fail "main panic missing message: $out"
+site "main.ri:6" "main panic missing site"
 echo "$out" | grep -q "second defer" || fail "second defer did not run: $out"
 echo "$out" | grep -q "first defer" || fail "first defer did not run: $out"
 step "an unbounded panic exits 1 after its defers, innermost first"
@@ -101,7 +101,7 @@ step "an unbounded panic exits 1 after its defers, innermost first"
 #      the cleanups the calling task deferred, innermost first, and
 #      nothing after it runs - not the rest of the function, not the line
 #      that called it. No panic is printed, because nothing went wrong ──
-cat > "$work/leave.iyi" <<'EOF'
+cat > "$work/leave.ri" <<'EOF'
 module leave
 
 pub def go : Int32
@@ -116,14 +116,14 @@ end
 puts go
 puts "caller went on"
 EOF
-run "$work/leave.iyi"
+run "$work/leave.ri"
 [ "$code" = 3 ] || fail "exit 3 exited $code: $out"
 [ "$out" = "$(printf 'before exit\nsecond defer\nfirst defer')" ] || fail "exit did not end after its task's defers, innermost first: $out"
 step "exit ends with its status after the task's defers, innermost first"
 
 # ── 2c. `exit` from a task ends the process: that task's cleanups run,
 #      the group's sibling does not get to print, and a plain `exit` is 0 ─
-cat > "$work/leave_task.iyi" <<'EOF'
+cat > "$work/leave_task.ri" <<'EOF'
 module leave_task
 
 pub def run_all : Int32
@@ -145,7 +145,7 @@ end
 
 puts run_all
 EOF
-run "$work/leave_task.iyi"
+run "$work/leave_task.ri"
 [ "$code" = 0 ] || fail "a bare exit from a task exited $code: $out"
 [ "$out" = "task defer" ] || fail "exit from a task: wanted only its own defer, got: $out"
 step "exit from a task ends the process, after that task's defers"
@@ -154,7 +154,7 @@ step "exit from a task ends the process, after that task's defers"
 #      program ends: at its last line, at `exit` and at a panic's exit
 #      (`__iyi_flush_std`). Nothing wrote it, and standard output came
 #      back empty all three ways while standard error's line arrived ────
-cat > "$work/unsynced.iyi" <<'EOF'
+cat > "$work/unsynced.ri" <<'EOF'
 module unsynced
 
 STDOUT.sync = false
@@ -168,7 +168,7 @@ when "raise"
   raise "boom"
 end
 EOF
-"$IYI" build -o "$work/unsynced" "$work/unsynced.iyi" > "$work/unsynced.build" 2>&1 ||
+"$RIS" build -o "$work/unsynced" "$work/unsynced.ri" > "$work/unsynced.build" 2>&1 ||
   fail "the unsynced program did not build: $(cat "$work/unsynced.build")"
 for ending in end exit raise; do
   set +e
@@ -180,7 +180,7 @@ step "a stream set to sync = false is written at the end, at exit and at a panic
 
 # ── 3. `.or_panic` is a real panic now: through the task boundary,
 #      carrying the error's message ────────────────────────────────────
-cat > "$work/orp.iyi" <<'EOF'
+cat > "$work/orp.ri" <<'EOF'
 module orp
 
 pub struct Boom
@@ -202,9 +202,9 @@ group do |g|
 end
 puts "unreached"
 EOF
-run "$work/orp.iyi"
+run "$work/orp.ri"
 [ "$code" = 1 ] || fail "or_panic exit was $code, wanted 1"
-echo "$out" | grep -q "iyi: panic: or_panic fired" || fail "or_panic message missing:
+echo "$out" | grep -q "ris: panic: or_panic fired" || fail "or_panic message missing:
 $out"
 echo "$out" | grep -q "a task panicked: or_panic fired" || fail "or_panic boundary missing:
 $out"
@@ -214,7 +214,7 @@ step ".or_panic is a real panic, caught at the boundary"
 # ── 4. reading a panicked task's value *catches* the panic: it arrives
 #      as the `Panicked` error value, the group continues, the program
 #      exits 0 — III.1.4's "catchable at task boundaries", literal ────
-cat > "$work/value.iyi" <<'EOF'
+cat > "$work/value.ri" <<'EOF'
 module tval
 
 pub def blows : Int32
@@ -231,7 +231,7 @@ end
 puts caught
 puts "life goes on"
 EOF
-run "$work/value.iyi"
+run "$work/value.ri"
 [ "$code" = 0 ] || fail "value exit was $code, wanted 0 (the panic was read):
 $out"
 echo "$out" | grep -q "caught: task blew" || fail "the panic did not arrive as a value:
@@ -244,7 +244,7 @@ step "a read panic is a value; the process outlives the bug"
 
 # ── 5. the panic crosses two boundaries: inner group's owner is a task
 #      of the outer group, and each boundary adds its own report ───────
-cat > "$work/nested.iyi" <<'EOF'
+cat > "$work/nested.ri" <<'EOF'
 module nested
 
 pub def inner_work : Int32
@@ -264,7 +264,7 @@ group do |g|
 end
 puts "unreached"
 EOF
-run "$work/nested.iyi"
+run "$work/nested.ri"
 [ "$code" = 1 ] || fail "nested exit was $code, wanted 1"
 echo "$out" | grep -q "a task panicked: a task panicked: deep" || fail "nested chain missing:
 $out"
@@ -272,7 +272,7 @@ step "a panic climbs group by group, each boundary named"
 
 # ── 6. the no-panic path is untouched: defers run LIFO on a normal
 #      exit and on a return, and the program answers what it always did ─
-cat > "$work/normal.iyi" <<'EOF'
+cat > "$work/normal.ri" <<'EOF'
 module normal
 
 pub def with_cleanup(early : Bool) : Int32
@@ -286,7 +286,7 @@ end
 puts with_cleanup(false)
 puts with_cleanup(true)
 EOF
-run "$work/normal.iyi"
+run "$work/normal.ri"
 [ "$code" = 0 ] || fail "normal exit was $code, wanted 0"
 expected=$(printf 'body ran\nclose b\nclose a\n2\nclose b\nclose a\n1')
 [ "$out" = "$expected" ] || fail "normal-path output was:
@@ -300,7 +300,7 @@ step "the no-panic path is unchanged: LIFO on fall-through and on return"
 #      100), and a later `x = x.size` stopped compiling. The panic walk's
 #      copy, the proc the compiler marks `iyi_defer`, still reads the
 #      variable as it is when the task dies ──────────────────────────────
-cat > "$work/live.iyi" <<'EOF'
+cat > "$work/live.ri" <<'EOF'
 module live
 
 struct Counter
@@ -356,7 +356,7 @@ group do |g|
 end
 EOF
 set +e
-out=$("$IYI" run "$work/live.iyi" 2>"$work/live.err")
+out=$("$RIS" run "$work/live.ri" 2>"$work/live.err")
 code=$?
 set -e
 [ "$code" = 0 ] || fail "live-struct exit was $code, wanted 0: $out $(cat "$work/live.err")"
@@ -367,7 +367,7 @@ step "a defer sees the live struct and keeps its narrowing; the panic walk reads
 
 # ── 6c. a cleanup cannot leave its `defer`: inside the proc a `return`
 #      ended the cleanup and nothing said so (`defer return 7` answered 1)
-cat > "$work/leave_defer.iyi" <<'EOF'
+cat > "$work/leave_defer.ri" <<'EOF'
 module leave_defer
 
 def answer : Int32
@@ -377,7 +377,7 @@ end
 
 puts answer
 EOF
-run "$work/leave_defer.iyi"
+run "$work/leave_defer.ri"
 [ "$code" != 0 ] || fail "\`defer return 7\` compiled and answered: $out"
 echo "$out" | grep -q "\`return\` can't leave a \`defer\`" || fail "\`defer return\` was refused, but not as leaving the defer: $out"
 step "a return out of a defer is refused as leaving it"
@@ -386,7 +386,7 @@ step "a return out of a defer is refused as leaving it"
 #      stands in, as the same line written there does. Lowered with the
 #      expansion alone, it had nothing after it and ran at once, before
 #      the code it guards ("if cleanup" before "if body") ─────────────────
-cat > "$work/macro_defer.iyi" <<'EOF'
+cat > "$work/macro_defer.ri" <<'EOF'
 module macro_defer
 
 macro cleanup(msg)
@@ -431,7 +431,7 @@ group do |g|
 end
 EOF
 set +e
-out=$("$IYI" run "$work/macro_defer.iyi" 2>"$work/macro_defer.err")
+out=$("$RIS" run "$work/macro_defer.ri" 2>"$work/macro_defer.err")
 code=$?
 set -e
 [ "$code" = 0 ] || fail "macro-defer exit was $code, wanted 0: $out $(cat "$work/macro_defer.err")"
@@ -446,7 +446,7 @@ step "a defer a macro writes covers the rest of the scope it stands in"
 #      ("expected argument #1 to 'String#+' to be String, not Int32"), and
 #      the scope's own read between the two assignments lost its
 #      narrowing to the cleanup's ──────────────────────────────────────────
-cat > "$work/narrow_defer.iyi" <<'EOF'
+cat > "$work/narrow_defer.ri" <<'EOF'
 module narrow_defer
 
 def later(flag : Bool, fail : Bool) : Int32
@@ -472,7 +472,7 @@ group do |g|
 end
 EOF
 set +e
-out=$("$IYI" run "$work/narrow_defer.iyi" 2>"$work/narrow_defer.err")
+out=$("$RIS" run "$work/narrow_defer.ri" 2>"$work/narrow_defer.err")
 code=$?
 set -e
 [ "$code" = 0 ] || fail "narrowing-defer exit was $code, wanted 0: $out $(cat "$work/narrow_defer.err")"
@@ -484,7 +484,7 @@ step "is_a? narrows inside a cleanup, on the ordinary exit and on the panic walk
 # ── 6f. a `yield` in a cleanup is refused as itself: the panic walk runs
 #      the cleanup as a proc, and the refusal was about a proc literal
 #      nobody wrote ──────────────────────────────────────────────────────
-cat > "$work/yield_defer.iyi" <<'EOF'
+cat > "$work/yield_defer.ri" <<'EOF'
 module yield_defer
 
 def around(&) : Nil
@@ -494,7 +494,7 @@ end
 
 around { puts "cleanup" }
 EOF
-run "$work/yield_defer.iyi"
+run "$work/yield_defer.ri"
 [ "$code" != 0 ] || fail "\`defer yield\` compiled: $out"
 echo "$out" | grep -q "\`yield\` can't run in a \`defer\`" || fail "\`defer yield\` was refused, but not as a defer: $out"
 step "a yield in a defer is refused as a defer"
@@ -502,7 +502,7 @@ step "a yield in a defer is refused as a defer"
 # ── 7. an arithmetic overflow is a panic like any other: the trap
 #      routes through the registry, so a task's overflow dies at the
 #      task boundary instead of taking the process bare-handed ────────
-cat > "$work/overflow.iyi" <<'EOF'
+cat > "$work/overflow.ri" <<'EOF'
 module overflow
 
 pub def blows : Int32
@@ -515,9 +515,9 @@ group do |g|
 end
 puts "unreached"
 EOF
-run "$work/overflow.iyi"
+run "$work/overflow.ri"
 [ "$code" = 1 ] || fail "overflow exit was $code, wanted 1"
-echo "$out" | grep -q "iyi: panic: arithmetic overflow" || fail "overflow message missing:
+echo "$out" | grep -q "ris: panic: arithmetic overflow" || fail "overflow message missing:
 $out"
 echo "$out" | grep -q "a task panicked: arithmetic overflow" || fail "overflow boundary missing:
 $out"
@@ -531,7 +531,7 @@ step "an overflow in a task dies at the task boundary"
 #      "invalid memory access". The panic goes to the descriptor now,
 #      and to descriptor 2, which is also why `prog > file` no longer
 #      finds a panic inside the file. ─────────────────────────────────
-cat > "$work/pipe.iyi" <<'EOF'
+cat > "$work/pipe.ri" <<'EOF'
 module pipe
 
 n = 0
@@ -540,7 +540,7 @@ while n < 200000
   n = n + 1
 end
 EOF
-"$IYI" build "$work/pipe.iyi" -o "$work/pipe" >/dev/null 2>&1 || fail "pipe fixture did not build"
+"$RIS" build "$work/pipe.ri" -o "$work/pipe" >/dev/null 2>&1 || fail "pipe fixture did not build"
 # SIGPIPE ignored is how every parent that matters runs a child: the
 # editor's `▶ run`, a Crystal or Go parent, systemd. With the signal
 # doing the killing there is no panic to print at all (exit 141).
@@ -553,7 +553,7 @@ set -e
 said=$(head -c 400 "$work/pipe.err")
 [ "$status" != 139 ] || fail "a closed reader still segfaults the writer"
 [ "$status" = 1 ] || fail "closed-reader exit was $status, wanted 1"
-echo "$said" | grep -q "iyi: panic: write failed" || fail "closed-reader panic said:
+echo "$said" | grep -q "ris: panic: write failed" || fail "closed-reader panic said:
 $said"
 set +e
 data=$(trap "" PIPE; "$work/pipe" 2>/dev/null | head -c 20)
@@ -567,10 +567,10 @@ step "a panic with nowhere to print says so once, on the error stream"
 # ── 9. the site is printed when it is the program's, and not when it is
 #      the library's: a `raise` in the program names its line; a panic
 #      the prelude raises names none, and neither does one `std` raises.
-#      `each_slice(0)` printed `at .../src/std/enumerable.iyi:442`, which
+#      `each_slice(0)` printed `at .../src/std/enumerable.ri:442`, which
 #      is the library's line and not where the bug is - the prelude's
 #      rule, applied to the other half of the library ──────────────────
-cat > "$work/site.iyi" <<'EOF'
+cat > "$work/site.ri" <<'EOF'
 module site
 
 import std/enumerable::{Enumerable}
@@ -579,13 +579,13 @@ import std/list::{List}
 three = List(Int32).new([1, 2, 3])
 puts three.each_slice(0).size
 EOF
-run "$work/site.iyi"
+run "$work/site.ri"
 [ "$code" = 1 ] || fail "std panic exit was $code, wanted 1"
-echo "$out" | grep -q "^iyi: panic: slice size must be positive" || fail "std panic missing message: $out"
-# Either separator: a Windows build names the file `...\src\std/x.iyi`,
+echo "$out" | grep -q "^ris: panic: slice size must be positive" || fail "std panic missing message: $out"
+# Either separator: a Windows build names the file `...\src\std/x.ri`,
 # and a pattern with `/` alone let a library line through there unseen.
 echo "$out" | grep -qE 'at.*src[/\\]std' && fail "a std panic named a library line: $out"
-cat > "$work/index.iyi" <<'EOF'
+cat > "$work/index.ri" <<'EOF'
 module index
 
 pub def go : Int32
@@ -597,9 +597,9 @@ end
 
 puts go
 EOF
-run "$work/index.iyi"
+run "$work/index.ri"
 [ "$code" = 1 ] || fail "prelude panic exit was $code, wanted 1"
-echo "$out" | grep -q "^iyi: panic: index 5 out of range for 3 elements" || fail "prelude panic missing message: $out"
+echo "$out" | grep -q "^ris: panic: index 5 out of range for 3 elements" || fail "prelude panic missing message: $out"
 echo "$out" | grep -qE 'at.*src[/\\]iyi' && fail "a prelude panic named a library line: $out"
 # On Darwin, the panic raises a backtrace through libSystem's backtrace and
 # points at the program rather than the library. Windows captures its
@@ -607,7 +607,7 @@ echo "$out" | grep -qE 'at.*src[/\\]iyi' && fail "a prelude panic named a librar
 # resolver, which is the next step's subject; on the Linux raw-syscall
 # runtime capture is not built yet.
 if [ "$(uname -s)" = Darwin ]; then
-  echo "$out" | grep -qE "index\.iyi|Index@Index::go|Index::go" \
+  echo "$out" | grep -qE "index\.ri|Index@Index::go|Index::go" \
     || fail "library panic named no frame in the program: $out"
 fi
 step "a panic the library raises names no library line, prelude or std"
@@ -617,7 +617,7 @@ step "a panic the library raises names no library line, prelude or std"
 #      named the `{% if` line - where the expansion was put, not where the
 #      `raise` is. `__LINE__` is what `raise` reads, and it reads the
 #      line the text was written on now. ───────────────────────────────
-cat > "$work/inplace.iyi" <<'EOF'
+cat > "$work/inplace.ri" <<'EOF'
 module inplace
 
 def boom(x : Int32) : Nil
@@ -631,9 +631,9 @@ end
 
 boom(1)
 EOF
-run "$work/inplace.iyi"
+run "$work/inplace.ri"
 [ "$code" = 1 ] || fail "the in-place panic exit was $code, wanted 1"
-echo "$out" | grep -q "at .*inplace\.iyi:8$" || fail "a raise inside {% if %} did not name its own line, 8: $out"
+echo "$out" | grep -q "at .*inplace\.ri:8$" || fail "a raise inside {% if %} did not name its own line, 8: $out"
 step "a raise inside a macro written in place names its own line"
 
 # ── 9a. a program that imports `std/debug` gets its callers named: the
@@ -645,7 +645,7 @@ step "a raise inside a macro written in place names its own line"
 #      it was never gated. ────────
 case "$(uname -s)-$(uname -m)" in
   Darwin-* | MINGW* | MSYS* | CYGWIN* | Windows_NT-* | Linux-x86_64 | Linux-aarch64)
-    cat > "$work/named.iyi" <<'EOF'
+    cat > "$work/named.ri" <<'EOF'
 module named
 
 import std/debug
@@ -657,20 +657,20 @@ end
 
 puts inner(0)
 EOF
-    run "$work/named.iyi"
+    run "$work/named.ri"
     [ "$code" = 1 ] || fail "the named-frames panic exited $code, wanted 1"
-    echo "$out" | grep -q "^iyi: panic: named frames" || fail "no panic line: $out"
+    echo "$out" | grep -q "^ris: panic: named frames" || fail "no panic line: $out"
     # Each platform names a frame in the form its debug information holds:
     # darwin's Mach-O symbol is the mangled `*Named@Named::inner<Int32>:Int32`
     # and Windows' PDB procedure record is the display name `inner`, so the
     # pattern asks for the function's own name followed by the file and a
     # line and does not pin either spelling.
-    echo "$out" | grep -qE "inner[^ ]* at .*named\.iyi:[0-9]" ||
+    echo "$out" | grep -qE "inner[^ ]* at .*named\.ri:[0-9]" ||
       fail "no frame named the program's own function and line:
 $out"
     # More than one frame of the same recursion, so the walk is a walk and
     # not one resolved address repeated by accident.
-    frames="$(echo "$out" | grep -cE "inner[^ ]* at .*named\.iyi:")"
+    frames="$(echo "$out" | grep -cE "inner[^ ]* at .*named\.ri:")"
     [ "$frames" -ge 2 ] || fail "the trace named $frames frames of the recursion, wanted at least 2:
 $out"
     # And the first frame is the function that raised, at the raise's own
@@ -678,13 +678,13 @@ $out"
     # dropped this one: the trace began at the caller, line 7.
     case "$(uname -s)" in
       MINGW* | MSYS* | CYGWIN* | Windows_NT)
-        echo "$out" | grep -qE "^0 +inner at .*named\.iyi:6$" ||
-          fail "the trace does not start at the function that raised, named.iyi:6:
+        echo "$out" | grep -qE "^0 +inner at .*named\.ri:6$" ||
+          fail "the trace does not start at the function that raised, named.ri:6:
 $out"
         ;;
       Linux)
-        echo "$out" | grep -qE "^0 +[^ ]*inner[^ ]* at .*named\.iyi:6:" ||
-          fail "the trace does not start at the function that raised, named.iyi:6:
+        echo "$out" | grep -qE "^0 +[^ ]*inner[^ ]* at .*named\.ri:6:" ||
+          fail "the trace does not start at the function that raised, named.ri:6:
 $out"
         ;;
     esac
@@ -717,10 +717,10 @@ end' ;;
     thread) body='t = IyiThread.start { down(0); nil }
 t.join' ;;
   esac
-  printf 'module deep_%s\n\ndef down(n : Int32) : Int32\n  down(n + 1) + 1\nend\n\n%s\n' "$where" "$body" > "$work/deep_$where.iyi"
-  run "$work/deep_$where.iyi"
+  printf 'module deep_%s\n\ndef down(n : Int32) : Int32\n  down(n + 1) + 1\nend\n\n%s\n' "$where" "$body" > "$work/deep_$where.ri"
+  run "$work/deep_$where.ri"
   [ "$code" = 1 ] || fail "stack overflow on the $where stack exited $code, wanted 1 (139 is the signal, unhandled)"
-  [ "$out" = "iyi: panic: stack overflow: the stack ran out, which is infinite or very deep recursion" ] ||
+  [ "$out" = "ris: panic: stack overflow: the stack ran out, which is infinite or very deep recursion" ] ||
     fail "stack overflow on the $where stack said:
 $out"
 done
@@ -740,7 +740,7 @@ done
 # `IyiThread` sets its own now (14.8 to 17.8 KB measured).
 for where in main fiber thread; do
   set +e
-  "$IYI" build -o "$work/deep_${where}_bin" "$work/deep_$where.iyi" > /dev/null 2>&1
+  "$RIS" build -o "$work/deep_${where}_bin" "$work/deep_$where.ri" > /dev/null 2>&1
   set -e
   for again in 1 2 3 4 5 6 7 8; do
     set +e
@@ -748,7 +748,7 @@ for where in main fiber thread; do
     code=$?
     set -e
     [ "$code" = 1 ] || fail "stack overflow on the $where stack, run $again, exited $code, wanted 1"
-    [ "$out" = "iyi: panic: stack overflow: the stack ran out, which is infinite or very deep recursion" ] ||
+    [ "$out" = "ris: panic: stack overflow: the stack ran out, which is infinite or very deep recursion" ] ||
       fail "stack overflow on the $where stack, run $again, said more than the sentence:
 $out"
   done
@@ -783,7 +783,7 @@ done
 # page is the first page touched past the committed stack, and the
 # kernel answers STATUS_STACK_OVERFLOW; a frame that skipped the probes
 # would have written only committed memory and come back.
-cat > "$work/overrun.iyi" <<'EOF'
+cat > "$work/overrun.ri" <<'EOF'
 @[Ffi]
 module overrun
 
@@ -855,14 +855,14 @@ end
   end
 {% end %}
 EOF
-"$IYI" build -o "$work/overrun_bin" "$work/overrun.iyi" > "$work/overrun.log" 2>&1 ||
+"$RIS" build -o "$work/overrun_bin" "$work/overrun.ri" > "$work/overrun.log" 2>&1 ||
   fail "the overrun program did not build: $(cat "$work/overrun.log")"
 set +e
 out=$("$work/overrun_bin" 2>&1)
 code=$?
 set -e
 [ "$code" = 1 ] || fail "a frame larger than the guard page exited $code, wanted 1: $out"
-[ "$out" = "iyi: panic: stack overflow: the stack ran out, which is infinite or very deep recursion" ] ||
+[ "$out" = "ris: panic: stack overflow: the stack ran out, which is infinite or very deep recursion" ] ||
   fail "a frame larger than the guard page said:
 $out"
 step "a frame larger than the guard page is a stack overflow, not a write under the stack"
@@ -874,7 +874,7 @@ step "a frame larger than the guard page is a stack overflow, not a write under 
 # asking sees the difference.
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
-    cat > "$work/guarantee.iyi" <<'EOF'
+    cat > "$work/guarantee.ri" <<'EOF'
 @[Ffi]
 module guarantee
 
@@ -886,23 +886,23 @@ t = IyiThread.start do
 end
 t.join
 EOF
-    "$IYI" build -o "$work/guarantee" "$work/guarantee.iyi" > "$work/guarantee.log" 2>&1 || fail "the guarantee probe did not build: $(cat "$work/guarantee.log")"
+    "$RIS" build -o "$work/guarantee" "$work/guarantee.ri" > "$work/guarantee.log" 2>&1 || fail "the guarantee probe did not build: $(cat "$work/guarantee.log")"
     out=$("$work/guarantee" 2>&1) || fail "the guarantee probe exited $?: $out"
     [ "$out" = "thread guarantee 16384" ] || fail "a thread's own stack guarantee: $out, wanted 16384"
-    mkdir -p "$work/unguaranteed/iyi"
-    cp src/iyi/*.iyi "$work/unguaranteed/iyi/"
+    mkdir -p "$work/unguaranteed/ris"
+    cp src/ris/*.ri "$work/unguaranteed/ris/"
     awk '/^        LibC.SetThreadStackGuarantee\(pointerof\(guarantee\)\)$/ { found = 1; next } { print } END { if (!found) exit 3 }' \
-      src/iyi/thread.iyi > "$work/unguaranteed/iyi/thread.iyi" ||
-      fail "the thread's guarantee this proof removes is not in thread.iyi any more"
-    IYI_PATH="$(cygpath -m "$work/unguaranteed");$(cygpath -m "$PWD/src")" \
-      "$IYI" build -o "$work/unguaranteed.exe" "$work/guarantee.iyi" > "$work/guarantee.log" 2>&1 ||
+      src/ris/thread.ri > "$work/unguaranteed/ris/thread.ri" ||
+      fail "the thread's guarantee this proof removes is not in thread.ri any more"
+    RIS_PATH="$(cygpath -m "$work/unguaranteed");$(cygpath -m "$PWD/src")" \
+      "$RIS" build -o "$work/unguaranteed.exe" "$work/guarantee.ri" > "$work/guarantee.log" 2>&1 ||
       fail "the unguaranteed probe did not build: $(cat "$work/guarantee.log")"
     out=$("$work/unguaranteed.exe" 2>&1)
     [ "$out" != "thread guarantee 16384" ] || fail "the guarantee check passed with the thread's own call taken out"
     step "a thread sets its own stack guarantee, and the check sees it gone ($out without it)"
     ;;
 esac
-cat > "$work/wild.iyi" <<'EOF'
+cat > "$work/wild.ri" <<'EOF'
 @[Ffi]
 module wild
 
@@ -910,7 +910,7 @@ p = Pointer(Int32).new(16_u64)
 puts p.value
 EOF
 set +e
-"$IYI" build -o "$work/wild" "$work/wild.iyi" > /dev/null 2>&1
+"$RIS" build -o "$work/wild" "$work/wild.ri" > /dev/null 2>&1
 "$work/wild" > "$work/wild.out" 2>&1
 code=$?
 set -e
@@ -935,7 +935,7 @@ step "the stack running out is a panic on every stack, and a wild pointer is not
 
 # ── 11. a panic prints backtrace frames locating the call site ─────────────
 if [ "$(uname -s)" = Darwin ]; then
-  cat > "$work/trace.iyi" <<'EOF'
+  cat > "$work/trace.ri" <<'EOF'
 module trace
 
 def depth3(x : Int32) : Int32
@@ -955,16 +955,16 @@ end
 
 puts depth1(42)
 EOF
-  run "$work/trace.iyi"
+  run "$work/trace.ri"
   [ "$code" = 1 ] || fail "trace exit was $code, wanted 1"
-  echo "$out" | grep -q "^iyi: panic: deep boom" || fail "trace message missing: $out"
+  echo "$out" | grep -q "^ris: panic: deep boom" || fail "trace message missing: $out"
   echo "$out" | grep -q "depth3" || fail "frame depth3 missing from backtrace: $out"
   echo "$out" | grep -q "depth2" || fail "frame depth2 missing from backtrace: $out"
   echo "$out" | grep -q "depth1" || fail "frame depth1 missing from backtrace: $out"
   step "a panic prints backtrace frames locating the call site"
 
   # ── 12. a panic resolver hook formats frames when installed ────────────────
-  cat > "$work/hook.iyi" <<'EOF'
+  cat > "$work/hook.ri" <<'EOF'
 @[Ffi]
 module hook
 
@@ -982,9 +982,9 @@ end
 
 cause_panic
 EOF
-  run "$work/hook.iyi"
+  run "$work/hook.ri"
   [ "$code" = 1 ] || fail "hooked panic exit was $code, wanted 1"
-  echo "$out" | grep -q "^iyi: panic: hooked panic" || fail "hooked panic message missing: $out"
+  echo "$out" | grep -q "^ris: panic: hooked panic" || fail "hooked panic message missing: $out"
   echo "$out" | grep -q "custom resolver:.*frames" || fail "custom resolver hook was not called: $out"
   step "a panic resolver hook formats frames when installed"
 fi

@@ -1,5 +1,5 @@
-# iyi: `iyi.sum` — III.7 step 2. The spec's split, kept exactly: `iyi.mod`
-# is policy, written by a person; `iyi.sum` is fact, written by the tool,
+# iyi: `ris.sum` — III.7 step 2. The spec's split, kept exactly: `ris.mod`
+# is policy, written by a person; `ris.sum` is fact, written by the tool,
 # "and its only job is to notice that what arrived is not what arrived
 # last time."
 #
@@ -22,21 +22,16 @@ require "../codegen/cache_dir"
 
 module Iyi::Mod
   module Sum
-    # ris: `ris.sum` beside `ris.mod`; an iyi project's `iyi.sum` is kept
-    # while its manifest is still `iyi.mod`.
-    FILE     = "ris.sum"
-    IYI_FILE = "iyi.sum"
-    FILES    = {FILE, IYI_FILE}
+    # ris: `ris.sum` beside `ris.mod` (SPEC 6.10).
+    FILE  = "ris.sum"
+    FILES = {FILE}
 
     def self.path_in(dir : String) : String
-      if File.basename(Installer.manifest_in(dir)) == Installer::IYI_MANIFEST
-        File.join(dir, IYI_FILE)
-      else
-        File.join(dir, FILE)
-      end
+      Installer.refuse_iyi_files(dir)
+      File.join(dir, FILE)
     end
 
-    # Verifies *selections* against the manifest directory's `iyi.sum`,
+    # Verifies *selections* against the manifest directory's `ris.sum`,
     # appending what is new. *checkout* answers a selection's directory.
     def self.check(dir : String, selections : Array(Selection), &checkout : Selection -> String) : Nil
       sum_path = path_in(dir)
@@ -104,10 +99,10 @@ module Iyi::Mod
     # system names files (`Iyi.file_key`). A string prefix was case- and
     # separator-sensitive: a check run from the checkout entered as `c:\`,
     # as editors and language clients spell the drive, was not "inside"
-    # `C:\...\cache\mod`, so it wrote an `iyi.sum` into the cached package,
+    # `C:\...\cache\mod`, so it wrote an `ris.sum` into the cached package,
     # and every project using that version was refused as tampered with
     # until the cache was cleared. Folding the case was not the whole
-    # answer: on a CI runner `IYI_CACHE_DIR` is spelled `C:\Users\RUNNER~1\`
+    # answer: on a CI runner `RIS_CACHE_DIR` is spelled `C:\Users\RUNNER~1\`
     # the way `mktemp` hands it out, and the checkout's directory is
     # `C:\Users\runneradmin\` the way the shell enters it, so the same write
     # happened with every letter folded. Only the file system knows an 8.3

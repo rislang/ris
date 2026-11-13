@@ -12,7 +12,6 @@ failures = [] of String
 
 # The copy a caller keeps, made at the boundary it leaves the tape by.
 
-
 def check(failures : Array(String), ok : Bool, what : String) : Nil
   failures << what.copy_to(Program.tape) unless ok
 end

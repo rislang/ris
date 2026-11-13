@@ -16,8 +16,8 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IYI="${IYI:-$REPO/bin/ris}"
-case "$IYI" in /*) ;; *) IYI="$PWD/$IYI" ;; esac
+RIS="${RIS:-$REPO/bin/ris}"
+case "$RIS" in /*) ;; *) RIS="$PWD/$RIS" ;; esac
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 TMPDIR="$WORK/tmp"
@@ -59,7 +59,7 @@ spec 1.1
   File.write((Program.env("TMPDIR") || "") + "/../seen", tmp.path)
 end
 EOF
-"$IYI" test notes.ri > a.out 2>&1
+"$RIS" test notes.ri > a.out 2>&1
 [ $? = 0 ] || { fail "(a) tmp block did not pass"; cat a.out; }
 has a.out "ok  spec 1.1"
 seen="$(cat "$WORK/seen" 2>/dev/null)"
@@ -99,7 +99,7 @@ spec 1.2
   demo("x") == "hello from x\n"
 end
 EOF
-"$IYI" test demo.ri > b.out 2>&1
+"$RIS" test demo.ri > b.out 2>&1
 [ $? = 1 ] || { fail "(b) the failing block did not fail the run"; cat b.out; }
 grep -c "^ok  spec 1\.[23]" b.out | grep -qx 2 || { fail "(b) two blocks pass"; cat b.out; }
 has b.out 'demo("x") == "hello from x\n"'
@@ -129,7 +129,7 @@ spec 1.4
   File.write((Program.env("TMPDIR") || "") + "/../pid", tmp.path)
 end
 EOF
-"$IYI" test echo.ri > c.out 2>&1
+"$RIS" test echo.ri > c.out 2>&1
 [ $? = 0 ] || { fail "(c) background block did not pass"; cat c.out; }
 has c.out "ok  spec 1.4"
 pgrep -f "$WORK/tmp/ris-program" > c.ps &&
@@ -153,7 +153,7 @@ spec 1.2
   d == "xy\n"
 end
 EOF
-"$IYI" test d.ri > d.out 2>&1
+"$RIS" test d.ri > d.out 2>&1
 [ $? = 0 ] || { fail "(d) computed program constant"; tail -15 d.out; }
 has d.out "1 blocks: 1 ok"
 
@@ -170,7 +170,7 @@ spec 1.1
   one == 1
 end
 EOF
-"$IYI" test e1.ri > e1.out 2>&1
+"$RIS" test e1.ri > e1.out 2>&1
 [ $? = 0 ] && fail "(e) a local named tmp passed"
 has e1.out "\`tmp\` is the block's temporary directory in a spec block; rename the local"
 
@@ -184,7 +184,7 @@ spec 1.2
   e2 == 1
 end
 EOF
-"$IYI" test e2.ri > e2.out 2>&1
+"$RIS" test e2.ri > e2.out 2>&1
 [ $? = 0 ] && fail "(e) a local named like the module passed"
 has e2.out "\`e2\` runs the program in a spec block; rename the local"
 
@@ -197,12 +197,12 @@ import web/spec
 
 puts "hi"
 EOF
-"$IYI" build e3.ri -o e3 > e3.out 2>&1
+"$RIS" build e3.ri -o e3 > e3.out 2>&1
 [ $? = 0 ] && fail "(e) a */spec import above the section built"
 has e3.out "web/spec is test vocabulary; import it after the first \`spec\` block"
 
 # (f) the plain build carries no test-only type.
-"$IYI" build demo.ri -o demo_plain > f.out 2>&1 || { fail "(f) plain build"; cat f.out; }
+"$RIS" build demo.ri -o demo_plain > f.out 2>&1 || { fail "(f) plain build"; cat f.out; }
 if [ -f demo_plain ]; then
   if strings demo_plain | grep -qE "RisRun|RisProcess|RisTmp"; then
     fail "(f) the plain binary names a test-only type"

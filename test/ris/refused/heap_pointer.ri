@@ -2,4 +2,5 @@
 def allocate
   Pointer(UInt8).malloc(16_u64)
 end
+
 allocate

@@ -10,15 +10,15 @@ stays refused; there is no adapter from it.
 ## Terms
 
 * `Server.serve(host, port, config, Handler, ...)`: the old pool
-  (src/std/http.iyi:2690; the refused open-socket form at :2699;
+  (src/std/http.ri:2690; the refused open-socket form at :2699;
   options documented at :2628-2689). Its handler answers a `Request`
   with a `Response` (classes, header `Hash`es). It has TLS, HTTP/2,
   compression, streamed bodies and upgrades.
 * `Server.answer(host, port, config, Handler, max_connections)`: the
-  tape pool (http.iyi:2399). Its handler reads an `Incoming` (views of
-  the received bytes, src/std/http_head.iyi:195) and writes an
+  tape pool (http.ri:2399). Its handler reads an `Incoming` (views of
+  the received bytes, src/std/http_head.ri:195) and writes an
   `Outgoing` (status, up to 32 header lines, a body builder,
-  http.iyi:2259). Today it serves cleartext HTTP/1.1 only.
+  http.ri:2259). Today it serves cleartext HTTP/1.1 only.
 * *Port set*: every file that defines or calls a server-side
   `Request -> Response` form (`git grep ': Response'`):
   * benches: http2_exercise, std_acme, std_autocert, std_cookie,
@@ -27,12 +27,12 @@ stays refused; there is no adapter from it.
     std_http_resume, std_http_server, std_http_stop, std_router,
     std_sse, std_websocket; each bench's `RisExerciseServer.serve`
     wrapper calls `Server.serve` and moves too;
-  * samples/iyi/autocert.iyi;
+  * samples/ris/autocert.ri;
   * tests: test/ris/http_conn_growth, http2_conn_growth, http_coding,
     http_keepalive_scope, http_open, http_prefork_tls, http_continue,
     websocket_handshake, sse_open;
-  * std: router.iyi, acme.iyi (`answer`, :911), autocert.iyi (:666),
-    sse.iyi, websocket.iyi.
+  * std: router.ri, acme.ri (`answer`, :911), autocert.ri (:666),
+    sse.ri, websocket.ri.
 
 ## What the port set needs
 
@@ -67,7 +67,7 @@ code; nothing is built as a `Request` or `Response` for a handler.
                   max_connections : Int32 = MAX_CONNECTIONS) : Nil
 
 No new plumbing: `prefork`, `supervise` and `run_worker` already
-carry these four (http.iyi:2712-2827); `answer` stops passing the
+carry these four (http.ri:2712-2827); `answer` stops passing the
 constants `false, false, 60000, REQUEST_TIMEOUT` (:2402). TLS is the
 handler's optional `tls_config`, read once per worker (:2803).
 `listening(port)` is kept.
@@ -118,9 +118,9 @@ query.
   it and `body` is empty; without it `body_io` reads the whole body
   already in `body`.
 
-`BodyReader` and `Certificate` live in http.iyi and std/tls, so
-`Incoming` moves into http.iyi (http_head keeps `HeadParser`,
-`Field`, `ParsedHead`); the alias at http.iyi:160 goes. `header(name)`
+`BodyReader` and `Certificate` live in http.ri and std/tls, so
+`Incoming` moves into http.ri (http_head keeps `HeadParser`,
+`Field`, `ParsedHead`); the alias at http.ri:160 goes. `header(name)`
 exists (http_head:206).
 
 ### Outgoing
@@ -135,7 +135,7 @@ upgrade), [5] 1 when `close` is asked. The sink is a reference
   over HTTP/1.1, DATA frames over HTTP/2, to the close for HTTP/1.0),
   runs the block, ends the body. A HEAD runs no block.
 * `res.send(io : IyiIO)`: the same, copying *io* to its end.
-  `FileServer` (src/std/fileserver.iyi:66, `read_into` :158) keeps
+  `FileServer` (src/std/fileserver.ri:66, `read_into` :158) keeps
   reading small files into `body`; `send` is for a body larger than
   is worth holding, as `Response.new(status, io)` was.
 * `length=` before `stream`/`send`: the head says `Content-Length`,
@@ -198,12 +198,12 @@ up front (no growth moves); `stream`/`send` go gzip through
   [] of String, deflate = true) : Nil`: the 101's headers and
   `res.upgrade`, or a 400/426 answer. `WebSocket.serve(socket,
   leftover, res : Outgoing, ...)` reads the agreed extension with
-  `res.header`. The block-form refusal (websocket.iyi:512) stays,
+  `res.header`. The block-form refusal (websocket.ri:512) stays,
   reworded for the new signature.
 * `Router`: `handle(pattern) { |req, res, params| ... }` with a
   `Proc(Incoming, Outgoing, Hash(String, String), Nil)`, `call(req,
   res) : Nil`; 404/405 (with `Allow`), `redirect` and `plain` write
-  into `res`. router.iyi:528's "not ported" note goes.
+  into `res`. router.ri:528's "not ported" note goes.
 * `Acme#answer(req : Incoming, res : Outgoing) : Bool` and the same on
   `Autocert`: true when the request was an HTTP-01 challenge and was
   answered.
@@ -281,7 +281,7 @@ As drafted:
   Outgoing; `Server.serve`, `Request` and the server's `Response` forms
   removed.
 * `Incoming` (version, remote_address, tls_resumed?,
-  peer_certificates, body_io) moved into http.iyi; `Outgoing` with
+  peer_certificates, body_io) moved into http.ri; `Outgoing` with
   stream, send, length=, upgrade, close, header(name) and the 6-slot
   state; the refusals (old `call`, `upgrade` without `take_over`, a
   second end) and the "not a server's" raise.
@@ -311,12 +311,12 @@ Differs:
   its frame magic: `Zstd.decompress` is refused by the view check.
 * The port set's benches did not build before (client owners, views,
   `HTTP.upgrade`, `TlsServerConfig.from_pem`); each now stops first at
-  such an error, none at a server form. samples/iyi/autocert.iyi
+  such an error, none at a server form. samples/ris/autocert.ri
   stops at `records_handshake`.
 * Not gated: answer_upgrade has no `SSE.stream` case, though Gates
   promised SSE events there. answer_h2.ri was not made; its cases are
   in answer_tls.ri.
 * New refusals the draft did not name: `SSE.stream` raises when the
-  handler already wrote a `Content-Type` (sse.iyi:542), and
+  handler already wrote a `Content-Type` (sse.ri:542), and
   `res.header` raises "a header after the head was sent" after
-  `stream` or `send` (http.iyi:2117).
+  `stream` or `send` (http.ri:2117).

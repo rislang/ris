@@ -1,5 +1,5 @@
 # iyi: the pass that turns the lowered types into pointer maps, which the
-# `Layouts` section of a `.iyimod` carries (GC_DESIGN.md Stage 1).
+# `Layouts` section of a `.rimod` carries (GC_DESIGN.md Stage 1).
 #
 # The collector this feeds never discovers an object's shape at run time: the
 # compiler knows which words in an object are pointers, and this is where that

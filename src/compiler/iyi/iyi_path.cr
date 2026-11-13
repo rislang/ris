@@ -53,7 +53,7 @@ module Iyi
       paths.map! do |path|
         # `$ORIGIN` alone is the directory itself. It read the character
         # after the name without asking whether there was one, and
-        # `IYI_PATH=$ORIGIN` died of "Index out of bounds (IndexError)" and
+        # `RIS_PATH=$ORIGIN` died of "Index out of bounds (IndexError)" and
         # "you've found a bug in the iyi compiler".
         if (chopped = path.lchop?("$ORIGIN")) && (chopped.empty? || chopped[0].in?(::Path::SEPARATORS))
           if origin.nil?
@@ -79,7 +79,7 @@ module Iyi
     # The origin a language server's proxy pinned, handed to the workers it
     # starts: a worker asks for its own path at startup, and a rebuild can
     # unlink the binary between the worker's exec and that question.
-    ORIGIN_VARIABLE = "IYI_LSP_ORIGIN"
+    ORIGIN_VARIABLE = "RIS_LSP_ORIGIN"
 
     def self.origin : String?
       unless @@origin_resolved
@@ -180,10 +180,8 @@ module Iyi
       # `--prelude` resolves through here, and 0.1.0's prelude is written in
       # iyi (iyi SPEC, "0.1.0", item 3).
       unless relative_filename.ends_with?(".cr")
-        # ris: a module of the language is `name.ri`; `name.iyi` is one
-        # carried over from iyi, the prelude's among them.
-        yield relative_filename.ensure_suffix(".ri") unless relative_filename.ends_with?(".iyi")
-        yield relative_filename.ensure_suffix(".iyi") unless relative_filename.ends_with?(".ri")
+        # ris: a module of the language is `name.ri` (SPEC 6.10).
+        yield relative_filename.ensure_suffix(".ri")
       end
 
       # Check if .cr file exists.

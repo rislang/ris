@@ -17,7 +17,7 @@ module Iyi
     property column_number : Int32
     property wants_symbol : Bool
 
-    # iyi: true while lexing a `.iyi` file, where `!` is not part of an
+    # iyi: true while lexing a `.ri` file, where `!` is not part of an
     # identifier (SPEC III.1.7, decision A). Derived from the filename rather
     # than passed in, because every parser that reads a file from disk sets
     # `filename` immediately after construction and nothing else needs to know.
@@ -132,7 +132,7 @@ module Iyi
 
     # iyi: which language the source is written in is the one thing the lexer
     # cannot read out of the source, so it comes off the name — `!` is not
-    # part of a name in a `.iyi` file (iyi SPEC III.1.7) and is part of one in
+    # part of a name in a `.ri` file (iyi SPEC III.1.7) and is part of one in
     # a `.cr` file.
     #
     # A macro expansion's name is a `VirtualFile`, which is no extension at
@@ -171,22 +171,44 @@ module Iyi
     # stored, `stored_name`).
     def self.iyi_miscased?(filename : String) : Bool
       return false if filename.ris_source?
-      tail = filename[-4..]?
-      !tail.nil? && tail.compare(".iyi", case_insensitive: true) == 0
+      return true if iyi_named?(filename)
+      tail = filename[-3..]?
+      !tail.nil? && tail.compare(".ri", case_insensitive: true) == 0
+    end
+
+    # ris: a file named for iyi - `.iyi` in any case, or an `.iyimod`
+    # artifact - is refused, never read (SPEC 6.10). Every boundary asks
+    # this one predicate and prints `iyi_miscased_sentence`.
+    def self.iyi_named?(filename : String) : Bool
+      name = File.basename(filename).downcase
+      name.ends_with?(".iyi") || name.ends_with?(".iyimod") ||
+        name == "iyi.mod" || name == "iyi.sum"
     end
 
     # The sentence for a name `iyi_miscased?` answers yes for, shared by
     # every verb that is handed one or walks to one, so they refuse it alike.
     def self.iyi_miscased_sentence(filename : String) : String
-      "#{Iyi.relative_filename(filename)} ends in `#{filename[-4..]}`, and an iyi source file ends in " \
-      "`.iyi`: the language is read off the extension, in lower case, on " \
-      "every system. Rename it #{File.basename(filename).rchop(filename[-4..])}.iyi"
+      shown = Iyi.relative_filename(filename)
+      base = File.basename(filename)
+      lower = base.downcase
+      if lower == "iyi.mod" || lower == "iyi.sum"
+        return "#{shown}: rename #{base} to ris.#{lower[-3..]}"
+      end
+      if lower.ends_with?(".iyimod")
+        return "#{shown}: built by an older compiler; rebuild it"
+      end
+      if lower.ends_with?(".iyi")
+        return "#{shown}: a ris file ends in .ri; rename it to #{base[0, base.size - 4]}.ri"
+      end
+      "#{shown} ends in `#{filename[-3..]}`, and a ris source file ends in " \
+      "`.ri`: the language is read off the extension, in lower case, on " \
+      "every system. Rename it #{base.rchop(filename[-3..])}.ri"
     end
 
     # iyi: a file's name as its directory stores it, for `iyi_miscased?`
     # and `iyi_source?` to read. On Windows a name typed in another case
     # opens the same file, so `iyi run HDR/APP/MAIN.IYI` of a stored
-    # `main.iyi` got iyi's prelude and the other language's lexer. The
+    # `main.ri` got iyi's prelude and the other language's lexer. The
     # stored name is the file's on every system: typed in any case it is
     # read as what it is, and a file stored as `UP.IYI` is refused as one.
     def self.stored_name(path : String) : String
@@ -2263,7 +2285,7 @@ module Iyi
           # iyi: `impl` opens a block that its `end` closes, and a macro
           # body that wrote one - a derive implementing a trait for the
           # type it is attached to - ended at that `end` instead: "unexpected
-          # 'end': nothing is open for it to close". Only in a `.iyi` file,
+          # 'end': nothing is open for it to close". Only in a `.ri` file,
           # where it is a keyword; in a `.cr` file it is a name.
           MacroKeywordState::Other if @iyi && char_sequence?('p', 'l') && peek_not_ident_part_or_end_next_char
         end

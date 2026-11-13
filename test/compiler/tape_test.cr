@@ -2,7 +2,7 @@ require "./test_helper"
 
 private def tape_compile(code : String, extension = "ri")
   compiler = create_spec_compiler
-  compiler.prelude = "iyi/prelude"
+  compiler.prelude = "ris/prelude"
   compiler.no_codegen = true
   source = Iyi::Compiler::Source.new(
     File.expand_path("text-default.#{extension}"), code)

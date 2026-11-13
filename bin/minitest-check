@@ -96,7 +96,7 @@ def main():
              f"IYI_CONFIG_BUILD_COMMIT={shlex.quote(commit)} "
              "make ris > build.log 2>&1")
     command = (f"set -eu; cd {shlex.quote(directory)}; "
-               "export IYI_CACHE_DIR=/tmp/rispure-agent-check-cache; "
+               "export RIS_CACHE_DIR=/tmp/rispure-agent-check-cache; "
                f"if {build}; then tail -n 4 build.log; "
                "else cat build.log; exit 1; fi")
     if args.action == "check":

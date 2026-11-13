@@ -21,6 +21,7 @@ pub struct User
   getter id : Int32
   getter name : String
   getter status : String
+
   def initialize(@id, @name, @status)
   end
 end
@@ -80,7 +81,7 @@ struct Handler
 
   def call(req : Incoming, res : Outgoing) : Nil
     if req.method == "GET" && (id = status_id(req.path)) &&
-        (user = @users.find { |user| user.id == id })
+       (user = @users.find { |user| user.id == id })
       status_view(res, user.name, user.status)
     else
       not_found(res)
@@ -99,6 +100,7 @@ end
 
 struct Settings
   getter port : Int32
+
   def initialize(@port)
   end
 end

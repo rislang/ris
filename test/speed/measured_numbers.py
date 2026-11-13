@@ -88,7 +88,7 @@ def check_build_pair(wrong: list[str], held: list[str]) -> None:
             [sys.executable, str(REPO / "test/speed/build_speed/generate_pair.py"), "300", raw],
             check=True, capture_output=True,
         )
-        measured_iyi = len((pathlib.Path(raw) / "medium.iyi").read_text().splitlines())
+        measured_iyi = len((pathlib.Path(raw) / "medium.ri").read_text().splitlines())
         measured_go = len((pathlib.Path(raw) / "medium.go").read_text().splitlines())
     want_iyi = int(iyi_lines[0].replace(",", ""))
     want_go = int(go_lines[0].replace(",", ""))

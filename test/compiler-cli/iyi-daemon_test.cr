@@ -8,9 +8,9 @@ require "./test_helper"
 # version handshake between an `iyi` client and a `crystal` server passes: builds
 # would be served, by a daemon holding a prelude that was chosen for the other
 # command surface.
-describe "`iyi daemon`" do
+describe "`ris daemon`" do
   it "looks for a server named after itself" do
-    pending!("requires #{IYI_BIN} (`make iyi`)") unless File::Info.executable?(IYI_BIN)
+    pending!("requires #{IYI_BIN} (`make ris`)") unless File::Info.executable?(IYI_BIN)
 
     # Somewhere with no sibling server and no `.build` — so the lookup fails and
     # says what it looked for, which is the only part being read here.

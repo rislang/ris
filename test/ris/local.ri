@@ -2,7 +2,6 @@
 module test/ris/local
 import std/int
 
-
 def check(ok : Bool) : Nil
   raise "local check failed" unless ok
 end

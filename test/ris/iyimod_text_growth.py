@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Growing text across a module artifact: a String local and field that
 get `<<`, and an Array field appended in a chain, built from source and
-from the .iyimod give the same output. The artifact's bodies are already
+from the .rimod give the same output. The artifact's bodies are already
 lowered: lowering them again took `__temp_1 << item` for growing text."""
 import os
 from pathlib import Path
@@ -63,10 +63,10 @@ end
         subprocess.run([str(RIS), "build", option, "mods", "-o", executable,
                         str(main)], cwd=work, check=True)
 
-    build("--emit-iyimod", "source")
+    build("--emit-rimod", "source")
     source = subprocess.check_output([str(work / "source")], text=True)
     library.unlink()
-    build("--use-iyimod", "artifact")
+    build("--use-rimod", "artifact")
     artifact = subprocess.check_output([str(work / "artifact")], text=True)
     assert source == artifact == EXPECTED, (source, artifact)
     print("runs     iyimod_text_growth (source and artifact match)")
@@ -84,7 +84,7 @@ class Holder
 end
 holder = Holder.new
 """)
-    refused = subprocess.run([str(RIS), "build", "--use-iyimod", "mods",
+    refused = subprocess.run([str(RIS), "build", "--use-rimod", "mods",
                               "--no-codegen", str(main)], cwd=work,
                              capture_output=True, text=True)
     assert refused.returncode != 0 and "grow after new" in refused.stderr, (
@@ -93,7 +93,7 @@ holder = Holder.new
 
     # An Array field appended in an iyi module: the artifact's lowered
     # `__temp_N << item` met the consumer's own `__temp_N`.
-    (work / "app/stack.iyi").write_text('''module app/stack
+    (work / "app/stack.ri").write_text('''module app/stack
 
 pub class Stack(T)
   @items : Array(T) = [] of T
@@ -107,13 +107,13 @@ pub class Stack(T)
   end
 end
 ''')
-    main = work / "main.iyi"
+    main = work / "main.ri"
     main.write_text("module main\n\nimport app/stack::*\n\n"
                     "stack = Stack(Int32).new\nputs stack.push(5)\n")
-    build("--emit-iyimod", "source")
+    build("--emit-rimod", "source")
     source = subprocess.check_output([str(work / "source")], text=True)
-    (work / "app/stack.iyi").unlink()
-    build("--use-iyimod", "artifact")
+    (work / "app/stack.ri").unlink()
+    build("--use-rimod", "artifact")
     artifact = subprocess.check_output([str(work / "artifact")], text=True)
     assert source == artifact == "1\n", (source, artifact)
     print("runs     iyimod_text_growth (iyi Array field from its artifact)")
@@ -123,7 +123,7 @@ end
     # of self"); an impl method carries its checked contract, not the
     # opaque default; an imported constructor that publishes its Array fields
     # does not count as shrinking a value someone views.
-    (work / "app/kit.iyi").write_text('''module app/kit
+    (work / "app/kit.ri").write_text('''module app/kit
 
 import std/int
 
@@ -178,10 +178,10 @@ puts "refused with #{v.message.inspect}" if v.is_a?(KitError)
 puts size_of("ab")
 puts Bag.new([1, 2, 3]).size
 ''')
-    build("--emit-iyimod", "source")
+    build("--emit-rimod", "source")
     source = subprocess.check_output([str(work / "source")], text=True)
-    (work / "app/kit.iyi").unlink()
-    build("--use-iyimod", "artifact")
+    (work / "app/kit.ri").unlink()
+    build("--use-rimod", "artifact")
     artifact = subprocess.check_output([str(work / "artifact")], text=True)
     expected = '8\nrefused with "long1"\n2\n4\n'
     assert source == artifact == expected, (source, artifact)

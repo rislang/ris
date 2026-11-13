@@ -4,7 +4,7 @@
 #     bash test/cli/std_atomic_exercise.sh
 #
 # Proves:
-#   * test/cli/std_atomic_exercise.iyi passes plain and --release: every verb
+#   * The module blocks pass plain and --release: every verb
 #     on every admitted T, compare_and_set at each ordering, the bitwise
 #     verbs signed and unsigned, four threads counting without loss, and a
 #     release/acquire handoff.
@@ -31,7 +31,7 @@ case "$(uname -s)" in
   *) PSEP=':' ;;
 esac
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -49,7 +49,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 # The IR audit reads one target's IR, and it is not the host's.
 #
@@ -68,7 +68,18 @@ IR_TARGET=(--cross-compile --target x86_64-unknown-linux-gnu)
 build_and_run() {
   local label="$1" name="$2" source="$3"
   shift 3
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build --spec "$@" -o "$WORK/$name-spec" \
+       "$REPO/src/std/atomic.ri" >"$WORK/$name-spec.log" 2>&1; then
+    tail -12 "$WORK/$name-spec.log"
+    status=1
+    return 1
+  fi
+  if ! "$WORK/$name-spec" >"$WORK/$name-spec.out" 2>&1; then
+    tail -12 "$WORK/$name-spec.out"
+    status=1
+    return 1
+  fi
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -86,7 +97,7 @@ build_and_run() {
 }
 
 echo "== the std/atomic exercise, plain build"
-build_and_run "std_atomic" exercise-atomic "$REPO/test/cli/std_atomic_exercise.iyi"
+build_and_run "std_atomic" exercise-atomic "$REPO/test/cli/std_atomic_exercise.ri"
 
 echo
 echo "== every atomic check reported"
@@ -100,7 +111,7 @@ done
 
 echo
 echo "== the same program with optimisation on (--release)"
-build_and_run "std_atomic --release" exercise-atomic-release "$REPO/test/cli/std_atomic_exercise.iyi" --release >/dev/null
+build_and_run "std_atomic --release" exercise-atomic-release "$REPO/test/cli/std_atomic_exercise.ri" --release >/dev/null
 if grep -q "ALL CHECKS PASSED" "$WORK/exercise-atomic-release.out" 2>/dev/null; then
   echo "  every check holds under --release"
 else
@@ -153,7 +164,7 @@ ir_audit() { # ir_audit <ir file> ; prints failures, returns 1 on any
   fi
   return $ok
 }
-if ! "$IYI" build --emit llvm-ir "${IR_TARGET[@]}" -o "$WORK/ir" "$REPO/test/cli/std_atomic_exercise.iyi" >"$WORK/ir.build.log" 2>&1 || [ ! -s "$WORK/ir.ll" ]; then
+if ! "$RIS" build --emit llvm-ir "${IR_TARGET[@]}" -o "$WORK/ir" "$REPO/test/cli/std_atomic_exercise.ri" >"$WORK/ir.build.log" 2>&1 || [ ! -s "$WORK/ir.ll" ]; then
   echo "  could not emit IR"
   tail -5 "$WORK/ir.build.log"
   status=1
@@ -172,13 +183,13 @@ echo "== proving the checks can fail when the module is broken"
 prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
   local label="$1" dir="$2" phrase="$3" script="$4"
   mkdir -p "$WORK/$dir/std"
-  sed -e "$script" "$REPO/src/std/atomic.iyi" > "$WORK/$dir/std/atomic.iyi"
-  if cmp -s "$REPO/src/std/atomic.iyi" "$WORK/$dir/std/atomic.iyi"; then
+  sed -e "$script" "$REPO/src/std/atomic.ri" > "$WORK/$dir/std/atomic.ri"
+  if cmp -s "$REPO/src/std/atomic.ri" "$WORK/$dir/std/atomic.ri"; then
     echo "  $label: the patch changed nothing, so this proves nothing"
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build -o "$WORK/$dir/program" "$REPO/test/cli/std_atomic_exercise.iyi" >"$WORK/$dir/build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build --spec -o "$WORK/$dir/program" "$WORK/$dir/std/atomic.ri" >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched module did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
     status=1
@@ -187,7 +198,7 @@ prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
   "$WORK/$dir/program" >"$WORK/$dir/out" 2>&1
   local exit_code=$?
   if [ "$exit_code" -eq 0 ]; then
-    echo "  $label: the exercise still passed, so it does not test this"
+    echo "  $label: the module blocks still passed"
     status=1
     return
   fi
@@ -197,7 +208,7 @@ prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
 }
 
 prove_fails "add_relaxed subtracts" add_subs "Int32 add_relaxed" \
@@ -210,8 +221,8 @@ prove_fails "compare_and_set_release never exchanges" cas_stuck "release: exchan
 echo
 echo "== proving the IR audit can fail: every relaxed verb strengthened to seq_cst"
 mkdir -p "$WORK/strong/std"
-sed -e 's/:monotonic/:sequentially_consistent/g' "$REPO/src/std/atomic.iyi" > "$WORK/strong/std/atomic.iyi"
-if IYI_PATH="$WORK/strong${PSEP}$REPO/src" "$IYI" build --emit llvm-ir "${IR_TARGET[@]}" -o "$WORK/strong/ir" "$REPO/test/cli/std_atomic_exercise.iyi" >"$WORK/strong/build.log" 2>&1 \
+sed -e 's/:monotonic/:sequentially_consistent/g' "$REPO/src/std/atomic.ri" > "$WORK/strong/std/atomic.ri"
+if RIS_PATH="$WORK/strong${PSEP}$REPO/src" "$RIS" build --emit llvm-ir "${IR_TARGET[@]}" -o "$WORK/strong/ir" "$REPO/test/cli/std_atomic_exercise.ri" >"$WORK/strong/build.log" 2>&1 \
    && [ -s "$WORK/strong/ir.ll" ]; then
   if ir_audit "$WORK/strong/ir.ll" >"$WORK/strong/audit.out"; then
     echo "  the audit PASSED with every relaxed verb strengthened (it should have failed)"

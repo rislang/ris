@@ -1,7 +1,7 @@
 # What `Share` would cost — the count iyi SPEC III.4.7 asks for before III.4.4 is
 # built.
 #
-#     ./bin/crystal run test/cli/share_count.cr -- samples/iyi src/compiler/iyi
+#     ./bin/crystal run test/cli/share_count.cr -- samples/ris src/compiler/iyi
 #
 # `Share` is decided structurally (III.4.4): a type is shareable if no field is
 # mutable and every field's type is shareable. Made countable:
@@ -265,7 +265,7 @@ def classify(types, collections_shareable = false)
   failing
 end
 
-roots = ARGV.empty? ? ["samples/iyi", "src/compiler/iyi"] : ARGV
+roots = ARGV.empty? ? ["samples/ris", "src/compiler/iyi"] : ARGV
 
 roots.each do |root|
   files = Dir.glob(File.join(root, "**", "*.{cr,iyi}")).sort

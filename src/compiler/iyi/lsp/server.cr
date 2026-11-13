@@ -748,7 +748,7 @@ module Iyi::Lsp
                           json.array do
                             json.object do
                               json.field "pattern" do
-                                json.object { json.field "glob", "**/*.iyi" }
+                                json.object { json.field "glob", "**/*.ri" }
                               end
                             end
                           end
@@ -1024,7 +1024,7 @@ module Iyi::Lsp
         # The worker's bound, between two files. One pull compiled every
         # file in one process with no collector, about 40 MB apiece, and
         # gave nothing back until it answered: 1,443 MB for the 36 files
-        # of `samples/iyi`, 5.4 GB for 145, where the proxy retires a
+        # of `samples/ris`, 5.4 GB for 145, where the proxy retires a
         # worker at `Proxy::RETIRE_FOOTPRINT` - but only between
         # requests. So the pull answers the files it has judged and says
         # it stopped short (`iyi/partial`), and the proxy hands the rest
@@ -1149,8 +1149,8 @@ module Iyi::Lsp
 
     # A resultId per file: a fold over the file's own stamp and the
     # stamps of every module its imports reach, plus one stamp shared
-    # by all for what is outside the graph — `lib/`, `iyi.mod`,
-    # `iyi.sum` — since a dependency's declarations are part of every
+    # by all for what is outside the graph — `lib/`, `ris.mod`,
+    # `ris.sum` — since a dependency's declarations are part of every
     # verdict and the graph does not resolve into them.
     #
     # The fold is over bytes and numbers, not `#hash`: that is seeded per
@@ -1813,7 +1813,7 @@ module Iyi::Lsp
           raise Refused.new("#{local.name} is not renamed on its own: its accessors carry the name as methods")
         end
         unless valid_local?(new_name) && lexed_name(new_name, path)
-          raise Refused.new("'#{new_name}' is not an iyi variable name")
+          raise Refused.new("'#{new_name}' is not a ris variable name")
         end
         if local.taken?(new_name, text_of(params["textDocument"]["uri"].as_s).lines)
           raise Refused.new("'#{new_name}' is already a name where '#{local.name}' lives, and the rename would make the two one")
@@ -1822,7 +1822,7 @@ module Iyi::Lsp
       else
         refuse_type_name(params)
         unless valid_name?(new_name) && lexed_name(new_name, path)
-          raise Refused.new("'#{new_name}' is not an iyi method name")
+          raise Refused.new("'#{new_name}' is not a ris method name")
         end
         if def_name_taken?(params, new_name)
           raise Refused.new("'#{new_name}' is already a method where this one is, and the rename would make the two one")
@@ -1875,7 +1875,7 @@ module Iyi::Lsp
 
     # Under R-1 a def's callers live in its *consumers'* compiles, so one
     # program cannot answer "who calls this" — the workspace can: every
-    # open document and every `.iyi` under the root compiles as its own
+    # open document and every `.ri` under the root compiles as its own
     # entry and the answers merge. A caller in a file nobody opened is
     # still a caller, and a rename that missed it would leave a program
     # that does not compile. Open buffers ride first, so unsaved edits
@@ -1938,7 +1938,7 @@ module Iyi::Lsp
     # workspace folder in a file the editor does not hold, is not the
     # person's to rename: its callers are every program that reads that
     # file, and the workspace holds a few of them. `puts` renamed from a
-    # buffer answered an edit to the toolchain's own `src/iyi/io.iyi`,
+    # buffer answered an edit to the toolchain's own `src/ris/io.ri`,
     # line 447 - and in a workspace of 145 files the walk to build that
     # answer took two minutes, answering nothing else meanwhile. Refused
     # here, from the cursor's own compile, before the walk.
@@ -1983,7 +1983,7 @@ module Iyi::Lsp
     end
 
     # The entry set a session-wide question compiles: open buffers
-    # first (they see unsaved edits), then the workspace's own `.iyi`
+    # first (they see unsaved edits), then the workspace's own `.ri`
     # files, capped like workspace/diagnostic. R-1 prices each entry at
     # one small front-end compile, which is what makes "ask the whole
     # workspace" an ordinary request rather than an index.
@@ -2006,7 +2006,7 @@ module Iyi::Lsp
     # skipped the same way. One such file - access denied, or held open
     # by a process that shares nothing - failed workspace symbols,
     # completion, references, rename and workspace diagnostics alike,
-    # -32602 "locked.iyi: Access is denied.", blaming the client.
+    # -32602 "locked.ri: Access is denied.", blaming the client.
     private def workspace_text(file : String) : String?
       File.read(file)
     rescue IO::Error
@@ -2148,7 +2148,7 @@ module Iyi::Lsp
         edited = edited.byte_slice(0, from) + new_name + edited.byte_slice(to, edited.bytesize - to)
       end
       return if parses?(edited, filename)
-      raise Refused.new("'#{new_name}' is a word iyi keeps for itself where the name is used: #{Exports.header_of(text) || filename} would not parse after the rename")
+      raise Refused.new("'#{new_name}' is a word ris keeps for itself where the name is used: #{Exports.header_of(text) || filename} would not parse after the rename")
     end
 
     private def parses?(text : String, filename : String) : Bool
@@ -2635,7 +2635,7 @@ module Iyi::Lsp
 
     # ── Workspace symbols ────────────────────────────────────────────────
 
-    # Every `.iyi` file the workspace holds, open buffers winning over
+    # Every `.ri` file the workspace holds, open buffers winning over
     # the disk, outlined by the parser and filtered by subsequence — the
     # match every editor's muscle memory expects. No index: parsing a
     # module costs microseconds, and an index is a cache with an
@@ -2776,7 +2776,7 @@ module Iyi::Lsp
     end
 
     # The path comes along because the lexer reads the language off the
-    # extension: `!` is not part of a name in a `.iyi` file (iyi SPEC
+    # extension: `!` is not part of a name in a `.ri` file (iyi SPEC
     # III.1.7) and is part of one in a `.cr` file. Without it the scanner
     # lexed every buffer by the other language's rules, so `risky!` was
     # coloured as one name — the propagation operator swallowed into it —
@@ -2869,7 +2869,7 @@ module Iyi::Lsp
       # A buffer this worker was handed (`iyi/adopt`) has a verdict on the
       # client's screen and none stored here: the successor compiles only
       # the focused file, and every other open file's quick fix was gone
-      # after an idle replacement - `a.iyi` offered "Change to 'upcase'"
+      # after an idle replacement - `a.ri` offered "Change to 'upcase'"
       # before a 3 s pause and nothing after it. Compiled here instead,
       # which is the verdict that is on screen.
       diagnostic_rows(uri) if action_wanted?(only, "quickfix") && !@published.has_key?(uri)
@@ -3057,13 +3057,13 @@ module Iyi::Lsp
         # from either.
         old_posix = ::Path[old_path].to_posix.to_s
         new_posix = ::Path[new_path].to_posix.to_s
-        suffix = "/#{old_mod}.iyi"
+        suffix = "/#{old_mod}.ri"
         next unless old_posix.ends_with?(suffix)
 
         root = old_posix[0, old_posix.size - suffix.size]
         prefix = root.empty? ? "/" : root + "/"
         next unless new_posix.starts_with?(prefix)
-        new_mod = new_posix[prefix.size..].rchop(".iyi")
+        new_mod = new_posix[prefix.size..].rchop(".ri")
         next if new_mod.empty? || new_mod == old_mod || !clean_module?(new_mod)
 
         (edits[uri_of(old_path)] ||= [] of {Int32, Int32, Int32, String})
@@ -3492,14 +3492,14 @@ module Iyi::Lsp
       # The posix reading, as `project_root_of` reads the same question: a
       # module path is posix by grammar and the path is the platform's.
       # The root is sliced off the path itself, so its spelling is kept.
-      if (header = Exports.header_of(text)) && ::Path[path].to_posix.to_s.ends_with?("/#{header}.iyi")
+      if (header = Exports.header_of(text)) && ::Path[path].to_posix.to_s.ends_with?("/#{header}.ri")
         derived = path[0, path.size - header.size - 5]
         roots << (derived.empty? ? "/" : derived)
       end
       roots << File.dirname(path)
 
       # What the compile resolved, which is the only thing that knows where a
-      # package's module lives: `iyi.mod` names the requirement, `iyi.sum`
+      # package's module lives: `ris.mod` names the requirement, `ris.sum`
       # pins it and the fetcher puts the checkout in the cache, none of which
       # a filename guess can reach.
       resolved = @analysis.module_files(path, text, overrides_for(path))
@@ -3537,7 +3537,7 @@ module Iyi::Lsp
             end
             next if mod.empty?
             target = resolved[mod]? || roots.each do |candidate_root|
-              candidate = File.join(candidate_root, mod + ".iyi")
+              candidate = File.join(candidate_root, mod + ".ri")
               break candidate if File.file?(candidate) || @documents.has_key?(uri_of(candidate))
             end
             next unless target
@@ -3771,11 +3771,11 @@ module Iyi::Lsp
         name = String.build do |io|
           tail.each_char { |char| io << (char.ascii_alphanumeric? || char == '-' || char == '_' ? char : '_') }
         end
-        scratch = File.join(scratch_dir, "#{name.empty? ? "untitled" : name}.iyi")
+        scratch = File.join(scratch_dir, "#{name.empty? ? "untitled" : name}.ri")
         File.write(scratch, text)
         path = scratch
       elsif (text = @documents[uri]?) && (!File.file?(path) || File.read(path) != text)
-        scratch = File.join(File.dirname(path), ".#{File.basename(path, ".iyi")}.iyi-lsp.iyi")
+        scratch = File.join(File.dirname(path), ".#{File.basename(path, ".ri")}.ri-lsp.ri")
         File.write(scratch, text)
         path = scratch
       end
@@ -3889,9 +3889,9 @@ module Iyi::Lsp
     # ── Paths and the shadow root ────────────────────────────────────────
 
     # A file URI, both ways. On POSIX the two spellings differ by the
-    # scheme alone: `file:///tmp/a.iyi` is `/tmp/a.iyi`. On Windows they do
-    # not: an editor sends `file:///c%3A/Users/x/a.iyi`, and chopping the
-    # scheme off that leaves `/c:/Users/x/a.iyi`, a path with a root it
+    # scheme alone: `file:///tmp/a.ri` is `/tmp/a.ri`. On Windows they do
+    # not: an editor sends `file:///c%3A/Users/x/a.ri`, and chopping the
+    # scheme off that leaves `/c:/Users/x/a.ri`, a path with a root it
     # does not have — every open there was read from a file that could not
     # be found, which is what the language server was on the platform the
     # zip is built for. The drive's slash comes off, and the separators
@@ -3911,7 +3911,7 @@ module Iyi::Lsp
     # other two (steps 9, 31c and 32 of `test/cli/lsp_session.py`, the first
     # times it ran there). Everything that enters as a path goes through
     # here first.
-    # The workspace's `.iyi` files under *root*, each with whether it sits
+    # The workspace's `.ri` files under *root*, each with whether it sits
     # under a `lib` directory - a dependency's checkout - and without those
     # when *with_lib* is false. A directory whose name starts with `.` is
     # not the project's (`.git`, an editor's own), and is skipped.
@@ -3926,7 +3926,7 @@ module Iyi::Lsp
     # link to a directory is not followed: a junction loop listed the same
     # files dozens of times under paths too long to open.
     #
-    # With *manifests*, the `iyi.mod` and `iyi.sum` files instead.
+    # With *manifests*, the `ris.mod` and `ris.sum` files instead.
     # Every folder's files, a file under two folders (one nested in the
     # other) once.
     private def each_workspace_file(*, with_lib : Bool, manifests : Bool = false, & : String, Bool ->) : Nil
@@ -3971,7 +3971,7 @@ module Iyi::Lsp
     # A file to list, skipped like a directory that will not list when the
     # server may not read it: `File.file?` opens it for its attributes, and a file
     # whose ACL denies reading raised from the walk, failing every
-    # workspace question with -32602 "locked.iyi: Access is denied.".
+    # workspace question with -32602 "locked.ri: Access is denied.".
     private def listed_file?(path : String) : Bool
       File.file?(path)
     rescue File::Error
@@ -4022,8 +4022,8 @@ module Iyi::Lsp
     # spellings of one file are never both in a response - and otherwise
     # one built the way RFC 8089 spells it, percent-encoded. It was the
     # path behind `file:///` as it stood: `#` and `%` in a directory's
-    # name made a URI that named another file (`C#proj/greet.iyi` is the
-    # fragment `proj/greet.iyi` of `C`), and a space or `ğ` made one no
+    # name made a URI that named another file (`C#proj/greet.ri` is the
+    # fragment `proj/greet.ri` of `C`), and a space or `ğ` made one no
     # client's spelling ever equalled, so an editor did not recognise the
     # files an answer named.
     private def uri_of(path : String) : String

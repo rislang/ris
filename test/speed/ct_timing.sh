@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A dudect-style timing check of std's secret paths (test/speed/ct_timing.iyi
+# A dudect-style timing check of std's secret paths (test/speed/ct_timing.ri
 # says how): std/big's `inverse_mod_secret`, std/rsa's `sign_pss`, P-256
 # and P-384 signing, Ed25519 signing, X25519, ML-KEM-768 decapsulation
 # (valid against tampered ciphertexts, one key against others) and the
@@ -21,15 +21,15 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 SCALE="${CT_SCALE:-1}"
 mkdir -p "$REPO/test/speed/.work"
 WORK="$(mktemp -d "$REPO/test/speed/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
-export IYI_PATH="$REPO/src"
+export RIS_PATH="$REPO/src"
 
-if ! "$IYI" build --release -o "$WORK/ct" "$REPO/test/speed/ct_timing.iyi" >"$WORK/build.log" 2>&1; then
-  echo "FAIL: test/speed/ct_timing.iyi did not build"
+if ! "$RIS" build --release -o "$WORK/ct" "$REPO/test/speed/ct_timing.ri" >"$WORK/build.log" 2>&1; then
+  echo "FAIL: test/speed/ct_timing.ri did not build"
   sed -n '1,12p' "$WORK/build.log"
   exit 1
 fi

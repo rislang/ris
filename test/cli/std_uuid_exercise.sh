@@ -5,9 +5,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -43,12 +43,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_uuid_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_uuid_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -96,15 +96,15 @@ echo "== what parse refuses"
 # A hyphen belongs at four places of the 36-character form and nowhere
 # else: every hyphen was dropped wherever it stood, so a 37-character
 # string with a hyphen run at its end read as a UUID.
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/uuid::{UUID}
 
 puts UUID.parse(Program.args[0]).to_s
-IYI
+RIS
 for bad in "6ba7b8109dad11d180b4-00c04fd430c8----" "550e8400e29b-41d4-a716-446655440000-" "550e8400-e29b41d4-a716-4466-55440000" "550e8400-e29b-41d4-a716-44665544000"; do
-  if "$IYI" run "$WORK/refuse.iyi" -- "$bad" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$bad" >"$WORK/refuse.out" 2>&1; then
     echo "  $bad was read as $(cat "$WORK/refuse.out")"
     status=1
   elif ! grep -q "UUID:" "$WORK/refuse.out"; then
@@ -123,16 +123,16 @@ else
   mkdir -p "$WORK/patched/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/uuid.iyi").read_text()
+src = Path("$REPO/src/std/uuid.ri").read_text()
 old = 'bytes[6] = (bytes[6] & 0x0f_u8) | 0x40_u8'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/uuid.iyi").write_text(src.replace(old, 'bytes[6] = bytes[6] & 0x0f_u8', 1))
+Path("$WORK/patched/std/uuid.ri").write_text(src.replace(old, 'bytes[6] = bytes[6] & 0x0f_u8', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_uuid_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_uuid_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on a broken module"
     status=1
   else
@@ -150,16 +150,16 @@ else
   mkdir -p "$WORK/patched/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/uuid.iyi").read_text()
+src = Path("$REPO/src/std/uuid.ri").read_text()
 old = '@bytes = bytes.dup'
 if src.count(old) != 1:
     raise SystemExit("patch site missing or not unique")
-Path("$WORK/patched/std/uuid.iyi").write_text(src.replace(old, '@bytes = bytes', 1))
+Path("$WORK/patched/std/uuid.ri").write_text(src.replace(old, '@bytes = bytes', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_uuid_exercise.iyi" >"$WORK/mut-value.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_uuid_exercise.ri" >"$WORK/mut-value.out" 2>&1; then
     echo "  the exercise PASSED with the caller's array kept"
     status=1
   elif grep -qF "a UUID keeps its bytes when the buffer it was made from is reused" "$WORK/mut-value.out"; then
@@ -177,11 +177,11 @@ echo "== what parse refuses"
 # out wherever it stood, and these were read as UUIDs. A probe program per
 # text, built against SEARCH - the module under test, unless the proof
 # below points it at a broken copy.
-SEARCH="$IYI_PATH"
+SEARCH="$RIS_PATH"
 refuses() { # refuses <label> <name> <phrase> <text>
   local label="$1" name="$2" phrase="$3" text="$4"
-  printf 'module main\n\nimport std/uuid::{UUID}\n\nputs UUID.parse(%s).to_s\n' "$text" > "$WORK/$name.iyi"
-  if ! IYI_PATH="$SEARCH" "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/uuid::{UUID}\n\nputs UUID.parse(%s).to_s\n' "$text" > "$WORK/$name.ri"
+  if ! RIS_PATH="$SEARCH" "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -200,7 +200,7 @@ refuses() { # refuses <label> <name> <phrase> <text>
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 refuses "a hyphen past the end" trailing "UUID: not 32 hex digits" '"550e8400-e29b-41d4-a716-446655440000-"'
 refuses "a hyphen one place early" early "UUID: not 32 hex digits" '"550e840-0e29b-41d4-a716-446655440000"'
@@ -215,7 +215,7 @@ else
   mkdir -p "$WORK/patched/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/uuid.iyi").read_text()
+src = Path("$REPO/src/std/uuid.ri").read_text()
 for old, new in (("unless n == 32 || (n == 36 && text[8] == 45_u8 &&",
                   "unless true || (n == 36 && text[8] == 45_u8 &&"),
                  ("if n == 36 && (i == 8 || i == 13 || i == 18 || i == 23)",
@@ -223,7 +223,7 @@ for old, new in (("unless n == 32 || (n == 36 && text[8] == 45_u8 &&",
     if src.count(old) != 1:
         raise SystemExit("patch site missing or not unique")
     src = src.replace(old, new, 1)
-Path("$WORK/patched/std/uuid.iyi").write_text(src)
+Path("$WORK/patched/std/uuid.ri").write_text(src)
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
@@ -231,7 +231,7 @@ PY
   else
     # The same check, run on the copy that takes every hyphen out again: it
     # must report the answer, which a copy that did not compile cannot give.
-    said="$(SEARCH="$WORK/patched${PSEP}$IYI_PATH"; refuses "every hyphen taken out" loose "UUID: not 32 hex digits" '"550e8400-e29b-41d4-a716-446655440000-"')"
+    said="$(SEARCH="$WORK/patched${PSEP}$RIS_PATH"; refuses "every hyphen taken out" loose "UUID: not 32 hex digits" '"550e8400-e29b-41d4-a716-446655440000-"')"
     if printf '%s\n' "$said" | grep -qF "it answered instead of refusing"; then
       echo "  every hyphen taken out again: caught"
     else
@@ -261,8 +261,8 @@ else
     expect="$(PROOF="$label" "$PY" - <<PY
 import os
 from pathlib import Path
-random_src = Path("$REPO/src/std/random.iyi").read_text()
-uuid_src = Path("$REPO/src/std/uuid.iyi").read_text()
+random_src = Path("$REPO/src/std/random.ri").read_text()
+uuid_src = Path("$REPO/src/std/uuid.ri").read_text()
 constant_seed = ("new(entropy, entropy)", "new(1_u64, 1_u64)")
 pcg_v4 = ("    Random::Secure.fill(bytes, 16)\n    bytes[6] = (bytes[6] & 0x0f_u8) | 0x40_u8",
           "    rng = Random.new\n    16.times { |i| bytes[i] = (rng.next_u & 255_u32).to_u8 }\n"
@@ -283,7 +283,7 @@ for patches, src, name in ((random_patches, random_src, "random"), (uuid_patches
         if src.count(old) != 1:
             raise SystemExit(f"patch site missing or not unique in {name}: {old!r}")
         src = src.replace(old, new, 1)
-    Path(f"$WORK/patched/std/{name}.iyi").write_text(src)
+    Path(f"$WORK/patched/std/{name}.ri").write_text(src)
 print(expect)
 PY
 )"
@@ -292,7 +292,7 @@ PY
       status=1
       continue
     fi
-    IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_uuid_exercise.iyi" >"$WORK/mut-source.out" 2>&1
+    RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_uuid_exercise.ri" >"$WORK/mut-source.out" 2>&1
     code=$?
     if [ "$expect" = "PASS" ]; then
       if [ "$code" -eq 0 ] && grep -q "ALL CHECKS PASSED" "$WORK/mut-source.out"; then
@@ -310,7 +310,7 @@ PY
       sed -n '1,3p' "$WORK/mut-source.out" | sed 's/^/    /'
       status=1
     else
-      echo "  $label: caught - $(grep -m1 'panic' "$WORK/mut-source.out" | sed 's/^iyi: panic: //' | cut -c1-110)"
+      echo "  $label: caught - $(grep -m1 'panic' "$WORK/mut-source.out" | sed 's/^ris: panic: //' | cut -c1-110)"
     fi
   done
 fi

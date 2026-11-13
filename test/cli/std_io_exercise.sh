@@ -25,16 +25,16 @@
 #     close - each a panic with a sentence.
 #   * Dependency floor: the exercise binary asks the machine for nothing new.
 #
-# Needs bin/iyi, python3, `nm`, and `otool` on Darwin or `readelf` on
+# Needs bin/ris, python3, `nm`, and `otool` on Darwin or `readelf` on
 # Linux, or the MSVC toolchain's `dumpbin` on Windows. Exits non-zero if any
 # check fails.
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 . "$REPO/test/cli/floor_base.sh"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -71,7 +71,7 @@ done
 
 status=0
 
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 # A PE leaves nothing undefined and names its imports instead, so on Windows
 # both readers are the MSVC toolchain's `dumpbin` (test/cli/floor_base.sh's
@@ -137,7 +137,7 @@ unexpected() {
 build_and_run() {
   local label="$1" name="$2" source="$3"
   shift 3
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -155,11 +155,11 @@ build_and_run() {
 }
 
 echo "== the std/io exercise"
-build_and_run "std_io" exercise-io "$REPO/test/cli/std_io_exercise.iyi"
+build_and_run "std_io" exercise-io "$REPO/test/cli/std_io_exercise.ri"
 
 echo
 echo "== the same program with optimisation on (--release)"
-build_and_run "std_io, release" exercise-io-release "$REPO/test/cli/std_io_exercise.iyi" --release >/dev/null
+build_and_run "std_io, release" exercise-io-release "$REPO/test/cli/std_io_exercise.ri" --release >/dev/null
 if grep -q "ALL CHECKS PASSED" "$WORK/exercise-io-release.out" 2>/dev/null; then
   echo "  the release build reached the end"
 else
@@ -184,9 +184,9 @@ done
 
 echo
 echo "== every ByteFormat encoding against python3 struct"
-grep -E '^  (LE|BE) (Int32|Int64|UInt64|UInt8) ' "$WORK/exercise-io.out" > "$WORK/encodings.iyi.txt"
+grep -E '^  (LE|BE) (Int32|Int64|UInt64|UInt8) ' "$WORK/exercise-io.out" > "$WORK/encodings.ri.txt"
 if [ -n "$PY" ]; then
-  "$PY" - "$WORK/encodings.iyi.txt" > "$WORK/encodings.py.txt" <<'PY'
+  "$PY" - "$WORK/encodings.ri.txt" > "$WORK/encodings.py.txt" <<'PY'
 import struct, sys
 # Python's text mode writes each "\n" as "\r\n" on Windows, and a program iyi
 # builds writes "\n" there as everywhere: every one of the eighty lines then
@@ -200,13 +200,13 @@ for line in open(sys.argv[1]):
     print(f"  {order} {kind} {value} {struct.pack(fmt, int(value)).hex()}")
 PY
 fi
-encoded="$(wc -l < "$WORK/encodings.iyi.txt")"
+encoded="$(wc -l < "$WORK/encodings.ri.txt")"
 if [ "$encoded" -lt 60 ]; then
   echo "  only $encoded encodings printed; the table has shrunk"
   status=1
 elif [ -z "$PY" ]; then
   echo "  skipped: no working python3, so the encodings were not compared with struct.pack"
-elif diff "$WORK/encodings.iyi.txt" "$WORK/encodings.py.txt" > "$WORK/encodings.diff"; then
+elif diff "$WORK/encodings.ri.txt" "$WORK/encodings.py.txt" > "$WORK/encodings.diff"; then
   echo "  all $encoded encodings (Int32, Int64, UInt64, UInt8; LE and BE; negative, min, max) agree with struct.pack"
 else
   echo "  encodings differ from python3 struct:"
@@ -214,7 +214,7 @@ else
   status=1
 fi
 for needed in "LE Int32 -1 ffffffff" "BE Int32 -2147483648 80000000" "LE Int64 -9223372036854775808 0000000000000080" "BE Int64 9223372036854775807 7fffffffffffffff" "LE UInt64 18446744073709551615 ffffffffffffffff" "BE UInt8 255 ff"; do
-  if ! grep -qF -- "  $needed" "$WORK/encodings.iyi.txt"; then
+  if ! grep -qF -- "  $needed" "$WORK/encodings.ri.txt"; then
     echo "  MISSING encoding: $needed"
     status=1
   fi
@@ -222,7 +222,7 @@ done
 
 echo
 echo "== every Hexdump line against python3's hexdump -C"
-grep -E '^[0-9a-f]{8}  ' "$WORK/exercise-io.out" > "$WORK/dumps.iyi.txt"
+grep -E '^[0-9a-f]{8}  ' "$WORK/exercise-io.out" > "$WORK/dumps.ri.txt"
 if [ -n "$PY" ]; then
   "$PY" - "$WORK/dumps.oracle.txt" <<'PY'
 import sys
@@ -254,12 +254,12 @@ with open(sys.argv[1], "w", newline="\n") as out:
         out.write(dump_c(chunk))
 PY
 fi
-if [ "$(wc -l < "$WORK/dumps.iyi.txt")" -ne 5 ]; then
-  echo "  expected five dump lines on stdout, found $(wc -l < "$WORK/dumps.iyi.txt")"
+if [ "$(wc -l < "$WORK/dumps.ri.txt")" -ne 5 ]; then
+  echo "  expected five dump lines on stdout, found $(wc -l < "$WORK/dumps.ri.txt")"
   status=1
 elif [ -z "$PY" ]; then
   echo "  skipped: no working python3, so the dump lines were not compared with hexdump -C"
-elif diff "$WORK/dumps.iyi.txt" "$WORK/dumps.oracle.txt" > "$WORK/dumps.diff"; then
+elif diff "$WORK/dumps.ri.txt" "$WORK/dumps.oracle.txt" > "$WORK/dumps.diff"; then
   echo "  five lines (a short line, three lines of forty bytes, a stdout dump) equal hexdump -C's"
 else
   echo "  dump lines differ from hexdump -C:"
@@ -282,8 +282,8 @@ done
 # Negative failure proofs
 # ---------------------------------------------------------------------------
 
-patched_fails() { # patched_fails <label> <dir> <check phrase> <python replacement expression> [module under src/, std/io.iyi by default]
-  local label="$1" dir="$2" phrase="$3" replacement="$4" module="${5:-std/io.iyi}"
+patched_fails() { # patched_fails <label> <dir> <check phrase> <python replacement expression> [module under src/, std/io.ri by default]
+  local label="$1" dir="$2" phrase="$3" replacement="$4" module="${5:-std/io.ri}"
   if [ -z "$PY" ]; then
     echo "  $label: skipped, no working python3 to make the broken copy with"
     return 0
@@ -292,7 +292,7 @@ patched_fails() { # patched_fails <label> <dir> <check phrase> <python replaceme
   # the whole prelude is, so a prelude module is broken in a copy of all.
   mkdir -p "$(dirname "$WORK/$dir/$module")"
   case "$module" in
-    iyi/*) cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi" ;;
+    ris/*) cp -R "$REPO/src/ris/." "$WORK/$dir/ris" ;;
     *) cp "$REPO/src/$module" "$WORK/$dir/$module" ;;
   esac
   "$PY" - "$WORK/$dir/$module" "$replacement" <<'PY'
@@ -309,7 +309,7 @@ PY
     status=1
     return
   fi
-  if (IYI_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_io_exercise.iyi" >"$WORK/$dir.out" 2>&1); then
+  if (RIS_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_io_exercise.ri" >"$WORK/$dir.out" 2>&1); then
     echo "  $label: the exercise PASSED with the module broken (it should have failed):"
     head -15 "$WORK/$dir.out" | sed 's/^/    /'
     status=1
@@ -360,7 +360,7 @@ patched_fails "a reader chomps a lone CR" patched_cr_reader "lines(chomp) on a S
 # is the one broken.
 patched_fails "a file chomps a lone CR" patched_cr_file "lines(chomp) on a file keeps a CR that ends it" \
   '    chomp ? text.chomp : text=>    chomp ? (text.ends_with?("\r") ? text[0, text.bytesize - 1] : text.chomp) : text' \
-  iyi/io.iyi
+  ris/io.ri
 
 echo
 echo "== negative proof: a pipe that holds writes, ends badly or drops a piece is caught"
@@ -412,8 +412,8 @@ echo
 echo "== what the module refuses"
 io_panics_with() { # io_panics_with <label> <name> <phrase> <program body>
   local label="$1" name="$2" phrase="$3" body="$4"
-  printf 'module main\n\nimport std/io::{Memory, Sized, Delimited, MultiWriter, Hexdump, ByteFormat}\n\n%s\n' "$body" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/io::{Memory, Sized, Delimited, MultiWriter, Hexdump, ByteFormat}\n\n%s\n' "$body" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -432,7 +432,7 @@ io_panics_with() { # io_panics_with <label> <name> <phrase> <program body>
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 io_panics_with "a negative count" neg_count "negative count: -1" \
   'puts Memory.new("abc").read_bytes(-1)'
@@ -543,7 +543,7 @@ puts m.read_char'
 # the wait that still has to happen.
 echo
 echo "== standard input read to its end, from a file and from a pipe"
-cat >"$WORK/lines.iyi" <<'IYI'
+cat >"$WORK/lines.ri" <<'RIS'
 module lines
 
 count = 0
@@ -553,8 +553,8 @@ while line = STDIN.gets(chomp: true)
   bytes = bytes + line.bytesize
 end
 puts "#{count} #{bytes}"
-IYI
-if ! "$IYI" build -o "$WORK/lines" "$WORK/lines.iyi" >"$WORK/lines.build.log" 2>&1; then
+RIS
+if ! "$RIS" build -o "$WORK/lines" "$WORK/lines.ri" >"$WORK/lines.build.log" 2>&1; then
   echo "  the line counter did not build"
   sed -n '1,6p' "$WORK/lines.build.log"
   status=1

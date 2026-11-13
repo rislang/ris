@@ -2975,7 +2975,7 @@ module Iyi
             # no location, and the `allocate` a generated `new` makes stands
             # where that `new` was made - `class Reference` in the prelude for
             # a class with no `initialize` - so `A.new` was reported at
-            # primitives.iyi:58 and `-f json`'s deepest frame had no file and
+            # primitives.ri:58 and `-f json`'s deepest frame had no file and
             # no line. Past a generated `new`, the call is the one to it.
             blame = call
             if blame && (outer = blame.parent_visitor?) && outer.typed_def?.try(&.new?) && (asked = outer.call)
@@ -3404,11 +3404,11 @@ module Iyi
       # body does, and `def foo ... rescue` was reported at `raise "x"`.
       if @program.iyi_prelude? && !node.iyi_defer? && node.location.try(&.original_filename.try(&.ris_source?))
         if node.rescues || node.else
-          (node.rescues.try(&.first) || node).raise "iyi has no exceptions to rescue: an error is a value the caller handles (iyi SPEC III.1), " \
+          (node.rescues.try(&.first) || node).raise "ris has no exceptions to rescue: an error is a value the caller handles (iyi SPEC III.1), " \
                                                     "and a panic is caught at a task boundary (III.1.4), never here - this `rescue` would not run. " \
                                                     "Return the error, or read the task's `value`"
         elsif node.ensure && (at = node.ensure_location || node.location)
-          ::raise TypeException.new("iyi has no `ensure`: a panic unwinds by registry and skips it (iyi SPEC III.1.4). " \
+          ::raise TypeException.new("ris has no `ensure`: a panic unwinds by registry and skips it (iyi SPEC III.1.4). " \
                                     "Write `defer`, which runs on return, on `!` and on a panic",
             at.line_number, at.column_number, at.filename, "ensure".size)
         end

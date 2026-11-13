@@ -30,4 +30,5 @@ def run
   refill(holder)
   puts kept
 end
+
 tape { run }

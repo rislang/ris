@@ -4,6 +4,7 @@ end
 
 struct BoardLimitRace
   getter number : Int32
+
   def initialize(@number : Int32)
   end
 end

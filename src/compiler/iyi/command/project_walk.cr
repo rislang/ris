@@ -20,14 +20,17 @@ class Iyi::Command
       if Dir.exists?(path)
         next if WALK_SKIPPED_DIRS.includes?(child)
         project_walk(path, found, &keep)
+      elsif Lexer.iyi_named?(child)
+        # ris: a file named for iyi is refused, not skipped (SPEC 6.10).
+        abort! Lexer.iyi_miscased_sentence(path), :USAGE_ERROR
       elsif keep.call(child)
         found << path
       end
     end
   end
 
-  # A test program's name: `*_test.ri` or `*_test.iyi`, the suffix in any
-  # case so a miscased name is refused later rather than walked past.
+  # A test program's name: `*_test.ri`, the suffix in any case so a
+  # miscased name is refused later rather than walked past.
   private def test_program_name?(name : String) : Bool
     lower = name.downcase
     lower.ends_with?("_test.ri") || lower.ends_with?("_test.iyi")

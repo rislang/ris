@@ -4,7 +4,7 @@ all: ##
 
 # Recipes for this Makefile
 
-## Build the compiler and `iyi`, then run a program with ./bin/iyi
+## Build the compiler and `iyi`, then run a program with ./bin/ris
 ##   $ make
 ## Build the compiler with progress output
 ##   $ make progress=1
@@ -65,7 +65,7 @@ override FLAGS += -D strict_multi_assign -D preview_overload_order $(if $(releas
 # What that looked like from outside: a 116-byte mangled function name in a
 # 128-byte block, needing 129, clean at `target_def_fun` and corrupt at the
 # same address by `check_mod_fun`, LLVM's `strlen` reading into the next
-# allocation, and `samples/iyi/collections.iyi` failing to link 10 runs out of
+# allocation, and `samples/ris/collections.ri` failing to link 10 runs out of
 # 10. Four mechanisms were written down before it and all four were wrong:
 # invalid IR, a dropped symbol, an empty link line, and parallel codegen. The
 # switch two lines below removes the parallel half and changed nothing, 5/5
@@ -110,7 +110,7 @@ override COMPILER_FLAGS += -Dwithout_openssl -Dwithout_zlib -Dwithout_iconv$(if 
 BINARY_GC_FLAGS := $(if $(gc_none),-Dgc_none,)
 TEST_WARNINGS_OFF := --exclude-warnings test/std --exclude-warnings test/compiler --exclude-warnings test/primitives --exclude-warnings src/float/printer --exclude-warnings src/random.cr
 override TEST_FLAGS += $(if $(verbose),-v )$(if $(junit_output),--junit_output $(junit_output) )$(if $(order),--order=$(order) )
-IYI_CONFIG_LIBRARY_PATH := '$$ORIGIN/../lib/iyi'
+IYI_CONFIG_LIBRARY_PATH := '$$ORIGIN/../lib/ris'
 ifndef IYI_CONFIG_BUILD_COMMIT
 	IYI_CONFIG_BUILD_COMMIT := $(shell git rev-parse --short HEAD 2> /dev/null)
 endif
@@ -172,21 +172,21 @@ CRYSTAL_BIN := crystal$(EXE)
 # the forking thread survives a fork, so a multi-threaded runtime would hand the
 # child a broken one. `crystal daemon start` execs this binary.
 CRYSTAL_DAEMON_BIN := crystal-daemon$(EXE)
-# iyi: its own server, because a daemon is the compiler it was built from. `iyi`
+# iyi: its own server, because a daemon is the compiler it was built from. `ris`
 # and `crystal` are one compiler with two preludes and two command surfaces, and
 # `iyi daemon start` looks for a sibling named after the binary that was typed.
-IYI_DAEMON_BIN := iyi-daemon$(EXE)
+IYI_DAEMON_BIN := ris-daemon$(EXE)
 
 # iyi: what a downloadable build of iyi is called.
 IYI_VERSION ?= $(shell cat src/IYI_VERSION)
-IYI_PACKAGE := iyi-$(IYI_VERSION)-$(shell uname -s | tr A-Z a-z)-$(shell uname -m)
+IYI_PACKAGE := ris-$(IYI_VERSION)-$(shell uname -s | tr A-Z a-z)-$(shell uname -m)
 
 # iyi: "beside this binary", in the loader's own words — the token differs
 # per platform and nothing else about the rule does.
 #
 # The compiler needs one shared library at *runtime* that a fresh machine
 # has no reason to own: LLVM's. A tarball that does not carry it is a
-# tarball whose `bin/iyi` dies on `libLLVM.so.NN: cannot open shared object
+# tarball whose `bin/ris` dies on `libLLVM.so.NN: cannot open shared object
 # file` — which every release before this one shipped, invisibly, because
 # the gate that unpacks the tarball ran on the machine that built it and
 # found the library it had just linked against. So the package carries
@@ -254,9 +254,9 @@ check_llvm_config = $(eval \
 	)
 
 .PHONY: all
-# iyi: both names, because a plain `make` that leaves you with a binary called
-# `crystal` and nothing called `iyi` is a confusing way to build iyi.
-all: crystal iyi
+# ris: both names, because a plain `make` that leaves you with a binary called
+# `crystal` and nothing called `ris` is a confusing way to build ris.
+all: crystal ris
 
 .PHONY: test
 test: ## Run tests
@@ -296,10 +296,10 @@ check_daemon_matches: $(O)/crystal$(EXE) $(O)/$(CRYSTAL_DAEMON_BIN)
 	 fi
 
 .PHONY: cli_test
-# `$(O)/iyi` too: one test here runs `iyi daemon start` to read the name it
-# looks its server up by. Not `iyi-daemon` — that test is about the lookup
+# `$(O)/ris` too: one test here runs `ris daemon start` to read the name it
+# looks its server up by. Not `ris-daemon` — that test is about the lookup
 # failing, so a server would be the wrong thing to have.
-cli_test: $(O)/cli_test$(EXE) check_daemon_matches $(O)/iyi$(EXE) ## Run compiler CLI tests
+cli_test: $(O)/cli_test$(EXE) check_daemon_matches $(O)/ris$(EXE) ## Run compiler CLI tests
 	$(O)/cli_test$(EXE) $(TEST_FLAGS)
 
 .PHONY: simple_smoke_test
@@ -323,16 +323,9 @@ all_test: $(O)/all_test$(EXE) ## Run all tests (note: this builds a huge program
 .PHONY: crystal
 crystal: $(O)/$(CRYSTAL_BIN) ## Build the compiler under Crystal's name (test/ and its scripts use this one)
 
-.PHONY: iyi
-iyi: $(O)/iyi$(EXE) ## iyi: build `iyi` itself, runnable as ./bin/iyi [default, with crystal]
-
-# ris: the same compiler under the language's name. A link, not a second
-# build: the binary finds its prelude from where it really is, and names
-# itself `ris` whichever name ran it.
+# ris: the compiler under the language's name, runnable as ./bin/ris.
 .PHONY: ris
-ris: $(O)/iyi$(EXE) ## ris: build the compiler, runnable as ./bin/ris
-	ln -sf iyi$(EXE) $(O)/ris$(EXE)
-	@echo "built $(O)/ris — run it as ./bin/ris"
+ris: $(O)/ris$(EXE) ## ris: build the compiler, runnable as ./bin/ris [default, with crystal]
 
 .PHONY: crystal-front
 crystal-front: $(O)/crystal-front$(EXE) ## iyi: build the front end, which links no LLVM
@@ -340,8 +333,8 @@ crystal-front: $(O)/crystal-front$(EXE) ## iyi: build the front end, which links
 .PHONY: crystal-daemon
 crystal-daemon: $(O)/$(CRYSTAL_DAEMON_BIN) ## Build the single-threaded build daemon
 
-.PHONY: iyi-daemon
-iyi-daemon: $(O)/$(IYI_DAEMON_BIN) ## iyi: build iyi's own single-threaded build daemon
+.PHONY: ris-daemon
+ris-daemon: $(O)/$(IYI_DAEMON_BIN) ## ris: build ris's own single-threaded build daemon
 
 .PHONY: build
 build: ## Build ris for a package install
@@ -369,7 +362,7 @@ format: ## Format sources
 # the same reason, `safe.directory` included: inside the build image the
 # checkout is owned by another user and git 2.35+ refuses `ls-files`
 # without it, which would turn this gate into a crash rather than a check.
-	git -c safe.directory='*' ls-files -z --cached --others --exclude-standard '*.cr' '*.iyi' \
+	git -c safe.directory='*' ls-files -z --cached --others --exclude-standard '*.cr' '*.ri' \
 	  | xargs -0 ./bin/crystal tool format$(if $(check), --check)
 
 .PHONY: generate_data
@@ -384,59 +377,35 @@ install: install_ris
 uninstall: ## Uninstall ris and its prelude from DESTDIR
 uninstall: uninstall_ris
 
-# iyi: the binary and its prelude, and nothing else — an iyi program requires
-# only the prelude and the prelude requires only itself, so what is installed
-# beside `bin/iyi` is 1,040 KB rather than a standard library.
-.PHONY: install_iyi
-install_iyi: ## iyi: install `iyi` and its prelude at DESTDIR
-install_iyi: $(O)/iyi$(EXE) $(O)/$(IYI_DAEMON_BIN)
-	rm -rf "$(DESTDIR)$(DATADIR)/iyi"
-	$(INSTALL) -d -m 0755 "$(DESTDIR)$(BINDIR)/"
-	$(INSTALL) -m 0755 "$(O)/iyi$(EXE)" "$(DESTDIR)$(BINDIR)/iyi$(EXE)"
-
-	$(INSTALL) -m 0755 "$(O)/$(IYI_DAEMON_BIN)" "$(DESTDIR)$(BINDIR)/$(IYI_DAEMON_BIN)"
-
-	$(INSTALL) -d -m 0755 "$(DESTDIR)$(DATADIR)/iyi/src"
-	cp -R -p $(if $(deref_symlinks),-L,-P) src/iyi "$(DESTDIR)$(DATADIR)/iyi/src/iyi"
-
-# And the standard library beside it, because `import std/text` is a program's
-# line and not a checkout's. It rode into the tarball under the other
-# language's directory before this - `src/.` below copies everything there -
-# so it resolved by accident, out of a library it is not part of. Here it is
-# on `IYI_PATH` under its own name.
-	cp -R -p $(if $(deref_symlinks),-L,-P) src/std "$(DESTDIR)$(DATADIR)/iyi/src/std"
-
-	$(INSTALL) -d -m 0755 "$(DESTDIR)$(DATADIR)/licenses/iyi/"
-	$(INSTALL) -m 644 LICENSE "$(DESTDIR)$(DATADIR)/licenses/iyi/LICENSE"
-	$(INSTALL) -m 644 NOTICE.md "$(DESTDIR)$(DATADIR)/licenses/iyi/NOTICE.md"
-
-# ris: iyi's install in a tree of its own, and `ris` on the PATH linked into
-# it. The prelude's place is built into the binary as `$ORIGIN/../share/iyi`,
-# so sharing PREFIX with an installed iyi would replace that iyi's files.
-RIS_HOME ?= $(PREFIX)/lib/ris
-
+# ris: the binary and its prelude, and nothing else — a ris program requires
+# only what its prelude and std hold. Installed at PREFIX: bin/ris,
+# bin/ris-daemon, share/ris/src/{ris,std}, share/licenses/ris. `uninstall`
+# removes these paths only: an iyi installed beside ris is not ris's.
 .PHONY: install_ris
-install_ris: ## ris: install ris in RIS_HOME, linked as BINDIR/ris
-	$(MAKE) install_iyi PREFIX="$(RIS_HOME)" BINDIR="$(RIS_HOME)/bin" DATADIR="$(RIS_HOME)/share"
+install_ris: ## ris: install `ris` and its prelude at DESTDIR
+install_ris: $(O)/ris$(EXE) $(O)/$(IYI_DAEMON_BIN)
+	rm -rf "$(DESTDIR)$(DATADIR)/ris"
 	$(INSTALL) -d -m 0755 "$(DESTDIR)$(BINDIR)/"
-	ln -sf "$(RIS_HOME)/bin/iyi$(EXE)" "$(DESTDIR)$(BINDIR)/ris$(EXE)"
+	$(INSTALL) -m 0755 "$(O)/ris$(EXE)" "$(DESTDIR)$(BINDIR)/ris$(EXE)"
+	$(INSTALL) -m 0755 "$(O)/$(IYI_DAEMON_BIN)" "$(DESTDIR)$(BINDIR)/$(IYI_DAEMON_BIN)"
+	$(INSTALL) -d -m 0755 "$(DESTDIR)$(DATADIR)/ris/src"
+	cp -R -p $(if $(deref_symlinks),-L,-P) src/ris "$(DESTDIR)$(DATADIR)/ris/src/ris"
+	cp -R -p $(if $(deref_symlinks),-L,-P) src/std "$(DESTDIR)$(DATADIR)/ris/src/std"
+	$(INSTALL) -d -m 0755 "$(DESTDIR)$(DATADIR)/licenses/ris/"
+	$(INSTALL) -m 644 LICENSE "$(DESTDIR)$(DATADIR)/licenses/ris/LICENSE"
+	$(INSTALL) -m 644 NOTICE.md "$(DESTDIR)$(DATADIR)/licenses/ris/NOTICE.md"
 
 .PHONY: uninstall_ris
 uninstall_ris: ## ris: remove what install_ris installed
 	rm -f "$(DESTDIR)$(BINDIR)/ris$(EXE)"
-	rm -rf "$(DESTDIR)$(RIS_HOME)"
-
-.PHONY: uninstall_iyi
-uninstall_iyi: ## iyi: remove what install_iyi installed
-	rm -f "$(DESTDIR)$(BINDIR)/iyi$(EXE)"
 	rm -f "$(DESTDIR)$(BINDIR)/$(IYI_DAEMON_BIN)"
-	rm -rf "$(DESTDIR)$(DATADIR)/iyi"
-	rm -rf "$(DESTDIR)$(DATADIR)/licenses/iyi"
+	rm -rf "$(DESTDIR)$(DATADIR)/ris"
+	rm -rf "$(DESTDIR)$(DATADIR)/licenses/ris"
 
-# iyi: the binaries about to be packaged are optimised ones.
+# ris: the binaries about to be packaged are optimised ones.
 #
 # `release := 1` above asks for that, and asking is not enough: make rebuilds
-# on file times, so a `.build/iyi` left over from an ordinary `make iyi` is
+# on file times, so a `.build/ris` left over from an ordinary `make ris` is
 # newer than every source and gets packaged as it is. Nothing about the tarball
 # would look wrong. The binary would simply be an unoptimised compiler, and
 # every build every user ran would go through it — a release nobody could see
@@ -444,134 +413,77 @@ uninstall_iyi: ## iyi: remove what install_iyi installed
 #
 # So it is asked of the binary rather than of the build: `--version` says which
 # it is.
-.PHONY: check_iyi_is_release
-check_iyi_is_release: $(O)/iyi$(EXE) $(O)/$(IYI_DAEMON_BIN)
-	@for bin in iyi$(EXE) $(IYI_DAEMON_BIN); do \
+.PHONY: check_ris_is_release
+check_ris_is_release: $(O)/ris$(EXE) $(O)/$(IYI_DAEMON_BIN)
+	@for bin in ris$(EXE) $(IYI_DAEMON_BIN); do \
 	   if $(O)/$$bin --version | grep -q "not built in release mode"; then \
 	     echo "$(O)/$$bin is not an optimised build, and a tarball ships what it packages."; \
 	     echo "It is up to date by file times, so make will not rebuild it. Force it:"; \
-	     echo "  make -B iyi iyi-daemon release=1"; \
+	     echo "  make -B ris ris-daemon release=1"; \
 	     exit 1; \
 	   fi; \
 	 done
 
-# iyi: the same layout in a file somebody can download. Relocatable, because
-# the binary finds its prelude relative to itself.
-.PHONY: iyi-tarball
-iyi-tarball: ## iyi: build a relocatable tarball at $(O)
-# bake-format off: Mbake bug with Duplicate target rule https://github.com/EbodShojaei/bake/issues/106
-iyi-tarball: release := 1
-iyi-tarball: $(O)/iyi$(EXE) $(O)/$(IYI_DAEMON_BIN) check_iyi_is_release
-# bake-format on
-	rm -rf "$(O)/iyi-package"
-# `release=1` again, for the sub-make: `release := 1` above is this goal's
-# and does not travel. Under `make -B iyi-tarball` the sub-make inherits
-# `-B`, rebuilds `iyi` for `install_iyi` *after* the guard above passed, and
-# without the word rebuilt it unoptimised — the exact package the guard
-# exists to refuse, found by running the tarball this way once.
-	$(MAKE) install_iyi release=1 DESTDIR="$(CURDIR)/$(O)/iyi-package" PREFIX=""
-	$(INSTALL) -m 644 README.md "$(O)/iyi-package/share/iyi/README.md"
-	$(INSTALL) -m 644 SPEC.md "$(O)/iyi-package/share/iyi/SPEC.md"
-	cp -R -p samples/iyi "$(O)/iyi-package/share/iyi/samples"
-	find "$(O)/iyi-package/share/iyi/samples" \
-	     \( -name lib -o -name mods \) -type d -prune -exec rm -rf {} +
-	find "$(O)/iyi-package/share/iyi/samples" -type f -perm -u+x -delete
-	find "$(O)/iyi-package/share/iyi/samples" -type d -empty -delete
-# What the binaries need at runtime and a fresh machine has no reason to
-# own. In ris the collector is among them by default; `gc_none=1` takes
-# libgc off and the bundle follows it. What is left depends on how LLVM was
-# linked, and both cases are measured: against `scripts/build-static-llvm.sh`
-# LLVM is inside the binary and `lib/` is empty, and the script refuses a
-# package that carries libLLVM in that case; against a shared LLVM, `lib/`
-# carries it and whatever it names (here libLLVM, libz3, libzstd), plus
-# libstdc++ on Linux. Not a curated list: the script takes what the loader
-# reports, which is why it needed no change when the collector left, and
-# CI's clean room (a bare image with nothing but a C toolchain) judges it.
-	bash scripts/bundle-runtime-libs.sh "$(O)/iyi-package"
-	tar -czf "$(O)/$(IYI_PACKAGE).tar.gz" -C "$(O)/iyi-package" .
-	@echo "wrote $(O)/$(IYI_PACKAGE).tar.gz"
-
-# ris: iyi's package, with `bin/ris` and ris's documents beside it. Unpacked
-# into a directory of its own (`install_ris.sh`), so it carries no manifest.
+# ris: the same layout in a file somebody can download, with ris's documents
+# beside it. Relocatable, because the binary finds its prelude relative to
+# itself. Unpacked into a directory of its own (`install_ris.sh`).
 RIS_VERSION := $(shell sed -n 's/^ *RIS_VERSION = "\(.*\)"/\1/p' src/compiler/iyi/config.cr)
 RIS_PACKAGE := ris-$(RIS_VERSION)-$(shell uname -s | tr A-Z a-z)-$(shell uname -m)
 
 .PHONY: ris-tarball
 ris-tarball: ## ris: build a relocatable tarball at $(O)
-ris-tarball: iyi-tarball
+# bake-format off: Mbake bug with Duplicate target rule https://github.com/EbodShojaei/bake/issues/106
+ris-tarball: release := 1
+ris-tarball: $(O)/ris$(EXE) $(O)/$(IYI_DAEMON_BIN) check_ris_is_release
+# bake-format on
 	rm -rf "$(O)/ris-package"
-	cp -R -p "$(O)/iyi-package" "$(O)/ris-package"
-	ln -sf iyi$(EXE) "$(O)/ris-package/bin/ris$(EXE)"
-	$(INSTALL) -d -m 0755 "$(O)/ris-package/share/ris"
+# `release=1` again, for the sub-make: `release := 1` above is this goal's
+# and does not travel. Under `make -B ris-tarball` the sub-make inherits
+# `-B`, rebuilds `ris` for `install_ris` *after* the guard above passed, and
+# without the word rebuilt it unoptimised — the exact package the guard
+# exists to refuse, found by running the tarball this way once.
+	$(MAKE) install_ris release=1 DESTDIR="$(CURDIR)/$(O)/ris-package" PREFIX=""
 	$(INSTALL) -m 644 README.md LEARN.md SPEC.md LICENSE NOTICE.md \
 	  "$(O)/ris-package/share/ris/"
 	cp -R -p samples/ris "$(O)/ris-package/share/ris/samples"
+	find "$(O)/ris-package/share/ris/samples" \
+	     \( -name lib -o -name mods \) -type d -prune -exec rm -rf {} +
+	find "$(O)/ris-package/share/ris/samples" -type f -perm -u+x -delete
+	find "$(O)/ris-package/share/ris/samples" -type d -empty -delete
+# What the binaries need at runtime and a fresh machine has no reason to
+# own: see scripts/bundle-runtime-libs.sh, which takes what the loader
+# reports; CI's clean room (a bare image with nothing but a C toolchain)
+# judges it.
+	bash scripts/bundle-runtime-libs.sh "$(O)/ris-package"
 	tar -czf "$(O)/$(RIS_PACKAGE).tar.gz" -C "$(O)/ris-package" .
 	@echo "wrote $(O)/$(RIS_PACKAGE).tar.gz"
-
-ifeq ($(WINDOWS),1)
-.PHONY: install_dlls
-install_dlls: $(O)/$(CRYSTAL_BIN) ## Install the compiler's dependent DLLs at DESTDIR (Windows only)
-	$(INSTALL) -d -m 0755 "$(DESTDIR)$(BINDIR)/"
-	@ldd $(O)/$(CRYSTAL_BIN) | grep -iv ' => /c/windows/system32' | sed 's/.* => //; s/ (.*//' | xargs -t -i $(INSTALL) -m 0755 '{}' "$(DESTDIR)$(BINDIR)/"
-endif
-
-$(O)/all_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
-	$(call check_llvm_config)
-	@mkdir -p $(O)
-	$(EXPORT_CC) $(EXPORTS) CRYSTAL_SKIP_BUILT=1 ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/all_test.cr
-
-$(O)/std_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
-	$(call check_llvm_config)
-	@mkdir -p $(O)
-	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/std_test.cr
-$(O)/compiler_test$(EXE): $(DEPS) $(SOURCES) $(TEST_SOURCES)
-	$(call check_llvm_config)
-	@mkdir -p $(O)
-	$(EXPORT_CC) CRYSTAL_SKIP_BUILT=1 ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/compiler_test.cr --release
-
-$(O)/primitives_test$(EXE): $(O)/$(CRYSTAL_BIN) $(DEPS) $(SOURCES) $(TEST_SOURCES)
-	@mkdir -p $(O)
-	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/primitives_test.cr
-
-$(O)/cli_test$(EXE): $(O)/$(CRYSTAL_BIN) $(O)/$(IYI_DAEMON_BIN) $(DEPS) $(SOURCES) $(TEST_SOURCES)
-	@mkdir -p $(O)
-	$(EXPORT_CC) ./bin/crystal build $(FLAGS) $(TEST_WARNINGS_OFF) -o $@ test/cli_test.cr
-
-$(O)/$(CRYSTAL_BIN): $(DEPS) $(SOURCES)
-	$(call check_llvm_config)
-	@mkdir -p $(O)
-	$(EXPORTS) $(EXPORTS_BUILD) ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) -o $(if $(WINDOWS),$(O)/crystal-next.exe,$@) src/compiler/crystal.cr
-	@# NOTE: on MSYS2 it is not possible to overwrite a running program, so the compiler must be first built with
-	@# a different filename and then moved to the final destination.
-	$(if $(WINDOWS),mv $(O)/crystal-next.exe $@)
 
 # iyi: the same compiler under its own name — the commands iyi has, a usage
 # line that names them, and a version that says what it is a fork of. It links
 # what `crystal` links, because it *is* `crystal`; what differs is the surface.
-# Its prelude is its own, and it is 1,040 KB: `iyi` installed as `bin/iyi` finds
-# `share/iyi/src/iyi/prelude.iyi` beside it and needs nothing else — no
-# `IYI_PATH`, no standard library, because an iyi program requires only the
+# Its prelude is its own, and it is 1,040 KB: `bin/ris` installed finds
+# `share/ris/src/ris/prelude.ri` beside it and needs nothing else — no
+# `RIS_PATH`, no standard library, because a ris program requires only the
 # prelude and the prelude requires only itself.
-$(O)/iyi$(EXE): $(DEPS) $(SOURCES)
+$(O)/ris$(EXE): $(DEPS) $(SOURCES)
 	$(call check_llvm_config)
 	@mkdir -p $(O)
-	$(EXPORTS) $(EXPORTS_BUILD) IYI_CONFIG_PATH='$$ORIGIN/../share/iyi/src:$$ORIGIN/../share/iyi/crystal:$$ORIGIN/../src' \
+	$(EXPORTS) $(EXPORTS_BUILD) IYI_CONFIG_PATH='$$ORIGIN/../share/ris/src:$$ORIGIN/../share/ris/crystal:$$ORIGIN/../src' \
 	  ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) $(SELF_RPATH) -o $@ src/compiler/iyi.cr
-	@echo "built $@ — run it as ./bin/iyi"
+	@echo "built $@ — run it as ./bin/ris"
 
 # iyi: the same compiler, single-threaded, which is what lets it fork.
 #
 # The daemon forks a child per build and only the forking thread survives a
 # fork, so the server half cannot be the multi-threaded binary. Same sources,
-# same prelude path, `-Dwithout_mt` — and a name `iyi daemon start` will find
+# same prelude path, `-Dwithout_mt` — and a name `ris daemon start` will find
 # beside itself, installed or in `.build`.
 $(O)/$(IYI_DAEMON_BIN): $(DEPS) $(SOURCES)
 	$(call check_llvm_config)
 	@mkdir -p $(O)
-	$(EXPORTS) $(EXPORTS_BUILD) IYI_CONFIG_PATH='$$ORIGIN/../share/iyi/src:$$ORIGIN/../share/iyi/crystal:$$ORIGIN/../src' \
+	$(EXPORTS) $(EXPORTS_BUILD) IYI_CONFIG_PATH='$$ORIGIN/../share/ris/src:$$ORIGIN/../share/ris/crystal:$$ORIGIN/../src' \
 	  ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) $(SELF_RPATH) -Dwithout_mt -o $@ src/compiler/iyi.cr
-	@echo "built $@ — \`iyi daemon start\` finds it beside iyi"
+	@echo "built $@ — \`ris daemon start\` finds it beside ris"
 
 # iyi: the front end on its own. Linking libLLVM costs 26 ms of load-time
 # initialisers whether or not anything generates code, and `--no-codegen` never
@@ -622,8 +534,8 @@ clean_man:
 	rm -rf ./man
 
 .PHONY: clean_cache
-clean_cache: ## Clean up IYI_CACHE_DIR files
-	rm -rf $(shell ./bin/crystal env IYI_CACHE_DIR)
+clean_cache: ## Clean up RIS_CACHE_DIR files
+	rm -rf $(shell ./bin/crystal env RIS_CACHE_DIR)
 
 .PHONY: help
 help: ## Show this help

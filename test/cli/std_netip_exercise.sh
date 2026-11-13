@@ -9,9 +9,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -47,13 +47,13 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 export PYTHONIOENCODING=utf-8
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_netip_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_netip_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -117,7 +117,7 @@ todo="std/netip"
 while [ -n "$todo" ]; do
   next=""
   for module in $todo; do
-    for imported in $(sed -n 's/^import \(std\/[a-z_]*\).*/\1/p' "$REPO/src/$module.iyi"); do
+    for imported in $(sed -n 's/^import \(std\/[a-z_]*\).*/\1/p' "$REPO/src/$module.ri"); do
       case " $reached " in
         *" $imported "*) ;;
         *) reached="$reached $imported"; next="$next $imported" ;;
@@ -128,7 +128,7 @@ while [ -n "$todo" ]; do
 done
 bound=""
 for module in $reached; do
-  if grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)|__iyi_' "$REPO/src/$module.iyi" \
+  if grep -nE '^\s*(lib [A-Z]|fun [a-z_]|asm\(|@\[Link)|__iyi_' "$REPO/src/$module.ri" \
       | grep -qvE 'llvm\.(ctpop|ctlz|cttz)\.'; then
     bound="$bound $module"
   fi
@@ -470,7 +470,7 @@ print(f"  {counts['A']} addresses ({accepted} valid), {counts['P']} prefixes eac
       f"{counts['C']} containments, {counts['O']} overlaps, {counts['S']} subnet lists, {counts['R']} sorts, "
       f"{counts['T']} prefix sets")
 PY
-cat >"$WORK/driver.iyi" <<'IYI'
+cat >"$WORK/driver.ri" <<'RIS'
 module netip_corpus
 
 import std/netip::{IP, Prefix, PrefixSet, NetipError}
@@ -576,14 +576,14 @@ until done
     end
   end
 end
-IYI
+RIS
 
-SEARCH="$IYI_PATH"
+SEARCH="$RIS_PATH"
 # corpus <name>: builds the driver against SEARCH, answers the corpus, and
 # compares with Python's answers; prints the first lines that differ.
 corpus() {
   local name="$1"
-  if ! IYI_PATH="$SEARCH" "$IYI" build -o "$WORK/$name" "$WORK/driver.iyi" >"$WORK/$name.build.log" 2>&1; then
+  if ! RIS_PATH="$SEARCH" "$RIS" build -o "$WORK/$name" "$WORK/driver.ri" >"$WORK/$name.build.log" 2>&1; then
     echo "  the corpus program did not build: $(grep -m1 -E 'Error|BUG' "$WORK/$name.build.log")"
     return 2
   fi
@@ -632,7 +632,7 @@ echo "== where this module and python differ, by design"
 # Each difference the module's header names, checked on both sides, so a
 # Python that changes its answer shows here.
 if [ -n "$PY" ]; then
-  cat >"$WORK/differ.iyi" <<'IYI'
+  cat >"$WORK/differ.ri" <<'RIS'
 module differ
 
 import std/netip::{IP, Prefix, NetipError}
@@ -644,8 +644,8 @@ puts IP.parse("fe80::1%eth0").or_panic.reverse_pointer
 last = IP.parse("255.255.255.255").or_panic.next
 puts last ? last.to_s : "nil"
 puts (IP.parse("fe80::1%eth0").or_panic.next || IP.parse("::").or_panic).to_s
-IYI
-  if ! "$IYI" run "$WORK/differ.iyi" >"$WORK/differ.out" 2>&1; then
+RIS
+  if ! "$RIS" run "$WORK/differ.ri" >"$WORK/differ.out" 2>&1; then
     echo "  the differences program did not run: $(tail -1 "$WORK/differ.out")"
     status=1
   elif ! "$PY" - "$WORK/differ.out" <<'PY'
@@ -696,7 +696,7 @@ PY
   fi
 
   # The registry table the exercise holds is Python's own answer.
-  if ! "$PY" - "$REPO/test/cli/std_netip_exercise.iyi" <<'PY'
+  if ! "$PY" - "$REPO/test/cli/std_netip_exercise.ri" <<'PY'
 import ipaddress, re, sys
 source = open(sys.argv[1], encoding="utf-8").read()
 table = source[source.index("== iana special-purpose registries"):source.index("check ip(pair[0]).global? == pair[1]")]
@@ -717,7 +717,7 @@ echo "== what the module refuses, by name"
 # Malformed text is a NetipError value, checked by the exercise; what
 # panics is the program's own mistake, and an error it chose to panic on
 # (`or_panic`) panics with its sentence exactly.
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/netip::{IP, Prefix, PrefixSet}
@@ -753,8 +753,8 @@ when "prefix-or-panic"
   Prefix.parse("10.0.0.1/8").or_panic
 end
 puts "accepted"
-IYI
-if ! "$IYI" build -o "$WORK/refuse" "$WORK/refuse.iyi" >"$WORK/refuse.build.log" 2>&1; then
+RIS
+if ! "$RIS" build -o "$WORK/refuse" "$WORK/refuse.ri" >"$WORK/refuse.build.log" 2>&1; then
   echo "  the refusal program did not build: $(grep -m1 -E 'Error|BUG' "$WORK/refuse.build.log")"
   status=1
 fi
@@ -762,7 +762,7 @@ refuse() { # refuse <case> <phrase>
   if "$WORK/refuse" "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
-  elif ! grep -qxF -e "iyi: panic: $2" "$WORK/refuse.out"; then
+  elif ! grep -qxF -e "ris: panic: $2" "$WORK/refuse.out"; then
     echo "  $1 was refused without saying why: $(tr -d '\r' <"$WORK/refuse.out" | head -1)"
     status=1
   else
@@ -785,8 +785,8 @@ refuse prefix-or-panic "netip: \"10.0.0.1/8\" is not a prefix: host bits are set
 # An address is made by the module's readers and constructors, which
 # check what they are given; the field-by-field constructor is the
 # module's own.
-printf 'module unchecked\n\nimport std/netip::{IP}\nimport std/int\n\nputs IP.new(value: 0x100000000_u128, v6: false, zone: "")\n' >"$WORK/unchecked.iyi"
-if "$IYI" build -o "$WORK/unchecked" "$WORK/unchecked.iyi" >"$WORK/unchecked.log" 2>&1; then
+printf 'module unchecked\n\nimport std/netip::{IP}\nimport std/int\n\nputs IP.new(value: 0x100000000_u128, v6: false, zone: "")\n' >"$WORK/unchecked.ri"
+if "$RIS" build -o "$WORK/unchecked" "$WORK/unchecked.ri" >"$WORK/unchecked.log" 2>&1; then
   echo "  an IPv4 address of 33 bits was built"
   status=1
 elif grep -qF "protected method 'new' called for Std::Netip::IP.class" "$WORK/unchecked.log"; then
@@ -811,7 +811,7 @@ prove_broken() {
     status=1
     return
   fi
-  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/netip.iyi" "$WORK/patched/std/netip.iyi" <<'PY'
+  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/netip.ri" "$WORK/patched/std/netip.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 if os.environ["OLD"] not in src:
@@ -823,7 +823,7 @@ PY
     status=1
     return
   fi
-  local search="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi"
+  local search="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris"
   if [ "${5:-}" = corpus ]; then
     SEARCH="$search" corpus "mut-$mutations" >"$WORK/mut.out" 2>&1
     local code=$?
@@ -840,7 +840,7 @@ PY
   fi
   # Build first, then run: a patch that does not compile would also
   # "fail", and that proves nothing about whether the exercise catches it.
-  if ! IYI_PATH="$search" "$IYI" build -o "$WORK/mut-$mutations" "$REPO/test/cli/std_netip_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  if ! RIS_PATH="$search" "$RIS" build -o "$WORK/mut-$mutations" "$REPO/test/cli/std_netip_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the $1 copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1
@@ -904,14 +904,14 @@ prove_broken "a dotted tail allowed only after six groups" "the corpus disagrees
 
 echo
 echo "== doc, format, other platforms and artifacts"
-if "$IYI" doc "$REPO/src/std/netip.iyi" >"$WORK/doc.txt" 2>&1; then
+if "$RIS" doc "$REPO/src/std/netip.ri" >"$WORK/doc.txt" 2>&1; then
   echo "  iyi doc reads std/netip ($(grep -c '^ *def ' "$WORK/doc.txt") methods)"
 else
   echo "  iyi doc fails: $(grep -m1 -E 'Error|BUG' "$WORK/doc.txt")"
   status=1
 fi
 if [ -x "$REPO/bin/crystal" ]; then
-  if "$IYI" check format "$REPO/src/std/netip.iyi" "$REPO/test/cli/std_netip_exercise.iyi" >"$WORK/format.log" 2>&1; then
+  if "$RIS" check format "$REPO/src/std/netip.ri" "$REPO/test/cli/std_netip_exercise.ri" >"$WORK/format.log" 2>&1; then
     echo "  the module and its exercise are formatted"
   else
     echo "  not formatted: $(grep -m1 produced "$WORK/format.log")"
@@ -920,7 +920,7 @@ if [ -x "$REPO/bin/crystal" ]; then
 fi
 apart=""
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_netip_exercise.iyi" >"$WORK/cross.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_netip_exercise.ri" >"$WORK/cross.log" 2>&1; then
     echo "  $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross.log")"
     apart="$apart $target"
   fi
@@ -932,8 +932,8 @@ else
   echo "  the exercise typechecks for x86_64-linux-gnu, aarch64-darwin, x86_64-windows-msvc, aarch64-linux-gnu, x86_64-linux-musl"
 fi
 mkdir -p "$WORK/r1/mods"
-if (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_netip_exercise.iyi" \
-      && "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_netip_exercise.iyi") >"$WORK/r1/build.log" 2>&1; then
+if (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_netip_exercise.ri" \
+      && "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_netip_exercise.ri") >"$WORK/r1/build.log" 2>&1; then
   "$WORK/r1/from-source" >"$WORK/r1/source.out" 2>&1
   "$WORK/r1/from-artifact" >"$WORK/r1/artifact.out" 2>&1
   if cmp -s "$WORK/r1/source.out" "$WORK/r1/artifact.out" && grep -q "ALL CHECKS PASSED" "$WORK/r1/artifact.out"; then

@@ -4,10 +4,12 @@ WORDS = Array(String){"constant reader"}
 
 class State
   @@words = Array(String){"program #{42}"}
+
   def self.word : String
     @@words[0]
   end
 end
+
 threads = Array(IyiThread).new(4)
 4.times do
   threads << IyiThread.start do

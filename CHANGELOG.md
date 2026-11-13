@@ -57,6 +57,23 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.
 
+### 2026-11-13 · 6.7@436841dc 6.10@9b9f5766
+
+* New: a ris file ends in `.ri` (6.10). The compiler refuses a `.iyi`
+  file in any case at every boundary (a verb's path, the project walk,
+  check's walk, doc, an import only it satisfies), an `.iyimod`
+  artifact and its switches (`--emit-rimod`, `--use-rimod` now), and
+  `iyi.mod` and `iyi.sum`. `IYI_X` variables a user sets are `RIS_X`;
+  a set `IYI_X` prints "IYI_X is not read: set RIS_X". 6.7 loses
+  ".ri or .iyi" and "ris.mod or iyi.mod".
+  Why: one language, one extension; 326 tracked files ended in `.iyi`
+  (src/iyi/ is src/ris/, samples/iyi/ joined samples/ris/). Draft and
+  EGM review: doc/drafts/ri-extension/. The review made the rule cover
+  what a user meets (printed text says ris; `Iyi*` types and `__iyi_*`
+  symbols stay), added `.rimod` and its switches, a notice rather than
+  a refusal for `IYI_X`, a boundary table for the refusal, the
+  installed layout (share/ris, lib/ris, bin/ris-daemon) and one landing.
+
 ### 2026-11-13 · 6.7@10750e35 6.8@82707d6b 8.2@ddd1640f
 
 * New: a std module's promises are clauses in its own file, a

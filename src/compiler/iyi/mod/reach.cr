@@ -23,7 +23,7 @@
 #
 # Tests are left out - a consumer builds the package, never its tests -
 # and so are hidden directories, `lib/` and any directory with an
-# `iyi.mod` of its own, which is another package.
+# `ris.mod` of its own, which is another package.
 require "../syntax/parser"
 require "../syntax/visitor"
 require "../iyi_path"
@@ -98,13 +98,13 @@ module Iyi::Mod
     # Where `std/x/y` is, on the search path a build resolves it on.
     private def self.std_file(name : String) : String?
       IyiPath.default_paths.each do |entry|
-        file = File.join(File.expand_path(entry), "#{name}.iyi")
+        file = File.join(File.expand_path(entry), "#{name}.ri")
         return file if File.file?(file)
       end
       nil
     end
 
-    # The `.iyi` files a consumer builds of the package at *dir*.
+    # The `.ri` files a consumer builds of the package at *dir*.
     def self.sources(dir : String) : Array(String)
       found = [] of String
       Dir.each_child(dir) do |entry|
@@ -113,7 +113,7 @@ module Iyi::Mod
           next if entry.starts_with?('.') || entry == "lib"
           next if Installer.manifest?(full)
           found.concat(sources(full))
-        elsif entry.ris_source? && !entry.ends_with?("_test.iyi")
+        elsif entry.ris_source? && !entry.ends_with?("_test.ri")
           found << full
         end
       end

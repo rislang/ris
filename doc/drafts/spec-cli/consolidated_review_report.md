@@ -12,7 +12,7 @@ user's later decisions (mandatory coverage, todo tests), which stand.
 1. **Unit = file.** Tags from the leading comment block; outcome fail >
    todo > pass; `todo` ends the file.
 2. **Scanned set:** files under test/ and bench/ of the root (ris.mod or
-   iyi.mod), `#` comments (.ri .iyi .cr .sh .py); src/ and std/
+   ris.mod), `#` comments (.ri .ri .cr .sh .py); src/ and std/
    citations are not tags; prose regex `SPEC \d+\.\d+`. Recount 63/8
    with the command, one unit.
 3. **8 hex digits** for the version.

@@ -3,7 +3,7 @@
 #
 #     bash test/cli/std_dns_exercise.sh
 #
-# Runs test/cli/std_dns_exercise.iyi plain and --release - a name server in
+# Runs test/cli/std_dns_exercise.ri plain and --release - a name server in
 # the program itself, on 127.0.0.1, so nothing leaves the machine - checks
 # every section reported, holds the HTTPS records it reads (RFC 9460) to
 # BIND's reading of the same - nsupdate's of their presentation format,
@@ -16,9 +16,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -61,12 +61,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src"
+export RIS_PATH="$REPO/src"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_dns_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_dns_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -83,7 +83,7 @@ build_and_run() {
   fi
   # A task that panics after its group has joined prints and is not
   # propagated: the exit status alone does not see it.
-  if grep -q "iyi: panic" "$WORK/$name.out"; then
+  if grep -q "ris: panic" "$WORK/$name.out"; then
     echo "$label: a panic the program outlived"
     status=1
     return 1
@@ -290,8 +290,8 @@ PY
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build -o "$WORK/$dir/program" \
-       "$REPO/test/cli/std_dns_exercise.iyi" >"$WORK/$dir/build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build -o "$WORK/$dir/program" \
+       "$REPO/test/cli/std_dns_exercise.ri" >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the broken copy did not build"
     sed -n '1,8p' "$WORK/$dir/build.log"
     status=1
@@ -317,7 +317,7 @@ PY
     sed -n '$p' "$WORK/$dir/out"
     status=1
   else
-    echo "  $label: caught at \"$(grep -m1 -F -- "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //' | cut -c1-110)\""
+    echo "  $label: caught at \"$(grep -m1 -F -- "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //' | cut -c1-110)\""
   fi
 }
 
@@ -325,67 +325,67 @@ if [ -z "$PY" ]; then
   echo "  skipped: no working python3, so the broken copies could not be made"
   status=1
 else
-  breaks "an answer read without its question" noquestion "a wrong ID and a wrong question are ignored" dns.iyi \
+  breaks "an answer read without its question" noquestion "a wrong ID and a wrong question are ignored" dns.ri \
     'same_name && question_type == type && question_class' \
     'question_type == type && question_class'
-  breaks "a truncated answer taken as it came" notcp "a truncated answer is asked again over TCP" socket.iyi \
+  breaks "a truncated answer taken as it came" notcp "a truncated answer is asked again over TCP" socket.ri \
     'return ask_tcp(server, query, id, name, type) if answer.is_a?(DnsTapeMessage) && answer.truncated?' \
     ''
   # The ID is checked twice - before the bytes are parsed, and again by
   # `answers?` - so the proof takes out both.
-  breaks "an answer read without its ID" noid "a wrong ID and a wrong question are ignored" dns.iyi \
+  breaks "an answer read without its ID" noid "a wrong ID and a wrong question are ignored" dns.ri \
     'return false unless flags & 0x8000 != 0 && (flags >> 11) & 15 == 0 && message_id == id' \
     'return false unless flags & 0x8000 != 0 && (flags >> 11) & 15 == 0' \
-    socket.iyi \
+    socket.ri \
     'if packet.bytesize >= 2 && ((packet[0].to_i32 << 8) | packet[1].to_i32) == id.to_i32' \
     'if packet.bytesize >= 2'
-  breaks "NXDOMAIN read as a server's failure" nxservfail "NXDOMAIN is not_found?" socket.iyi \
+  breaks "NXDOMAIN read as a server's failure" nxservfail "NXDOMAIN is not_found?" socket.ri \
     'DnsError.new(DnsError::NOT_FOUND, name, label)' \
     'DnsError.new(DnsError::SERVER_FAILURE, name, label)'
-  breaks "an OPT record's extended RCODE ignored" nobadvers "BADVERS (16), not NOERROR" dns.iyi \
+  breaks "an OPT record's extended RCODE ignored" nobadvers "BADVERS (16), not NOERROR" dns.ri \
     '(@extended_rcode << 4) | (@flags & 15)' \
     '@flags & 15'
-  breaks "a CNAME not followed" nocname "a CNAME chain in one answer" dns.iyi \
+  breaks "a CNAME not followed" nocname "a CNAME chain in one answer" dns.ri \
     'next_name = record.target if record.type == DnsTapeRecord::CNAME && next_name.empty?' \
     'next_name = "" if record.type == DnsTapeRecord::CNAME'
-  breaks "one attempt where two were asked for" noretry "the second attempt is answered" socket.iyi \
+  breaks "one attempt where two were asked for" noretry "the second attempt is answered" socket.ri \
     'while attempt < @attempts' \
     'while attempt < 1'
-  breaks "the hosts file skipped" nohosts "the hosts file answers" socket.iyi \
+  breaks "the hosts file skipped" nohosts "the hosts file answers" socket.ri \
     'return listed unless listed.empty?' \
     'nil # Ignore the hosts result.'
-  breaks "the search list tried after the name" searchorder "a short name tries the search list first" dns.iyi \
+  breaks "the search list tried after the name" searchorder "a short name tries the search list first" dns.ri \
     'answer << name if dots >= ndots' \
     'answer << name if dots < ndots'
-  breaks "a compression pointer allowed forward" pointerfloor HANG dns.iyi \
+  breaks "a compression pointer allowed forward" pointerfloor HANG dns.ri \
     'return nil unless pointer < floor' \
     'return nil unless pointer < size'
-  breaks "a CNAME chain without a bound" cnamebound HANG dns.iyi \
+  breaks "a CNAME chain without a bound" cnamebound HANG dns.ri \
     'return DnsTapeMessage.malformed("a chain of more than #{budget} CNAMEs, or a loop of them") if links > budget' \
     ''
-  breaks "a name read as an address, as it was" noname 'cannot resolve address: "web.test"' socket.iyi \
+  breaks "a name read as an address, as it was" noname 'cannot resolve address: "web.test"' socket.ri \
     '!localhost?(host) && DnsName.valid?(host)' \
     'false'
   # Service bindings: section 2.2's order and the mandatory keys
   # (`SvcbRecord.parse`), and SVCB resolution's bound, order and name
   # (`Resolver#https_records`). The chain the bound ends never ends, so
   # without it the lookup asks until it is killed.
-  breaks "SvcParamKeys taken out of order" svcborder "keys out of order are refused" dns.iyi \
+  breaks "SvcParamKeys taken out of order" svcborder "keys out of order are refused" dns.ri \
     'return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)} after #{key_name(last)}: the keys are not in increasing order") if key < last' \
     ''
-  breaks "a SvcParamKey taken twice" svcbtwice "a key twice is refused" dns.iyi \
+  breaks "a SvcParamKey taken twice" svcbtwice "a key twice is refused" dns.ri \
     'return DnsTapeMessage.malformed("SvcParamKey #{key_name(key)} twice") if key == last' \
     ''
-  breaks "mandatory keys not held to the record" svcbmandatory "a mandatory key the record does not carry is refused" dns.iyi \
+  breaks "mandatory keys not held to the record" svcbmandatory "a mandatory key the record does not carry is refused" dns.ri \
     'return DnsTapeMessage.malformed("mandatory lists #{key_name(listed)}, which the record does not carry") unless keys.includes?(listed)' \
     ''
-  breaks "an AliasMode chain without a bound" aliasbound HANG socket.iyi \
+  breaks "an AliasMode chain without a bound" aliasbound HANG socket.ri \
     'if aliases > SvcbAnswer::MAX_ALIASES' \
     'if false'
-  breaks "ServiceMode records in the order they came" svcbpriority "ServiceMode records by priority" socket.iyi \
+  breaks "ServiceMode records in the order they came" svcbpriority "ServiceMode records by priority" socket.ri \
     'Resolver.by_priority(parsed)' \
     'parsed'
-  breaks "another port asked at the host's own name" svcbport "another port asks _port._https.host" socket.iyi \
+  breaks "another port asked at the host's own name" svcbport "another port asks _port._https.host" socket.ri \
     'asked = port == 443 ? relative : "_#{port}._https.#{relative}"' \
     'asked = relative'
 
@@ -394,31 +394,31 @@ else
   # put first - and says it was skipped where the section was.
   ran="$WORK/dns-plain.out"
   if grep -q "^he_blackhole: ok" "$ran"; then
-    breaks "one address after another, the attempt delay an hour" heserial "the second address does not wait for the first to fail" socket.iyi \
+    breaks "one address after another, the attempt delay an hour" heserial "the second address does not wait for the first to fail" socket.ri \
       'ATTEMPT_DELAY_MS = 250' \
       'ATTEMPT_DELAY_MS = 3600000'
-    breaks "every address at once, the attempt delay ignored" heatonce "the second address waits the attempt delay" socket.iyi \
+    breaks "every address at once, the attempt delay ignored" heatonce "the second address waits the attempt delay" socket.ri \
       'ATTEMPT_DELAY_MS = 250' \
       'ATTEMPT_DELAY_MS = 0'
   else
     echo "  the attempt delay's two copies: skipped, he_blackhole did not run on this machine"
   fi
   if grep -q "^he_fds: ok (.*descriptors before and after" "$ran"; then
-    breaks "a losing attempt's socket left open" heleak "every losing attempt's socket is closed" socket.iyi \
+    breaks "a losing attempt's socket left open" heleak "every losing attempt's socket is closed" socket.ri \
       $'if waited.is_a?(Cancelled)\n        __sys_close(fd)\n' \
       $'if waited.is_a?(Cancelled)\n'
   else
     echo "  a losing attempt's socket left open: skipped, descriptors are counted on Linux alone"
   fi
   if grep -q "^he_refused: ok" "$ran"; then
-    breaks "the error naming the last address alone" helast "one error naming every address, in the order tried" socket.iyi \
+    breaks "the error naming the last address alone" helast "one error naming every address, in the order tried" socket.ri \
       'parts.join("; ")) if ran_out < 0' \
       'parts.last) if ran_out < 0'
   else
     echo "  the error naming the last address alone: skipped, he_refused did not run on this machine"
   fi
   if grep -q "^he_order: ok (IPv6 first" "$ran"; then
-    breaks "IPv4 first whatever the routes say" hefour "IPv6 first when this machine has a route to it" socket.iyi \
+    breaks "IPv4 first whatever the routes say" hefour "IPv6 first when this machine has a route to it" socket.ri \
       'if routed?(six[0].as(IPv6Address))' \
       'if false'
   else
@@ -431,7 +431,7 @@ else
     *) windows=0 ;;
   esac
   if [ "$windows" -eq 0 ] && grep -q "^he_order: ok (IPv6 first" "$ran"; then
-    breaks "a failure that waits for the attempt delay" hewait "a refused first address starts the next at once" socket.iyi \
+    breaks "a failure that waits for the attempt delay" hewait "a refused first address starts the next at once" socket.ri \
       $'# A failure starts the next attempt now, not when it was due.\n          next_at = 0_i64\n' \
       ''
   else

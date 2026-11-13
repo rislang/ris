@@ -4,6 +4,7 @@ module test/ris/nested_blocks_depth
 def step(x : Int32, &block : Int32 -> Nil) : Nil
   yield x + 1
 end
+
 acc = [] of Int32
 step(0) do |v1|
   w1 = v1 * 2

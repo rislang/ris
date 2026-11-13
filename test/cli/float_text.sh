@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# `Float64#to_s` and `String#to_f` (src/iyi/float.iyi): the shortest
+# `Float64#to_s` and `String#to_f` (src/ris/float.ri): the shortest
 # decimal that reads back as the same double, in Crystal's notation, and
-# the correctly rounded double a decimal names. Runs test/cli/float_text.iyi
+# the correctly rounded double a decimal names. Runs test/cli/float_text.ri
 # plain and optimised - forty-odd printed cases, two dozen parsed, twenty
 # thousand doubles printed and read back to their bits - then proves the
 # check fails by name when the printer is broken: the bignum digit loop's
@@ -14,9 +14,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs whatever compiler the caller names; `bin/iyi` is a shell
+# The gate runs whatever compiler the caller names; `bin/ris` is a shell
 # wrapper, and on Windows the caller has to point at the built exe itself.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -43,7 +43,7 @@ status=0
 
 echo "== the exercise"
 for flags in "" "--release"; do
-  if ! "$IYI" build $flags -o "$WORK/program" "$REPO/test/cli/float_text.iyi" > "$WORK/build.log" 2>&1; then
+  if ! "$RIS" build $flags -o "$WORK/program" "$REPO/test/cli/float_text.ri" > "$WORK/build.log" 2>&1; then
     echo "  build failed ($flags)"; cat "$WORK/build.log" | tail -5; status=1; continue
   fi
   if "$WORK/program" > "$WORK/out" 2>&1 && grep -q "every case printed" "$WORK/out"; then
@@ -54,19 +54,19 @@ for flags in "" "--release"; do
 done
 
 # $1 label, $2 directory, $3 the phrase the failing check prints, $4 awk
-# program over float.iyi and tape.iyi's parser copy.
+# program over float.ri and tape.ri's parser copy.
 prove_fails() {
   local label="$1" dir="$2" phrase="$3" script="$4"
-  mkdir -p "$WORK/$dir/iyi"
-  cp -R "$REPO/src/iyi/." "$WORK/$dir/iyi/"
-  awk "$script" "$REPO/src/iyi/float.iyi" > "$WORK/$dir/iyi/float.iyi"
-  # tape.iyi carries String#to_f's copy of the parser, which a program
-  # reads: it is broken the same way (the printer is float.iyi's alone).
-  awk "$script" "$REPO/src/iyi/tape.iyi" > "$WORK/$dir/iyi/tape.iyi"
-  if cmp -s "$WORK/$dir/iyi/float.iyi" "$REPO/src/iyi/float.iyi"; then
+  mkdir -p "$WORK/$dir/ris"
+  cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
+  awk "$script" "$REPO/src/ris/float.ri" > "$WORK/$dir/ris/float.ri"
+  # tape.ri carries String#to_f's copy of the parser, which a program
+  # reads: it is broken the same way (the printer is float.ri's alone).
+  awk "$script" "$REPO/src/ris/tape.ri" > "$WORK/$dir/ris/tape.ri"
+  if cmp -s "$WORK/$dir/ris/float.ri" "$REPO/src/ris/float.ri"; then
     echo "  $label: the awk found nothing to change"; status=1; return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build -o "$WORK/$dir/program" "$REPO/test/cli/float_text.iyi" > "$WORK/$dir/build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build -o "$WORK/$dir/program" "$REPO/test/cli/float_text.ri" > "$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched prelude did not build"; tail -3 "$WORK/$dir/build.log"; status=1; return
   fi
   set +e

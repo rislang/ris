@@ -3,10 +3,12 @@
 # outlive the round that frees it (SPEC 1.1, 3.2): refused at the store.
 class State
   @@log = Array(String).new
+
   def self.keep(text : String)
     @@log << text
   end
 end
+
 text = "static".copy_to(Program.tape)
 a = text
 b = text

@@ -25,7 +25,7 @@ import sys
 import tempfile
 import time
 
-IYI = os.path.abspath(os.environ.get("IYI", "./bin/iyi"))
+RIS = os.path.abspath(os.environ.get("RIS", "./bin/ris"))
 SAMPLES = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "samples", "iyi"))
 # `std` moved out of the samples into the library, so it is copied from there.
 # Copying the whole of it does not change what this measures: the entry imports
@@ -65,10 +65,10 @@ def run(args, cwd):
 def timed_build(cwd, extra, tick):
     # The edit first: an unedited entry lets per-program object caching
     # serve codegen, and then the measurement flatters everybody.
-    with open(os.path.join(cwd, "main.iyi"), "a") as f:
+    with open(os.path.join(cwd, "main.ri"), "a") as f:
         f.write(f"# tick {tick}\n")
     start = time.monotonic()
-    run([IYI, "build", "-o", "app"] + extra + ["main.iyi"], cwd)
+    run([RIS, "build", "-o", "app"] + extra + ["main.ri"], cwd)
     return time.monotonic() - start
 
 
@@ -77,17 +77,17 @@ def main():
     for sub in ("calc", "kemal", "app"):
         shutil.copytree(os.path.join(SAMPLES, sub), os.path.join(work, sub))
     shutil.copytree(STD, os.path.join(work, "std"))
-    with open(os.path.join(work, "main.iyi"), "w") as f:
+    with open(os.path.join(work, "main.ri"), "w") as f:
         f.write(ENTRY)
 
     # The artifacts the artifact arm reads, written once — the producer
     # side of R-1, off the clock the way a library build is.
-    run([IYI, "build", "--emit-iyimod", "mods", "-o", "app", "main.iyi"], work)
+    run([RIS, "build", "--emit-rimod", "mods", "-o", "app", "main.ri"], work)
 
     source, artifact = [], []
     for round_no in range(ROUNDS):
         source.append(timed_build(work, [], f"s{round_no}"))
-        artifact.append(timed_build(work, ["--use-iyimod", "mods"], f"a{round_no}"))
+        artifact.append(timed_build(work, ["--use-rimod", "mods"], f"a{round_no}"))
     src = min(source)
     art = min(artifact)
     print(f"rebuild after an edit, {ROUNDS} alternating rounds, minimums:")

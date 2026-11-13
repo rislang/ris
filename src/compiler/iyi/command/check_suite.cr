@@ -86,7 +86,7 @@ class Iyi::Command
     when "deps"
       if !paths.empty?
         "a PATH was given"
-      elsif !{"ris.mod", "iyi.mod"}.any? { |m| File.file?(m) }
+      elsif !Mod::Installer.manifest?(".")
         "no ris.mod here"
       end
     when "spec"
@@ -103,7 +103,7 @@ class Iyi::Command
       # ris: a module with spec blocks is a test too (5.9): `ris init`
       # writes no *_test.ri, only a block at the end of NAME.ri.
       "no *_test.ri or spec block" unless ok_sources(paths).any? do |file|
-        file.ends_with?("_test.ri") || file.ends_with?("_test.iyi") || spec_module?(file)
+        file.ends_with?("_test.ri") || spec_module?(file)
       end
     end
   end
@@ -464,6 +464,8 @@ class Iyi::Command
       path = dir == "." ? child : File.join(dir, child)
       if Dir.exists?(path)
         ok_walk(path, files) unless child == "lib"
+      elsif Lexer.iyi_named?(child)
+        abort! Lexer.iyi_miscased_sentence(path), :USAGE_ERROR
       elsif child.ris_source?
         files << path
       end
@@ -481,6 +483,9 @@ class Iyi::Command
         files << root
       else
         Dir.children(dir).sort!.each do |child|
+          # ris: only a file is refused; a `.iyi/` build cache is a directory.
+          path = File.join(dir, child)
+          abort! Lexer.iyi_miscased_sentence(path), :USAGE_ERROR if Lexer.iyi_named?(child) && File.file?(path)
           next unless child.ends_with?(".ri") && !child.ends_with?("_test.ri")
           files << (dir == "." ? child : File.join(dir, child))
         end
@@ -504,7 +509,8 @@ class Iyi::Command
   end
 
   private def ok_root_module(dir : String) : String?
-    manifest = {"ris.mod", "iyi.mod"}.map { |m| File.join(dir, m) }.find { |m| File.file?(m) }
+    manifest = Mod::Installer.manifest_in(dir)
+    manifest = nil unless File.file?(manifest)
     return nil unless manifest
     File.each_line(manifest) do |line|
       if match = line.match(/^\s*module\s+(\S+)/)

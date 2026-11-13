@@ -3,7 +3,7 @@
 # value, or, once the scope has ended, the next scope's - and
 # `Str.new(pointer, size)` makes a view of any address. The
 # checkers that keep a tape value inside its scope do not see either, so
-# outside the tape's runtime (`src/iyi/`) and a `std/` def marked
+# outside the tape's runtime (`src/ris/`) and a `std/` def marked
 # `@[TapeUnsafe]` both are refused, and a program reads a tape string
 # through the bounds-checked `[]`, `each_byte` and `[start, count]` instead. A raw pointer the program makes itself
 # (`Pointer.new`) is outside this rule: iyi has no unsafe blocks for it.
@@ -309,7 +309,7 @@ class Iyi::TapeFfiFlow
 end
 
 # Where the tape's rules (TapePointerChecker, TapeEscapeChecker,
-# TapeRefillChecker) do not reach. The tape's own runtime (`src/iyi/`, and
+# TapeRefillChecker) do not reach. The tape's own runtime (`src/ris/`, and
 # Crystal's `.cr` code, which has no tape) builds the rules' primitives from
 # raw pointers. A `std/` module is under the rules like any program; a def
 # of one that must hand a pointer to the OS or copy a view out to keep a
@@ -318,12 +318,12 @@ end
 # through `[]`, `[start, count]` and `each_byte`.
 module Iyi::TapeRules
   # The prelude also where it was loaded from: a test copies it out of
-  # `src/iyi/` to change it.
+  # `src/ris/` to change it.
   def self.runtime?(program : Program, location : Location?) : Bool
     file = location.try(&.original_filename)
     return false unless file
     file = file.gsub('\\', '/')
-    file.includes?("/src/iyi/") || file.ends_with?(".cr") ||
+    file.includes?("/src/ris/") || file.ends_with?(".cr") ||
       TapeScopeRuntime.prelude?(program, location)
   end
 

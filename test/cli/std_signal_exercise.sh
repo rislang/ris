@@ -35,7 +35,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -48,25 +48,25 @@ if [ "$WINDOWS" -eq 1 ]; then
   WORK="$(cygpath -m "$WORK")"
 fi
 
-ORIG_IYI_PATH="${IYI_PATH:-}"
+ORIG_IYI_PATH="${RIS_PATH:-}"
 cleanup() {
   rm -rf "$WORK"
   if [ -n "$ORIG_IYI_PATH" ]; then
-    export IYI_PATH="$ORIG_IYI_PATH"
+    export RIS_PATH="$ORIG_IYI_PATH"
   else
-    unset IYI_PATH
+    unset RIS_PATH
   fi
 }
 trap cleanup EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
-EXERCISE="$REPO/test/cli/std_signal_exercise.iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
+EXERCISE="$REPO/test/cli/std_signal_exercise.ri"
 
 build() { # build <name> <search path> [flags...]
   local name="$1" path="$2"
   shift 2
-  if ! IYI_PATH="$path" "$IYI" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
+  if ! RIS_PATH="$path" "$RIS" build "$@" -o "$WORK/$name" "$EXERCISE" >"$WORK/$name.build.log" 2>&1; then
     echo "  $name: build failed"
     tail -12 "$WORK/$name.build.log" | sed 's/^/    /'
     status=1
@@ -77,7 +77,7 @@ build() { # build <name> <search path> [flags...]
 build_and_run() { # build_and_run <label> <name> [flags...]
   local label="$1" name="$2"
   shift 2
-  build "$name" "$IYI_PATH" "$@" || return 1
+  build "$name" "$RIS_PATH" "$@" || return 1
   "$WORK/$name" >"$WORK/$name.out" 2>&1
   local exit_code=$?
   sed 's/^/  /' "$WORK/$name.out"
@@ -297,7 +297,7 @@ fi
 # the refusal is a panic and the exercise must not print one.
 echo
 echo "== two fibers waiting at once are refused"
-cat > "$WORK/waiters.iyi" <<'IYI'
+cat > "$WORK/waiters.ri" <<'RIS'
 module main
 
 import std/signal::{Signal}
@@ -308,8 +308,8 @@ group do |g|
   0
 end
 puts "two waiters were let in"
-IYI
-if ! "$IYI" build -o "$WORK/waiters" "$WORK/waiters.iyi" >"$WORK/waiters.build.log" 2>&1; then
+RIS
+if ! "$RIS" build -o "$WORK/waiters" "$WORK/waiters.ri" >"$WORK/waiters.build.log" 2>&1; then
   echo "  waiters: build failed"
   tail -12 "$WORK/waiters.build.log" | sed 's/^/    /'
   status=1
@@ -319,7 +319,7 @@ elif ! grep -q "two fibers reading one fd" "$WORK/waiters.out"; then
   echo "  two waiters were refused, but not by name (or hung, and were killed):"
   sed 's/^/    /' "$WORK/waiters.out"; status=1
 else
-  echo "  two waiters: exits 1 at \"$(grep -m1 'two fibers' "$WORK/waiters.out" | sed 's/^iyi: panic: //')\""
+  echo "  two waiters: exits 1 at \"$(grep -m1 'two fibers' "$WORK/waiters.out" | sed 's/^ris: panic: //')\""
 fi
 
 echo
@@ -327,7 +327,7 @@ echo "== proving the checks can fail when the module is broken"
 patched() { # patched <name> <old> <new>: a copy of std with one line changed
   local name="$1" old="$2" new="$3"
   mkdir -p "$WORK/$name-std/std"
-  OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/signal.iyi" "$WORK/$name-std/std/signal.iyi" <<'PY'
+  OLD="$old" NEW="$new" "$PY" - "$REPO/src/std/signal.ri" "$WORK/$name-std/std/signal.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 old, new = os.environ["OLD"], os.environ["NEW"]
@@ -344,7 +344,7 @@ else
   if ! patched untaken 'if @@pending & bit != 0_u64' 'if false'; then
     echo "  the patch did not apply"
     status=1
-  elif build untaken "$WORK/untaken-std${PSEP}$IYI_PATH"; then
+  elif build untaken "$WORK/untaken-std${PSEP}$RIS_PATH"; then
     if "$WORK/untaken" >"$WORK/untaken.out" 2>&1; then
       echo "  the exercise PASSED with a wait that takes nothing"
       status=1
@@ -361,7 +361,7 @@ else
     if ! patched uninstalled '          handle(signal)' '          nil'; then
       echo "  the patch did not apply"
       status=1
-    elif build uninstalled "$WORK/uninstalled-std${PSEP}$IYI_PATH"; then
+    elif build uninstalled "$WORK/uninstalled-std${PSEP}$RIS_PATH"; then
       external uninstalled
       code=$?
       # 128 + 15: ended by the signal itself, and nothing else.
@@ -379,7 +379,7 @@ else
     if ! patched closeasint 'signal = event <= 1 ? 2 : 15' 'signal = 2'; then
       echo "  the patch did not apply"
       status=1
-    elif build closeasint "$WORK/closeasint-std${PSEP}$IYI_PATH"; then
+    elif build closeasint "$WORK/closeasint-std${PSEP}$RIS_PATH"; then
       said="$(console_close closeasint)"
       code=$?
       if [ "$code" -eq 0 ] || grep -q "stopped on TERM" "$WORK/closeasint.out"; then
@@ -408,7 +408,7 @@ else
       status=1
       return
     fi
-    build "$name" "$WORK/$name-std${PSEP}$IYI_PATH" || return
+    build "$name" "$WORK/$name-std${PSEP}$RIS_PATH" || return
     $LIMIT "$WORK/$name" >"$WORK/$name.out" 2>&1
     local code=$?
     if [ "$code" -eq 0 ]; then
@@ -448,7 +448,7 @@ else
   if ! patched stillignored "$reset_old" "$reset_new"; then
     echo "  the patch did not apply"
     status=1
-  elif build stillignored "$WORK/stillignored-std${PSEP}$IYI_PATH"; then
+  elif build stillignored "$WORK/stillignored-std${PSEP}$RIS_PATH"; then
     said="$(reset_run stillignored)"
     if printf '%s\n' "$said" | grep -q "outlived the reset"; then
       echo "  a reset that keeps the signal ignored is caught: the process outlived it"

@@ -7,9 +7,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -45,13 +45,13 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 export PYTHONIOENCODING=utf-8
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_idna_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_idna_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -153,11 +153,11 @@ for s in cases:
     lines.append(f"puts Punycode.encode({lit(s)})")
     lines.append(f"d = Punycode.decode({lit(enc)})")
     lines.append('puts d.is_a?(PunycodeError) ? "refused: #{d.message}" : hex_of(d)')
-open(os.path.join(work, "puny_cases.iyi"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
+open(os.path.join(work, "puny_cases.ri"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
 open(os.path.join(work, "puny_expected.txt"), "w", encoding="utf-8").write(
     "\n".join(f"{s.encode('punycode').decode('ascii')}\n{s.encode('utf-8').hex()}" for s in cases) + "\n")
 PY
-  if ! "$IYI" run "$WORK/puny_cases.iyi" >"$WORK/puny_got.txt" 2>&1; then
+  if ! "$RIS" run "$WORK/puny_cases.ri" >"$WORK/puny_got.txt" 2>&1; then
     echo "  the Punycode cases did not run: $(tail -1 "$WORK/puny_got.txt")"
     status=1
   elif ! "$PY" - "$WORK" <<'PY'
@@ -227,10 +227,10 @@ for n in names:
     lines.append('puts a.is_a?(IdnaError) ? "refused" : a')
     lines.append(f"u = IDNA.to_unicode(a.is_a?(IdnaError) ? {lit(n)} : a)")
     lines.append('puts u.is_a?(IdnaError) ? "refused" : u')
-open(os.path.join(work, "name_cases.iyi"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
+open(os.path.join(work, "name_cases.ri"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
 json.dump({"good": good, "refused": refused, "differ": differ}, open(os.path.join(work, "names.json"), "w", encoding="utf-8"))
 PY
-  if ! "$IYI" run "$WORK/name_cases.iyi" >"$WORK/name_got.txt" 2>&1; then
+  if ! "$RIS" run "$WORK/name_cases.ri" >"$WORK/name_got.txt" 2>&1; then
     echo "  the name cases did not run: $(tail -1 "$WORK/name_got.txt")"
     status=1
   elif ! "$PY" - "$WORK" <<'PY'
@@ -307,7 +307,7 @@ echo "== the rfc 5892 property of every code point against the idna package"
 if [ -z "$PY" ] || ! "$PY" -c 'import idna.idnadata' >/dev/null 2>&1; then
   echo "  the idna package is not installed here, so the property goes uncompared"
 else
-  cat >"$WORK/prop.iyi" <<'IYI'
+  cat >"$WORK/prop.ri" <<'RIS'
 module prop
 
 import std/idna::{IDNA, IdnaProperty}
@@ -324,8 +324,8 @@ while cp <= 0x110000
   end
   cp = cp + 1
 end
-IYI
-  if ! "$IYI" build --release -o "$WORK/prop" "$WORK/prop.iyi" >"$WORK/prop.build.log" 2>&1 || ! "$WORK/prop" >"$WORK/prop.txt" 2>&1; then
+RIS
+  if ! "$RIS" build --release -o "$WORK/prop" "$WORK/prop.ri" >"$WORK/prop.build.log" 2>&1 || ! "$WORK/prop" >"$WORK/prop.txt" 2>&1; then
     echo "  the property table did not build or run: $(tail -1 "$WORK/prop.build.log" "$WORK/prop.txt" 2>/dev/null | tail -1)"
     status=1
   elif ! "$PY" - "$WORK" <<'PY'
@@ -367,7 +367,7 @@ fi
 echo
 echo "== what idna refuses"
 # An error value passed to `.or_panic` panics with its sentence.
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/idna::{Punycode, IDNA}
@@ -389,9 +389,9 @@ when "uppercase"
   IDNA.to_unicode("MÜNCHEN.de").or_panic
 end
 puts "accepted"
-IYI
+RIS
 refuse() { # refuse <case> <phrase>
-  if "$IYI" run "$WORK/refuse.iyi" -- "$1" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
   elif ! grep -qF -e "$2" "$WORK/refuse.out"; then
@@ -423,15 +423,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/idna.iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/idna.ri").read_text(encoding="utf-8")
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/idna.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
+Path("$WORK/patched/std/idna.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_idna_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_idna_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF -e "$2" "$WORK/mut.out"; then

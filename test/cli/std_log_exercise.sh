@@ -5,9 +5,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -43,12 +43,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_log_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_log_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -99,16 +99,16 @@ else
   mkdir -p "$WORK/patched/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/log.iyi").read_text()
+src = Path("$REPO/src/std/log.ri").read_text()
 old = '@entries << RisLogEntry.new(entry).copy_to(@owner)'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/log.iyi").write_text(src.replace(old, '# ' + old, 1))
+Path("$WORK/patched/std/log.ri").write_text(src.replace(old, '# ' + old, 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_log_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_log_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on a broken module"
     status=1
   else
@@ -120,16 +120,16 @@ PY
   mkdir -p "$WORK/rootdot/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/log.iyi").read_text()
+src = Path("$REPO/src/std/log.ri").read_text()
 old = 'child_source = @parent.nil? && @source.empty? ? name'
 if src.count(old) != 1:
     raise SystemExit("patch site missing")
-Path("$WORK/rootdot/std/log.iyi").write_text(src.replace(old, 'child_source = @source.empty? ? name', 1))
+Path("$WORK/rootdot/std/log.ri").write_text(src.replace(old, 'child_source = @source.empty? ? name', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the empty-segment patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/rootdot${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_log_exercise.iyi" >"$WORK/rootdot.out" 2>&1; then
+  elif RIS_PATH="$WORK/rootdot${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_log_exercise.ri" >"$WORK/rootdot.out" 2>&1; then
     echo "  the exercise PASSED with a leading dot dropped from the source"
     status=1
   elif ! grep -q "ASSERTION FAILED: leading dot" "$WORK/rootdot.out"; then
@@ -143,9 +143,9 @@ PY
   # Data and context, each mechanism taken out of a copy that compiles:
   # the exercise must stop at the check written for it - an assertion's
   # message, or with a sixth argument, that text as it is said.
-  # FILE names another module of std/log's to patch (log.iyi otherwise).
+  # FILE names another module of std/log's to patch (log.ri otherwise).
   caught_at() { # caught_at <dir> <label> <old> <new> <check> [said]
-    local dir="$1" label="$2" file="${FILE:-log.iyi}"
+    local dir="$1" label="$2" file="${FILE:-log.ri}"
     mkdir -p "$WORK/$dir/std"
     OLD="$3" NEW="$4" DEST="$WORK/$dir/std/$file" "$PY" - <<PY
 import os
@@ -159,7 +159,7 @@ PY
     if [ $? -ne 0 ]; then
       echo "  the $label patch did not apply"
       status=1
-    elif IYI_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_log_exercise.iyi" >"$WORK/$dir.out" 2>&1; then
+    elif RIS_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_log_exercise.ri" >"$WORK/$dir.out" 2>&1; then
       echo "  the exercise PASSED with $label"
       status=1
     elif grep -qF -- "${6:-ASSERTION FAILED: $5}" "$WORK/$dir.out"; then
@@ -185,7 +185,7 @@ PY
     '        return nil unless group
         fiber = group.owner' '        return nil' \
     "a task finds its starter's context"
-  FILE=log_text.iyi caught_at unquoted "a value written without its quotes" \
+  FILE=log_text.ri caught_at unquoted "a value written without its quotes" \
     '      if plain
         writer << text
       else

@@ -19,7 +19,7 @@ for mode in ok size info nul; do
     if [ "$mode" = nul ]; then
       grep -qF 'path contains a NUL byte' <<<"$out"
     else
-      grep -qxF "iyi: panic: File not found: $work/file.missing" <<<"$out"
+      grep -qxF "ris: panic: File not found: $work/file.missing" <<<"$out"
     fi
   fi
 done

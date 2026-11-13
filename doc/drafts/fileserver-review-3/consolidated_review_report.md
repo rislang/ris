@@ -52,10 +52,10 @@ every phase green. Gaps: MB2, MB3, MB4.
 * **Discrepancy Description**: A three-form parser plus helpers is
   built only because std/time fails on ris, and is planned for
   deletion. A7 calls the std/time fix "unrelated", but P6 puts it at
-  time.iyi:2776, the same scratch-escape class; :3635 is a second
-  refusal. mail.iyi:1052 already duplicates `days_from_civil`.
+  time.ri:2776, the same scratch-escape class; :3635 is a second
+  refusal. mail.ri:1052 already duplicates `days_from_civil`.
 * **Rationale & Recommendation**: Probe the cost of fixing
-  time.iyi:2776 and :3635. If small, fix std/time as its own phase
+  time.ri:2776 and :3635. If small, fix std/time as its own phase
   and drop the parser; if not, keep it and give A7 the real reason.
   Not fixdate-only: RFC 9110 5.6.7 requires all three forms.
 
@@ -99,7 +99,7 @@ every phase green. Gaps: MB2, MB3, MB4.
 ### MB5 Cap memory figure - Severity: Major
 * **Reviewer Lens:** `codebase-details`
 * **Affected Scope:** 337-344, 543-544
-* **Discrepancy Description**: region.iyi:523-526, 529: each growing
+* **Discrepancy Description**: region.ri:523-526, 529: each growing
   payload reserves 128 MiB on Linux. If `res.body` is one, 1024
   answers reserve about 128 GiB whatever *max* is; "16 GiB at worst"
   and "pass a smaller *max*" do not hold under strict overcommit.
@@ -125,12 +125,12 @@ every phase green. Gaps: MB2, MB3, MB4.
   cited nowhere; `@state[2]` not cleared on raise (257-259).
 * `length=`: "raises unless HEAD" is one rule (246-249).
 * 418: 24 bytes with the comma, 23 without.
-* Citations: bodiless branch 2434-2438 (253); src/iyi/io.iyi:165
-  (336); fileserver.iyi 53/104/120 are 405/416/404 (330);
-  region.iyi:523-525 split over lines (226-227).
+* Citations: bodiless branch 2434-2438 (253); src/ris/io.ri:165
+  (336); fileserver.ri 53/104/120 are 405/416/404 (330);
+  region.ri:523-525 split over lines (226-227).
 * `to_unix` nil and Int64-to-Int32 narrowing into
-  `days_from_civil` (time.iyi:1784) unsaid.
-* Duplicate `check_line` at http.iyi:2479, 2486.
+  `days_from_civil` (time.ri:1784) unsaid.
+* Duplicate `check_line` at http.ri:2479, 2486.
 * Mapping table targets differ from headings (716, 733, 740-741);
   heading review tags mixed (91, 271, 310).
 * Undefined: `@[OnTape]` (98, 596), `Field` (223), `as_tape` (172);

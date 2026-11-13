@@ -42,7 +42,7 @@ for candidate in /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@
   [ -x "$candidate" ] && OPENSSL="$candidate" && break
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's path mapping: a scratch
@@ -58,12 +58,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_ocsp_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_ocsp_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -612,9 +612,9 @@ mutation_pids=""
 mkdir -p "$WORK/mutres"
 prove_copy() { # prove_copy <n> <dir> <label> <phrase>
   local n="$1" W="$2" label="$3" phrase="$4"
-  export IYI_CACHE_DIR="$W/cache"
-  if ! IYI_PATH="$W/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$W/x" \
-       "$REPO/test/cli/std_ocsp_exercise.iyi" >"$W/build.log" 2>&1; then
+  export RIS_CACHE_DIR="$W/cache"
+  if ! RIS_PATH="$W/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$W/x" \
+       "$REPO/test/cli/std_ocsp_exercise.ri" >"$W/build.log" 2>&1; then
     printf '  the %s copy did not build:\n%s\n' "$label" "$(tail -3 "$W/build.log" | sed 's/^/    /')" >"$WORK/mutres/$n"
     touch "$WORK/mutres/failed"
     return
@@ -642,10 +642,10 @@ prove_broken() {
 import os
 from pathlib import Path
 module = os.environ["MODULE"]
-src = Path("$REPO/src/std/" + module + ".iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/" + module + ".ri").read_text(encoding="utf-8")
 if src.count(os.environ["OLD"]) != 1:
     raise SystemExit("patch site missing or not one")
-Path("$W/patched/std/" + module + ".iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8", newline="\n")
+Path("$W/patched/std/" + module + ".ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8", newline="\n")
 PY
   then
     echo "  the $1 patch did not apply" >"$WORK/mutres/$n"

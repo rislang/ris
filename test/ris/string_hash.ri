@@ -46,6 +46,6 @@ while i < 1000
   map["key#{i}".copy_to(Program.tape)] = i
   i += 1
 end
-raise "lookup" unless map["key"+"500"] == 500 && map.first_key == "key0"
+raise "lookup" unless map["key" + "500"] == 500 && map.first_key == "key0"
 
 puts "PASS: string_hash"

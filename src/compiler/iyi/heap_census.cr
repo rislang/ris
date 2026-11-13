@@ -33,9 +33,9 @@ module Iyi::HeapPolicy
     name = a_def.owner?.to_s
     file = a_def.location.try(&.original_filename)
     return true if a_def.name == "group" &&
-                   file.try(&.ends_with?("/iyi/concurrency.iyi"))
+                   file.try(&.ends_with?("/ris/concurrency.ri"))
     return true if a_def.name.starts_with?("__iyi_") &&
-                   file.try(&.includes?("/src/iyi/"))
+                   file.try(&.includes?("/src/ris/"))
     allocator?(a_def) || internal?(name) || (name.in?(%w(IyiIO IyiIO.class)) &&
       a_def.name == "initialize")
   end
@@ -150,7 +150,7 @@ class Iyi::HeapCensus < Iyi::Visitor
          !type.is_a?(PointerInstanceType) && !type.is_a?(ProcInstanceType)
         file = node.location.try(&.original_filename)
         stream = type.to_s == "IyiIO" && !@constructor &&
-                 file.try(&.ends_with?("/iyi/io.iyi"))
+                 file.try(&.ends_with?("/ris/io.ri"))
         add node, kind(type), "#{type}.new" unless stream ||
                                                    TapeChecker.class_instance?(@program, type)
       elsif node.name == "build" && type &&

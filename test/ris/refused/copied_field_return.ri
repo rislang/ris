@@ -1,5 +1,6 @@
 class H
   getter bytes : String::Builder
+
   def initialize
     @bytes = String::Builder.new(16)
     @bytes << "abcdef"
@@ -17,4 +18,5 @@ def run
   o.bytes << "ZZZZZZZZ"
   puts e, o.bytes.finish
 end
+
 run

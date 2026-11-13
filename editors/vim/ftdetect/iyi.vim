@@ -1,4 +1,4 @@
 augroup iyi_filetype
   autocmd!
-  autocmd BufRead,BufNewFile *.iyi setfiletype iyi
+  autocmd BufRead,BufNewFile *.ri setfiletype iyi
 augroup END

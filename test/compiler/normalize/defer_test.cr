@@ -7,7 +7,7 @@ require "../../test_helper"
 # first, once per scope — is held by test/cli/panics.sh, which runs it.
 describe "Normalize: defer" do
   it "guards a defer that has nothing after it" do
-    assert_normalize "defer x", "begin\nensure\n  x\nend", filename: "x.iyi"
+    assert_normalize "defer x", "begin\nensure\n  x\nend", filename: "x.ri"
   end
 
   it "leaves a Crystal file's `defer` alone" do

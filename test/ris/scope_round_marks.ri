@@ -36,7 +36,7 @@ def builder_loop(text : String) : Int32
 end
 
 @[NoInline]
-def yield_loop(text : String) : Int32
+def yield_loop(text : String, &) : Int32
   at = 0
   count = 0
   while at < text.bytesize

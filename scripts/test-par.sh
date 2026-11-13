@@ -28,7 +28,7 @@ run() {
   for r in $(seq 0 $((parts - 1))); do
     dir=$out/$suite-$r tmp=/tmp/rs-${suite%%_*}-$r
     clean "$tmp"; mkdir -p "$dir" "$tmp/tmp" "$tmp/cache"
-    ( TMPDIR=$tmp/tmp IYI_CACHE_DIR=$tmp/cache CRYSTAL_CACHE_DIR=$tmp/cache \
+    ( TMPDIR=$tmp/tmp RIS_CACHE_DIR=$tmp/cache CRYSTAL_CACHE_DIR=$tmp/cache \
         SPEC_SPLIT=$r%$parts .build/$suite --order=random > "$dir/log" 2>&1
       echo $? > "$dir/rc" ) &
   done
@@ -51,7 +51,7 @@ for suite in compiler_test std_test primitives_test cli_test; do
     | sed 's/^crystal spec //' | sort -u > $out/$suite.failed
   while read -r at; do
     tmp=/tmp/rs-again; clean "$tmp"; mkdir -p "$tmp/tmp" "$tmp/cache"
-    if TMPDIR=$tmp/tmp IYI_CACHE_DIR=$tmp/cache \
+    if TMPDIR=$tmp/tmp RIS_CACHE_DIR=$tmp/cache \
        CRYSTAL_CACHE_DIR=$tmp/cache .build/$suite --location "$at" \
        > $out/again.log 2>&1; then
       echo "alone ok  $suite $at"

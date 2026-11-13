@@ -1,7 +1,7 @@
 # Exercises `std/mlkem`.
 #
 # Run via:
-#     ./bin/iyi run test/cli/std_mlkem_exercise.iyi [-- VECTORS.json]
+#     ./bin/ris run test/cli/std_mlkem_exercise.ri [-- VECTORS.json]
 #
 # With no argument: a few of NIST's ACVP cases for ML-KEM-768, embedded
 # below, then round trips from fixed seeds, the implicit rejection's key
@@ -52,7 +52,6 @@ def hex(bytes : Array(UInt8)) : String
   end
 end
 
-
 KAT_KEYGEN_D       = "e582b7d75e6c80b05ae392a1fc9f7153b12390fd99930368cc67a768baebc8a0"
 KAT_KEYGEN_Z       = "1cdacb8740c0b87c4a379575f187b367cbfa3b300bf591b109f79816e9cbe8f0"
 KAT_KEYGEN_EK_SHA3 = "81e66ef5a7a221619f6a64039cc369843e10df5c859f6959cc3fd8e5272330fd"
@@ -79,6 +78,5 @@ kat_dk[2336] = kat_dk[2336] ^ 1_u8
 hashed = MlKem768PrivateKey.from_bytes(kat_dk)
 check hashed.is_a?(MlKemError) && hashed.message.includes?("hash check"), "embedded acvp decapsulation 88's key with H(ek) one bit off: refused"
 puts "  a key pair, an encapsulation, a modified ciphertext implicitly rejected, a key of values too large and one whose hash is off refused"
-
 
 puts "PASS: ML-KEM ACVP views"

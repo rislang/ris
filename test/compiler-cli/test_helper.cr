@@ -22,7 +22,7 @@ end
 # iyi: the compiler under its own name. Its own binary because its command
 # surface is its own — and, for the daemon, because a server is the compiler it
 # was built from.
-IYI_BIN = ENV.fetch("IYI_SPEC_COMPILER_BIN") { Path[Dir.current, ".build", "iyi#{EXE_SUFFIX}"].to_s }
+IYI_BIN = ENV.fetch("RIS_SPEC_COMPILER_BIN") { Path[Dir.current, ".build", "iyi#{EXE_SUFFIX}"].to_s }
 
 def iyi
   IYI_BIN

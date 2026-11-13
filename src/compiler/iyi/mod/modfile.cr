@@ -1,6 +1,6 @@
-# iyi: `iyi.mod` — the manifest III.7 step 1 names. Policy, written by a
+# iyi: `ris.mod` — the manifest III.7 step 1 names. Policy, written by a
 # person: the module's own identity and the *minimums* it asks for. Fact —
-# what actually arrived — is `iyi.sum`'s job and step 2's.
+# what actually arrived — is `ris.sum`'s job and step 2's.
 #
 # The shape is Go's, because the design is (iyi SPEC III.7): line-oriented,
 # two directives, nothing clever enough to have a bad day.
@@ -359,7 +359,7 @@ module Iyi::Mod
         raise ModError.new("#{source}:#{line_number}: '#{name}' is not a short name; one is a single lower-case word, as `web` or `json_x`")
       end
       if name == "std"
-        raise ModError.new("#{source}:#{line_number}: `std` is iyi's standard library in every file, and cannot name a requirement")
+        raise ModError.new("#{source}:#{line_number}: `std` is ris's standard library in every file, and cannot name a requirement")
       end
       name
     end

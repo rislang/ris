@@ -974,7 +974,7 @@ module Iyi
     property? expansion = false
     property? args_in_brackets = false
     property? has_parentheses = false
-    # iyi: a bare `group do ... end` in a `.iyi` file, recognised by name
+    # iyi: a bare `group do ... end` in a `.ri` file, recognised by name
     # the way `.or` and `.or_panic` are (iyi SPEC III.1.3, III.4.9), so the
     # normalizer can expand the typed form without guessing from the name
     # of a call a Crystal file is free to mean differently.
@@ -1605,7 +1605,7 @@ module Iyi
     property splat_index : Int32?
     property doc : String?
     property visibility = Visibility::Public
-    # iyi: `pub def` — exported, so it appears in `.iyimod` (R-2).
+    # iyi: `pub def` — exported, so it appears in `.rimod` (R-2).
     property? exported = false
 
     # ris: the program runner generated for a spec build, not a source def.
@@ -1619,7 +1619,7 @@ module Iyi
     # for Int32` puts a method on a type its module does not export.
     property? iyi_from_impl = false
 
-    # iyi: read from a `.iyimod` rather than from source (iyi SPEC IV.1).
+    # iyi: read from a `.rimod` rather than from source (iyi SPEC IV.1).
     #
     # There is no body under this signature and there is not meant to be one:
     # the artifact carries what another module may call, not how it is done. A
@@ -1628,7 +1628,7 @@ module Iyi
     # is why one that reads artifacts cannot yet generate code.
     property? iyi_from_artifact = false
 
-    # iyi: read from a `.iyimod` *with* its body, from `MonoBodies` (iyi SPEC
+    # iyi: read from a `.rimod` *with* its body, from `MonoBodies` (iyi SPEC
     # IV.1g).
     #
     # The opposite of the flag above, and the reason both are needed: a def
@@ -2018,7 +2018,7 @@ module Iyi
     property string : String
 
     # iyi: the one the compiler writes itself, to load the prelude. A `require`
-    # in a `.iyi` file is refused and told about `import`; this is not one the
+    # in a `.ri` file is refused and told about `import`; this is not one the
     # author wrote.
     property? iyi_prelude = false
 
@@ -2184,7 +2184,7 @@ module Iyi
     # reaches a consumer by being written back out.
     property? exported = false
 
-    # iyi: written by a `.iyimod`'s renderer rather than by an author (iyi SPEC
+    # iyi: written by a `.rimod`'s renderer rather than by an author (iyi SPEC
     # IV.1g).
     #
     # Such a path may name a type the module keeps to itself — a field of a
@@ -2328,7 +2328,7 @@ module Iyi
     property name_location : Location?
     property doc : String?
     property visibility = Visibility::Public
-    # `pub trait` — exported from the module, so it appears in `.iyimod`.
+    # `pub trait` — exported from the module, so it appears in `.rimod`.
     property? exported = false
 
     def initialize(@name, body = nil, @type_vars = nil, @exported = false, @assoc_types = nil, @supertraits = nil)

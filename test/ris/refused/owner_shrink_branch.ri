@@ -8,9 +8,9 @@ end
 @[OnTape]
 struct Ctx
   getter vars : Vars
+
   def initialize(@vars); end
 end
-
 
 def held(vars : Vars, other : Vars)
   x = Program.args.empty? ? vars : other

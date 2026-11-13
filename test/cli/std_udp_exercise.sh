@@ -11,9 +11,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs the compiler the caller names; bin/iyi is a POSIX shell
+# The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -49,12 +49,12 @@ for candidate in python3 python; do
 done
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_udp_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_udp_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -106,16 +106,16 @@ else
   "$PY" - <<PY
 from pathlib import Path
 # The parser is std/socket's now, so the module broken is that one.
-src = Path("$REPO/src/std/socket.iyi").read_text()
+src = Path("$REPO/src/std/socket.ri").read_text()
 old = 'return IPv4Address.new(127_u8, 0_u8, 0_u8, 1_u8) if localhost?(host)'
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/socket.iyi").write_text(src.replace(old, 'return IPv4Address.new(127_u8, 0_u8, 0_u8, 2_u8) if localhost?(host)', 1))
+Path("$WORK/patched/std/socket.ri").write_text(src.replace(old, 'return IPv4Address.new(127_u8, 0_u8, 0_u8, 2_u8) if localhost?(host)', 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_udp_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_udp_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on a broken module"
     status=1
   else
@@ -128,8 +128,8 @@ echo "== what address parsing refuses"
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
   printf 'module main\n\nimport std/udp::{UdpSocket}\nimport std/socket::{IyiSocket}\n\nputs (%s).to_s\n' \
-    "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -148,7 +148,7 @@ refuses() { # refuses <label> <name> <phrase> <expression>
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 
 refuses "an invalid host string" bad_host "cannot resolve address: \"invalid.ip\"" \
@@ -172,8 +172,8 @@ refuses "a leading single colon" lead_colon "a single leading colon" \
 
 refuses_body() { # refuses_body <label> <name> <phrase>
   local label="$1" name="$2" phrase="$3"
-  cat > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  cat > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -192,53 +192,53 @@ refuses_body() { # refuses_body <label> <name> <phrase>
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 
-refuses_body "a negative port" neg_port "port -1 is not a port: 0 to 65535" <<'IYI'
+refuses_body "a negative port" neg_port "port -1 is not a port: 0 to 65535" <<'RIS'
 module main
 import std/udp::{UdpSocket}
 s = UdpSocket.bind("127.0.0.1", -1)
 puts s.local_port
-IYI
+RIS
 
-refuses_body "a port above 65535" high_port "port 70000 is not a port: 0 to 65535" <<'IYI'
+refuses_body "a port above 65535" high_port "port 70000 is not a port: 0 to 65535" <<'RIS'
 module main
 import std/udp::{UdpSocket}
 s = UdpSocket.bind("127.0.0.1", 70000)
 puts s.local_port
-IYI
+RIS
 
-refuses_body "a Datagram index that is not 0, 1, or 2" dg_index "Datagram index -1 is not 0, 1, or 2" <<'IYI'
+refuses_body "a Datagram index that is not 0, 1, or 2" dg_index "Datagram index -1 is not 0, 1, or 2" <<'RIS'
 module main
 import std/udp::{Datagram, Bytes}
 buf = Bytes.new(1)
 buf[0] = 120_u8
 dg = Datagram.new(buf, "h", 7)
 puts dg[-1]
-IYI
+RIS
 
-refuses_body "a negative receive count" neg_recv "negative count: -1" <<'IYI'
+refuses_body "a negative receive count" neg_recv "negative count: -1" <<'RIS'
 module main
 import std/udp::{UdpSocket}
 s = UdpSocket.bind("127.0.0.1", 0)
 s.receive_from(-1)
-IYI
+RIS
 
-refuses_body "local_port after close" closed_port "socket is closed" <<'IYI'
+refuses_body "local_port after close" closed_port "socket is closed" <<'RIS'
 module main
 import std/udp::{UdpSocket}
 s = UdpSocket.bind("127.0.0.1", 0)
 s.close
 puts s.local_port
-IYI
+RIS
 
-refuses_body "a negative poll timeout" neg_poll "negative timeout: -1" <<'IYI'
+refuses_body "a negative poll timeout" neg_poll "negative timeout: -1" <<'RIS'
 module main
 import std/udp::{UdpSocket}
 s = UdpSocket.bind("127.0.0.1", 0)
 puts s.poll_read(-1)
-IYI
+RIS
 
 echo
 echo "== a refusal says why"
@@ -254,25 +254,25 @@ refuses_port() { # refuses_port <label> <name> <phrase>, the program on stdin
 
 # And a port is its first binder's: no SO_REUSEADDR, which on Linux let
 # this second bind through.
-refuses_port "a second bind of a held port" rebind ": the address is in use" <<'IYI'
+refuses_port "a second bind of a held port" rebind ": the address is in use" <<'RIS'
 module main
 import std/udp::{UdpSocket}
 held = UdpSocket.bind("127.0.0.1", 0)
 again = UdpSocket.bind("127.0.0.1", held.local_port)
 puts again.local_port
-IYI
+RIS
 
-refuses_body "a datagram past 65,507 bytes" too_big "cannot send to 127.0.0.1:9: the datagram is too large to send" <<'IYI'
+refuses_body "a datagram past 65,507 bytes" too_big "cannot send to 127.0.0.1:9: the datagram is too large to send" <<'RIS'
 module main
 import std/udp::{UdpSocket}
 puts UdpSocket.client.send_to("x" * 65508, "127.0.0.1", 9)
-IYI
+RIS
 
-refuses_body "an IPv6 address from an IPv4 socket" other_family "cannot send to [::1]:9: the address is not of the socket's family" <<'IYI'
+refuses_body "an IPv6 address from an IPv4 socket" other_family "cannot send to [::1]:9: the address is not of the socket's family" <<'RIS'
 module main
 import std/udp::{UdpSocket}
 puts UdpSocket.client.send_to("x", "::1", 9)
-IYI
+RIS
 
 # A broadcast needs SO_BROADCAST. Linux answers that only where it has a
 # route for the address, and ENETUNREACH on a machine with none, so the
@@ -281,11 +281,11 @@ case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT) broadcast_said="cannot send to 255.255.255.255:9: the destination is a broadcast address" ;;
   *) broadcast_said="cannot send to 255.255.255.255:9: " ;;
 esac
-refuses_body "a broadcast without SO_BROADCAST" broadcast "$broadcast_said" <<'IYI'
+refuses_body "a broadcast without SO_BROADCAST" broadcast "$broadcast_said" <<'RIS'
 module main
 import std/udp::{UdpSocket}
 puts UdpSocket.client.send_to("x", "255.255.255.255", 9)
-IYI
+RIS
 
 echo
 echo "== a receive parks rather than blocking the thread (iyi SPEC III.4.2)"
@@ -294,7 +294,7 @@ echo "== a receive parks rather than blocking the thread (iyi SPEC III.4.2)"
 # blocked the worker would never let the sender run, and the program would
 # hang; it is given ten seconds. Then the same shape with a `close` instead
 # of a send: the parked receive answers `Cancelled`.
-cat > "$WORK/park.iyi" <<'IYI'
+cat > "$WORK/park.ri" <<'RIS'
 module park
 
 import std/udp::{UdpSocket, Datagram}
@@ -370,8 +370,8 @@ group do |g|
   end
 end
 puts "sibling error under a parked receive: #{cancel_answer}, probe beside it: #{probe_answer}"
-IYI
-if ! "$IYI" build -o "$WORK/park" "$WORK/park.iyi" > "$WORK/park.build" 2>&1; then
+RIS
+if ! "$RIS" build -o "$WORK/park" "$WORK/park.ri" > "$WORK/park.build" 2>&1; then
   echo "  the parking program did not build:"
   sed -n '1,8p' "$WORK/park.build"
   status=1
@@ -418,7 +418,7 @@ else
   mkdir -p "$WORK/blocking/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/udp.iyi").read_text()
+src = Path("$REPO/src/std/udp.ri").read_text()
 if "$BLOCKING_SITE" == "win32":
     old = "on = 1\n      LibWs2_32.ioctlsocket(s, FIONBIO, pointerof(on))"
     new = "on = 0\n      LibWs2_32.ioctlsocket(s, FIONBIO, pointerof(on))"
@@ -427,12 +427,12 @@ else:
     new = "count = UdpSocket.__sys_recvfrom(@fd, buffer, capacity.to_u64, 0, addr, pointerof(len))"
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/blocking/std/udp.iyi").write_text(src.replace(old, new, 1))
+Path("$WORK/blocking/std/udp.ri").write_text(src.replace(old, new, 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the blocking patch did not apply"
     status=1
-  elif ! IYI_PATH="$WORK/blocking${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/park_blocking" "$WORK/park.iyi" > "$WORK/park_blocking.build" 2>&1; then
+  elif ! RIS_PATH="$WORK/blocking${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/park_blocking" "$WORK/park.ri" > "$WORK/park_blocking.build" 2>&1; then
     echo "  the blocking copy did not build:"
     sed -n '1,8p' "$WORK/park_blocking.build"
     status=1
@@ -452,7 +452,7 @@ else
   mkdir -p "$WORK/patched_dg/std"
   "$PY" - <<PY
 from pathlib import Path
-src = Path("$REPO/src/std/udp.iyi").read_text()
+src = Path("$REPO/src/std/udp.ri").read_text()
 old = '''    elsif i == 2
       @port
     else
@@ -461,21 +461,21 @@ if old not in src:
     raise SystemExit("datagram patch site missing")
 new = '''    else
       @port'''
-Path("$WORK/patched_dg/std/udp.iyi").write_text(src.replace(old, new, 1))
+Path("$WORK/patched_dg/std/udp.ri").write_text(src.replace(old, new, 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  the datagram patch did not apply"
     status=1
   else
-    cat > "$WORK/dg_idx.iyi" <<'IYI'
+    cat > "$WORK/dg_idx.ri" <<'RIS'
 module main
 import std/udp::{Datagram, Bytes}
 buf = Bytes.new(1)
 buf[0] = 120_u8
 dg = Datagram.new(buf, "h", 7)
 puts dg[-1]
-IYI
-    if IYI_PATH="$WORK/patched_dg${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$WORK/dg_idx.iyi" >"$WORK/dg_mut.out" 2>&1; then
+RIS
+    if RIS_PATH="$WORK/patched_dg${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$WORK/dg_idx.ri" >"$WORK/dg_mut.out" 2>&1; then
       echo "  a broken Datagram index is caught"
     else
       echo "  the index program refused on a broken module (cannot prove the check)"
@@ -496,16 +496,16 @@ breaks_udp() { # breaks_udp <label> <dir> <phrase> <old> <new>
   OLD="$4" NEW="$5" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/udp.iyi").read_text()
+src = Path("$REPO/src/std/udp.ri").read_text()
 old, new = os.environ["OLD"], os.environ["NEW"]
 if old not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/$dir/std/udp.iyi").write_text(src.replace(old, new, 1))
+Path("$WORK/$dir/std/udp.ri").write_text(src.replace(old, new, 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  $label: the patch did not apply"
     status=1
-  elif ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/$dir/program" "$REPO/test/cli/std_udp_exercise.iyi" >"$WORK/$dir/build.log" 2>&1; then
+  elif ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/$dir/program" "$REPO/test/cli/std_udp_exercise.ri" >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the broken copy did not build"
     sed -n '1,8p' "$WORK/$dir/build.log"
     status=1
@@ -517,7 +517,7 @@ PY
     sed -n '$p' "$WORK/$dir/out"
     status=1
   else
-    echo "  $label: caught at \"$(grep -m1 -F -- "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')\""
+    echo "  $label: caught at \"$(grep -m1 -F -- "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')\""
   fi
 }
 if [ -z "$PY" ]; then

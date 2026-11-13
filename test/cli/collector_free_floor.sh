@@ -15,7 +15,7 @@
 # landed exactly on its capacity had its terminator outside its block. Under
 # bdw-gc every program was fine. Under `-Dgc_none` a 116-byte mangled function
 # name lost its terminator, LLVM's `strlen` read the next allocation, and
-# `samples/iyi/collections.iyi` failed to link 10 times out of 10.
+# `samples/ris/collections.ri` failed to link 10 times out of 10.
 #
 # So this is a floor, not a benchmark: a collector is a permitted dependency
 # for the compiler, and a memory bug the collector is hiding is not permitted.
@@ -35,7 +35,7 @@ case "$(uname -s)" in
     # the collector-free one, and the Windows job compiles every sample
     # with it. What this gate adds is the POSIX `make` with the flag, which
     # is not how the compiler is built here - and which began by deleting
-    # `.build/iyi`, so a run on Windows left the checkout without one.
+    # `.build/ris`, so a run on Windows left the checkout without one.
     echo "not here: the Windows compiler is built with -Dgc_none by default (Makefile.win), and the Windows job compiles every sample with it"
     exit 0
     ;;
@@ -74,10 +74,10 @@ for candidate in python3 python; do
 done
 
 cd "$REPO" || exit 1
-export IYI_PATH="$REPO/src"
+export RIS_PATH="$REPO/src"
 
 echo "== the compiler, built without a collector"
-rm -f .build/iyi .build/iyi-daemon .build/crystal
+rm -f .build/ris .build/iyi-daemon .build/crystal
 if ! make -j8 FLAGS="-Dgc_none" > "$WORK/build.log" 2>&1; then
   echo "  FAIL: the compiler does not build with -Dgc_none"
   grep -aE "^Error|error:" "$WORK/build.log" | head -5 | sed 's/^/    /'
@@ -105,9 +105,9 @@ if [ -z "$LIBS_READER" ]; then
   unmeasured=$((unmeasured + 1))
 else
   if [ "$LIBS_READER" = otool ]; then
-    libs="$(otool -L .build/iyi 2>/dev/null)"
+    libs="$(otool -L .build/ris 2>/dev/null)"
   else
-    libs="$(ldd .build/iyi 2>/dev/null)"
+    libs="$(ldd .build/ris 2>/dev/null)"
   fi
   if printf '%s' "$libs" | grep -qE 'libgc'; then
     echo "  FAIL: a collector is still linked"
@@ -125,16 +125,16 @@ echo "== every sample compiles with it, on a fresh cache each run"
 # clean pass once.
 failed=0
 total=0
-for source in "$REPO"/samples/iyi/*.iyi; do
-  name="$(basename "$source" .iyi)"
+for source in "$REPO"/samples/ris/*.ri; do
+  name="$(basename "$source" .ri)"
   run=1
   while [ "$run" -le "$RUNS" ]; do
     total=$((total + 1))
-    IYI_CACHE_DIR="$WORK/cache.$name.$run" \
-      ./bin/iyi build -o "$WORK/out.$name" "$source" > "$WORK/$name.$run.log" 2>&1
+    RIS_CACHE_DIR="$WORK/cache.$name.$run" \
+      ./bin/ris build -o "$WORK/out.$name" "$source" > "$WORK/$name.$run.log" 2>&1
     if [ $? -ne 0 ]; then
       failed=$((failed + 1))
-      echo "  FAIL: samples/iyi/$name.iyi, run $run"
+      echo "  FAIL: samples/ris/$name.ri, run $run"
       grep -aE "Undefined symbols|Error|error:" "$WORK/$name.$run.log" \
         | head -3 | cut -c1-140 | sed 's/^/    /'
     fi
@@ -154,7 +154,7 @@ echo "== every string constructor leaves room for its terminator"
 # only catches a missing terminator when some name happens to land on a size
 # class, which is why the bug reached a 116-byte name and nothing smaller.
 # This asks the question directly, at 3,000 lengths per constructor.
-if IYI_CACHE_DIR="$WORK/probe-cache" \
+if RIS_CACHE_DIR="$WORK/probe-cache" \
      ./bin/crystal run --no-color -Dgc_none "$REPO/test/cli/terminator_room.cr" \
      > "$WORK/room.log" 2>&1; then
   grep -a "leaves room" "$WORK/room.log" | sed 's/^/  /'
@@ -173,12 +173,12 @@ if [ -z "$PY" ]; then
   echo "  the 30-module project went unbuilt: its generator needs python and this machine has none"
   unmeasured=$((unmeasured + 1))
 elif "$PY" "$REPO/test/speed/incremental/generate_project.py" "$WORK/gen" \
-     > "$WORK/gen.log" 2>&1 && [ -f "$WORK/gen/iyi/main.iyi" ]; then
+     > "$WORK/gen.log" 2>&1 && [ -f "$WORK/gen/ris/main.ri" ]; then
   big_failed=0
   run=1
   while [ "$run" -le "$RUNS" ]; do
-    IYI_CACHE_DIR="$WORK/bigcache.$run" \
-      ./bin/iyi build -o "$WORK/big.$run" "$WORK/gen/iyi/main.iyi" \
+    RIS_CACHE_DIR="$WORK/bigcache.$run" \
+      ./bin/ris build -o "$WORK/big.$run" "$WORK/gen/ris/main.ri" \
       > "$WORK/big.$run.log" 2>&1
     if [ $? -ne 0 ]; then
       big_failed=$((big_failed + 1))
@@ -208,7 +208,7 @@ echo "== and they build with bdw-gc unreachable, not merely absent from the link
 # `@[Link("gc", pkg_config: "bdw-gc")]` emits its own -L from pkg-config. Both
 # were tried here and both passed while the dependency was still required.
 #
-# `CRYSTAL_LIBRARY_PATH` and not `IYI_LIBRARY_PATH`: the two are not
+# `CRYSTAL_LIBRARY_PATH` and not `RIS_LIBRARY_PATH`: the two are not
 # interchangeable here. The first replaces the default search path, the second
 # adds to it, so swapping them made this section pass with the collector back
 # on the binaries, which is to say it stopped measuring anything. The build
@@ -225,7 +225,7 @@ if env PKG_CONFIG_LIBDIR="$EMPTY" PKG_CONFIG_PATH="$EMPTY" \
   status=1
 else
   echo "  pkg-config cannot find bdw-gc, so the isolation holds"
-  rm -f .build/iyi .build/iyi-daemon .build/crystal
+  rm -f .build/ris .build/iyi-daemon .build/crystal
   if env -u LIBRARY_PATH PKG_CONFIG_LIBDIR="$EMPTY" PKG_CONFIG_PATH="$EMPTY" \
        CRYSTAL_LIBRARY_PATH="$EMPTY" make -j8 gc_none=1 > "$WORK/isolated.log" 2>&1; then
     echo "  the binaries build with no bdw-gc reachable"
@@ -250,7 +250,7 @@ echo "== the default build is unchanged, daemon included"
 # Reproduced before being believed: rebuild `iyi` alone against a different
 # build commit and that test goes from exit 0 to exit 1 with 12 failures, all
 # of them that refusal.
-rm -f .build/iyi .build/iyi-daemon .build/crystal
+rm -f .build/ris .build/iyi-daemon .build/crystal
 if make -j8 > "$WORK/default.log" 2>&1 \
      && make -j8 iyi-daemon >> "$WORK/default.log" 2>&1; then
   echo "  default build restored"

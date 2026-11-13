@@ -1,0 +1,363 @@
+# standard: RFC 4648
+# Base64, RFC 4648, written in iyi.
+#
+# `encode` is the alphabet with `+` `/` and `=` padding, no line
+# breaks (RFC 4648 §4). `urlsafe_encode` uses `-` `_` and the same
+# padding. `decode` accepts both alphabets, ignores ASCII whitespace,
+# and panics on a byte that is neither. Missing padding is allowed
+# (`"QQ"` is `"A"`), but nothing is dropped without a word: data after
+# the padding, data inside it (`"QU=JD"`), more `=` than the group
+# needs, and a final group of one character (`"Q"`, which cannot encode a
+# byte) are each refused.
+
+module std/base64
+
+pub struct Base64
+  # A data character's value, by byte; -1 for everything else, which the
+  # byte-at-a-time path sorts into whitespace, padding and refusals.
+  DECODE_VALUES = Base64.decode_values.copy_to(Program.tape)
+
+  # Two characters per twelve bits, the first in the low byte: the encoder
+  # writes eight characters for every six bytes it reads, as one word.
+  PAIRS_STD = Base64.pairs_of(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  ).copy_to(Program.tape)
+  PAIRS_URL = Base64.pairs_of(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+  ).copy_to(Program.tape)
+
+  def self.encode(data : String) : String
+    encode_with(data, plus_slash, PAIRS_STD, true)
+  end
+
+  def self.encode(data : String,
+                  writer : String::Builder) : Nil
+    writer << encode(data)
+  end
+
+  def self.urlsafe_encode(data : String) : String
+    encode_with(data, minus_underscore, PAIRS_URL, true)
+  end
+
+  def self.urlsafe_encode(data : String,
+                          writer : String::Builder) : Nil
+    writer << urlsafe_encode(data)
+  end
+
+  # Room for every byte the text can hold, sized up front.
+  def self.decode(text : String) : String
+    String.build(text.bytesize // 4 * 3 + 3) do |w|
+      decode_into(w, text)
+    end
+  end
+
+  def self.decode(text : String,
+                  writer : String::Builder) : Nil
+    writer << decode(text)
+  end
+
+  # Decodes *src* into *w*.
+  private def self.decode_into(w : String::Builder, src : String) : Nil
+    values = DECODE_VALUES
+    n = src.bytesize
+    acc = 0
+    bits = 0
+    pads = 0
+    pads_needed = 0
+    chars = 0
+    i = 0
+    while i < n
+      # Between groups with no padding seen, four data characters are three
+      # bytes, which is what the path below makes of them one at a time.
+      if bits == 0 && pads == 0 && i + 4 <= n
+        v0 = values[src[i].to_i32]
+        v1 = values[src[i + 1].to_i32]
+        v2 = values[src[i + 2].to_i32]
+        v3 = values[src[i + 3].to_i32]
+        if (v0 | v1 | v2 | v3) >= 0
+          group = (v0 << 18) | (v1 << 12) | (v2 << 6) | v3
+          w.push((group >> 16).to_u8)
+          w.push(((group >> 8) & 255).to_u8)
+          w.push((group & 255).to_u8)
+          i = i + 4
+          chars = chars + 4
+          next
+        end
+      end
+      b = src[i]
+      i = i + 1
+      # ASCII whitespace, as the header says: `\v` and `\f` were refused as
+      # invalid bytes.
+      next if b == 32_u8 || (b >= 9_u8 && b <= 13_u8)
+      if b == 61_u8 # '='
+        if pads == 0
+          raise "base64: #{chars} data characters, 1 more than a multiple of 4: a single character cannot encode a byte" if bits == 6
+          raise "base64: padding with no group to close" if bits == 0
+          pads_needed = bits == 4 ? 2 : 1
+        end
+        pads = pads + 1
+        raise "base64: excess padding" if pads > pads_needed
+        next
+      end
+      v = values[b.to_i32]
+      raise "base64: invalid byte #{b}" if v < 0
+      if pads > 0
+        raise "base64: discontinuous padding" if pads < pads_needed
+        raise "base64: data after padding"
+      end
+      chars = chars + 1
+      acc = (acc << 6) | v
+      bits = bits + 6
+      if bits >= 8
+        bits = bits - 8
+        w.push(((acc >> bits) & 255).to_u8)
+      end
+    end
+    raise "base64: #{chars} data characters, 1 more than a multiple of 4: a single character cannot encode a byte" if bits == 6
+  end
+
+  # Six bytes read as one word and eight characters written as one, while
+  # eight bytes can be read; then three bytes at a time. Words are
+  # little-endian on every target iyi builds for, which is what the byte
+  # order below and the pair table's order are written for.
+  private def self.encode_with(data : String, alphabet : String,
+                               pairs : Array(Int32),
+                               pad : Bool) : String
+    n = data.bytesize
+    whole = n - n % 3
+    table = String.view(alphabet)
+    String.build((n + 2) // 3 * 4) do |w|
+      i = 0
+      while i &+ 8 <= n
+        word = data.read_bytes_at(UInt64, i)
+        bits = (word & 0xFF_u64).unsafe_shl(40) | (word.unsafe_shr(8) & 0xFF_u64).unsafe_shl(32) |
+               (word.unsafe_shr(16) & 0xFF_u64).unsafe_shl(24) | (word.unsafe_shr(24) & 0xFF_u64).unsafe_shl(16) |
+               (word.unsafe_shr(32) & 0xFF_u64).unsafe_shl(8) | (word.unsafe_shr(40) & 0xFF_u64)
+        c01 = pairs[bits.unsafe_shr(36).unsafe_to_i32].unsafe_to_u64
+        c23 = pairs[(bits.unsafe_shr(24) & 0xFFF_u64).unsafe_to_i32].unsafe_to_u64
+        c45 = pairs[(bits.unsafe_shr(12) & 0xFFF_u64).unsafe_to_i32].unsafe_to_u64
+        c67 = pairs[(bits & 0xFFF_u64).unsafe_to_i32].unsafe_to_u64
+        w.write_bytes(c01 | c23.unsafe_shl(16) | c45.unsafe_shl(32) | c67.unsafe_shl(48))
+        i = i &+ 6
+      end
+      while i < whole
+        triple = (data[i].to_i32 << 16) | (data[i + 1].to_i32 << 8) | data[i + 2].to_i32
+        w.push(table[triple >> 18])
+        w.push(table[(triple >> 12) & 63])
+        w.push(table[(triple >> 6) & 63])
+        w.push(table[triple & 63])
+        i = i + 3
+      end
+      if i < n
+        rest = n - i
+        b1 = rest > 1 ? data[i + 1].to_i32 : 0
+        triple = (data[i].to_i32 << 16) | (b1 << 8)
+        w.push(table[triple >> 18])
+        w.push(table[(triple >> 12) & 63])
+        if rest == 1
+          w.push(pad ? 61_u8 : table[(triple >> 6) & 63])
+          w.push(61_u8)
+        else
+          w.push(table[(triple >> 6) & 63])
+          w.push(pad ? 61_u8 : table[triple & 63])
+        end
+      end
+    end
+  end
+
+  private def self.plus_slash : String
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  end
+
+  private def self.minus_underscore : String
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+  end
+
+  protected def self.pairs_of(alphabet : String) : Array(Int32)
+    chars = alphabet
+    Array(Int32).new(4096) { |k| chars[k.unsafe_shr(6)].to_i32 | chars[k & 63].to_i32.unsafe_shl(8) }
+  end
+
+  protected def self.decode_values : Array(Int32)
+    Array(Int32).new(256) { |b| value_of(b.to_u8) }
+  end
+
+  private def self.value_of(b : UInt8) : Int32
+    if b >= 65_u8 && b <= 90_u8
+      (b - 65_u8).to_i32
+    elsif b >= 97_u8 && b <= 122_u8
+      (b - 97_u8).to_i32 + 26
+    elsif b >= 48_u8 && b <= 57_u8
+      (b - 48_u8).to_i32 + 52
+    elsif b == 43_u8 || b == 45_u8
+      62
+    elsif b == 47_u8 || b == 95_u8
+      63
+    else
+      -1
+    end
+  end
+end
+
+spec 8.1  # A std module follows the standard its header names (an RFC, a file…
+  raw = "\u0000hello café\u00ff"
+  encoded = Base64.encode(raw)
+  Base64.decode(encoded) == raw
+  Base64.decode(" Q Q = = \n") == "A"
+  w = String::Builder.new(1)
+  w << "prefix:"
+  Base64.encode("foo", w)
+  Base64.decode("YmFy", w)
+  Base64.urlsafe_encode("?", w)
+  w.finish == "prefix:Zm9vbarPw=="
+  Base64.encode("").empty?
+  Base64.encode("foobar") == "Zm9vYmFy"
+  Base64.urlsafe_encode("foobar") == "Zm9vYmFy"
+end
+
+spec 1.5  # A def builds its tape result in its caller's destination (Goose §7,…
+  kept = ""
+  tape do
+    kept = Base64.encode("\u0000hello café\u00ff").copy_to(Program.tape)
+  end
+  Base64.decode(kept) == "\u0000hello café\u00ff"
+end
+
+private def base64_assert_true(cond : Bool, msg : String) : Bool
+  raise "ASSERTION FAILED: #{msg}" unless cond
+  true
+end
+
+private def base64_assert_str(expected : String, actual : String, msg : String) : Bool
+  raise "ASSERTION FAILED: #{msg}\n  expected #{expected.inspect}\n  got      #{actual.inspect}" unless expected == actual
+  true
+end
+
+private def base64_byte_sum(s : String) : UInt64
+  p = s
+  sum = 0_u64
+  i = 0
+  while i < s.bytesize
+    sum = sum &+ p.byte_at(i).to_u64
+    i = i + 1
+  end
+  sum
+end
+
+private def base64_encode_checks : Bool
+  base64_assert_str "aGk=", Base64.encode("hi"), "hi"
+  base64_assert_str "Zg==", Base64.encode("f"), "f"
+  base64_assert_str "Zm8=", Base64.encode("fo"), "fo"
+  base64_assert_str "Zm9v", Base64.encode("foo"), "foo"
+  base64_assert_str "", Base64.encode(""), "empty"
+  base64_assert_str "Pz8=", Base64.urlsafe_encode("??"), "urlsafe"
+
+  # Past eight bytes the encoder reads six at a time and writes eight
+  # characters as one word; every byte value, both alphabets, and every
+  # length around the switch to the byte-at-a-time tail.
+  every_byte = String.from_bytes(256) { |p| 256.times { |k| p[k] = k.to_u8 } }
+  backwards = String.from_bytes(256) { |p| 256.times { |k| p[k] = (255 - k).to_u8 } }
+  base64_assert_str (
+    "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKiss" +
+    "LS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZ" +
+    "WltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWG" +
+    "h4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKz" +
+    "tLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g" +
+    "4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w=="
+  ), Base64.encode(every_byte), "every byte value"
+  base64_assert_str (
+    "__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-" +
+    "bl5OPi4eDf3t3c29rZ2NfW1dTT0tHQz87NzMvKycjHxsXEw8LBwL--vby7ur" +
+    "m4t7a1tLOysbCvrq2sq6qpqKempaSjoqGgn56dnJuamZiXlpWUk5KRkI-OjY" +
+    "yLiomIh4aFhIOCgYB_fn18e3p5eHd2dXRzcnFwb25tbGtqaWhnZmVkY2JhYF" +
+    "9eXVxbWllYV1ZVVFNSUVBPTk1MS0pJSEdGRURDQkFAPz49PDs6OTg3NjU0Mz" +
+    "IxMC8uLSwrKikoJyYlJCMiISAfHh0cGxoZGBcWFRQTEhEQDw4NDAsKCQgHBg" +
+    "UEAwIBAA=="
+  ), Base64.urlsafe_encode(backwards), "every byte value, url-safe"
+  40.times do |len|
+    piece = every_byte[200 - len, len]
+    base64_assert_str piece, Base64.decode(Base64.encode(piece)), "a round trip of #{len} bytes"
+  end
+
+  # What encoding costs against a pass that only adds the bytes up: a byte
+  # and a character at a time it is one and a half of them in a plain
+  # build, read and written a word at a time half of one. A release build
+  # turns the pass into vector code, so the ratio is not asked there.
+  {% unless flag?(:release) %}
+    sample = "0123456789abcdefghijklmnopqrstuvwxyz!?" * 30000
+    best_sum = 0_i64
+    best_encode = 0_i64
+    seen = 0_u64
+    3.times do |k|
+      t0 = __iyi_monotonic_ns
+      seen = seen &+ base64_byte_sum(sample)
+      t1 = __iyi_monotonic_ns
+      seen = seen &+ Base64.encode(sample).bytesize.to_u64
+      t2 = __iyi_monotonic_ns
+      best_sum = (t1 - t0).to_i64 if k == 0 || (t1 - t0).to_i64 < best_sum
+      best_encode = (t2 - t1).to_i64 if k == 0 || (t2 - t1).to_i64 < best_encode
+    end
+    base64_assert_true best_encode < best_sum, "encode cost: #{best_encode * 10 // best_sum}/10 of a byte sum (#{seen})"
+  {% end %}
+
+  true
+end
+
+private def base64_refusal_checks : Bool
+  caught = 0
+  ["QU*JD", "QQ==QQ==", "QU=JD", "QQ===", "QUJD=", "Q",
+   "QUJDR", "Q="].each do |text|
+    group do |g|
+      task = g.spawn { Base64.decode(text) }
+      caught += 1 if task.value.is_a?(Panicked)
+    end
+  end
+  caught == 8
+end
+
+# base64.1 encode writes RFC 4648 section 4's alphabet; urlsafe_encode uses
+#   section 5's alphabet. Both pad with = and insert no line breaks.
+spec base64.1
+  base64_encode_checks
+end
+
+# base64.2 decode accepts both alphabets, even mixed, ignores ASCII space and
+#   bytes 9 through 13, and accepts missing padding.
+spec base64.2
+  base64_assert_str "hi", Base64.decode("aGk="), "pad"
+  base64_assert_str "hello world", Base64.decode(Base64.encode("hello world")), "round trip"
+  # What stays lenient next to the refusals the gate drives: missing or
+  # partial padding, and whitespace anywhere, including between the `=`.
+  base64_assert_str "A", Base64.decode("QQ"), "missing padding"
+  base64_assert_str "ABCA", Base64.decode("QUJD\nQQ=\n=\n"), "whitespace between groups and padding"
+  base64_assert_str "ABCEFG", Base64.decode("QUJD\nRUZH"), "whole groups either side of a line break"
+  base64_assert_str "ABCD", Base64.decode("QUJDRA=="), "a full group then a padded one"
+  # All six ASCII whitespace bytes, as the module's header says: `\v` and
+  # `\f` were refused as invalid bytes.
+  base64_assert_str "ABCD", Base64.decode("QUJD\vRA=\f="), "vertical tab and form feed are whitespace"
+end
+
+# base64.3 Invalid alphabet bytes, padding without a group, excess padding, data
+#   after padding and a final single data character panic.
+spec base64.3
+  base64_refusal_checks
+end
+
+# base64.4 Decoding does not require zero unused bits and accepts an incomplete
+#   final padding run; this is a permissive decoder rather than canonical RFC
+#   4648 validation.
+spec base64.4
+  base64_assert_str "A", Base64.decode("QQ="), "partial padding"
+  todo "Needs proof"
+end
+
+# base64.5 Results are new binary Strings under SPEC 1.5. Writer overloads
+#   append the completed result to the caller's builder.
+spec base64.5
+  w = String::Builder.new(1)
+  w << "prefix:"
+  Base64.encode("foo", w)
+  Base64.decode("YmFy", w)
+  Base64.urlsafe_encode("?", w)
+  w.finish == "prefix:Zm9vbarPw=="
+end

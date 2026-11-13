@@ -9,7 +9,7 @@ set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 # The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
-IYI="${IYI:-$REPO/bin/ris}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -52,12 +52,12 @@ todo() { # todo <label> <what std/xml lacks>
   echo "  todo: $1: $2"
   todo_count=$((todo_count + 1))
 }
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_xml_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_xml_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -388,8 +388,8 @@ echo "== what a node refuses when it is made or its text set"
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
   printf 'module main\n\nimport std/xml::{TapeNode, XmlTree, NodeType}\n\ntree = XmlTree.new\nd = tree.document\n%s\n' \
-    "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+    "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -471,16 +471,16 @@ mutate() { # mutate <label> <old> <new> <phrase>
   OLD="$old" NEW="$new" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/xml.iyi").read_text()
+src = Path("$REPO/src/std/xml.ri").read_text()
 old = os.environ["OLD"]
 if old not in src:
     raise SystemExit("patch site missing: " + old)
-Path("$WORK/patched/src/std/xml.iyi").write_text(src.replace(old, os.environ["NEW"], 1))
+Path("$WORK/patched/src/std/xml.ri").write_text(src.replace(old, os.environ["NEW"], 1))
 PY
   if [ $? -ne 0 ]; then
     echo "  $label: the patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_xml_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_xml_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the exercise PASSED on a broken module"
     status=1
   elif ! grep -q "$phrase" "$WORK/mut.out"; then

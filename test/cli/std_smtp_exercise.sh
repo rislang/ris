@@ -34,7 +34,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 case "$(uname -s)" in
@@ -47,12 +47,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_smtp_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_smtp_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -329,7 +329,7 @@ fi
 
 echo
 echo "== what smtp refuses"
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/smtp::{SmtpClient, SmtpError, SmtpSecurity}
@@ -366,9 +366,9 @@ when "or-panic"
   SmtpClient.connect("127.0.0.1", listener.local_port, SmtpSecurity::Cleartext, TlsConfig.new, nil, 300).or_panic
 end
 puts "accepted"
-IYI
+RIS
 refuse() { # refuse <case> <phrase>
-  if "$IYI" run "$WORK/refuse.iyi" -- "$1" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
   elif ! grep -qF -e "$2" "$WORK/refuse.out"; then
@@ -402,7 +402,7 @@ prove_broken() {
   fi
   rm -rf "$WORK/patched"
   mkdir -p "$WORK/patched/std"
-  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/smtp.iyi" "$WORK/patched/std/smtp.iyi" <<'PY'
+  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/smtp.ri" "$WORK/patched/std/smtp.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 if src.count(os.environ["OLD"]) != 1:
@@ -415,14 +415,14 @@ PY
     return
   fi
   if [ -n "${5:-}" ]; then
-    if ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/smtp-broken" "$REPO/test/cli/std_smtp_exercise.iyi" >"$WORK/mut.log" 2>&1; then
+    if ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/smtp-broken" "$REPO/test/cli/std_smtp_exercise.ri" >"$WORK/mut.log" 2>&1; then
       echo "  the $1 copy did not compile"
       status=1
       return
     fi
     session "$WORK/smtp-broken" "$5" "$WORK/certs/roots.pem" >"$WORK/mut.out" 2>&1
   else
-    IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" timeout 300 "$IYI" run "$REPO/test/cli/std_smtp_exercise.iyi" >"$WORK/mut.out" 2>&1
+    RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" timeout 300 "$RIS" run "$REPO/test/cli/std_smtp_exercise.ri" >"$WORK/mut.out" 2>&1
   fi
   if [ $? -eq 0 ]; then
     echo "  the check PASSED on $1"

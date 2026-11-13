@@ -29,4 +29,5 @@ def run
   bytes.clear
   puts other.view
 end
+
 tape { run }

@@ -5,12 +5,14 @@ end
 # Every delivered id is acknowledged on a separate nominal queue.
 struct BoardParallel
   getter id : Int64
+
   def initialize(@id : Int64)
   end
 end
 
 struct BoardReceipt
   getter id : Int64
+
   def initialize(@id : Int64)
   end
 end
@@ -47,7 +49,7 @@ group do |g|
   cv = c.value
   dv = d.value
   raise "cancelled" unless av.is_a?(Int64) && bv.is_a?(Int64) &&
-    cv.is_a?(Int64) && dv.is_a?(Int64)
+                           cv.is_a?(Int64) && dv.is_a?(Int64)
   raise "unique delivery" unless av + bv + cv + dv == 320400_i64
 end
 seen = Array(Bool).new(801, false)

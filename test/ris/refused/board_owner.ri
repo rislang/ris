@@ -1,3 +1,4 @@
 class BoardOwner
 end
+
 RisBoard.poll(BoardOwner)

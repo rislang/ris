@@ -25,7 +25,7 @@ for candidate in python3.14 python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 case "$(uname -s)" in
@@ -38,7 +38,7 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 if [ -z "$PY" ]; then
   echo "no python with compression.zstd (3.14 or later) on this machine: the zstd oracle cannot be written, so std/zstd goes unmeasured"
@@ -53,9 +53,9 @@ fi
 #   refuse  <stream> <phrase> <window limit>  refused, the error saying <phrase>
 #   huge    <stream> <crc-32> <bytes> <window> read through a bounded reader
 #   write   <plain>                           compressed by iyi to
-#   <plain>.iyi.zst
+#   <plain>.ri.zst
 mkdir -p "$WORK/fixtures"
-if ! "$PY" - "$WORK/fixtures" "$REPO/src/std/zstd.iyi" <<'PY'
+if ! "$PY" - "$WORK/fixtures" "$REPO/src/std/zstd.ri" <<'PY'
 import os, random, struct, sys, time, zlib
 from compression import zstd
 CP = zstd.CompressionParameter
@@ -380,7 +380,7 @@ fi
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_zstd_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_zstd_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -427,7 +427,7 @@ names = [l.split("\t")[1].strip() for l in open(os.path.join(out, "index.txt")) 
 total = 0
 for name in names:
     plain = open(os.path.join(out, name), "rb").read()
-    stream = open(os.path.join(out, name + ".iyi.zst"), "rb").read()
+    stream = open(os.path.join(out, name + ".ri.zst"), "rb").read()
     if zstd.decompress(stream) != plain:
         raise SystemExit(f"  {name}: python reads something else")
     d = zstd.ZstdDecompressor()
@@ -452,8 +452,8 @@ echo
 echo "== what a caller's mistake panics with"
 refuses() { # refuses <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
-  printf 'module main\n\nimport std/zstd::{Zstd, ZstdReader, ZstdError}\n\nputs (%s)\n' "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/zstd::{Zstd, ZstdReader, ZstdError}\n\nputs (%s)\n' "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,8p' "$WORK/$name.build"
     status=1
@@ -496,16 +496,16 @@ mutate() { # mutate <label> <old> <new> <phrase> [<file>]
   if ! OLD="$old" NEW="$new" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/$file.iyi").read_text()
+src = Path("$REPO/src/std/$file.ri").read_text()
 old = os.environ["OLD"]
 if old not in src:
     raise SystemExit("patch site missing: " + old)
-Path("$WORK/patched/std/$file.iyi").write_text(src.replace(old, os.environ["NEW"], 1))
+Path("$WORK/patched/std/$file.ri").write_text(src.replace(old, os.environ["NEW"], 1))
 PY
   then
     echo "  $label: the patch did not apply"
     status=1
-  elif ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_zstd_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_zstd_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  $label: the broken copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1

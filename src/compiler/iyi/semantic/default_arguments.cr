@@ -39,7 +39,7 @@ class Iyi::Def
     # defaults. Forwarding hides its default roots from cycle stores.
     retain_body ||= !TapeScopeChecker.parts(body).nil?
 
-    # iyi: a def read from a `.iyimod` has no body to retain (iyi SPEC IV.1).
+    # iyi: a def read from a `.rimod` has no body to retain (iyi SPEC IV.1).
     #
     # It is a header: the machine code is in the artifact and the call reaches
     # it by symbol. Retaining the body copies `Nop` and drops the call on the
@@ -233,7 +233,7 @@ class Iyi::Def
       if iyi_from_artifact? && body.is_a?(Nop)
         expansion.body = body.clone
         # And it has to say so. Codegen refuses to inline a def that came from
-        # a `.iyimod` — an absent body reads there as the simplest possible
+        # a `.rimod` — an absent body reads there as the simplest possible
         # one, and inlining it would replace a call to the module's machine
         # code with nothing at all — and it asks the def in front of it, which
         # for a call with named arguments is this one. Unmarked, the `Nop` was

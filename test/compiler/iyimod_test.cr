@@ -1,7 +1,7 @@
 require "../test_helper"
 require "./test_helper"
 
-# iyi: the `.iyimod` container — iyi SPEC IV.1.
+# iyi: the `.rimod` container — iyi SPEC IV.1.
 #
 # The contract these guard is that an artifact is either understood exactly or
 # refused. A build cache whose worst case is "read something plausible and
@@ -16,7 +16,7 @@ private def sample_artifact(imports = [] of String,
                             layouts = [] of {String, Iyi::IyiMod::TypeLayout})
   Iyi::IyiMod::Artifact.new(
     module_name: "app/greeter",
-    source_path: "/src/app/greeter.iyi",
+    source_path: "/src/app/greeter.ri",
     compiler_version: "1.22.0-dev+abc1234",
     target_triple: "x86_64-pc-linux-gnu",
     flags: ["bits64", "linux"],
@@ -72,7 +72,7 @@ private def impl_record(trait_name : String,
 end
 
 private def with_temporary_file(&)
-  path = File.tempname("iyimod", ".iyimod")
+  path = File.tempname("iyimod", ".rimod")
   begin
     yield path
   ensure
@@ -80,7 +80,7 @@ private def with_temporary_file(&)
   end
 end
 
-# Writes *modules* and `main.iyi`, builds the program from source writing the
+# Writes *modules* and `main.ri`, builds the program from source writing the
 # modules' artifacts, deletes the modules' sources, builds it again from the
 # artifacts and answers what the two programs print. Inside a `with_tempdir`.
 private def iyimod_round_trip(modules : Hash(String, String), main : String,
@@ -89,11 +89,11 @@ private def iyimod_round_trip(modules : Hash(String, String), main : String,
     Dir.mkdir_p File.dirname(path)
     File.write path, text
   end
-  File.write "main.iyi", main
-  source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), main)
+  File.write "main.ri", main
+  source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), main)
 
   producer = create_spec_compiler
-  producer.prelude = "iyi/prelude"
+  producer.prelude = "ris/prelude"
   producer.release! if release
   producer.emit_iyimod = "mods"
   producer.compile source, File.expand_path("from-source")
@@ -102,7 +102,7 @@ private def iyimod_round_trip(modules : Hash(String, String), main : String,
   modules.each_key { |path| File.delete path }
 
   consumer = create_spec_compiler
-  consumer.prelude = "iyi/prelude"
+  consumer.prelude = "ris/prelude"
   consumer.release! if release
   consumer.use_iyimod = "mods"
   consumer.compile source, File.expand_path("from-artifact")
@@ -110,7 +110,7 @@ private def iyimod_round_trip(modules : Hash(String, String), main : String,
 end
 
 describe Iyi::IyiMod do
-  # iyi: a `.iyimod` is the one input the compiler reads that nobody typed.
+  # iyi: a `.rimod` is the one input the compiler reads that nobody typed.
   # Truncated ones used to leave `IO::EOFError` and a stack trace, which names
   # no file and reads as a compiler bug rather than as a damaged file.
   describe "a damaged file" do
@@ -162,10 +162,10 @@ describe Iyi::IyiMod do
       end
     end
 
-    it "refuses something that was never a .iyimod" do
+    it "refuses something that was never a .rimod" do
       with_temporary_file do |path|
         File.write(path, "this is not an artifact\n")
-        expect_raises(Iyi::IyiMod::Error, /not a .iyimod|too short/) do
+        expect_raises(Iyi::IyiMod::Error, /not a .rimod|too short/) do
           Iyi::IyiMod.read(path)
         end
       end
@@ -178,7 +178,7 @@ describe Iyi::IyiMod do
       read = Iyi::IyiMod.read(path)
 
       read.module_name.should eq "app/greeter"
-      read.source_path.should eq "/src/app/greeter.iyi"
+      read.source_path.should eq "/src/app/greeter.ri"
       read.compiler_version.should eq "1.22.0-dev+abc1234"
       read.target_triple.should eq "x86_64-pc-linux-gnu"
       read.flags.should eq ["bits64", "linux"]
@@ -218,10 +218,10 @@ describe Iyi::IyiMod do
     end
   end
 
-  it "refuses a file that is not a .iyimod" do
+  it "refuses a file that is not a .rimod" do
     with_temporary_file do |path|
       File.write path, "this is not an artifact"
-      expect_raises(Iyi::IyiMod::Error, /is not a \.iyimod/) do
+      expect_raises(Iyi::IyiMod::Error, /is not a \.rimod/) do
         Iyi::IyiMod.read(path)
       end
     end
@@ -290,7 +290,7 @@ describe Iyi::IyiMod do
       io = IO::Memory.new
       format = Iyi::IyiMod::FORMAT
       header = IO::Memory.new
-      {"app/greeter", "/src/app/greeter.iyi", "1.0", "triple"}.each do |value|
+      {"app/greeter", "/src/app/greeter.ri", "1.0", "triple"}.each do |value|
         header.write_bytes value.bytesize.to_u32, format
         header.write value.to_slice
       end
@@ -559,14 +559,14 @@ describe Iyi::IyiMod do
   it "carries the object code of a module's own type" do
     with_tempdir("iyimod_object_code") do
       Dir.mkdir_p "app"
-      File.write "app/greeter.iyi", <<-IYI
+      File.write "app/greeter.ri", <<-IYI
         module app/greeter
 
         pub def polite(name : String) : String
           "Hello, " + name
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/greeter
@@ -578,15 +578,15 @@ describe Iyi::IyiMod do
       # Chosen by the entry file's extension in `crystal build`, which is the
       # command layer rather than the compiler, so a spec driving the compiler
       # directly asks for it.
-      compiler.prelude = "iyi/prelude"
+      compiler.prelude = "ris/prelude"
       compiler.emit_iyimod = "mods"
 
       with_temp_executable("iyimod-object-code") do |executable|
-        source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+        source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
         compiler.compile source, executable
       end
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "greeter.iyimod"),
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "greeter.rimod"),
         want_object_code: true)
       unit = artifact.object_code.find { |candidate| candidate.name == "App::Greeter" }
       unit.should_not be_nil
@@ -604,14 +604,14 @@ describe Iyi::IyiMod do
   it "builds and runs a program from a module's artifact, source deleted" do
     with_tempdir("iyimod_end_to_end") do
       Dir.mkdir_p "app"
-      File.write "app/twice.iyi", <<-IYI
+      File.write "app/twice.ri", <<-IYI
         module app/twice
 
         pub def twice(n : Int32) : Int32
           n + n
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/twice
@@ -619,18 +619,18 @@ describe Iyi::IyiMod do
         puts App::Twice.twice(21)
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "42"
 
-      File.delete "app/twice.iyi"
+      File.delete "app/twice.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "42"
@@ -651,7 +651,7 @@ describe Iyi::IyiMod do
   it "builds and runs a program from a module's exported enum" do
     with_tempdir("iyimod_enum") do
       Dir.mkdir_p "app"
-      File.write "app/levels.iyi", <<-IYI
+      File.write "app/levels.ri", <<-IYI
         module app/levels
 
         pub enum Level : Int32
@@ -670,7 +670,7 @@ describe Iyi::IyiMod do
           Level::Warn
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/levels::{Level, Mode, loudest}
@@ -678,10 +678,10 @@ describe Iyi::IyiMod do
         puts "\#{loudest} \#{loudest == Level::Warn} \#{loudest.warn?} \#{Level.values.size} \#{(Mode::Read | Mode::Write)}"
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "Warn true true 2 Read | Write"
@@ -689,7 +689,7 @@ describe Iyi::IyiMod do
       # The declaration carries the members and their numbers, and not the
       # `None` and `All` a `@[Flags]` enum is given wherever it is declared —
       # carried, they arrive as a redefinition of the consumer's own.
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "levels.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "levels.rimod"))
       level = artifact.exports.types.find { |declaration| declaration.name == "Level" }
       level.should_not be_nil
       level.not_nil!.kind.should eq "enum"
@@ -699,10 +699,10 @@ describe Iyi::IyiMod do
       mode.not_nil!.annotations.should eq ["@[Flags]"]
       mode.not_nil!.members.map(&.[0]).should eq ["Read", "Write", "Append"]
 
-      File.delete "app/levels.iyi"
+      File.delete "app/levels.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "Warn true true 2 Read | Write"
@@ -726,7 +726,7 @@ describe Iyi::IyiMod do
   it "builds a generic from an artifact whether or not its argument is written" do
     with_tempdir("iyimod_generic_instance") do
       Dir.mkdir_p "app"
-      File.write "app/boxes.iyi", <<-IYI
+      File.write "app/boxes.ri", <<-IYI
         module app/boxes
 
         pub struct Box(T)
@@ -736,7 +736,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/boxes
@@ -746,18 +746,18 @@ describe Iyi::IyiMod do
         puts written.value + inferred.value
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "42"
 
-      File.delete "app/boxes.iyi"
+      File.delete "app/boxes.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "42"
@@ -773,14 +773,14 @@ describe Iyi::IyiMod do
   it "carries what a module's body calls but its consumer does not" do
     with_tempdir("iyimod_closure") do
       Dir.mkdir_p "app"
-      File.write "app/greeter.iyi", <<-IYI
+      File.write "app/greeter.ri", <<-IYI
         module app/greeter
 
         pub def polite(name : String) : String
           "Hello, " + name
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/greeter
@@ -788,18 +788,18 @@ describe Iyi::IyiMod do
         puts App::Greeter.polite("world")
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "Hello, world"
 
-      File.delete "app/greeter.iyi"
+      File.delete "app/greeter.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "Hello, world"
@@ -816,7 +816,7 @@ describe Iyi::IyiMod do
   it "numbers the types a module's own code instantiates" do
     with_tempdir("iyimod_type_ids") do
       Dir.mkdir_p "app"
-      File.write "app/box.iyi", <<-IYI
+      File.write "app/box.ri", <<-IYI
         module app/box
 
         @[OnTape]
@@ -838,7 +838,7 @@ describe Iyi::IyiMod do
           items.map { |item| item.name }.join(", ")
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/box
@@ -846,23 +846,23 @@ describe Iyi::IyiMod do
         puts App::Box.labels
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "a, b"
 
       # The instantiation the consumer cannot reach any other way, named in the
       # artifact so that it can make it.
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "box.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "box.rimod"))
       artifact.type_ids.should contain "Array(App::Box::Item)"
 
-      File.delete "app/box.iyi"
+      File.delete "app/box.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "a, b"
@@ -877,7 +877,7 @@ describe Iyi::IyiMod do
   it "carries a type its module does not export" do
     with_tempdir("iyimod_type_ids_private") do
       Dir.mkdir_p "app"
-      File.write "app/box.iyi", <<-IYI
+      File.write "app/box.ri", <<-IYI
         module app/box
 
         struct Secret
@@ -898,7 +898,7 @@ describe Iyi::IyiMod do
           items[0].n + items[1].n
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/box
@@ -906,15 +906,15 @@ describe Iyi::IyiMod do
         puts App::Box.total
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "5"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "box.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "box.rimod"))
       secret = artifact.exports.types.find! { |declaration| declaration.name == "Secret" }
       secret.visibility.should eq "private"
       secret.fields.should eq [{"@n", "::Int32", ""}]
@@ -925,27 +925,27 @@ describe Iyi::IyiMod do
       secret.methods.map(&.name).sort!.should eq ["initialize", "n"]
       secret.methods.each { |signature| signature.required.should be_false }
 
-      File.delete "app/box.iyi"
+      File.delete "app/box.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "5"
 
       # And carrying it does not make it reachable, which is the half R-2b is
       # about: the consumer has the type and may not name it.
-      File.write "reach.iyi", <<-IYI
+      File.write "reach.ri", <<-IYI
         module main
 
         import app/box
 
         puts App::Box::Secret.new(1).n
         IYI
-      reaching = Iyi::Compiler::Source.new(File.expand_path("reach.iyi"), File.read("reach.iyi"))
+      reaching = Iyi::Compiler::Source.new(File.expand_path("reach.ri"), File.read("reach.ri"))
 
       refuser = create_spec_compiler
-      refuser.prelude = "iyi/prelude"
+      refuser.prelude = "ris/prelude"
       refuser.use_iyimod = "mods"
       refuser.no_codegen = true
       expect_raises(Iyi::TypeException, /does not export App::Box::Secret/) do
@@ -963,7 +963,7 @@ describe Iyi::IyiMod do
   it "refuses a declaration that adds to another module's namespace" do
     with_tempdir("iyi_r3_reopen") do
       Dir.mkdir_p "app"
-      File.write "app/a.iyi", <<-IYI
+      File.write "app/a.ri", <<-IYI
         module app/a
 
         pub struct Point
@@ -973,7 +973,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/a
@@ -986,10 +986,10 @@ describe Iyi::IyiMod do
 
         puts App::A::Point.new(2).doubled
         IYI
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       compiler = create_spec_compiler
-      compiler.prelude = "iyi/prelude"
+      compiler.prelude = "ris/prelude"
       compiler.no_codegen = true
       expect_raises(Iyi::TypeException, /`App::A::Point` already exists.*cannot add to it/m) do
         compiler.compile source, "unused"
@@ -997,7 +997,7 @@ describe Iyi::IyiMod do
 
       # A file's own namespace is its own to declare into, and two modules
       # under `app/` share `App` by design: neither is reopening.
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/a
@@ -1013,9 +1013,9 @@ describe Iyi::IyiMod do
 
         puts Helpers::Thing.new.n + App::A::Point.new(2).x
         IYI
-      allowed = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      allowed = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       ok = create_spec_compiler
-      ok.prelude = "iyi/prelude"
+      ok.prelude = "ris/prelude"
       ok.compile allowed, File.expand_path("allowed")
       `./allowed`.chomp.should eq "9"
     end
@@ -1029,19 +1029,19 @@ describe Iyi::IyiMod do
   it "refuses an exported def that does not write its types down" do
     with_tempdir("iyimod_r2") do
       Dir.mkdir_p "app"
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/a
 
         puts App::A.greet("x")
         IYI
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       write = ->(body : String) do
-        File.write "app/a.iyi", "module app/a\n\n#{body}\n"
+        File.write "app/a.ri", "module app/a\n\n#{body}\n"
         compiler = create_spec_compiler
-        compiler.prelude = "iyi/prelude"
+        compiler.prelude = "ris/prelude"
         compiler.emit_iyimod = "mods"
         compiler.no_codegen = true
         compiler
@@ -1062,10 +1062,10 @@ describe Iyi::IyiMod do
       compiler.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "hi x"
 
-      File.delete "app/a.iyi"
+      File.delete "app/a.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "hi x"
@@ -1080,7 +1080,7 @@ describe Iyi::IyiMod do
   it "carries the body of a method that takes a block" do
     with_tempdir("iyimod_block_bodies") do
       Dir.mkdir_p "app"
-      File.write "app/box.iyi", <<-IYI
+      File.write "app/box.ri", <<-IYI
         module app/box
 
         pub class Box
@@ -1111,7 +1111,7 @@ describe Iyi::IyiMod do
           box.add(&block)
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/box
@@ -1123,15 +1123,15 @@ describe Iyi::IyiMod do
         puts box.run(5)
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "doubling\n11"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "box.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "box.rimod"))
 
       # Whatever the def is written on: a module's own `pub def` and a method
       # of an exported class are the same case.
@@ -1154,10 +1154,10 @@ describe Iyi::IyiMod do
       step.kind.should eq "alias"
       step.value.should eq "(Int32 -> Int32)"
 
-      File.delete "app/box.iyi"
+      File.delete "app/box.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "doubling\n11"
@@ -1171,7 +1171,7 @@ describe Iyi::IyiMod do
   it "carries the unexported defs a travelling body calls" do
     with_tempdir("iyimod_carried_defs") do
       Dir.mkdir_p "app"
-      File.write "app/box.iyi", <<-IYI
+      File.write "app/box.ri", <<-IYI
         module app/box
 
         class Hidden
@@ -1193,7 +1193,7 @@ describe Iyi::IyiMod do
           helper(start, &block)
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/box
@@ -1201,15 +1201,15 @@ describe Iyi::IyiMod do
         puts App::Box.run(5) { |n| n * 3 }
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "15"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "box.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "box.rimod"))
 
       # Kept out of `functions`, which is the module's surface and stays what a
       # consumer may call.
@@ -1221,27 +1221,27 @@ describe Iyi::IyiMod do
       artifact.mono_bodies.keys.should contain "app/box#helper(start : Int32)&block : (Int32 -> Int32)"
       artifact.mono_bodies.keys.should contain "Hidden#tweak()&block : (Int32 -> Int32)"
 
-      File.delete "app/box.iyi"
+      File.delete "app/box.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "15"
 
       # And carrying them leaves R-2b where it was: the consumer has them and
       # may not name them, with the message it gets from source.
-      File.write "reach.iyi", <<-IYI
+      File.write "reach.ri", <<-IYI
         module main
 
         import app/box
 
         puts App::Box.helper(5) { |n| n * 3 }
         IYI
-      reaching = Iyi::Compiler::Source.new(File.expand_path("reach.iyi"), File.read("reach.iyi"))
+      reaching = Iyi::Compiler::Source.new(File.expand_path("reach.ri"), File.read("reach.ri"))
 
       refuser = create_spec_compiler
-      refuser.prelude = "iyi/prelude"
+      refuser.prelude = "ris/prelude"
       refuser.use_iyimod = "mods"
       refuser.no_codegen = true
       expect_raises(Iyi::TypeException, /does not export 'helper'/) do
@@ -1257,7 +1257,7 @@ describe Iyi::IyiMod do
   it "carries the macros a travelling body expands" do
     with_tempdir("iyimod_macro_bodies") do
       Dir.mkdir_p "app"
-      File.write "app/box.iyi", <<-IYI
+      File.write "app/box.ri", <<-IYI
         module app/box
 
         macro twice(x)
@@ -1283,7 +1283,7 @@ describe Iyi::IyiMod do
           block.call(twice(n))
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/box
@@ -1292,15 +1292,15 @@ describe Iyi::IyiMod do
         puts App::Box.run_module(5) { |n| n + 1 }
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "11\n11"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "box.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "box.rimod"))
       artifact.macro_bodies.size.should eq 1
       artifact.macro_bodies.first.should start_with "macro twice"
 
@@ -1309,10 +1309,10 @@ describe Iyi::IyiMod do
       box.macros.size.should eq 1
       box.macros.first.should start_with "macro double"
 
-      File.delete "app/box.iyi"
+      File.delete "app/box.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "11\n11"
@@ -1329,7 +1329,7 @@ describe Iyi::IyiMod do
       # A generic's body travels and the consumer instantiates it, so a type
       # the producer never tried is where this lands: the error is in a line of
       # the module's, reported to somebody who does not have the module.
-      File.write "app/box.iyi", <<-IYI
+      File.write "app/box.ri", <<-IYI
         module app/box
 
         pub struct Box(T)
@@ -1343,7 +1343,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/box
@@ -1351,27 +1351,27 @@ describe Iyi::IyiMod do
         puts App::Box::Box(Int32).new(21).doubled
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "42"
 
-      File.delete "app/box.iyi"
+      File.delete "app/box.ri"
 
-      File.write "bad.iyi", <<-IYI
+      File.write "bad.ri", <<-IYI
         module main
 
         import app/box
 
         puts App::Box::Box(Bool).new(true).doubled
         IYI
-      bad = Iyi::Compiler::Source.new(File.expand_path("bad.iyi"), File.read("bad.iyi"))
+      bad = Iyi::Compiler::Source.new(File.expand_path("bad.ri"), File.read("bad.ri"))
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.no_codegen = true
 
@@ -1381,7 +1381,7 @@ describe Iyi::IyiMod do
 
       rendered = error.to_s
       rendered.should contain "@item + @item"
-      rendered.should contain "box.iyimod"
+      rendered.should contain "box.rimod"
       # The bytes the artifact starts with, which is what used to be shown.
       rendered.should_not contain "IYIMOD"
     end
@@ -1402,7 +1402,7 @@ describe Iyi::IyiMod do
   it "carries a module's class variables, declaration and global" do
     with_tempdir("iyimod_class_vars") do
       Dir.mkdir_p "app"
-      File.write "app/counter.iyi", <<-IYI
+      File.write "app/counter.ri", <<-IYI
         module app/counter
 
         pub struct Tally
@@ -1419,7 +1419,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/counter
@@ -1429,15 +1429,15 @@ describe Iyi::IyiMod do
         puts t.remember("again")
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "hello:1\nagain:2"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "counter.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "counter.rimod"))
       # The module's own two, plus the scheduler's: `raise` reaches the
       # panic path now (III.1.4), so every unit's object code refers to
       # the runtime's globals — the same rule that carries
@@ -1459,10 +1459,10 @@ describe Iyi::IyiMod do
         .should eq [{"@@cache", "(::String | ::Nil)", ""}, {"@@seen", "::Int32", "0"}]
       tally.class_vars.map(&.annotations).should eq [[] of String, [] of String]
 
-      File.delete "app/counter.iyi"
+      File.delete "app/counter.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "hello:1\nagain:2"
@@ -1477,7 +1477,7 @@ describe Iyi::IyiMod do
   it "carries the constants a module's own code reads" do
     with_tempdir("iyimod_constants") do
       Dir.mkdir_p "app"
-      File.write "app/counter.iyi", <<-IYI
+      File.write "app/counter.ri", <<-IYI
         module app/counter
 
         pub struct Tally
@@ -1497,7 +1497,7 @@ describe Iyi::IyiMod do
           START.n + 2
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/counter
@@ -1505,15 +1505,15 @@ describe Iyi::IyiMod do
         puts App::Counter.total
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "42"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "counter.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "counter.rimod"))
       # ris: the unit's code also reaches runtime constants (STDERR, ...)
       # through inlined runtime paths, and reads them itself, so they are
       # listed too; what must hold is that this module's own constant is
@@ -1521,10 +1521,10 @@ describe Iyi::IyiMod do
       artifact.constants.should contain "App::Counter::START"
       artifact.constants.select(&.starts_with?("App::")).should eq ["App::Counter::START"]
 
-      File.delete "app/counter.iyi"
+      File.delete "app/counter.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "42"
@@ -1538,7 +1538,7 @@ describe Iyi::IyiMod do
   it "carries a type declared inside a carried type" do
     with_tempdir("iyimod_nested_types") do
       Dir.mkdir_p "app"
-      File.write "app/router.iyi", <<-IYI
+      File.write "app/router.ri", <<-IYI
         module app/router
 
         pub class Router
@@ -1566,7 +1566,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/router
@@ -1577,15 +1577,15 @@ describe Iyi::IyiMod do
         puts router.count
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "2"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "router.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "router.rimod"))
       router = artifact.exports.types.find! { |declaration| declaration.name == "Router" }
       route = router.types.find! { |declaration| declaration.name == "Route" }
       route.visibility.should eq "private"
@@ -1596,10 +1596,10 @@ describe Iyi::IyiMod do
       Iyi::IyiMod.declarations artifact, io
       io.to_s.should contain "  private struct Route"
 
-      File.delete "app/router.iyi"
+      File.delete "app/router.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "2"
@@ -1615,7 +1615,7 @@ describe Iyi::IyiMod do
   it "carries a type's class methods, and its bodyless initialize" do
     with_tempdir("iyimod_class_methods") do
       Dir.mkdir_p "std"
-      File.write "std/counter.iyi", <<-IYI
+      File.write "std/counter.ri", <<-IYI
         module std/counter
 
         pub struct Counter
@@ -1633,7 +1633,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import std/counter
@@ -1642,15 +1642,15 @@ describe Iyi::IyiMod do
         puts Std::Counter::Counter.new(5).n
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "0\n5"
 
-      declaration = Iyi::IyiMod.read(File.join("mods", "std", "counter.iyimod"))
+      declaration = Iyi::IyiMod.read(File.join("mods", "std", "counter.rimod"))
         .exports.types.find! { |candidate| candidate.name == "Counter" }
 
       declaration.methods.find { |m| m.name == "zero" }.try(&.receiver).should eq "self"
@@ -1660,10 +1660,10 @@ describe Iyi::IyiMod do
       # module's surface would be describing this compiler instead.
       declaration.methods.map(&.name).should eq ["initialize", "n", "zero"]
 
-      File.delete "std/counter.iyi"
+      File.delete "std/counter.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "0\n5"
@@ -1681,7 +1681,7 @@ describe Iyi::IyiMod do
   it "ships a generic type's bodies, and the consumer specialises them" do
     with_tempdir("iyimod_mono_generic") do
       Dir.mkdir_p "pack"
-      File.write "pack/box.iyi", <<-IYI
+      File.write "pack/box.ri", <<-IYI
         module pack/box
 
         @[OnTape]
@@ -1696,7 +1696,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import pack/box
@@ -1705,21 +1705,21 @@ describe Iyi::IyiMod do
         puts Pack::Box::Box(String).new("seven").item
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "7\nseven"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "pack", "box.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "pack", "box.rimod"))
       artifact.mono_bodies.keys.should contain "Box#item()"
 
-      File.delete "pack/box.iyi"
+      File.delete "pack/box.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "7\nseven"
@@ -1739,7 +1739,7 @@ describe Iyi::IyiMod do
   it "specialises an imported generic however the consumer reaches it" do
     with_tempdir("iyimod_generic_reach") do
       Dir.mkdir_p "pack"
-      File.write "pack/box.iyi", <<-IYI
+      File.write "pack/box.ri", <<-IYI
         module pack/box
 
         pub trait Show
@@ -1763,7 +1763,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import pack/box
@@ -1773,18 +1773,18 @@ describe Iyi::IyiMod do
         puts Pack::Box::Box.new(Pack::Box::Box.new(5)).value.value
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "42\nshown\n5"
 
-      File.delete "pack/box.iyi"
+      File.delete "pack/box.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "42\nshown\n5"
@@ -1798,7 +1798,7 @@ describe Iyi::IyiMod do
   it "ships a trait's default bodies, and the consumer stencils them" do
     with_tempdir("iyimod_mono_trait") do
       Dir.mkdir_p "std"
-      File.write "std/countable.iyi", <<-IYI
+      File.write "std/countable.ri", <<-IYI
         module std/countable
 
         pub trait Countable
@@ -1809,7 +1809,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import std/countable::{Countable}
@@ -1827,21 +1827,21 @@ describe Iyi::IyiMod do
         puts Three.new.doubled
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "6"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "std", "countable.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "std", "countable.rimod"))
       artifact.mono_bodies.keys.should contain "Countable#doubled()"
 
-      File.delete "std/countable.iyi"
+      File.delete "std/countable.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "6"
@@ -1856,7 +1856,7 @@ describe Iyi::IyiMod do
   it "does not ship the body of a method that travels as machine code" do
     with_tempdir("iyimod_mono_boundary") do
       Dir.mkdir_p "app"
-      File.write "app/greeter.iyi", <<-IYI
+      File.write "app/greeter.ri", <<-IYI
         module app/greeter
 
         pub struct Greeter
@@ -1865,7 +1865,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/greeter
@@ -1873,22 +1873,22 @@ describe Iyi::IyiMod do
         puts App::Greeter::Greeter.new.hello
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "greeter.iyimod"),
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "greeter.rimod"),
         want_object_code: true)
       artifact.mono_bodies.should be_empty
       artifact.object_code.map(&.name).should contain "App::Greeter::Greeter"
 
-      File.delete "app/greeter.iyi"
+      File.delete "app/greeter.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "hello"
@@ -1932,7 +1932,7 @@ describe Iyi::IyiMod do
   it "carries a module's initialiser, in import order" do
     with_tempdir("iyimod_initialiser") do
       Dir.mkdir_p "boot"
-      File.write "boot/config.iyi", <<-IYI
+      File.write "boot/config.ri", <<-IYI
         module boot/config
 
         puts "1. config"
@@ -1941,7 +1941,7 @@ describe Iyi::IyiMod do
           "iyi"
         end
         IYI
-      File.write "boot/registry.iyi", <<-IYI
+      File.write "boot/registry.ri", <<-IYI
         module boot/registry
 
         puts "2. registry, above its own import"
@@ -1954,7 +1954,7 @@ describe Iyi::IyiMod do
           Boot::Config.name
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/registry
@@ -1963,24 +1963,24 @@ describe Iyi::IyiMod do
         puts Boot::Registry.greeting
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "1. config\n2. registry, above its own import\n3. registry, below it\n4. main\niyi"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "registry.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "registry.rimod"))
       artifact.has_initialiser.should be_false
       artifact.initialiser.lines.size.should eq 2
 
-      File.delete "boot/config.iyi"
-      File.delete "boot/registry.iyi"
+      File.delete "boot/config.ri"
+      File.delete "boot/registry.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq expected
@@ -2000,7 +2000,7 @@ describe Iyi::IyiMod do
   it "refuses to generate code against a module whose type body has to run" do
     with_tempdir("iyimod_type_body") do
       Dir.mkdir_p "boot"
-      File.write "boot/counter.iyi", <<-IYI
+      File.write "boot/counter.ri", <<-IYI
         module boot/counter
 
         pub struct Counter
@@ -2011,7 +2011,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/counter
@@ -2019,19 +2019,19 @@ describe Iyi::IyiMod do
         puts Boot::Counter::Counter.new.count
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.no_codegen = true
       producer.compile source, File.expand_path("unused")
 
-      Iyi::IyiMod.read(File.join("mods", "boot", "counter.iyimod"))
+      Iyi::IyiMod.read(File.join("mods", "boot", "counter.rimod"))
         .has_initialiser.should be_true
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       expect_raises(Iyi::TypeException, /has code inside a type body/) do
         consumer.compile source, File.expand_path("from-artifact")
@@ -2039,7 +2039,7 @@ describe Iyi::IyiMod do
 
       # Front end only, which is what the artifact does carry: still fine.
       checker = create_spec_compiler
-      checker.prelude = "iyi/prelude"
+      checker.prelude = "ris/prelude"
       checker.use_iyimod = "mods"
       checker.no_codegen = true
       checker.compile source, File.expand_path("unused-too")
@@ -2049,7 +2049,7 @@ describe Iyi::IyiMod do
   it "carries the constants a type body declares" do
     with_tempdir("iyimod_type_constants") do
       Dir.mkdir_p "boot"
-      File.write "boot/limits.iyi", <<-IYI
+      File.write "boot/limits.ri", <<-IYI
         module boot/limits
 
         pub struct Limits
@@ -2065,7 +2065,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/limits
@@ -2075,16 +2075,16 @@ describe Iyi::IyiMod do
         puts Boot::Limits::Limits::Inner::DEPTH
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "10\n30\n2"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "limits.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "limits.rimod"))
       artifact.has_initialiser.should be_false
       artifact.initialiser.lines.should eq [
         "pub Limits::MAX = 10",
@@ -2092,10 +2092,10 @@ describe Iyi::IyiMod do
         "pub Limits::Inner::DEPTH = 2",
       ]
 
-      File.delete "boot/limits.iyi"
+      File.delete "boot/limits.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq expected
@@ -2126,7 +2126,7 @@ describe Iyi::IyiMod do
   it "carries a lib's declarations and the constants a macro writes" do
     with_tempdir("iyimod_lib_and_macro") do
       Dir.mkdir_p "boot"
-      File.write "boot/plat.iyi", <<-IYI
+      File.write "boot/plat.ri", <<-IYI
         @[Ffi]
         module boot/plat
 
@@ -2158,7 +2158,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/plat
@@ -2169,23 +2169,23 @@ describe Iyi::IyiMod do
         puts Boot::Plat::Plat.root(6.25)
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "1\n2\n2.5\n2.5"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "plat.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "plat.rimod"))
       artifact.has_initialiser.should be_false
       artifact.initialiser.lines.should eq ["pub Plat::LOW = 1", "pub Plat::HIGH = 2"]
 
-      File.delete "boot/plat.iyi"
+      File.delete "boot/plat.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq expected
@@ -2209,7 +2209,7 @@ describe Iyi::IyiMod do
   it "carries object code from a release build to a release consumer" do
     with_tempdir("iyimod_release_object_code") do
       Dir.mkdir_p "boot"
-      File.write "boot/half.iyi", <<-IYI
+      File.write "boot/half.ri", <<-IYI
         module boot/half
 
         pub struct Half
@@ -2246,7 +2246,7 @@ describe Iyi::IyiMod do
           7
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/half
@@ -2261,23 +2261,23 @@ describe Iyi::IyiMod do
         puts log.join(",")
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "42\n42\n2\n7\nbody,defer"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.release!
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "half.iyimod"), want_object_code: true)
+      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "half.rimod"), want_object_code: true)
       artifact.object_code.empty?.should be_false
 
-      File.delete "boot/half.iyi"
+      File.delete "boot/half.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.release!
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
@@ -2296,7 +2296,7 @@ describe Iyi::IyiMod do
   it "changes a struct through an artifact's getter, and links its defer" do
     with_tempdir("iyimod_getter_and_defer") do
       Dir.mkdir_p "boot"
-      File.write "boot/shelf.iyi", <<-IYI
+      File.write "boot/shelf.ri", <<-IYI
         module boot/shelf
 
         pub struct Counter
@@ -2327,7 +2327,7 @@ describe Iyi::IyiMod do
           7
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/shelf
@@ -2343,19 +2343,19 @@ describe Iyi::IyiMod do
         puts log.join(",")
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "2\n2\n7\nbody,defer"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
-      File.delete "boot/shelf.iyi"
+      File.delete "boot/shelf.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq expected
@@ -2379,7 +2379,7 @@ describe Iyi::IyiMod do
   it "carries a class variable's value" do
     with_tempdir("iyimod_class_var_value") do
       Dir.mkdir_p "boot"
-      File.write "boot/reg.iyi", <<-IYI
+      File.write "boot/reg.ri", <<-IYI
         module boot/reg
 
         private def seed : Int32
@@ -2396,7 +2396,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/reg
@@ -2404,22 +2404,22 @@ describe Iyi::IyiMod do
         puts Boot::Reg::Reg.report
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "7:a,b:42"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
-      Iyi::IyiMod.read(File.join("mods", "boot", "reg.iyimod"))
+      Iyi::IyiMod.read(File.join("mods", "boot", "reg.rimod"))
         .has_initialiser.should be_false
 
-      File.delete "boot/reg.iyi"
+      File.delete "boot/reg.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq expected
@@ -2445,7 +2445,7 @@ describe Iyi::IyiMod do
   it "carries the members of an enum it does not export" do
     with_tempdir("iyimod_carried_enum") do
       Dir.mkdir_p "boot"
-      File.write "boot/kinds.iyi", <<-IYI
+      File.write "boot/kinds.ri", <<-IYI
         module boot/kinds
 
         enum Kind
@@ -2466,7 +2466,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/kinds
@@ -2474,25 +2474,25 @@ describe Iyi::IyiMod do
         puts Boot::Kinds::Holder.describe
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "Large:9:Read | Write"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
       declarations = String.build do |io|
-        Iyi::IyiMod.declarations(Iyi::IyiMod.read(File.join("mods", "boot", "kinds.iyimod")), io)
+        Iyi::IyiMod.declarations(Iyi::IyiMod.read(File.join("mods", "boot", "kinds.rimod")), io)
       end
       declarations.should contain "private enum Kind : Int32\n  Small = 3\n  Large = 9\nend"
       declarations.should contain "@[Flags]\nprivate enum Mode : Int32\n  Read = 1\n  Write = 2\n  Append = 4\nend"
 
-      File.delete "boot/kinds.iyi"
+      File.delete "boot/kinds.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq expected
@@ -2516,7 +2516,7 @@ describe Iyi::IyiMod do
   it "carries the methods an enum's author wrote, and not the compiler's" do
     with_tempdir("iyimod_enum_methods") do
       Dir.mkdir_p "boot"
-      File.write "boot/kind.iyi", <<-IYI
+      File.write "boot/kind.ri", <<-IYI
         module boot/kind
 
         pub enum Kind : UInt8
@@ -2532,7 +2532,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/kind
@@ -2542,23 +2542,23 @@ describe Iyi::IyiMod do
         puts Boot::Kind::Kind::WINDOWS.windows?
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "posix\nwindows\ntrue"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
-      kind = Iyi::IyiMod.read(File.join("mods", "boot", "kind.iyimod"))
+      kind = Iyi::IyiMod.read(File.join("mods", "boot", "kind.rimod"))
         .exports.types.find! { |declaration| declaration.name == "Kind" }
       kind.methods.map(&.name).should eq ["label", "native"]
 
-      File.delete "boot/kind.iyi"
+      File.delete "boot/kind.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq expected
@@ -2589,7 +2589,7 @@ describe Iyi::IyiMod do
   it "carries a header whose parameters are keyword-only" do
     with_tempdir("iyimod_splat_header") do
       Dir.mkdir_p "boot"
-      File.write "boot/span.iyi", <<-IYI
+      File.write "boot/span.ri", <<-IYI
         module boot/span
 
         pub struct Span
@@ -2611,7 +2611,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/span
@@ -2622,19 +2622,19 @@ describe Iyi::IyiMod do
         puts Boot::Span::Span.make(hours: 9_i64).ticks
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "48\n5\n27\n9"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
-      File.delete "boot/span.iyi"
+      File.delete "boot/span.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq expected
@@ -2663,7 +2663,7 @@ describe Iyi::IyiMod do
   it "carries an alias as the module wrote it" do
     with_tempdir("iyimod_alias_value") do
       Dir.mkdir_p "boot"
-      File.write "boot/ring.iyi", <<-IYI
+      File.write "boot/ring.ri", <<-IYI
         module boot/ring
 
         pub alias Array = ::Array
@@ -2677,7 +2677,7 @@ describe Iyi::IyiMod do
           items[items.size - 1]
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/ring
@@ -2686,25 +2686,25 @@ describe Iyi::IyiMod do
         puts Boot::Ring.last([7, 8])
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "7\n8"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
       declarations = String.build do |io|
-        Iyi::IyiMod.declarations(Iyi::IyiMod.read(File.join("mods", "boot", "ring.iyimod")), io)
+        Iyi::IyiMod.declarations(Iyi::IyiMod.read(File.join("mods", "boot", "ring.rimod")), io)
       end
       declarations.should contain "pub alias Array = ::Array"
       declarations.should contain "pub alias Ary = ::Array"
 
-      File.delete "boot/ring.iyi"
+      File.delete "boot/ring.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq expected
@@ -2714,7 +2714,7 @@ describe Iyi::IyiMod do
   it "carries the body of a method whose parameter is wider than its callers" do
     with_tempdir("iyimod_widened_parameters") do
       Dir.mkdir_p "boot"
-      File.write "boot/crate.iyi", <<-IYI
+      File.write "boot/crate.ri", <<-IYI
         module boot/crate
 
         pub class Crate
@@ -2741,7 +2741,7 @@ describe Iyi::IyiMod do
           n.to_i64 * 2_i64
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/crate
@@ -2753,27 +2753,27 @@ describe Iyi::IyiMod do
         puts Boot::Crate.sized(21)
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "hi\n7\n42"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
       # The bodies are in the artifact, which is what makes the link work.
-      keys = Iyi::IyiMod.read(File.join("mods", "boot", "crate.iyimod")).mono_bodies.keys
+      keys = Iyi::IyiMod.read(File.join("mods", "boot", "crate.rimod")).mono_bodies.keys
       keys.should contain "Crate#note=(value : ::String | ::Nil)"
       keys.should contain "Crate#tag(kind : Int32 | Symbol)"
       keys.should contain "boot/crate#sized(n : Int)"
       # And the one whose parameters cannot disagree is not among them.
       keys.should_not contain "Crate#note()"
 
-      File.delete "boot/crate.iyi"
+      File.delete "boot/crate.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq expected
@@ -2801,7 +2801,7 @@ describe Iyi::IyiMod do
   it "carries a @[Primitive] the module declared" do
     with_tempdir("iyimod_primitive") do
       Dir.mkdir_p "boot"
-      File.write "boot/f32.iyi", <<-IYI
+      File.write "boot/f32.ri", <<-IYI
         module boot/f32
 
         struct ::Float32
@@ -2818,7 +2818,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/f32
@@ -2827,26 +2827,26 @@ describe Iyi::IyiMod do
         puts 1.5_f32.doubled.to_i32
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       expected = "3\n3"
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq expected
 
-      File.delete "boot/f32.iyi"
+      File.delete "boot/f32.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq expected
 
       # And what carried it: the annotation on the signature, and no body,
       # because an instruction has none.
-      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "f32.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "f32.rimod"))
       float = artifact.reopened.find! { |declaration| declaration.name == "::Float32" }
       plus = float.methods.find! { |signature| signature.name == "+" }
       plus.annotations.should eq ["@[::Primitive(:binary)]"]
@@ -2878,7 +2878,7 @@ describe Iyi::IyiMod do
   it "carries a module it keeps to itself" do
     with_tempdir("iyimod_nested_module") do
       Dir.mkdir_p "boot"
-      File.write "boot/num.iyi", <<-IYI
+      File.write "boot/num.ri", <<-IYI
         module boot/num
 
         module Helper
@@ -2893,7 +2893,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/num
@@ -2901,24 +2901,24 @@ describe Iyi::IyiMod do
         puts 3.quadrupled
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "12"
 
       declarations = String.build do |io|
-        Iyi::IyiMod.declarations(Iyi::IyiMod.read(File.join("mods", "boot", "num.iyimod")), io)
+        Iyi::IyiMod.declarations(Iyi::IyiMod.read(File.join("mods", "boot", "num.rimod")), io)
       end
       declarations.should contain "module Helper\n"
       declarations.should contain "  def self.twice(n : Int32) : Int32"
 
-      File.delete "boot/num.iyi"
+      File.delete "boot/num.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "12"
@@ -2930,7 +2930,7 @@ describe Iyi::IyiMod do
   #
   # `pkg/child` is the namespace `Pkg::Child`, inside `pkg`'s `Pkg`, and the
   # walks that gather `pkg`'s artifact went into every module they found
-  # there. `pkg.iyimod` carried the child's declarations, aliases and
+  # there. `pkg.rimod` carried the child's declarations, aliases and
   # machine code a second time, so a program built from both artifacts was
   # refused (`alias Num is already defined`) or failed to link (LNK2005).
   # A module with a `module` header of its own has its own artifact; the
@@ -2938,7 +2938,7 @@ describe Iyi::IyiMod do
   it "leaves a module under its path to that module's own artifact" do
     with_tempdir("iyimod_nested_unit") do
       modules = {
-        "pkg/child.iyi" => <<-IYI,
+        "pkg/child.ri" => <<-IYI,
           module pkg/child
 
           pub alias Num = Int32 | Int64
@@ -2956,7 +2956,7 @@ describe Iyi::IyiMod do
             Foo.new(3)
           end
           IYI
-        "pkg.iyi" => <<-IYI,
+        "pkg.ri" => <<-IYI,
           module pkg
 
           import pkg/child::*
@@ -2981,8 +2981,8 @@ describe Iyi::IyiMod do
       from_source.should eq "6\n3\n"
       from_artifact.should eq from_source
 
-      parent = Iyi::IyiMod.read(File.join("mods", "pkg.iyimod"))
-      child = Iyi::IyiMod.read(File.join("mods", "pkg", "child.iyimod"))
+      parent = Iyi::IyiMod.read(File.join("mods", "pkg.rimod"))
+      child = Iyi::IyiMod.read(File.join("mods", "pkg", "child.rimod"))
 
       parent.object_code.map(&.name).select(&.starts_with?("Pkg::Child")).should be_empty
       parent.layouts.map(&.[0]).select(&.starts_with?("Pkg::Child")).should be_empty
@@ -3012,7 +3012,7 @@ describe Iyi::IyiMod do
   it "carries a generic's splat parameter" do
     with_tempdir("iyimod_splat_parameter") do
       Dir.mkdir_p "boot"
-      File.write "boot/pack.iyi", <<-IYI
+      File.write "boot/pack.ri", <<-IYI
         module boot/pack
 
         pub struct Bag(*T)
@@ -3021,7 +3021,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/pack
@@ -3029,22 +3029,22 @@ describe Iyi::IyiMod do
         puts Boot::Pack::Bag(Int32, String, Bool).count
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "3"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "pack.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "pack.rimod"))
       bag = artifact.exports.types.find! { |declaration| declaration.name == "Bag" }
       bag.type_parameters.should eq ["*T"]
 
-      File.delete "boot/pack.iyi"
+      File.delete "boot/pack.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "3"
@@ -3084,7 +3084,7 @@ describe Iyi::IyiMod do
   it "carries a class hierarchy" do
     with_tempdir("iyimod_hierarchy") do
       Dir.mkdir_p "boot"
-      File.write "boot/sink.iyi", <<-IYI
+      File.write "boot/sink.ri", <<-IYI
         module boot/sink
 
         pub abstract class Sink
@@ -3117,7 +3117,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/sink
@@ -3125,16 +3125,16 @@ describe Iyi::IyiMod do
         puts Boot::Sink::Holder.new(Boot::Sink::Doubler.new("d")).run(21)
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "d:42"
 
       declarations = String.build do |io|
-        Iyi::IyiMod.declarations(Iyi::IyiMod.read(File.join("mods", "boot", "sink.iyimod")), io)
+        Iyi::IyiMod.declarations(Iyi::IyiMod.read(File.join("mods", "boot", "sink.rimod")), io)
       end
       declarations.should contain "pub abstract class Sink"
       declarations.should contain "pub class Doubler < Sink"
@@ -3142,10 +3142,10 @@ describe Iyi::IyiMod do
       # read inside the module.
       declarations.should contain "@sink : ::Boot::Sink::Sink\n"
 
-      File.delete "boot/sink.iyi"
+      File.delete "boot/sink.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "d:42"
@@ -3182,7 +3182,7 @@ describe Iyi::IyiMod do
   it "carries the body of a method whose signature is wider than its callers" do
     with_tempdir("iyimod_widened_signature") do
       Dir.mkdir_p "boot"
-      File.write "boot/shape.iyi", <<-IYI
+      File.write "boot/shape.ri", <<-IYI
         module boot/shape
 
         pub abstract class Shape
@@ -3216,7 +3216,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/shape
@@ -3226,24 +3226,24 @@ describe Iyi::IyiMod do
         puts Boot::Shape::Make::Factory.doubled(shape)
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "18\n18"
 
       # The nested module's bodies are keyed under the path the renderer
       # reads them back by, not under its bare name.
-      keys = Iyi::IyiMod.read(File.join("mods", "boot", "shape.iyimod")).mono_bodies.keys
+      keys = Iyi::IyiMod.read(File.join("mods", "boot", "shape.rimod")).mono_bodies.keys
       keys.should contain "Make::Factory#self.doubled(shape : Shape)"
       keys.should contain "Shape#twice()"
 
-      File.delete "boot/shape.iyi"
+      File.delete "boot/shape.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "18\n18"
@@ -3270,7 +3270,7 @@ describe Iyi::IyiMod do
   it "carries the bodies of a module it included into a type it does not own" do
     with_tempdir("iyimod_stencilled_module") do
       Dir.mkdir_p "boot"
-      File.write "boot/loud.iyi", <<-IYI
+      File.write "boot/loud.ri", <<-IYI
         module boot/loud
 
         pub struct Loud
@@ -3299,7 +3299,7 @@ describe Iyi::IyiMod do
           include Boot::Loud::Loud::Extensions
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/loud
@@ -3308,15 +3308,15 @@ describe Iyi::IyiMod do
         puts 42.loud
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "hi!\n42!"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "loud.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "loud.rimod"))
       # The include itself, which is the whole of what this module does to
       # `::Object` and carries no def of its own.
       artifact.reopened.find { |decl| decl.name == "::Object" }
@@ -3327,10 +3327,10 @@ describe Iyi::IyiMod do
       # And the nested generic's, which the carried path did not ask for.
       artifact.mono_bodies.keys.should contain "Loud::Wrap#shout()"
 
-      File.delete "boot/loud.iyi"
+      File.delete "boot/loud.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "hi!\n42!"
@@ -3358,7 +3358,7 @@ describe Iyi::IyiMod do
   it "carries what a type it declares under a foreign name is made of" do
     with_tempdir("iyimod_foreign_declaration") do
       Dir.mkdir_p "boot"
-      File.write "boot/tag.iyi", <<-IYI
+      File.write "boot/tag.ri", <<-IYI
         module boot/tag
 
         @[OnTape]
@@ -3373,7 +3373,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "boot/vault.iyi", <<-IYI
+      File.write "boot/vault.ri", <<-IYI
         module boot/vault
 
         import boot/tag::{Tag}
@@ -3418,7 +3418,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/vault
@@ -3430,15 +3430,15 @@ describe Iyi::IyiMod do
         puts Vault.made
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "t:box\ntrue\n1"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "vault.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "vault.rimod"))
       vault = artifact.reopened.find { |decl| decl.name == "::Vault" }.should_not be_nil
       vault.fields.map(&.[0]).should eq ["@label", "@count"]
       vault.class_vars.map(&.name).should eq ["@@made"]
@@ -3450,10 +3450,10 @@ describe Iyi::IyiMod do
       # module's namespace and so is not this module's to ship.
       artifact.mono_bodies.keys.should contain "::Vault::Kind#small?()"
 
-      File.delete "boot/vault.iyi"
+      File.delete "boot/vault.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "t:box\ntrue\n1"
@@ -3476,14 +3476,14 @@ describe Iyi::IyiMod do
   it "accepts an impl the producer wrote inside the type it targets" do
     with_tempdir("iyimod_impl_in_type") do
       Dir.mkdir_p "boot"
-      File.write "boot/shown.iyi", <<-IYI
+      File.write "boot/shown.ri", <<-IYI
         module boot/shown
 
         pub trait Show
           abstract def show : String
         end
         IYI
-      File.write "boot/pair.iyi", <<-IYI
+      File.write "boot/pair.ri", <<-IYI
         module boot/pair
 
         import boot/shown::{Show}
@@ -3504,7 +3504,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/pair
@@ -3517,18 +3517,18 @@ describe Iyi::IyiMod do
         puts announce(Boot::Pair::Pair::Half.new(2))
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "half 2"
 
-      File.delete "boot/pair.iyi"
+      File.delete "boot/pair.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "half 2"
@@ -3540,7 +3540,7 @@ describe Iyi::IyiMod do
   # `run` compiles and executes a program at the consumer's compile time,
   # and the module names that program the way the file that wrote the
   # macro could: `std/eiy` writes `run("./eiy/process", …)`, which is
-  # beside `src/std/eiy.iyi`. Resolved against the artifact the consumer
+  # beside `src/std/eiy.ri`. Resolved against the artifact the consumer
   # read it from, that was `can't find "./eiy/process" relative to
   # "mods/std"`.
   #
@@ -3551,19 +3551,19 @@ describe Iyi::IyiMod do
   it "resolves a travelling macro's run against the module's own directory" do
     with_tempdir("iyimod_macro_run") do
       Dir.mkdir_p "boot/tools"
-      File.write "boot/tools/emit.iyi", <<-IYI
+      File.write "boot/tools/emit.ri", <<-IYI
         module boot/tools/emit
 
         print "42"
         IYI
-      File.write "boot/gen.iyi", <<-IYI
+      File.write "boot/gen.ri", <<-IYI
         module boot/gen
 
         pub macro answer
           {{ run("./tools/emit") }}
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/gen
@@ -3571,20 +3571,20 @@ describe Iyi::IyiMod do
         puts Boot::Gen.answer
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "42"
 
       # The module's own source goes; the program its macro runs stays,
       # because that is what `run` needs and what nothing can carry.
-      File.delete "boot/gen.iyi"
+      File.delete "boot/gen.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "42"
@@ -3610,7 +3610,7 @@ describe Iyi::IyiMod do
   # can be wrong quietly rather than loudly.
   it "carries what an annotation decides, on a type and on a def" do
     with_tempdir("iyimod_primitive_annotation") do
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         @[Ffi]
         module main
 
@@ -3630,16 +3630,16 @@ describe Iyi::IyiMod do
         puts storage.to_reference.x
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "true\ntrue\n7"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "true\ntrue\n7"
@@ -3648,7 +3648,7 @@ describe Iyi::IyiMod do
 
   it "preserves receiver stores in artifact constructor contracts" do
     with_tempdir("iyimod_string_constructor") do
-      modules = {"record.iyi" => <<-IYI}
+      modules = {"record.ri" => <<-IYI}
         module record
         @[OnTape]
         pub struct Record
@@ -3669,7 +3669,7 @@ describe Iyi::IyiMod do
       from_source.should eq "artifact tape\n"
       from_artifact.should eq from_source
 
-      artifact = Iyi::IyiMod.read("mods/record.iyimod")
+      artifact = Iyi::IyiMod.read("mods/record.rimod")
       record = artifact.exports.types.find! { |type| type.name == "Record" }
       constructor = record.methods.find! { |method| method.name == "initialize" }
       checked = Iyi::TapeCallGraph::Contract.decode(constructor.tape_contract)
@@ -3680,7 +3680,7 @@ describe Iyi::IyiMod do
 
   it "preserves the OnTape lifetime marker on exported and nested types" do
     with_tempdir("iyimod_tape_annotation") do
-      File.write "packet.iyi", <<-IYI
+      File.write "packet.ri", <<-IYI
         @[Ffi]
         module packet
 
@@ -3703,7 +3703,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
         import packet::{Packet}
         tape do
@@ -3711,27 +3711,27 @@ describe Iyi::IyiMod do
           puts text
         end
         IYI
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "tape"
 
-      artifact = Iyi::IyiMod.read("mods/packet.iyimod")
+      artifact = Iyi::IyiMod.read("mods/packet.rimod")
       packet = artifact.exports.types.find! { |type| type.name == "Packet" }
       packet.annotations.should contain "@[::OnTape]"
       packet.types.find! { |type| type.name == "View" }.annotations.should contain "@[::OnTape]"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "tape"
 
       # Pointer-only tape types otherwise look like ordinary structs, and
       # losing the marker would silently allow this lifetime escape.
-      File.write "bad.iyi", <<-IYI
+      File.write "bad.ri", <<-IYI
         @[Ffi]
         module bad
         import packet::{Packet}
@@ -3741,9 +3741,9 @@ describe Iyi::IyiMod do
         end
         puts kept
         IYI
-      bad_source = Iyi::Compiler::Source.new(File.expand_path("bad.iyi"), File.read("bad.iyi"))
+      bad_source = Iyi::Compiler::Source.new(File.expand_path("bad.ri"), File.read("bad.ri"))
       checker = create_spec_compiler
-      checker.prelude = "iyi/prelude"
+      checker.prelude = "ris/prelude"
       checker.use_iyimod = "mods"
       expect_raises(Iyi::TypeException, /is a variable of the code around this tape block/) do
         checker.compile bad_source, File.expand_path("must-not-build")
@@ -3768,7 +3768,7 @@ describe Iyi::IyiMod do
   it "carries a lib it declares, with the struct inside it" do
     with_tempdir("iyimod_own_lib") do
       Dir.mkdir_p "boot"
-      File.write "boot/clock.iyi", <<-IYI
+      File.write "boot/clock.ri", <<-IYI
         @[Ffi]
         module boot/clock
 
@@ -3790,7 +3790,7 @@ describe Iyi::IyiMod do
           span.seconds
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/clock
@@ -3801,15 +3801,15 @@ describe Iyi::IyiMod do
         puts Boot::Clock.with_abs { |value| value == 3 }
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "3\ntrue"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "clock.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("mods", "boot", "clock.rimod"))
       lib_decl = artifact.exports.types.find { |decl| decl.name == "LibC" }.should_not be_nil
       lib_decl.kind.should eq "lib"
       lib_decl.funs.should eq ["fun abs(value : Int32) : Int32"]
@@ -3819,10 +3819,10 @@ describe Iyi::IyiMod do
       span.methods.should be_empty
       span.fields.map(&.[0]).should eq ["@seconds", "@nanos"]
 
-      File.delete "boot/clock.iyi"
+      File.delete "boot/clock.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "3\ntrue"
@@ -3847,7 +3847,7 @@ describe Iyi::IyiMod do
   it "carries an impl method whose declaration is wider than its body" do
     with_tempdir("iyimod_impl_widened") do
       Dir.mkdir_p "boot"
-      File.write "boot/eval.iyi", <<-IYI
+      File.write "boot/eval.ri", <<-IYI
         module boot/eval
 
         pub struct Missing
@@ -3873,7 +3873,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import boot/eval
@@ -3890,18 +3890,18 @@ describe Iyi::IyiMod do
         puts answer(Boot::Eval::Literal.new(7))
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "7"
 
-      File.delete "boot/eval.iyi"
+      File.delete "boot/eval.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "7"
@@ -3912,7 +3912,7 @@ describe Iyi::IyiMod do
     with_temporary_file do |path|
       artifact = Iyi::IyiMod::Artifact.new(
         module_name: "boot/config",
-        source_path: "/src/boot/config.iyi",
+        source_path: "/src/boot/config.ri",
         compiler_version: "1.22.0-dev+abc1234",
         target_triple: "x86_64-pc-linux-gnu",
         flags: ["bits64"],
@@ -3929,7 +3929,7 @@ describe Iyi::IyiMod do
     with_temporary_file do |path|
       artifact = Iyi::IyiMod::Artifact.new(
         module_name: "app/box",
-        source_path: "/src/app/box.iyi",
+        source_path: "/src/app/box.ri",
         compiler_version: "1.22.0-dev+abc1234",
         target_triple: "x86_64-pc-linux-gnu",
         flags: ["bits64"],
@@ -3952,17 +3952,17 @@ describe Iyi::IyiMod do
   it "moves the interface hash for a signature and not for a body" do
     with_tempdir("iyimod_hashes") do
       Dir.mkdir_p "app"
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/box
 
         puts App::Box.twice(21)
         IYI
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       write_box = ->(body : String, extra : String) do
-        File.write "app/box.iyi", <<-IYI
+        File.write "app/box.ri", <<-IYI
           module app/box
 
           pub def twice(n : Int32) : Int32
@@ -3974,11 +3974,11 @@ describe Iyi::IyiMod do
 
       emit = -> do
         compiler = create_spec_compiler
-        compiler.prelude = "iyi/prelude"
+        compiler.prelude = "ris/prelude"
         compiler.emit_iyimod = "mods"
         compiler.no_codegen = true
         compiler.compile source, "unused"
-        Iyi::IyiMod.read(File.join("mods", "app", "box.iyimod")).hashes
+        Iyi::IyiMod.read(File.join("mods", "app", "box.rimod")).hashes
       end
 
       write_box.call("n + n", "")
@@ -4013,29 +4013,29 @@ describe Iyi::IyiMod do
   it "reads an artifact only while it still describes its module" do
     with_tempdir("iyimod_stale") do
       Dir.mkdir_p "app"
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/box
 
         puts App::Box.twice(21)
         IYI
-      File.write "app/box.iyi", <<-IYI
+      File.write "app/box.ri", <<-IYI
         module app/box
 
         pub def twice(n : Int32) : Int32
           n + n
         end
         IYI
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "42"
 
-      File.write "app/box.iyi", <<-IYI
+      File.write "app/box.ri", <<-IYI
         module app/box
 
         pub def twice(n : Int32) : Int32
@@ -4045,7 +4045,7 @@ describe Iyi::IyiMod do
 
       # A build that only reads artifacts is refused, and told what moved.
       reader = create_spec_compiler
-      reader.prelude = "iyi/prelude"
+      reader.prelude = "ris/prelude"
       reader.use_iyimod = "mods"
       expect_raises(Iyi::TypeException, /has changed since it was written/) do
         reader.compile source, File.expand_path("stale")
@@ -4054,7 +4054,7 @@ describe Iyi::IyiMod do
       # A build that also writes them is the incremental loop: the module is
       # compiled from its source and its artifact rewritten.
       rewriter = create_spec_compiler
-      rewriter.prelude = "iyi/prelude"
+      rewriter.prelude = "ris/prelude"
       rewriter.use_iyimod = "mods"
       rewriter.emit_iyimod = "mods"
       rewriter.compile source, File.expand_path("rebuilt")
@@ -4062,7 +4062,7 @@ describe Iyi::IyiMod do
 
       # And what it wrote is read again without a word.
       again = create_spec_compiler
-      again.prelude = "iyi/prelude"
+      again.prelude = "ris/prelude"
       again.use_iyimod = "mods"
       again.compile source, File.expand_path("cached")
       `./cached`.chomp.should eq "63"
@@ -4071,18 +4071,18 @@ describe Iyi::IyiMod do
 
   # The remedy for a stale artifact compiles the module from its source. With
   # the source gone that is not a remedy, and a build that had passed
-  # --emit-iyimod was still told to pass it.
-  it "does not offer --emit-iyimod for an artifact with no source to rebuild from" do
+  # --emit-rimod was still told to pass it.
+  it "does not offer --emit-rimod for an artifact with no source to rebuild from" do
     with_tempdir("iyimod_stale_no_source") do
       Dir.mkdir_p "app"
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/half
 
         puts App::Half.half(3.0)
         IYI
-      File.write "app/half.iyi", <<-IYI
+      File.write "app/half.ri", <<-IYI
         module app/half
 
         import std/float
@@ -4091,28 +4091,28 @@ describe Iyi::IyiMod do
           x / 2
         end
         IYI
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
 
       # Only the module's own artifact, without the `std/float` one it was
       # compiled against, and without its source.
       Dir.mkdir_p "only/app"
-      File.copy "mods/app/half.iyimod", "only/app/half.iyimod"
-      File.delete "app/half.iyi"
+      File.copy "mods/app/half.rimod", "only/app/half.rimod"
+      File.delete "app/half.ri"
 
       rewriter = create_spec_compiler
-      rewriter.prelude = "iyi/prelude"
+      rewriter.prelude = "ris/prelude"
       rewriter.use_iyimod = "only"
       rewriter.emit_iyimod = "only"
       error = expect_raises(Iyi::TypeException, /"std\/float", which it imports, has: there is no artifact for it/) do
         rewriter.compile source, File.expand_path("rewritten")
       end
       error.message.to_s.should contain %("app/half" has no source here to compile in its place)
-      error.message.to_s.should_not contain "pass --emit-iyimod to this build"
+      error.message.to_s.should_not contain "pass --emit-rimod to this build"
     end
   end
 
@@ -4120,42 +4120,42 @@ describe Iyi::IyiMod do
   # different file: `src/std/` ships a `std/text`, and a program with one of
   # its own that deletes it finds the library's at that path. The artifact is
   # then not stale — it is about a file nobody asked for — and saying
-  # "src/std/text.iyi has changed since it was written" named a library file
+  # "src/std/text.ri has changed since it was written" named a library file
   # the author has never opened.
   it "names a module whose path reaches another file now" do
     with_tempdir("iyimod_moved_name") do
       Dir.mkdir_p "std"
-      File.write "std/text.iyi", <<-IYI
+      File.write "std/text.ri", <<-IYI
         module std/text
 
         pub def mine : Int32
           7
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import std/text::{mine}
 
         puts mine
         IYI
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "7"
 
-      File.delete "std/text.iyi"
+      File.delete "std/text.ri"
 
       reader = create_spec_compiler
-      reader.prelude = "iyi/prelude"
+      reader.prelude = "ris/prelude"
       reader.use_iyimod = "mods"
       # The module path is posix by grammar (R-1); the *file* it named is
       # printed the way this platform writes a path, so the expectation asks
       # for the file by its own separator rather than by a literal slash.
-      moved = Regex.escape(File.join("std", "text.iyi"))
+      moved = Regex.escape(File.join("std", "text.ri"))
       expect_raises(Iyi::TypeException, /"std\/text" is .+ now, and this was written from .+#{moved}/) do
         reader.compile source, File.expand_path("moved")
       end
@@ -4163,61 +4163,61 @@ describe Iyi::IyiMod do
   end
 
   # An artifact records the module it was written for, and nothing compared that
-  # to the module being imported. A `.iyimod` copied onto another module's path
+  # to the module being imported. A `.rimod` copied onto another module's path
   # was adopted: its declarations were spliced in under its own name, and the
   # module actually asked for stayed undefined. The failure surfaced at the
   # first `using` (the keyword `import X::{...}` replaced) as "can't find
-  # module 'm1/a'", which sends the reader off to write `m1/a.iyi` when the
+  # module 'm1/a'", which sends the reader off to write `m1/a.ri` when the
   # file was there, valid, and already read.
   it "refuses an artifact that declares a different module" do
     with_tempdir("iyimod_module_name") do
       Dir.mkdir_p "m1"
-      File.write "m1/a.iyi", <<-IYI
+      File.write "m1/a.ri", <<-IYI
         module m1/a
 
         pub def v : Int32
           1
         end
         IYI
-      File.write "m1/b.iyi", <<-IYI
+      File.write "m1/b.ri", <<-IYI
         module m1/b
 
         pub def v : Int32
           2
         end
         IYI
-      File.write "usea.iyi", <<-IYI
+      File.write "usea.ri", <<-IYI
         module usea
 
         import m1/a::*
 
         puts v
         IYI
-      File.write "useb.iyi", <<-IYI
+      File.write "useb.ri", <<-IYI
         module useb
 
         import m1/b::*
 
         puts v
         IYI
-      source = Iyi::Compiler::Source.new(File.expand_path("usea.iyi"), File.read("usea.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("usea.ri"), File.read("usea.ri"))
 
       # Both artifacts, each written for the module it names.
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-a")
       `./from-a`.chomp.should eq "1"
 
-      other = Iyi::Compiler::Source.new(File.expand_path("useb.iyi"), File.read("useb.iyi"))
+      other = Iyi::Compiler::Source.new(File.expand_path("useb.ri"), File.read("useb.ri"))
       producer_b = create_spec_compiler
-      producer_b.prelude = "iyi/prelude"
+      producer_b.prelude = "ris/prelude"
       producer_b.emit_iyimod = "mods"
       producer_b.compile other, File.expand_path("from-b")
       `./from-b`.chomp.should eq "2"
 
       # The sources go away, so the artifacts are all there is. That is what
-      # puts the mismatch beyond reach of every other check: with `m1/a.iyi`
+      # puts the mismatch beyond reach of every other check: with `m1/a.ri`
       # present, the source hash catches the wrong file and blames the source
       # for having changed, which is a misdiagnosis of its own.
       Dir.mkdir_p "away"
@@ -4225,17 +4225,17 @@ describe Iyi::IyiMod do
 
       # `m1/b`'s artifact under `m1/a`'s name. Every checksum in it is intact and
       # the only thing wrong with it is which module it is.
-      File.copy File.join("mods", "m1", "b.iyimod"), File.join("mods", "m1", "a.iyimod")
+      File.copy File.join("mods", "m1", "b.rimod"), File.join("mods", "m1", "a.rimod")
 
       reader = create_spec_compiler
-      reader.prelude = "iyi/prelude"
+      reader.prelude = "ris/prelude"
       reader.use_iyimod = "mods"
       ex = expect_raises(Iyi::TypeException, /declares module "m1\/b", not "m1\/a"/) do
         reader.compile source, File.expand_path("mismatched")
       end
 
       # The file, so the reader knows which one to go and look at.
-      ex.message.to_s.should contain File.join("mods", "m1", "a.iyimod")
+      ex.message.to_s.should contain File.join("mods", "m1", "a.rimod")
 
       # At the `import`, which is where the artifact is read, and not at its
       # scope half, where the old misdiagnosis landed.
@@ -4246,17 +4246,17 @@ describe Iyi::IyiMod do
       # the module is compiled from it and the wrong file written over.
       File.rename File.join("away", "m1"), "m1"
       rewriter = create_spec_compiler
-      rewriter.prelude = "iyi/prelude"
+      rewriter.prelude = "ris/prelude"
       rewriter.use_iyimod = "mods"
       rewriter.emit_iyimod = "mods"
       rewriter.compile source, File.expand_path("repaired")
       `./repaired`.chomp.should eq "1"
-      Iyi::IyiMod.read_summary(File.join("mods", "m1", "a.iyimod"))
+      Iyi::IyiMod.read_summary(File.join("mods", "m1", "a.rimod"))
         .module_name.should eq "m1/a"
 
       # And what it wrote is read again without a word.
       again = create_spec_compiler
-      again.prelude = "iyi/prelude"
+      again.prelude = "ris/prelude"
       again.use_iyimod = "mods"
       again.compile source, File.expand_path("cached")
       `./cached`.chomp.should eq "1"
@@ -4270,21 +4270,21 @@ describe Iyi::IyiMod do
   it "keeps a dependent whose dependency changed only a body" do
     with_tempdir("iyimod_interface_hash") do
       Dir.mkdir_p "app"
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/outer
 
         puts App::Outer.outer
         IYI
-      File.write "leaf.iyi", <<-IYI
+      File.write "leaf.ri", <<-IYI
         module leaf
 
         import app/inner
 
         puts App::Inner.inner
         IYI
-      File.write "app/outer.iyi", <<-IYI
+      File.write "app/outer.ri", <<-IYI
         module app/outer
 
         import app/inner
@@ -4294,7 +4294,7 @@ describe Iyi::IyiMod do
         end
         IYI
       write_inner = ->(body : String, extra : String) do
-        File.write "app/inner.iyi", <<-IYI
+        File.write "app/inner.ri", <<-IYI
           module app/inner
 
           pub def inner : Int32
@@ -4304,12 +4304,12 @@ describe Iyi::IyiMod do
           IYI
       end
 
-      main = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
-      leaf = Iyi::Compiler::Source.new(File.expand_path("leaf.iyi"), File.read("leaf.iyi"))
+      main = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
+      leaf = Iyi::Compiler::Source.new(File.expand_path("leaf.ri"), File.read("leaf.ri"))
 
       build = ->(program : Iyi::Compiler::Source, output : String, emit : Bool) do
         compiler = create_spec_compiler
-        compiler.prelude = "iyi/prelude"
+        compiler.prelude = "ris/prelude"
         compiler.use_iyimod = "mods"
         compiler.emit_iyimod = "mods" if emit
         compiler.compile program, File.expand_path(output)
@@ -4349,7 +4349,7 @@ describe Iyi::IyiMod do
     with_temporary_file do |path|
       artifact = Iyi::IyiMod::Artifact.new(
         module_name: "app/box",
-        source_path: "/src/app/box.iyi",
+        source_path: "/src/app/box.ri",
         compiler_version: "1.22.0-dev+abc1234",
         target_triple: "x86_64-pc-linux-gnu",
         flags: ["bits64"],
@@ -4408,7 +4408,7 @@ describe Iyi::IyiMod do
     it "computes the offsets from the emitted struct, not from field sizes added up" do
       with_tempdir("iyimod_layouts") do
         Dir.mkdir_p "app"
-        File.write "app/shapes.iyi", <<-IYI
+        File.write "app/shapes.ri", <<-IYI
           module app/shapes
 
           pub struct Point
@@ -4484,7 +4484,7 @@ describe Iyi::IyiMod do
             nil
           end
           IYI
-        File.write "main.iyi", <<-IYI
+        File.write "main.ri", <<-IYI
           module main
 
           import app/shapes
@@ -4495,16 +4495,16 @@ describe Iyi::IyiMod do
 
         captured = nil
         compiler = create_spec_compiler
-        compiler.prelude = "iyi/prelude"
+        compiler.prelude = "ris/prelude"
         compiler.emit_iyimod = "mods"
-        source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+        source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
         compiler.compile_configure_program(source, File.expand_path("from-source")) do |program|
           captured = program
         end
         `./from-source`.chomp.should eq "ok"
 
         program = captured.not_nil!
-        artifact = Iyi::IyiMod.read(File.join("mods", "app", "shapes.iyimod"))
+        artifact = Iyi::IyiMod.read(File.join("mods", "app", "shapes.rimod"))
         shapes = program.types["App"].types["Shapes"]
 
         # The layout the compiler computed, asked the way `offsetof` asks it.
@@ -4642,7 +4642,7 @@ describe Iyi::IyiMod do
     with_temporary_file do |path|
       artifact = Iyi::IyiMod::Artifact.new(
         module_name: "app/box",
-        source_path: "/src/app/box.iyi",
+        source_path: "/src/app/box.ri",
         compiler_version: "1.22.0-dev+abc1234",
         target_triple: "x86_64-pc-linux-gnu",
         flags: ["bits64"],
@@ -4718,7 +4718,7 @@ describe Iyi::IyiMod do
   it "renders the initialiser inside the module it belongs to" do
     artifact = Iyi::IyiMod::Artifact.new(
       module_name: "boot/config",
-      source_path: "/src/boot/config.iyi",
+      source_path: "/src/boot/config.ri",
       compiler_version: "1.22.0-dev+abc1234",
       target_triple: "x86_64-pc-linux-gnu",
       flags: [] of String,
@@ -4742,7 +4742,7 @@ describe Iyi::IyiMod do
   it "carries a type's fields" do
     with_tempdir("iyimod_fields") do
       Dir.mkdir_p "std"
-      File.write "std/box.iyi", <<-IYI
+      File.write "std/box.ri", <<-IYI
         module std/box
 
         pub struct Box(T)
@@ -4758,7 +4758,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import std/box
@@ -4766,15 +4766,15 @@ describe Iyi::IyiMod do
         puts Std::Box::Box(Int32).new(7).item
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.no_codegen = true
       producer.compile source, File.expand_path("unused")
 
-      declaration = Iyi::IyiMod.read(File.join("mods", "std", "box.iyimod"))
+      declaration = Iyi::IyiMod.read(File.join("mods", "std", "box.rimod"))
         .exports.types.find! { |candidate| candidate.name == "Box" }
 
       # In the order they were declared, because that order is the layout: a
@@ -4794,7 +4794,7 @@ describe Iyi::IyiMod do
   it "carries a type's Share marker, and a consumer's thread reads it" do
     with_tempdir("iyimod_share") do
       Dir.mkdir_p "std"
-      File.write "std/pair.iyi", <<-IYI
+      File.write "std/pair.ri", <<-IYI
         module std/pair
 
         pub struct Pair
@@ -4825,7 +4825,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import std/pair
@@ -4839,30 +4839,30 @@ describe Iyi::IyiMod do
         puts pair.left
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.no_codegen = true
       producer.compile source, File.expand_path("unused")
 
-      types = Iyi::IyiMod.read(File.join("mods", "std", "pair.iyimod")).exports.types
+      types = Iyi::IyiMod.read(File.join("mods", "std", "pair.rimod")).exports.types
       types.find! { |candidate| candidate.name == "Pair" }.annotations.should eq ["@[Share]"]
       types.find! { |candidate| candidate.name == "Counter" }.annotations.should eq [] of String
 
-      File.delete "std/pair.iyi"
+      File.delete "std/pair.ri"
 
       # The shareable one crosses a thread from the artifact alone.
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.no_codegen = true
       consumer.compile source, File.expand_path("unused")
 
       # The other is refused with the artifact as the reason: the consumer
       # cannot see `bump`, and does not pretend to.
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import std/pair
@@ -4874,9 +4874,9 @@ describe Iyi::IyiMod do
         end
         t.join
         IYI
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       refusing = create_spec_compiler
-      refusing.prelude = "iyi/prelude"
+      refusing.prelude = "ris/prelude"
       refusing.use_iyimod = "mods"
       refusing.no_codegen = true
       # ris: a class instance is a tape value, so the tape-capture rule
@@ -4896,7 +4896,7 @@ describe Iyi::IyiMod do
   pending "carries an owning type's Share marker, and a consumer's thread reads it" do
     with_tempdir("iyimod_share_owns") do
       Dir.mkdir_p "std"
-      File.write "std/guard.iyi", <<-IYI
+      File.write "std/guard.ri", <<-IYI
         module std/guard
 
         pub class Counter
@@ -4932,7 +4932,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import std/guard::{Guard, Counter}
@@ -4945,21 +4945,21 @@ describe Iyi::IyiMod do
         t.join
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.no_codegen = true
       producer.compile source, File.expand_path("unused")
 
-      types = Iyi::IyiMod.read(File.join("mods", "std", "guard.iyimod")).exports.types
+      types = Iyi::IyiMod.read(File.join("mods", "std", "guard.rimod")).exports.types
       types.find! { |candidate| candidate.name == "Guard" }.annotations.should eq ["@[Share(owns: true)]"]
 
-      File.delete "std/guard.iyi"
+      File.delete "std/guard.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.no_codegen = true
       consumer.compile source, File.expand_path("unused")
@@ -4987,7 +4987,7 @@ describe Iyi::IyiMod do
   it "does not mistake declarations for an initialiser" do
     with_tempdir("iyimod_no_initialiser") do
       Dir.mkdir_p "std"
-      File.write "std/hold.iyi", <<-IYI
+      File.write "std/hold.ri", <<-IYI
         module std/hold
 
         pub trait Hold
@@ -5011,7 +5011,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import std/hold::{Hold}
@@ -5020,14 +5020,14 @@ describe Iyi::IyiMod do
         puts Std::Hold::Box.new(7).item
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
 
-      Iyi::IyiMod.read(File.join("mods", "std", "hold.iyimod")).has_initialiser.should be_false
+      Iyi::IyiMod.read(File.join("mods", "std", "hold.rimod")).has_initialiser.should be_false
     end
   end
 
@@ -5038,7 +5038,7 @@ describe Iyi::IyiMod do
   it "does not mistake a macro call in a type body for an initialiser" do
     with_tempdir("iyimod_macro_declarations") do
       Dir.mkdir_p "app"
-      File.write "app/store.iyi", <<-IYI
+      File.write "app/store.ri", <<-IYI
         module app/store
 
         @[OnTape]
@@ -5074,7 +5074,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/store
@@ -5085,20 +5085,20 @@ describe Iyi::IyiMod do
         puts store.total
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "11"
 
-      Iyi::IyiMod.read(File.join("mods", "app", "store.iyimod")).has_initialiser.should be_false
+      Iyi::IyiMod.read(File.join("mods", "app", "store.rimod")).has_initialiser.should be_false
 
-      File.delete "app/store.iyi"
+      File.delete "app/store.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "11"
@@ -5111,7 +5111,7 @@ describe Iyi::IyiMod do
   it "sees the code a macro expands to in a type body" do
     with_tempdir("iyimod_macro_code") do
       Dir.mkdir_p "app"
-      File.write "app/thing.iyi", <<-IYI
+      File.write "app/thing.ri", <<-IYI
         module app/thing
 
         pub class Thing
@@ -5124,7 +5124,7 @@ describe Iyi::IyiMod do
           end
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/thing
@@ -5132,17 +5132,17 @@ describe Iyi::IyiMod do
         puts App::Thing::Thing.new.n
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
 
-      Iyi::IyiMod.read(File.join("mods", "app", "thing.iyimod")).has_initialiser.should be_true
+      Iyi::IyiMod.read(File.join("mods", "app", "thing.rimod")).has_initialiser.should be_true
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       expect_raises(Iyi::TypeException, /has code inside a type body/) do
         consumer.compile source, File.expand_path("from-artifact")
@@ -5157,14 +5157,14 @@ describe Iyi::IyiMod do
   it "carries no object code from a --no-codegen build" do
     with_tempdir("iyimod_no_codegen") do
       Dir.mkdir_p "app"
-      File.write "app/greeter.iyi", <<-IYI
+      File.write "app/greeter.ri", <<-IYI
         module app/greeter
 
         pub def polite(name : String) : String
           "Hello, " + name
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/greeter
@@ -5173,14 +5173,14 @@ describe Iyi::IyiMod do
         IYI
 
       compiler = create_spec_compiler
-      compiler.prelude = "iyi/prelude"
+      compiler.prelude = "ris/prelude"
       compiler.emit_iyimod = "mods"
       compiler.no_codegen = true
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       compiler.compile source, "unused"
 
-      artifact = Iyi::IyiMod.read(File.join("mods", "app", "greeter.iyimod"),
+      artifact = Iyi::IyiMod.read(File.join("mods", "app", "greeter.rimod"),
         want_object_code: true)
       artifact.object_code.should be_empty
       artifact.exports.functions.map(&.name).should eq ["polite"]
@@ -5191,19 +5191,19 @@ describe Iyi::IyiMod do
   # the far end arrived. The edges are kept by filename because load-once is,
   # so writing one out means looking the filename back up — and the lookup used
   # to ask only the modules read from source, which left an import resolved
-  # from a `.iyimod` recorded as that file's path. `mods/app/inner.iyimod` is
+  # from a `.rimod` recorded as that file's path. `mods/app/inner.rimod` is
   # this build's directory layout, not a module anybody else can resolve.
   it "records an import read from an artifact as the module it is" do
     with_tempdir("iyimod_artifact_edge") do
       Dir.mkdir_p "app"
-      File.write "app/inner.iyi", <<-IYI
+      File.write "app/inner.ri", <<-IYI
         module app/inner
 
         pub def inner : Int32
           1
         end
         IYI
-      File.write "app/outer.iyi", <<-IYI
+      File.write "app/outer.ri", <<-IYI
         module app/outer
 
         import app/inner
@@ -5212,7 +5212,7 @@ describe Iyi::IyiMod do
           App::Inner.inner
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/outer
@@ -5220,28 +5220,28 @@ describe Iyi::IyiMod do
         puts App::Outer.outer
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.no_codegen = true
       producer.compile source, "unused"
 
       # Only the leaf keeps its artifact, so the second build reads `app/inner`
-      # from a `.iyimod` and `app/outer` from source — which is the shape an
+      # from a `.rimod` and `app/outer` from source — which is the shape an
       # incremental build has, and the only one where the edge is written by a
       # module whose dependency did not come from source.
-      File.delete File.join("mods", "app", "outer.iyimod")
+      File.delete File.join("mods", "app", "outer.rimod")
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.emit_iyimod = "out"
       consumer.no_codegen = true
       consumer.compile source, "unused"
 
-      artifact = Iyi::IyiMod.read(File.join("out", "app", "outer.iyimod"))
+      artifact = Iyi::IyiMod.read(File.join("out", "app", "outer.rimod"))
       artifact.import_names.should eq ["app/inner"]
     end
   end
@@ -5402,7 +5402,7 @@ describe Iyi::IyiMod do
   # linked.
   it "links a release consumer against object code that checks overflow and allocates" do
     with_tempdir("iyimod_release_closure") do
-      modules = {"app/sum.iyi" => <<-IYI}
+      modules = {"app/sum.ri" => <<-IYI}
         module app/sum
 
         pub class Tally
@@ -5439,7 +5439,7 @@ describe Iyi::IyiMod do
   # reading the declaration asked for `| Nil` on the end.
   it "links a def whose body answers fewer union members than it declares" do
     with_tempdir("iyimod_narrow_union") do
-      modules = {"app/mixed.iyi" => <<-IYI}
+      modules = {"app/mixed.ri" => <<-IYI}
         module app/mixed
 
         pub def mixed(flag : Bool) : Int32 | String | Nil
@@ -5476,7 +5476,7 @@ describe Iyi::IyiMod do
   # `area_of<App::Shapes::Shape>`, which nobody emitted.
   it "links a def whose parameter is written as a trait" do
     with_tempdir("iyimod_trait_parameter") do
-      modules = {"app/shapes.iyi" => <<-IYI}
+      modules = {"app/shapes.ri" => <<-IYI}
         module app/shapes
 
         pub trait Shape
@@ -5533,7 +5533,7 @@ describe Iyi::IyiMod do
   # as written with no symbol behind it.
   it "links a def whose parameter is a class or a private union" do
     with_tempdir("iyimod_narrow_instantiation") do
-      modules = {"lib/u.iyi" => <<-IYI}
+      modules = {"lib/u.ri" => <<-IYI}
         module lib/u
 
         pub abstract class Base
@@ -5576,7 +5576,7 @@ describe Iyi::IyiMod do
   # own artifact was read.
   it "leaves a subclass in another module to that module's artifact" do
     with_tempdir("iyimod_inherited_class_var") do
-      modules = {"lib/base.iyi" => <<-BASE, "lib/sub.iyi" => <<-SUB}
+      modules = {"lib/base.ri" => <<-BASE, "lib/sub.ri" => <<-SUB}
         module lib/base
 
         pub abstract class Base
@@ -5620,11 +5620,11 @@ describe Iyi::IyiMod do
   end
 
   # A generic body with macro code travels as text and is expanded by the
-  # consumer, under the artifact's path. That path is no `.iyi`, so the
+  # consumer, under the artifact's path. That path is no `.ri`, so the
   # expansion was lexed as the other language's and `raw!` was a method name.
   it "reads a propagation in a travelled body's macro code" do
     with_tempdir("iyimod_macro_propagate") do
-      modules = {"lib/r.iyi" => <<-IYI}
+      modules = {"lib/r.ri" => <<-IYI}
         module lib/r
 
         pub class Fail
@@ -5675,7 +5675,7 @@ describe Iyi::IyiMod do
   # type body that has to run".
   it "carries an instance variable's initialiser written without a type" do
     with_tempdir("iyimod_untyped_ivar") do
-      modules = {"app/bag.iyi" => <<-IYI}
+      modules = {"app/bag.ri" => <<-IYI}
         module app/bag
 
         pub class Bag
@@ -5728,7 +5728,7 @@ describe Iyi::IyiMod do
   # declared `Stack(Int32)#initialize` and never defined it.
   it "defines a generic type's empty method" do
     with_tempdir("iyimod_empty_generic_body") do
-      modules = {"app/stack.iyi" => <<-IYI}
+      modules = {"app/stack.ri" => <<-IYI}
         module app/stack
 
         pub class Stack(T)
@@ -5764,7 +5764,7 @@ describe Iyi::IyiMod do
   # have.
   it "links object code that dispatches over a trait with a definition-typing witness" do
     with_tempdir("iyimod_witness") do
-      modules = {"app/names.iyi" => <<-IYI}
+      modules = {"app/names.ri" => <<-IYI}
         module app/names
 
         pub trait Named
@@ -5820,7 +5820,7 @@ describe Iyi::IyiMod do
   # refused. `run`'s definition-typing witness took the same wrong turn.
   it "resolves a default method's functions in the trait's module" do
     with_tempdir("iyimod_default_scope") do
-      modules = {"lib/core.iyi" => <<-IYI}
+      modules = {"lib/core.ri" => <<-IYI}
         module lib/core
 
         def helper(x : Int32) : Int32
@@ -5875,7 +5875,7 @@ describe Iyi::IyiMod do
   # interpolation" in a module that had compiled.
   it "carries a recovery inside an interpolation in a body that travels" do
     with_tempdir("iyimod_interpolated_or") do
-      modules = {"lib/core.iyi" => <<-IYI}
+      modules = {"lib/core.ri" => <<-IYI}
         module lib/core
 
         pub struct Bad
@@ -5914,11 +5914,11 @@ describe Iyi::IyiMod do
 
   # A signature with an error member is the def's type (III.1.8), and a
   # default method's body travels for its implementers. Read from the
-  # artifact, where its location is no `.iyi`, the body's own answer typed
+  # artifact, where its location is no `.ri`, the body's own answer typed
   # it: `Int32`, and `.or` on it was refused as having nothing to recover.
   it "keeps a travelled body's declared error union" do
     with_tempdir("iyimod_declared_union") do
-      modules = {"lib/core.iyi" => <<-IYI}
+      modules = {"lib/core.ri" => <<-IYI}
         module lib/core
 
         pub struct Bad
@@ -5976,7 +5976,7 @@ describe Iyi::IyiMod do
   # class, a struct or a def".
   it "renders an abstract generic class it can read back" do
     with_tempdir("iyimod_abstract_generic") do
-      modules = {"app/src.iyi" => <<-IYI}
+      modules = {"app/src.ri" => <<-IYI}
         module app/src
 
         pub abstract class Src(T)

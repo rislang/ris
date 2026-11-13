@@ -39,7 +39,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -57,12 +57,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2" source="$3"
   shift 3
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -119,7 +119,7 @@ PY
 }
 
 echo "== the std/deque exercise"
-build_and_run "std_deque" exercise-deque "$REPO/test/cli/std_deque_exercise.iyi"
+build_and_run "std_deque" exercise-deque "$REPO/test/cli/std_deque_exercise.ri"
 
 echo
 echo "== every deque section reported"
@@ -152,7 +152,7 @@ fi
 
 echo
 echo "== the same program with optimisation on (--release)"
-build_and_run "std_deque release" exercise-deque-release "$REPO/test/cli/std_deque_exercise.iyi" --release >/dev/null
+build_and_run "std_deque release" exercise-deque-release "$REPO/test/cli/std_deque_exercise.ri" --release >/dev/null
 if [ -z "$PY" ]; then
   echo "  and with no oracle the optimised build has nothing to be compared against"
 elif grep '^step ' "$WORK/exercise-deque-release.out" | diff -q "$WORK/oracle.out" - >/dev/null; then
@@ -166,8 +166,8 @@ echo
 echo "== what the deque refuses"
 deque_panics_with() { # deque_panics_with <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
-  printf 'module main\n\nimport std/deque::{Deque}\n\nd = Deque(Int32).new([1, 2, 3])\ne = Deque(Int32).new\nputs (%s).to_s\n' "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/deque::{Deque}\n\nd = Deque(Int32).new([1, 2, 3])\ne = Deque(Int32).new\nputs (%s).to_s\n' "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -186,7 +186,7 @@ deque_panics_with() { # deque_panics_with <label> <name> <phrase> <expression>
     status=1
     return
   fi
-  printf '  %s: exits 1 at "%s"\n' "$label" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits 1 at "%s"\n' "$label" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 deque_panics_with "pop of an empty deque" pop_empty "pop of an empty deque" 'e.pop'
 deque_panics_with "shift of an empty deque" shift_empty "shift of an empty deque" 'e.shift'
@@ -213,13 +213,13 @@ prove_fails() { # prove_fails <label> <name> <phrase> <python replace-expression
   fi
   "$PY" -c "
 import sys
-src = open('$REPO/src/std/deque.iyi').read()
+src = open('$REPO/src/std/deque.ri').read()
 broken = $replace
 if broken == src:
     sys.exit('patch did not apply')
-open('$WORK/$name/std/deque.iyi', 'w').write(broken)
+open('$WORK/$name/std/deque.ri', 'w').write(broken)
 " || { echo "  $label: the patch did not apply"; status=1; return; }
-  if ! IYI_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/$name/program" "$REPO/test/cli/std_deque_exercise.iyi" >"$WORK/$name/build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/$name/program" "$REPO/test/cli/std_deque_exercise.ri" >"$WORK/$name/build.log" 2>&1; then
     echo "  $label: the patched library did not build"
     sed -n '1,10p' "$WORK/$name/build.log"
     status=1
@@ -242,7 +242,7 @@ open('$WORK/$name/std/deque.iyi', 'w').write(broken)
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(grep -m1 -F -- "$phrase" "$WORK/$name/out" | sed 's/^iyi: panic: //' | cut -c1-160)"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(grep -m1 -F -- "$phrase" "$WORK/$name/out" | sed 's/^ris: panic: //' | cut -c1-160)"
 }
 
 # The wrapped run put back in reverse: dropping it outright leaves nil

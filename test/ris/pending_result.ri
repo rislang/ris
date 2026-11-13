@@ -32,9 +32,7 @@ tape do
   late = pending_borrow(source, false)
   raise "wrong borrowed result" unless early == "bcd" && late == "cd"
   address = pending_address(source)
-  raise "copied borrowed early view" unless \
-    pending_address(early) == address + 1
-  raise "copied borrowed final view" unless \
-    pending_address(late) == address + 2
+  raise "copied borrowed early view" unless pending_address(early) == address + 1
+  raise "copied borrowed final view" unless pending_address(late) == address + 2
   puts "PASS: pending results and borrowed views"
 end

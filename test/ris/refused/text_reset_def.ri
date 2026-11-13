@@ -2,6 +2,7 @@ def retain(values : Array(String), text : String)
   values << text
   nil
 end
+
 s = ""
 s << "old"
 kept = [] of String

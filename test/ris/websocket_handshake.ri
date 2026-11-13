@@ -38,13 +38,13 @@ end
 def offer(port : Int32, extensions : String) : Nil
   raw = IyiSocket.connect("127.0.0.1", port).or_panic
   raw.write("GET / HTTP/1.1\r\nHost: h\r\nUpgrade: websocket\r\n" +
-    "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
-    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
-    "Sec-WebSocket-Extensions: #{extensions}\r\n\r\n").or_panic
+            "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+            "Sec-WebSocket-Extensions: #{extensions}\r\n\r\n").or_panic
   head = raw.read(1024).or_panic
   head.split("\r\n").each do |line|
     puts line if line.starts_with?("HTTP/") ||
-      line.starts_with?("Sec-")
+                 line.starts_with?("Sec-")
   end
   raw.close
 end
@@ -78,7 +78,7 @@ group do |g|
       puts "failed #{ws}"
     end
     offer(port, "x-foo; a=\"b\\c\", , permessage-deflate;" +
-      " server_no_context_takeover; client_max_window_bits")
+                " server_no_context_takeover; client_max_window_bits")
     offer(port, "x-foo; a=\"b\\\"c\", permessage-deflate")
   end
   g.cancel_children

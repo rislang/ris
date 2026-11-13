@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The editor, in a workspace whose dependency is an artifact and nothing else.
 
-A library arrives as `.iyimod` files (iyi SPEC III.7), and a program built
-with `--use-iyimod` compiles against them with the module's source deleted —
+A library arrives as `.rimod` files (iyi SPEC III.7), and a program built
+with `--use-rimod` compiles against them with the module's source deleted —
 that is R-1's whole claim and `test/cli/samples_roundtrip.sh` gates it for the
 build. The *editor* was not asked. It compiled imports from source alone, so
 the same workspace opened with
@@ -11,7 +11,7 @@ the same workspace opened with
 
 on the import line, hover and definition empty, about a module the build
 compiles fine against. iyi SPEC IV says the server's inner loop *is* what
-`--use-iyimod` already does; this asserts that it does it.
+`--use-rimod` already does; this asserts that it does it.
 
 The comparison is the one that matters: the same program, the same
 questions, answered twice — once with the dependency's source present and
@@ -42,9 +42,9 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 sys.path.insert(0, os.path.join(ROOT, "test", "cli"))
-# The binary the session gate runs: `bin/iyi` is a shell script, and on
-# Windows the caller names the exe through `IYI`.
-IYI = os.environ.get("IYI", os.path.join(ROOT, "bin", "iyi"))
+# The binary the session gate runs: `bin/ris` is a shell script, and on
+# Windows the caller names the exe through `RIS`.
+RIS = os.environ.get("RIS", os.path.join(ROOT, "bin", "iyi"))
 
 # The program is one def so that `hover` has a local to name — the shape
 # `test/cli/lsp_session.py` established as the question an editor asks.
@@ -111,20 +111,20 @@ def workspace(where, keep_source):
     deleted. Building it first is also the control — a workspace the build
     cannot read is not a question for the editor."""
     os.makedirs(os.path.join(where, "app"), exist_ok=True)
-    with open(os.path.join(where, "main.iyi"), "w") as f:
+    with open(os.path.join(where, "main.ri"), "w") as f:
         f.write(MAIN)
-    with open(os.path.join(where, "app", "base.iyi"), "w") as f:
+    with open(os.path.join(where, "app", "base.ri"), "w") as f:
         f.write(BASE)
-    env = dict(os.environ, IYI_PATH=os.path.join(ROOT, "src") + os.pathsep + where)
-    emit = subprocess.run([IYI, "build", "--emit-iyimod", "mods", "-o", "out", "main.iyi"],
+    env = dict(os.environ, RIS_PATH=os.path.join(ROOT, "src") + os.pathsep + where)
+    emit = subprocess.run([RIS, "build", "--emit-rimod", "mods", "-o", "out", "main.ri"],
                           cwd=where, env=env, capture_output=True, text=True)
     if emit.returncode != 0:
         say(f"{os.path.basename(where)}: the workspace builds", False,
             emit.stdout.splitlines()[:1] or emit.stderr.splitlines()[:1])
         return None
     if not keep_source:
-        os.remove(os.path.join(where, "app", "base.iyi"))
-        use = subprocess.run([IYI, "build", "--use-iyimod", "mods", "-o", "out2", "main.iyi"],
+        os.remove(os.path.join(where, "app", "base.ri"))
+        use = subprocess.run([RIS, "build", "--use-rimod", "mods", "-o", "out2", "main.ri"],
                              cwd=where, env=env, capture_output=True, text=True)
         if use.returncode != 0:
             say("the artifact-only workspace builds", False,
@@ -139,7 +139,7 @@ def ask(where, env, label):
     os.environ.update(env)
     import lsp_session as session
 
-    main = os.path.join(where, "main.iyi")
+    main = os.path.join(where, "main.ri")
     uri = session.file_uri(main)
     session.watchdog(180)
     client = session.Client()

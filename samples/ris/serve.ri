@@ -13,9 +13,9 @@ module samples/serve
 import std/socket::{IyiSocket}
 import std/http::{Server, Incoming, Outgoing}
 
-N = 200000
+N       = 200000
 REQUEST = String.view("GET /users/42?full=1 HTTP/1.1\r\nHost: localhost\r\n" \
-  "User-Agent: bench\r\nAccept: */*\r\n\r\n")
+                      "User-Agent: bench\r\nAccept: */*\r\n\r\n")
 BODY = %({"id":42,"name":"Mari","email":"mari@example.com"})
 
 # The answers read into one writer on the tape, emptied before each read,
@@ -45,6 +45,7 @@ end
 
 struct Settings
   getter port : Int32
+
   def initialize(@port)
   end
 end

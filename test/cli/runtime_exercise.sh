@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives test/cli/runtime_exercise.iyi: the concurrency runtime gate for
+# Drives test/cli/runtime_exercise.ri: the concurrency runtime gate for
 # Windows x86_64, Linux, and Darwin (iyi SPEC III.4).
 #
 #     bash test/cli/runtime_exercise.sh
@@ -15,7 +15,7 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IYI="${IYI:-$REPO/bin/ris}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -36,7 +36,7 @@ step() { echo "== $1"; }
 
 # 1. Plain build
 step "runtime exercise, plain build"
-if ! "$IYI" build "$REPO/test/cli/runtime_exercise.iyi" -o exercise > build.log 2>&1; then
+if ! "$RIS" build "$REPO/test/cli/runtime_exercise.ri" -o exercise > build.log 2>&1; then
   echo "build failed:"
   cat build.log
   exit 1
@@ -50,7 +50,7 @@ grep -q 'runtime exercise: every property held' answers.txt || { cat answers.txt
 
 # 2. Release build
 step "runtime exercise, release build"
-if ! "$IYI" build --release "$REPO/test/cli/runtime_exercise.iyi" -o exercise-release > build-release.log 2>&1; then
+if ! "$RIS" build --release "$REPO/test/cli/runtime_exercise.ri" -o exercise-release > build-release.log 2>&1; then
   echo "release build failed:"
   cat build-release.log
   exit 1
@@ -62,10 +62,10 @@ if ! ./exercise-release > answers-release.txt 2>&1; then
 fi
 grep -q 'runtime exercise: every property held' answers-release.txt || { cat answers-release.txt; exit 1; }
 
-# 3. Windows cross-compilation: ris builds for Linux only (src/iyi/heap.iyi),
+# 3. Windows cross-compilation: ris builds for Linux only (src/ris/heap.ri),
 # so a Windows target is refused with the sentence that says so.
 step "runtime exercise, a Windows target refused"
-if "$IYI" build --cross-compile --target x86_64-windows-msvc "$REPO/test/cli/runtime_exercise.iyi" -o runtime-msvc.obj > msvc.log 2>&1 ||
+if "$RIS" build --cross-compile --target x86_64-windows-msvc "$REPO/test/cli/runtime_exercise.ri" -o runtime-msvc.obj > msvc.log 2>&1 ||
    ! grep -q 'ris programs need Linux' msvc.log; then
   echo "a Windows target was not refused for want of Linux:"
   cat msvc.log
@@ -106,13 +106,13 @@ esac
 
 # 5. Failure proof: deadlock
 step "failure proof: deadlock is a diagnosis, not a hang"
-cat > deadlock.iyi <<'IYI'
+cat > deadlock.ri <<'RIS'
 record Never, n : Int32
 
 value = RisBoard.take(Never)
 puts value.is_a?(Never)
-IYI
-if ! "$IYI" build deadlock.iyi -o deadlock > build-deadlock.log 2>&1; then
+RIS
+if ! "$RIS" build deadlock.ri -o deadlock > build-deadlock.log 2>&1; then
   echo "deadlock probe failed to build:"
   cat build-deadlock.log
   exit 1
@@ -130,8 +130,8 @@ grep -q 'deadlock' deadlock.txt || { echo "died without naming the deadlock:"; c
 
 # 6. Failure proof: interleaving assert can fail
 step "failure proof: a wrong interleaving order is refused"
-sed 's/== "bababa"/== "aaabbb"/' "$REPO/test/cli/runtime_exercise.iyi" > misordered.iyi
-if ! "$IYI" build misordered.iyi -o misordered > build-misordered.log 2>&1; then
+sed 's/== "bababa"/== "aaabbb"/' "$REPO/test/cli/runtime_exercise.ri" > misordered.ri
+if ! "$RIS" build misordered.ri -o misordered > build-misordered.log 2>&1; then
   echo "misordered probe failed to build:"
   cat build-misordered.log
   exit 1
@@ -148,8 +148,8 @@ fi
 
 # 7. Failure proof: IO cancellation assert can fail
 step "failure proof: an uncaught IO block fails rather than silently passing"
-sed 's/outcome.is_a?(Cancelled) ? "cancelled" : "read"/outcome.is_a?(Cancelled) ? "bogus" : "read"/' "$REPO/test/cli/runtime_exercise.iyi" > uncancelled.iyi
-if ! "$IYI" build uncancelled.iyi -o uncancelled > build-uncancelled.log 2>&1; then
+sed 's/outcome.is_a?(Cancelled) ? "cancelled" : "read"/outcome.is_a?(Cancelled) ? "bogus" : "read"/' "$REPO/test/cli/runtime_exercise.ri" > uncancelled.ri
+if ! "$RIS" build uncancelled.ri -o uncancelled > build-uncancelled.log 2>&1; then
   echo "uncancelled probe failed to build:"
   cat build-uncancelled.log
   exit 1

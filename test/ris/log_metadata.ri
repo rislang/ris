@@ -36,6 +36,7 @@ end
     raise "cleanup" if Log.has_context?
   end
 end
+
 def inherited_context : Bool
   raise "inherited" unless Log.context_size == 1
   Log.with_context(child: "yes") do

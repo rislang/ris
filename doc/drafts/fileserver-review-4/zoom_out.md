@@ -2,9 +2,9 @@
 
 Verdict: ready. No Blockers, no Majors.
 
-Code checks held: log.iyi:400-402 copies each entry with
-`copy_to(@owner)`; region.iyi:523-529 gives 128 MiB per growing
-payload with MAP_NORESERVE; time.iyi has seven `parse` defs (2457,
+Code checks held: log.ri:400-402 copies each entry with
+`copy_to(@owner)`; region.ri:523-529 gives 128 MiB per growing
+payload with MAP_NORESERVE; time.ri has seven `parse` defs (2457,
 2463, 3635, 3656, 3671, 3689, 3704); the RFC 3339 parse at 3736 does
 not use `Parser` and is rightly left out.
 

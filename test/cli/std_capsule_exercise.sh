@@ -35,7 +35,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -53,12 +53,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_capsule_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_capsule_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -108,7 +108,7 @@ echo "== proving the checks can fail when the module is broken"
 broken() {
   local label="$1" name="$2"
   mkdir -p "$WORK/$name/std"
-  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/capsule.iyi" "$WORK/$name/std/capsule.iyi" <<'PY'
+  if ! OLD="$3" NEW="$4" "$PY" - "$REPO/src/std/capsule.ri" "$WORK/$name/std/capsule.ri" <<'PY'
 import os, sys
 from pathlib import Path
 src = Path(sys.argv[1]).read_text()
@@ -120,7 +120,7 @@ PY
   then
     echo "  $label: the patch did not apply"
     status=1
-  elif ! IYI_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/$name/exercise" "$REPO/test/cli/std_capsule_exercise.iyi" >"$WORK/$name/build.log" 2>&1; then
+  elif ! RIS_PATH="$WORK/$name${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/$name/exercise" "$REPO/test/cli/std_capsule_exercise.ri" >"$WORK/$name/build.log" 2>&1; then
     echo "  $label: the broken module did not build"
     sed 's/^/    /' "$WORK/$name/build.log" | tail -6
     status=1
@@ -144,15 +144,15 @@ echo
 echo "== what capsule refuses"
 refuses() { # refuses <label> <name> <phrase> <code>
   local label="$1" name="$2" phrase="$3" code="$4"
-  cat <<IYI > "$WORK/$name.iyi"
+  cat <<RIS > "$WORK/$name.ri"
 module main
 
 import std/slice::{Bytes}
 import std/capsule::{VarInt, HttpDatagram, Capsule, CapsuleType}
 
 $code
-IYI
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+RIS
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -171,7 +171,7 @@ IYI
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code_exit" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code_exit" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 
 refuses "varint value exceeding 62-bit MAX" varint_overflow "varint value exceeds maximum 62-bit integer" 'VarInt.encode(4611686018427387904_u64)'

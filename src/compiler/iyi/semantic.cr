@@ -124,7 +124,7 @@ class Iyi::Program
   # only walks the owners *it* recorded — so a run that analyses a module and a
   # later run that analyses a type including that module have to share one, or
   # the second never learns to give the including type the module's variables.
-  # Only the fork probe needs this today; a `.iyimod` would restore these tables
+  # Only the fork probe needs this today; a `.rimod` would restore these tables
   # rather than recompute them.
   def top_level_semantic(node, main_visitor : MainVisitor = MainVisitor.new(self),
                          processor : TypeDeclarationProcessor? = nil)
@@ -210,7 +210,7 @@ class Iyi::Program
     # prelude require the compiler prepended, the `module` line, the
     # `require`s and the `import` lines (II.3 rule 4 makes that
     # block line-shaped). It used to be "the first node that is not a
-    # `Require`", which under an `.iyi` entry is the module header —
+    # `Require`", which under an `.ri` entry is the module header —
     # so an entry's own `require "pg"` was spliced *after* the imported
     # modules' initialisers, and a shard whose top-level code registers
     # something ran after the module that used it. Crystal's semantics
@@ -237,9 +237,9 @@ class Iyi::Program
   # which produces a different valid topological order each build.
   #
   # Release builds keep the load order, so what ships is reproducible.
-  # `IYI_INIT_SEED` pins the order, for a program that fails under one.
+  # `RIS_INIT_SEED` pins the order, for a program that fails under one.
   private def shuffle_iyi_module_initialisers(inits : Array(ASTNode)) : Array(ASTNode)
-    seed = ENV["IYI_INIT_SEED"]?.try &.to_u64?
+    seed = ENV["RIS_INIT_SEED"]?.try &.to_u64?
     random = seed ? Random.new(seed) : Random.new
 
     by_file = {} of String => ASTNode

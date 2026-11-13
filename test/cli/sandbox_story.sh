@@ -20,7 +20,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 
 # Overridable: in CI the compiler here is the tarball's, because that is
 # the one that runs beside wasmtime.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 WASI_SDK="${WASI_SDK:-/opt/wasi-sdk}"
 WASMTIME="${WASMTIME:-$HOME/.wasmtime/bin/wasmtime}"
 mkdir -p "$REPO/test/cli/.work"
@@ -47,18 +47,18 @@ ln -sf "$WASI_SDK/bin/clang" "$WASI_SDK/bin/cc" 2>/dev/null || true
 export PATH="$WASI_SDK/bin:$PATH"
 
 build_wasm() {
-  "$IYI" build --cross-compile --target wasm32-wasi -o "$1" "$1.iyi" > "$1.link" 2>&1 || { cat "$1.link"; exit 1; }
+  "$RIS" build --cross-compile --target wasm32-wasi -o "$1" "$1.ri" > "$1.link" 2>&1 || { cat "$1.link"; exit 1; }
   eval "$(cat "$1.link")" || exit 1
 }
 
 step "an honest program computes through the boundary"
-printf 'total = 0\nindex = 1\nwhile index <= 10\n  total = total + index\n  index = index + 1\nend\nputs total\n' > honest.iyi
+printf 'total = 0\nindex = 1\nwhile index <= 10\n  total = total + index\n  index = index + 1\nend\nputs total\n' > honest.ri
 build_wasm honest
 "$WASMTIME" honest > honest.txt 2>&1 || { cat honest.txt; exit 1; }
 grep -qx '55' honest.txt || { echo "wrong answer through the boundary:"; cat honest.txt; exit 1; }
 
 step "a theft dies named, and empty-handed"
-printf 'secret = File.read("/etc/passwd")\nputs secret\n' > theft.iyi
+printf 'secret = File.read("/etc/passwd")\nputs secret\n' > theft.ri
 build_wasm theft
 "$WASMTIME" theft > theft.txt 2>&1
 status=$?
@@ -69,7 +69,7 @@ step "the refusal is the prelude's rule, by name"
 grep -q 'File is not available on wasm32-wasi' theft.txt || { echo "the refusal is unnamed:"; cat theft.txt; exit 1; }
 
 step "File.exists? is refused by name, not answered false"
-printf 'puts File.exists?("/etc/passwd")\n' > exists.iyi
+printf 'puts File.exists?("/etc/passwd")\n' > exists.ri
 build_wasm exists
 "$WASMTIME" exists > exists.txt 2>&1
 status=$?

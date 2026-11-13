@@ -1,7 +1,9 @@
 struct ReleaseOrder
 end
+
 struct ReleaseCancelledOrder
 end
+
 struct ReleaseParallelOrder
 end
 

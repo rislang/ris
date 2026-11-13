@@ -1,7 +1,9 @@
 class Kept
   @text : String
+
   def initialize(n : Int32)
     @text = "number #{n}"
   end
 end
+
 Kept.new(1)

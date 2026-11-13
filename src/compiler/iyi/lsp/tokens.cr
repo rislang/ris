@@ -1,6 +1,6 @@
 # iyi: semantic tokens, from the lexer alone. iyi is a young language:
 # no editor ships a grammar for it, so the server's token stream *is*
-# the syntax highlighting — any LSP client colors `.iyi` correctly on
+# the syntax highlighting — any LSP client colors `.ri` correctly on
 # day one with zero client-side configuration. The walk is the same
 # protocol `Crystal::SyntaxHighlighter` proved: `next_token` in normal
 # state, `next_string_token` through delimiters, interpolations recurse

@@ -11,9 +11,9 @@ require "../syntax/visitor"
 # whatever the def says.
 module Iyi::AutoInline
   # Nodes in a def's body, as normalized: `span`'s is 46. Off unless
-  # IYI_AUTO_INLINE sets it: compiler_test --release took 57GB at any limit
+  # RIS_AUTO_INLINE sets it: compiler_test --release took 57GB at any limit
   # from 12 to 48, against 8.8GB without, and a five-line program 41s at 48.
-  LIMIT = (ENV["IYI_AUTO_INLINE"]? || "0").to_i
+  LIMIT = (ENV["RIS_AUTO_INLINE"]? || "0").to_i
 
   def self.small?(a_def : Def) : Bool
     return false if LIMIT <= 0

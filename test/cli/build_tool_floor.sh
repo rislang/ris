@@ -16,7 +16,7 @@
 #
 # 1. BUILD-TIME TOOLS (tools required to construct the compiler from source):
 #    - crystal: The bootstrap compiler that compiles .build/crystal and
-#      .build/iyi from source. Goes when the compiler is fully self-hosted.
+#      .build/ris from source. Goes when the compiler is fully self-hosted.
 #    - llvm-config: Locates LLVM headers, libraries, targets, and
 #      compiler/linker flags. Conditional: bypassed if LLVM_VERSION,
 #      LLVM_TARGETS, and LLVM_LDFLAGS are supplied externally. Goes when LLVM is
@@ -28,7 +28,7 @@
 #      it is unneeded. Goes when targeting LLVM 18+ exclusively or when the shim
 #      is eliminated.
 #    - cc (or clang / $CC): C compiler and linker driver used by ./bin/crystal
-#      build to link compiler binary objects (.build/crystal, .build/iyi).
+#      build to link compiler binary objects (.build/crystal, .build/ris).
 #      Goes when the compiler directly emits linked executables.
 #    - git: Reads commit hash and timestamp for build metadata
 #      (IYI_CONFIG_BUILD_COMMIT, SOURCE_DATE_EPOCH). Conditional: skipped when

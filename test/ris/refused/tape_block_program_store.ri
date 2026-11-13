@@ -23,13 +23,16 @@ end
 
 class Keep
   @@text = ""
+
   def self.put(v : String) : Nil
     @@text = v
   end
+
   def self.text : String
     @@text
   end
 end
+
 tape do
   made = ""
   made << "made"

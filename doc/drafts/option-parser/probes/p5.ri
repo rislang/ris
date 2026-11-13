@@ -4,17 +4,21 @@ module p5
 class Mini
   @names : Array(String)
   @help : Array({String, String})
+
   def initialize
     @names = [] of String
     @help = [] of {String, String}
   end
+
   def on(flag : String, description : String) : Nil
     @names << flag.split(' ')[0]
     @help << {flag, description}
   end
+
   def help(io : String::Builder) : Nil
     @help.each { |e| io << "  " << e[0] << "  " << e[1] << "\n" }
   end
+
   def parse(args : Array(String), found : Array({String, String})) : Nil
     i = 0
     while i < args.size
@@ -27,6 +31,7 @@ class Mini
     end
   end
 end
+
 ext = ""
 m = Mini.new
 m.on("-e EXT", "ending")

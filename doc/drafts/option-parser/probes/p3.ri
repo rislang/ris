@@ -3,6 +3,7 @@ import std/option_parser::{OptionParser}
 class Opts
   property ext : String = ""
 end
+
 opts = Opts.new
 parser = OptionParser.new
 parser.on("-e EXT", "ending") { |v| opts.ext = v }

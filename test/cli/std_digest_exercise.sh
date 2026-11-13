@@ -24,7 +24,7 @@ for candidate in python3 python; do
   fi
 done
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -42,12 +42,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2"
   shift 2
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_digest_exercise.iyi" \
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_digest_exercise.ri" \
        >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
@@ -94,7 +94,7 @@ echo
 echo "== what a digest refuses"
 # A digest that has given its final has nothing left to give: a second
 # final, or more bytes, would answer a hash of nothing anyone asked for.
-cat >"$WORK/refuse.iyi" <<'IYI'
+cat >"$WORK/refuse.ri" <<'RIS'
 module refuse
 
 import std/digest::{SHA1, SHA256, SHA224, SHA3_256, SHAKE128, CRC32, CRC64, Adler32, XXH64}
@@ -133,9 +133,9 @@ when "xxh64-negative-count"
   XXH64.new.update("abc", -1)
 end
 puts "accepted"
-IYI
+RIS
 refuse() { # refuse <case> <phrase>
-  if "$IYI" run "$WORK/refuse.iyi" -- "$1" >"$WORK/refuse.out" 2>&1; then
+  if "$RIS" run "$WORK/refuse.ri" -- "$1" >"$WORK/refuse.out" 2>&1; then
     echo "  $1 was accepted: $(tr -d '\r' <"$WORK/refuse.out" | tail -1)"
     status=1
   elif ! grep -qF "$2" "$WORK/refuse.out"; then
@@ -168,7 +168,7 @@ echo "== sha-3 and shake against python's hashlib"
 # so the cases are not shipped across; python hashes each message whole
 # and reads its output in one piece. The same program then times 4 MB
 # through SHA3-256, SHAKE128 and SHA-256, in a release build.
-cat >"$WORK/sha3_random.iyi" <<'IYI'
+cat >"$WORK/sha3_random.ri" <<'RIS'
 module sha3_random
 
 import std/digest::{SHA256, SHA3_224, SHA3_256, SHA3_384, SHA3_512, SHAKE128, SHAKE256, Shake}
@@ -250,10 +250,10 @@ t2 = __iyi_monotonic_ns
 SHA256.hash_bytes(big)
 t3 = __iyi_monotonic_ns
 STDERR.puts "  iyi --release, 4 MB: SHA3-256 #{(t1 - t0) // 1000000} ms, SHAKE128 read #{(t2 - t1) // 1000000} ms, SHA-256 #{(t3 - t2) // 1000000} ms"
-IYI
+RIS
 if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so SHA-3 goes uncompared"
-elif ! "$IYI" build --release -o "$WORK/sha3_random" "$WORK/sha3_random.iyi" >"$WORK/sha3_random.log" 2>&1; then
+elif ! "$RIS" build --release -o "$WORK/sha3_random" "$WORK/sha3_random.ri" >"$WORK/sha3_random.log" 2>&1; then
   echo "  the random SHA-3 program did not build"
   tail -12 "$WORK/sha3_random.log"
   status=1
@@ -318,7 +318,7 @@ echo "== crc-64 against liblzma"
 # one liblzma stores: the eight bytes before the index of
 # `lzma.compress(message, check=CHECK_CRC64)`, which xz's decoder holds
 # every block to. The same splitmix64 on both sides, as above.
-cat >"$WORK/crc64_random.iyi" <<'IYI'
+cat >"$WORK/crc64_random.ri" <<'RIS'
 module crc64_random
 
 import std/digest::{CRC64}
@@ -358,10 +358,10 @@ digits = "0123456789abcdef"
   16.times { |k| hex << digits[(crc.unsafe_shr(60 - 4 * k) & 15_u64).to_i32].unsafe_chr }
   puts hex
 end
-IYI
+RIS
 if [ -z "$PY" ]; then
   echo "  no python3 on this machine, so CRC-64 goes uncompared"
-elif ! "$IYI" build -o "$WORK/crc64_random" "$WORK/crc64_random.iyi" >"$WORK/crc64_random.log" 2>&1; then
+elif ! "$RIS" build -o "$WORK/crc64_random" "$WORK/crc64_random.ri" >"$WORK/crc64_random.log" 2>&1; then
   echo "  the random CRC-64 program did not build"
   tail -12 "$WORK/crc64_random.log"
   status=1
@@ -415,7 +415,7 @@ echo "== xxh64 against python's zstd"
 # stores as a frame's content checksum - the low 32 bits - for every
 # message; and the 64 bits iyi answers held to the reference. The same
 # splitmix64 on both sides, as above.
-cat >"$WORK/xxh64_random.iyi" <<'IYI'
+cat >"$WORK/xxh64_random.ri" <<'RIS'
 module xxh64_random
 
 import std/digest::{XXH64}
@@ -456,10 +456,10 @@ digits = "0123456789abcdef"
   16.times { |k| hex << digits[(sum.unsafe_shr(60 - 4 * k) & 15_u64).to_i32].unsafe_chr }
   puts hex
 end
-IYI
+RIS
 if [ -z "$PY" ] || ! "$PY" -c 'import compression.zstd' >/dev/null 2>&1; then
   echo "  no python with compression.zstd (3.14) on this machine, so XXH64 goes uncompared"
-elif ! "$IYI" build -o "$WORK/xxh64_random" "$WORK/xxh64_random.iyi" >"$WORK/xxh64_random.log" 2>&1; then
+elif ! "$RIS" build -o "$WORK/xxh64_random" "$WORK/xxh64_random.ri" >"$WORK/xxh64_random.log" 2>&1; then
   echo "  the random XXH64 program did not build"
   tail -12 "$WORK/xxh64_random.log"
   status=1
@@ -549,15 +549,15 @@ prove_broken() {
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/digest.iyi").read_text()
+src = Path("$REPO/src/std/digest.ri").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/patched/std/digest.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/std/digest.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_digest_exercise.iyi" >"$WORK/mut.out" 2>&1; then
+  elif RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_digest_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -qF "$2" "$WORK/mut.out"; then
@@ -640,15 +640,15 @@ cost_proof() { # cost_proof <label> <phrase> <old> <new>
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/digest.iyi").read_text()
+src = Path("$REPO/src/std/digest.ri").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing")
-Path("$WORK/costly/std/digest.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/costly/std/digest.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
-  elif IYI_PATH="$WORK/costly${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" run "$REPO/test/cli/std_digest_exercise.iyi" >"$WORK/costly.out" 2>&1; then
+  elif RIS_PATH="$WORK/costly${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" run "$REPO/test/cli/std_digest_exercise.ri" >"$WORK/costly.out" 2>&1; then
     echo "  the exercise PASSED on $1"
     status=1
   elif grep -q "$2" "$WORK/costly.out"; then

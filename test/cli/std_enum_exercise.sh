@@ -4,7 +4,7 @@
 #     bash test/cli/std_enum_exercise.sh
 #
 # Proves:
-#   * test/cli/std_enum_exercise.iyi passes plain and --release: conversions,
+#   * test/cli/std_enum_exercise.ri passes plain and --release: conversions,
 #     arithmetic and order, from_value/parse, the flags treatment of
 #     valid?/each, and the io spellings (the io line is read off stdout).
 #   * `from_value` and `parse` refuse with a sentence naming the value or
@@ -25,7 +25,7 @@ case "$(uname -s)" in
   *) PSEP=':' ;;
 esac
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -43,12 +43,12 @@ esac
 trap 'rm -rf "$WORK"' EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build_and_run() {
   local label="$1" name="$2" source="$3"
   shift 3
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$source" >"$WORK/$name.build.log" 2>&1; then
     echo "$label: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -66,7 +66,7 @@ build_and_run() {
 }
 
 echo "== the std/enum exercise, plain build"
-build_and_run "std_enum" exercise-enum "$REPO/test/cli/std_enum_exercise.iyi"
+build_and_run "std_enum" exercise-enum "$REPO/test/cli/std_enum_exercise.ri"
 
 echo
 echo "== every enum check reported"
@@ -80,7 +80,7 @@ done
 
 echo
 echo "== the same program with optimisation on (--release)"
-build_and_run "std_enum --release" exercise-enum-release "$REPO/test/cli/std_enum_exercise.iyi" --release >/dev/null
+build_and_run "std_enum --release" exercise-enum-release "$REPO/test/cli/std_enum_exercise.ri" --release >/dev/null
 if grep -q "ALL CHECKS PASSED" "$WORK/exercise-enum-release.out" 2>/dev/null; then
   echo "  every check holds under --release"
 else
@@ -96,8 +96,8 @@ echo
 echo "== what from_value and parse refuse"
 enum_panics_with() { # enum_panics_with <label> <name> <phrase> <expression>
   local label="$1" name="$2" phrase="$3" expression="$4"
-  printf 'module main\n\nimport std/enum\n\nenum Level\n  Debug\n  Info\n  Warn\nend\n\n@[Flags]\nenum Mode\n  Read\n  Write\nend\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.iyi"
-  if ! "$IYI" build -o "$WORK/$name" "$WORK/$name.iyi" > "$WORK/$name.build" 2>&1; then
+  printf 'module main\n\nimport std/enum\n\nenum Level\n  Debug\n  Info\n  Warn\nend\n\n@[Flags]\nenum Mode\n  Read\n  Write\nend\n\nputs (%s).to_s\n' "$expression" > "$WORK/$name.ri"
+  if ! "$RIS" build -o "$WORK/$name" "$WORK/$name.ri" > "$WORK/$name.build" 2>&1; then
     echo "  $label: the program did not build"
     sed -n '1,10p' "$WORK/$name.build"
     status=1
@@ -116,7 +116,7 @@ enum_panics_with() { # enum_panics_with <label> <name> <phrase> <expression>
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$code" "$(sed -n '1p' "$WORK/$name.out" | sed 's/^ris: panic: //')"
 }
 enum_panics_with "a value no member has" fv9 "Level member has the value 9" 'Level.from_value(9)'
 enum_panics_with "a flags combination, by value" fv3 "Mode member has the value 3" 'Mode.from_value(3)'
@@ -124,8 +124,8 @@ enum_panics_with "a name no member has" pnone "Level member is named \"fatal\"" 
 
 echo
 echo "== an enum has no ~"
-printf 'module main\n\nimport std/enum\n\n@[Flags]\nenum Mode\n  Read\n  Write\nend\n\nputs (~Mode::Read).to_s\n' > "$WORK/tilde.iyi"
-if "$IYI" build -o "$WORK/tilde" "$WORK/tilde.iyi" >"$WORK/tilde.log" 2>&1; then
+printf 'module main\n\nimport std/enum\n\n@[Flags]\nenum Mode\n  Read\n  Write\nend\n\nputs (~Mode::Read).to_s\n' > "$WORK/tilde.ri"
+if "$RIS" build -o "$WORK/tilde" "$WORK/tilde.ri" >"$WORK/tilde.log" 2>&1; then
   echo "  ~Mode::Read BUILT (the module should not offer it)"
   status=1
 elif grep -q "undefined method '~'" "$WORK/tilde.log"; then
@@ -145,13 +145,13 @@ echo "== proving the checks can fail when the module is broken"
 prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
   local label="$1" dir="$2" phrase="$3" script="$4"
   mkdir -p "$WORK/$dir/std"
-  sed -e "$script" "$REPO/src/std/enum.iyi" > "$WORK/$dir/std/enum.iyi"
-  if cmp -s "$REPO/src/std/enum.iyi" "$WORK/$dir/std/enum.iyi"; then
+  sed -e "$script" "$REPO/src/std/enum.ri" > "$WORK/$dir/std/enum.ri"
+  if cmp -s "$REPO/src/std/enum.ri" "$WORK/$dir/std/enum.ri"; then
     echo "  $label: the patch changed nothing, so this proves nothing"
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/$dir${PSEP}$REPO/src" "$IYI" build -o "$WORK/$dir/program" "$REPO/test/cli/std_enum_exercise.iyi" >"$WORK/$dir/build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build -o "$WORK/$dir/program" "$REPO/test/cli/std_enum_exercise.ri" >"$WORK/$dir/build.log" 2>&1; then
     echo "  $label: the patched module did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
     status=1
@@ -170,7 +170,7 @@ prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
     status=1
     return
   fi
-  printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^iyi: panic: //')"
+  printf '  %s: exits %s at "%s"\n' "$label" "$exit_code" "$(grep -m1 "$phrase" "$WORK/$dir/out" | sed 's/^ris: panic: //')"
 }
 
 prove_fails "each yields None and All" each_all "flags each walks the members, not None or All" \

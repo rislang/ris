@@ -16,9 +16,9 @@ tape do
   raise "punycode" unless Punycode.encode("bücher") == "bcher-kva"
   raise "decode" unless Punycode.decode("bcher-kva") == "bücher"
   raise "ASCII host" unless IDNA.to_ascii("Bücher.example") ==
-    "xn--bcher-kva.example"
+                              "xn--bcher-kva.example"
   raise "Unicode host" unless IDNA.to_unicode("xn--bcher-kva.example") ==
-    "bücher.example"
+                                "bücher.example"
   raise "invalid label" unless IDNA.to_ascii("-bad.example").is_a?(IdnaError)
   raise "invalid punycode" unless Punycode.decode("!").is_a?(PunycodeError)
 end

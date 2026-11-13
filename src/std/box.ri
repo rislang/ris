@@ -1,0 +1,65 @@
+# Box allows turning any object to a Void* and back.
+#
+# A Box's purpose is passing data to C as a Void* and then converting that
+# back to the original data type.
+#
+# For example, sending Procs or context to C callbacks.
+
+module std/box
+
+pub class Box(T)
+  getter object : T
+
+  def initialize(@object : T)
+  end
+
+  # This box as a Void*. The caller makes the box (`Box(T).new(object)`),
+  # on its tape: the pointer lives as long as the box.
+  def to_unsafe : Void*
+    self.as(Void*)
+  end
+
+  # Unboxes a Void* into an object of type T.
+  #
+  # Specifying T is required: `Box(T).unbox(data)`. A null pointer is nil
+  # when T admits nil, as the other library answers it for `String?` and
+  # every other union of references and nil, and is refused otherwise. It
+  # was refused for every T, so `Box(String?).unbox` of the null a C
+  # callback is handed when there is no data panicked "Unboxing null
+  # pointer" where nil is the answer the type has room for.
+  def self.unbox(pointer : Void*) : T
+    if pointer.address == 0
+      {% if T.nilable? %}
+        return nil
+      {% else %}
+        raise "Unboxing null pointer"
+      {% end %}
+    end
+    pointer.as(self).object
+  end
+end
+
+# box.1 A Box(T) retains its object and unbox of that box's pointer returns it
+#   as T.
+spec box.1
+  Box(Int32).new(41).object == 41
+  Box(Int32).unbox(Box(Int32).new(41).to_unsafe) == 41
+end
+
+# box.2 Unboxing a null pointer returns nil when T admits nil, and otherwise
+#   panics with Unboxing null pointer.
+spec box.2
+  # A null pointer is nil for a T that admits nil, as the other library
+  # answers it for `String?`: it was refused for every T, so a C callback
+  # handed no data panicked "Unboxing null pointer" where nil was the answer.
+  Box(String?).unbox(Pointer(Void).new(0_u64)).nil?
+  Box(Int32?).unbox(Pointer(Void).new(0_u64)).nil?
+  Box(String?).unbox(Box(String?).new("kept").to_unsafe).to_s == "kept"
+end
+
+# box.3 to_unsafe returns the box's address without copying its object. The
+#   pointer is valid only while the tape-owned box is alive; the caller must
+#   supply a live pointer to the matching Box(T).
+spec box.3
+  todo "Needs proof"
+end

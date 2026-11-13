@@ -17,7 +17,7 @@ COMPILER_FLAG=$1
 
 # test compiler_test
 make clean_cache clean_crystal
-IYI_LIBRARY_PATH=$(./bin/crystal env IYI_LIBRARY_PATH) CRYSTAL_SPEC_COMPILER_FLAGS="$COMPILER_FLAG" make compiler_test
+RIS_LIBRARY_PATH=$(./bin/crystal env RIS_LIBRARY_PATH) CRYSTAL_SPEC_COMPILER_FLAGS="$COMPILER_FLAG" make compiler_test
 
 # first gen compiler
 make clean_cache clean_crystal crystal
@@ -32,11 +32,11 @@ make clean_cache primitives_test FLAGS="-D$COMPILER_FLAG"
 
 # test compiler_test
 make clean_cache
-IYI_LIBRARY_PATH=$(./bin/crystal env IYI_LIBRARY_PATH) CRYSTAL_SPEC_COMPILER_FLAGS="$COMPILER_FLAG" make compiler_test FLAGS="-D$COMPILER_FLAG"
+RIS_LIBRARY_PATH=$(./bin/crystal env RIS_LIBRARY_PATH) CRYSTAL_SPEC_COMPILER_FLAGS="$COMPILER_FLAG" make compiler_test FLAGS="-D$COMPILER_FLAG"
 make clean_cache
-IYI_LIBRARY_PATH=$(./bin/crystal env IYI_LIBRARY_PATH) make compiler_test FLAGS="-D$COMPILER_FLAG"
+RIS_LIBRARY_PATH=$(./bin/crystal env RIS_LIBRARY_PATH) make compiler_test FLAGS="-D$COMPILER_FLAG"
 make clean_cache
-IYI_LIBRARY_PATH=$(./bin/crystal env IYI_LIBRARY_PATH) make compiler_test
+RIS_LIBRARY_PATH=$(./bin/crystal env RIS_LIBRARY_PATH) make compiler_test
 
 # building 2nd gen compiler
 make clean_crystal clean_cache crystal # first
@@ -54,8 +54,8 @@ make clean_cache primitives_test FLAGS="-D$COMPILER_FLAG"
 
 # run compiler tests
 make clean_cache
-IYI_LIBRARY_PATH=$(./bin/crystal env IYI_LIBRARY_PATH) CRYSTAL_SPEC_COMPILER_FLAGS="$COMPILER_FLAG" make compiler_test FLAGS="-D$COMPILER_FLAG"
+RIS_LIBRARY_PATH=$(./bin/crystal env RIS_LIBRARY_PATH) CRYSTAL_SPEC_COMPILER_FLAGS="$COMPILER_FLAG" make compiler_test FLAGS="-D$COMPILER_FLAG"
 make clean_cache
-IYI_LIBRARY_PATH=$(./bin/crystal env IYI_LIBRARY_PATH) make compiler_test FLAGS="-D$COMPILER_FLAG"
+RIS_LIBRARY_PATH=$(./bin/crystal env RIS_LIBRARY_PATH) make compiler_test FLAGS="-D$COMPILER_FLAG"
 make clean_cache
-IYI_LIBRARY_PATH=$(./bin/crystal env IYI_LIBRARY_PATH) make compiler_test
+RIS_LIBRARY_PATH=$(./bin/crystal env RIS_LIBRARY_PATH) make compiler_test

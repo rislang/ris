@@ -1,5 +1,6 @@
 class TapeValue
 end
+
 kept = nil
 tape do
   kept = TapeValue.new

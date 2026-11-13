@@ -64,7 +64,7 @@ kept = "retained".copy_to(Program.tape)
   end
   after = owner_usage
   raise "partial destination survived" unless before.region == after.region &&
-    before.cursor == after.cursor && before.side == after.side
+                                              before.cursor == after.cursor && before.side == after.side
   raise "existing data damaged" unless kept == "retained"
 end
 # Success after both panics also checks the program scope was restored.

@@ -11,7 +11,7 @@ end
 before = IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 temporary(42)
 raise "def kept temporaries" unless before ==
-  IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
+                                      IyiHeap.read64(RisRegion.tape &+ RisRegion::OFF_CURSOR)
 i = 0
 total = 0_i64
 while i < 1_000_000

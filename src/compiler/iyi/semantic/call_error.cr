@@ -99,7 +99,7 @@ class Iyi::Path
 
     # iyi: a name the standard library declares and this program never
     # imported. `Deque`, `JSON`, `Random`, `Socket` and thirty more were a
-    # bare "undefined constant" while `std/<module>.iyi` had each of them
+    # bare "undefined constant" while `std/<module>.ri` had each of them
     # under `pub`; the file is read, so the hint is the tree's rather than
     # a table's. Above the spelling suggestion, because `Deque` is not a
     # misspelling of anything.
@@ -117,11 +117,11 @@ class Iyi::Path
 
   # The module a qualified name maps to, `app/util` for `App::Util` (IV.6
   # #6), when that file is where an import would find it: beside the
-  # entry, under the root its header names, or on `IYI_PATH`.
+  # entry, under the root its header names, or on `RIS_PATH`.
   private def iyi_unimported_module_hint(program) : String?
     written = names.map(&.underscore).join('/')
     roots = [program.iyi_project_root || program.filename.try { |entry| File.dirname(entry) }, program.iyi_header_root]
-    return nil unless (roots.compact + program.iyi_path.entries).any? { |root| File.file?(File.join(root, "#{written}.iyi")) }
+    return nil unless (roots.compact + program.iyi_path.entries).any? { |root| File.file?(File.join(root, "#{written}.ri")) }
     "`#{self}` is module `#{written}`, which this file has not imported: `import #{written}` (iyi SPEC R-2b)"
   end
 
@@ -185,7 +185,7 @@ class Iyi::Path
         next unless file.ris_source?
         path = File.join(dir, file)
         next unless File.file?(path) && iyi_declares_at_top_level?(File.read(path), name)
-        written = "std/#{file.rchop(".iyi")}"
+        written = "std/#{file.rchop(".ri")}"
         return "`#{name}` comes with `import #{written}::{#{name}}`."
       end
     end
@@ -281,7 +281,7 @@ module Iyi
     # The words that open a failure, a container or a loop somewhere else.
     "new"   => "There is no `new` keyword: the type answers it — `Array(Int32).new`, `Point.new(1)`.",
     "throw" => "`raise \"why\"` is the spelling here, and it panics rather than unwinding to a handler (iyi SPEC III.1.4).",
-    "catch" => "iyi has no exceptions to catch: an error is a value the caller handles, and `!` propagates it (iyi SPEC III.1, III.1.7a).",
+    "catch" => "ris has no exceptions to catch: an error is a value the caller handles, and `!` propagates it (iyi SPEC III.1, III.1.7a).",
     "range" => "A range is written `(0...3)` — `...` excludes the end, `..` includes it — and `(0...3).each do |i| ... end` iterates it.",
     "echo"  => "`puts` is the spelling here; it ends the line.",
     # A call in this table is one with no receiver, so the method table's
@@ -1066,7 +1066,7 @@ class Iyi::Call
   # Crystal module, so the search finds nobody and the message is unchanged.
   # A type the prelude declares: one the compiler itself declares (String,
   # Array, the numbers - no location of their own) or one whose first
-  # location is under `src/iyi/`. A class the program declares has its
+  # location is under `src/ris/`. A class the program declares has its
   # file.
   private def iyi_prelude_type?(owner) : Bool
     return false unless program.iyi_prelude?
@@ -1081,7 +1081,7 @@ class Iyi::Call
     # `iyi doc` asked the same question the same way and on Windows
     # answered it wrong for every macro-written operator.
     posix = ::Path[filename].to_posix.to_s
-    posix.includes?("/src/iyi/") || posix.starts_with?("src/iyi/")
+    posix.includes?("/src/ris/") || posix.starts_with?("src/ris/")
   end
 
   IYI_STD_NUMBER_MODULES = {
@@ -1099,7 +1099,7 @@ class Iyi::Call
     loaded = "std/#{module_name}"
     return nil if program.iyi_module_paths.has_value?(loaded) || program.iyi_artifact_modules.has_value?(loaded)
     program.iyi_path.entries.each do |entry|
-      path = File.join(entry, "std", "#{module_name}.iyi")
+      path = File.join(entry, "std", "#{module_name}.ri")
       next unless File.file?(path)
       text = File.read(path)
       return nil unless iyi_std_number_names?(text, name)
@@ -1161,7 +1161,7 @@ class Iyi::Call
         path = File.join(dir, file)
         next unless File.file?(path)
         text = File.read(path)
-        written = "std/#{file.rchop(".iyi")}"
+        written = "std/#{file.rchop(".ri")}"
         if implemented = iyi_std_trait_with_method(text, name, bare)
           return "`#{written}` implements `#{implemented}` for #{bare} and that is where " \
                  "`#{name}` is: `import #{written}` puts it on this receiver " \
@@ -1605,11 +1605,11 @@ class Iyi::Call
           # iyi: a name this language cannot write. `!` is not part of a name
           # here (iyi SPEC III.1.7), so the nearest thing to `not_nil` in
           # Crystal's library — or to `sort` in a bound shard's — is a name no
-          # call in a `.iyi` file can spell. Suggesting it was worse than
+          # call in a `.ri` file can spell. Suggesting it was worse than
           # saying nothing: the edit travels in `check -f json` as
           # `suggested_edit`, and `iyi fix` applies those, so the answer to an
           # undefined method was a file that no longer parses.
-          msg << "'#{similar_name}' is what that library calls it, and `!` cannot end a name in iyi (iyi SPEC III.1.7): no call written here can spell it. Reach it through a Crystal-side method whose name this language can write."
+          msg << "'#{similar_name}' is what that library calls it, and `!` cannot end a name in ris (iyi SPEC III.1.7): no call written here can spell it. Reach it through a Crystal-side method whose name this language can write."
         else
           msg << "Did you mean '#{similar_name}'?"
           suggested_edit = similar_name unless floor_div
@@ -1678,7 +1678,7 @@ class Iyi::Call
         if reachable = iyi_std_method_hint(program, def_name, owner)
           msg << '\n' << reachable
         elsif !receiver_hinted
-          msg << '\n' << "iyi's prelude has no `#{def_name}` on #{owner}: it is small by rule - a method enters when a program in the repository needs it (iyi SPEC III.1). `iyi doc #{bare}` lists what it has."
+          msg << '\n' << "ris's prelude has no `#{def_name}` on #{owner}: it is small by rule - a method enters when a program in the repository needs it (iyi SPEC III.1). `ris doc #{bare}` lists what it has."
         end
       end
 

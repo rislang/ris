@@ -22,7 +22,7 @@
 # library arrives with a feature and nobody finds out until a build fails on a
 # machine that does not have it.
 #
-# Needs `make` for bin/iyi, plus `nm` and `otool` on darwin or `nm` and
+# Needs `make` for bin/ris, plus `nm` and `otool` on darwin or `nm` and
 # `readelf` on Linux. On Windows a PE leaves nothing undefined and names
 # imports instead, so the floor there is the import table and the reader is
 # the MSVC toolchain's own `dumpbin`, found the way the compiler finds the
@@ -31,9 +31,9 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-# The gate runs whatever compiler the caller names; `bin/iyi` is a shell
+# The gate runs whatever compiler the caller names; `bin/ris` is a shell
 # wrapper, and on Windows the caller has to point at the built exe itself.
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -51,8 +51,8 @@ trap 'rm -rf "$WORK"' EXIT
 
 # The floor is read from the built compiler, and on Windows the loader's own
 # suffix is part of its name.
-COMPILER="$REPO/.build/iyi"
-[ -f "$COMPILER" ] || COMPILER="$REPO/.build/iyi.exe"
+COMPILER="$REPO/.build/ris"
+[ -f "$COMPILER" ] || COMPILER="$REPO/.build/ris.exe"
 
 # The part of the floor every program carries, shared with the other gates
 # that audit one: test/cli/floor_base.sh. What is added below it here is what
@@ -72,13 +72,13 @@ COMPILER="$REPO/.build/iyi"
 # mean the prelude fell back to libc. What the prelude ITSELF asks for is read
 # one layer down, at the object, by the per-target audit in CI, where an iyi
 # program's .o for x86_64-linux-gnu is empty.
-# `read` joined the list when `samples/iyi/calc` started reading standard
+# `read` joined the list when `samples/ris/calc` started reading standard
 # input: on darwin that is `LibC.read` for the same reason `write` is, and on
 # Linux it is syscall 0 (63 on aarch64), so the Linux list is unchanged and
 # `calc`'s x86_64-linux-gnu object still has zero undefined symbols.
 # `open`, `close` and `chmod` joined when `File` did. Darwin binds libSystem;
 # Linux issues `openat`/`close` as syscalls, so the Linux list is still
-# unchanged and `files.iyi`'s x86_64-linux-gnu object is empty.
+# unchanged and `files.ri`'s x86_64-linux-gnu object is empty.
 # `unlink` joined with File.delete. Darwin binds libSystem again; Linux issues
 # `unlinkat`, so its undefined list and the files object remain empty.
 # `kqueue`, `kevent`, `clock_gettime_nsec_np` and `__error` joined when the
@@ -101,11 +101,11 @@ COMPILER="$REPO/.build/iyi"
 # darwin sample references libSystem's memset any more, and an allowlist
 # entry nothing uses is a check without teeth.
 # `_tlv_bootstrap` joined when the scheduler's state moved behind one
-# `@[ThreadLocal]` pointer (concurrency.iyi, GC_DESIGN.md's thread cutover):
+# `@[ThreadLocal]` pointer (concurrency.ri, GC_DESIGN.md's thread cutover):
 # Mach-O has no local-exec, so every thread-local descriptor names dyld's
 # thunk, and every darwin program reaches the scheduler. Linux pays no name
 # for the same variable, which is the thread floor's finding.
-# `pthread_kill` joined with the runtime's kernel thread (thread.iyi, GC
+# `pthread_kill` joined with the runtime's kernel thread (thread.ri, GC
 # Stage 4): every darwin program's collector can stop a thread, and the
 # stop's name is referenced whether or not the program ever starts one
 # (the plain build keeps it; the optimiser drops it as unreachable with
@@ -120,14 +120,14 @@ COMPILER="$REPO/.build/iyi"
 # the sweep's release of dead pages became a fresh `mmap` over the run:
 # its advice, `MADV_FREE_REUSABLE`, kept the bytes, and a fresh object
 # carved there read them. `mprotect` joined with the first
-# sample that starts a task (`samples/iyi/workers.iyi`, III.4): a fiber's
+# sample that starts a task (`samples/ris/workers.ri`, III.4): a fiber's
 # stack has a guard page under it, and on darwin the guard is libSystem's
 # `mprotect`. Linux names none of the five: clone, sched_getaffinity,
 # futex, rt_sigaction and mprotect are syscalls. `accept`, `bind`,
 # `connect`, `getsockname`, `listen`, `recv`, `send`, `setsockopt` and `socket`
-# joined with `IyiSocket` (samples/iyi/socket.iyi): on darwin libSystem is the
+# joined with `IyiSocket` (samples/ris/socket.ri): on darwin libSystem is the
 # platform interface, while Linux issues raw socket syscalls and names none of
-# them. `sigaltstack` joined with the stack guard (concurrency.iyi, III.1.4): a
+# them. `sigaltstack` joined with the stack guard (concurrency.ri, III.1.4): a
 # stack overflow is the program's own panic, said from a handler on an
 # alternate stack, and every darwin program installs one. Linux's is a
 # syscall.
@@ -195,7 +195,7 @@ COMPILER="$REPO/.build/iyi"
 # The eight 128-bit helpers - `__divti3`, `__modti3`, `__udivti3`,
 # `__umodti3` and the four int-to-float conversions - are calls LLVM makes
 # for a division or conversion no instruction does, and arrived when
-# `test/cli/std_int_exercise.iyi` began converting and printing 128-bit values
+# `test/cli/std_int_exercise.ri` began converting and printing 128-bit values
 # the optimiser cannot see. libSystem re-exports compiler-rt, which
 # defines them; Linux links libgcc's copies into the program; Windows has
 # neither and the prelude's win32 arm defines them itself.
@@ -480,9 +480,9 @@ found_libs="$WORK/libs"
 
 for mode in "" "--release"; do
   echo "== programs, ${mode:-plain} build"
-  for source in "$REPO"/samples/iyi/*.iyi; do
-    sample="$(basename "$source" .iyi)${mode:+-release}"
-    if ! "$IYI" build $mode -o "$WORK/$sample" "$source" >"$WORK/$sample.log" 2>&1; then
+  for source in "$REPO"/samples/ris/*.ri; do
+    sample="$(basename "$source" .ri)${mode:+-release}"
+    if ! "$RIS" build $mode -o "$WORK/$sample" "$source" >"$WORK/$sample.log" 2>&1; then
       echo "$sample: build failed"
       tail -5 "$WORK/$sample.log"
       status=1
@@ -503,10 +503,10 @@ done
 # calls is a declaration and not a symbol — which is exactly why the
 # exercises are the thing to build here: each one calls its module's surface.
 echo "== the std exercises, which call what src/std declares"
-for source in "$REPO"/test/cli/std_*_exercise.iyi; do
+for source in "$REPO"/test/cli/std_*_exercise.ri; do
   [ -f "$source" ] || continue
-  exercise="$(basename "$source" .iyi)"
-  if ! "$IYI" build -o "$WORK/$exercise" "$source" >"$WORK/$exercise.log" 2>&1; then
+  exercise="$(basename "$source" .ri)"
+  if ! "$RIS" build -o "$WORK/$exercise" "$source" >"$WORK/$exercise.log" 2>&1; then
     echo "$exercise: build failed"
     tail -5 "$WORK/$exercise.log"
     status=1
@@ -531,7 +531,7 @@ echo "== libgc is opt-in, and asking for it is the only way to get it"
 # only with -Dgc_boehm, and -Dgc_none (the bump pointer) must stay as
 # library-free as the default it used to be.
 boehm_libs=""
-if ! "$IYI" build -Dgc_boehm -o "$WORK/boehm" "$REPO/samples/iyi/hello.iyi" >"$WORK/boehm.log" 2>&1; then
+if ! "$RIS" build -Dgc_boehm -o "$WORK/boehm" "$REPO/samples/ris/hello.ri" >"$WORK/boehm.log" 2>&1; then
   # A collector that cannot be linked here has not been measured here. libgc
   # is a library somebody installs, and its absence on this machine is not
   # the opt-in being broken — reporting it as broken is a claim the run
@@ -562,8 +562,8 @@ else
     # the same binary. If asking for a collector produces what asking for
     # none produces, the flag did nothing — which is the failure this
     # check is for, and the one the import table cannot see.
-    "$IYI" build -Dgc_none -o "$WORK/gc_none_probe" "$REPO/samples/iyi/hello.iyi" >/dev/null 2>&1
-    "$IYI" build -o "$WORK/gc_default" "$REPO/samples/iyi/hello.iyi" >/dev/null 2>&1
+    "$RIS" build -Dgc_none -o "$WORK/gc_none_probe" "$REPO/samples/ris/hello.ri" >/dev/null 2>&1
+    "$RIS" build -o "$WORK/gc_default" "$REPO/samples/ris/hello.ri" >/dev/null 2>&1
     boehm_size="$(wc -c < "$(readable "$WORK/boehm")" | tr -d ' ')"
     none_size="$(wc -c < "$(readable "$WORK/gc_none_probe")" | tr -d ' ')"
     default_size="$(wc -c < "$(readable "$WORK/gc_default")" | tr -d ' ')"
@@ -582,7 +582,7 @@ if echo "$prog_libs" | grep -q 'libgc\.'; then
   echo "  a plain build linked libgc, so the owned default is not holding the floor"
   status=1
 fi
-"$IYI" build -Dgc_none -o "$WORK/none" "$REPO/samples/iyi/hello.iyi" >/dev/null 2>&1
+"$RIS" build -Dgc_none -o "$WORK/none" "$REPO/samples/ris/hello.ri" >/dev/null 2>&1
 none_libs="$(libraries "$WORK/none")"
 printf '  -Dgc_none   %s\n' "$(echo "$none_libs" | tr '\n' ' ')"
 if echo "$none_libs" | grep -q 'libgc\.'; then
@@ -642,9 +642,9 @@ while IFS= read -r annotation; do
       ;;
   esac
 done <<LINKS
-$(grep -rhoE '@\[Link\([^]]*\)\]' "$REPO/src/iyi" "$REPO/src/std" | sort -u)
+$(grep -rhoE '@\[Link\([^]]*\)\]' "$REPO/src/ris" "$REPO/src/std" | sort -u)
 LINKS
-printf '  %s\n' "$(grep -rhoE '@\[Link\([^]]*\)\]' "$REPO/src/iyi" "$REPO/src/std" | sort -u | tr '\n' ' ')"
+printf '  %s\n' "$(grep -rhoE '@\[Link\([^]]*\)\]' "$REPO/src/ris" "$REPO/src/std" | sort -u | tr '\n' ' ')"
 
 echo
 report() {
@@ -714,7 +714,7 @@ for binary in "$WORK"/* "$COMPILER"; do
       if match="$(echo "$bin_libs" | grep -E "$pattern" | head -n 1)"; then
         [ -n "$match" ] || continue
         echo "FORBIDDEN: $(basename "$binary") links $name ($match), which is an ancestor dependency"
-        echo "from Crystal's required-libraries list and is not allowed in an iyi program."
+        echo "from Crystal's required-libraries list and is not allowed in a ris program."
         status=1
       fi
     done

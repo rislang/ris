@@ -52,7 +52,7 @@ done
 ORACLE=""
 [ -n "$PY" ] && "$PY" -c 'from cryptography import x509; import ssl' >/dev/null 2>&1 && ORACLE=yes
 
-IYI="${IYI:-$REPO/bin/iyi}"
+RIS="${RIS:-$REPO/bin/ris}"
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 case "$(uname -s)" in
@@ -74,12 +74,12 @@ cleanup() {
 trap cleanup EXIT
 
 status=0
-export IYI_PATH="$REPO/src${PSEP}$REPO/samples/iyi"
+export RIS_PATH="$REPO/src${PSEP}$REPO/samples/ris"
 
 build() {
   local name="$1"
   shift
-  if ! "$IYI" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_autocert_exercise.iyi" >"$WORK/$name.build.log" 2>&1; then
+  if ! "$RIS" build "$@" -o "$WORK/$name" "$REPO/test/cli/std_autocert_exercise.ri" >"$WORK/$name.build.log" 2>&1; then
     echo "  $name: build failed"
     tail -12 "$WORK/$name.build.log"
     status=1
@@ -253,13 +253,13 @@ fi
 
 echo
 echo "== doc, format, other platforms and artifacts"
-if "$IYI" doc "$REPO/src/std/autocert.iyi" >"$WORK/doc.txt" 2>&1 && grep -q "identity_for" "$WORK/doc.txt"; then
+if "$RIS" doc "$REPO/src/std/autocert.ri" >"$WORK/doc.txt" 2>&1 && grep -q "identity_for" "$WORK/doc.txt"; then
   echo "  iyi doc reads std/autocert, AutocertManager's identity_for included"
 else
   echo "  FAIL: iyi doc: $(grep -m1 -E 'Error|BUG' "$WORK/doc.txt")"
   status=1
 fi
-if "$IYI" check format "$REPO/src/std/autocert.iyi" "$REPO/src/std/tls.iyi" "$REPO/test/cli/std_autocert_exercise.iyi" >"$WORK/format.log" 2>&1; then
+if "$RIS" check format "$REPO/src/std/autocert.ri" "$REPO/src/std/tls.ri" "$REPO/test/cli/std_autocert_exercise.ri" >"$WORK/format.log" 2>&1; then
   echo "  the module, std/tls and the exercise are formatted"
 else
   echo "  FAIL: not formatted: $(grep -m1 produced "$WORK/format.log")"
@@ -267,7 +267,7 @@ else
 fi
 apart=""
 for target in x86_64-linux-gnu aarch64-linux-gnu x86_64-linux-musl; do
-  if ! "$IYI" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_autocert_exercise.iyi" >"$WORK/cross.log" 2>&1; then
+  if ! "$RIS" build --no-codegen --target "$target" -o "$WORK/cross" "$REPO/test/cli/std_autocert_exercise.ri" >"$WORK/cross.log" 2>&1; then
     echo "  $target: $(grep -m1 -E 'Error|BUG' "$WORK/cross.log")"
     apart="$apart $target"
   fi
@@ -279,8 +279,8 @@ else
   echo "  the exercise typechecks for x86_64-linux-gnu, aarch64-darwin, x86_64-windows-msvc, aarch64-linux-gnu, x86_64-linux-musl"
 fi
 mkdir -p "$WORK/r1"
-if (cd "$WORK/r1" && "$IYI" build --emit-iyimod mods -o from-source "$REPO/test/cli/std_autocert_exercise.iyi" &&
-  "$IYI" build --use-iyimod mods -o from-artifact "$REPO/test/cli/std_autocert_exercise.iyi") >"$WORK/r1/build.log" 2>&1; then
+if (cd "$WORK/r1" && "$RIS" build --emit-rimod mods -o from-source "$REPO/test/cli/std_autocert_exercise.ri" &&
+  "$RIS" build --use-rimod mods -o from-artifact "$REPO/test/cli/std_autocert_exercise.ri") >"$WORK/r1/build.log" 2>&1; then
   local_run "$WORK/r1/from-artifact" "$WORK/r1/cache" "$WORK/r1/artifact.out"
   # Compared byte for byte: the exercise prints no port, count or wording
   # of the system's, which differ run to run and platform to platform.
@@ -336,18 +336,18 @@ prove_broken() {
   if ! OLD="$5" NEW="$6" "$PY" - <<PY
 import os
 from pathlib import Path
-src = Path("$REPO/src/std/$module.iyi").read_text(encoding="utf-8")
+src = Path("$REPO/src/std/$module.ri").read_text(encoding="utf-8")
 if src.count(os.environ["OLD"]) != 1:
     raise SystemExit("patch site missing or not one")
-Path("$WORK/patched/std/$module.iyi").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8", newline="\n")
+Path("$WORK/patched/std/$module.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8", newline="\n")
 PY
   then
     echo "  the $label patch did not apply"
     status=1
     return
   fi
-  if ! IYI_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/iyi" "$IYI" build -o "$WORK/mutant" \
-      "$REPO/test/cli/std_autocert_exercise.iyi" >"$WORK/mutant.build.log" 2>&1; then
+  if ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mutant" \
+      "$REPO/test/cli/std_autocert_exercise.ri" >"$WORK/mutant.build.log" 2>&1; then
     echo "  the $label copy did not build: $(grep -m1 -E 'Error' "$WORK/mutant.build.log")"
     status=1
     return

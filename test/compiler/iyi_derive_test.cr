@@ -25,7 +25,7 @@ end
 
 # iyi: `derive` (iyi SPEC R-5, II.4). A derive runs once, in the module that
 # declares the type. What it generates belongs to that module and travels in its
-# `.iyimod` like any other declaration, so a consumer calls the derived method
+# `.rimod` like any other declaration, so a consumer calls the derived method
 # without running the macro and without the producer's source.
 describe "Semantic: iyi derive" do
   it "runs the macro in the declaring module and carries what it generated" do
@@ -33,7 +33,7 @@ describe "Semantic: iyi derive" do
       Dir.mkdir_p "app"
       # The derive reads the facts R-5 promises it: the declaration's name and
       # its fields. It never enumerates a type it was not given.
-      File.write "app/derives.iyi", <<-IYI
+      File.write "app/derives.ri", <<-IYI
         module app/derives
 
         pub macro described(declaration)
@@ -46,7 +46,7 @@ describe "Semantic: iyi derive" do
           end
         end
         IYI
-      File.write "app/point.iyi", <<-IYI
+      File.write "app/point.ri", <<-IYI
         module app/point
 
         import app/derives::*
@@ -61,7 +61,7 @@ describe "Semantic: iyi derive" do
           derive described
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/point
@@ -69,21 +69,21 @@ describe "Semantic: iyi derive" do
         puts App::Point::Point.new(3, 4).described
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "Point(@x=3;@y=4;)"
 
       # R-1, taken literally: the consumer compiles against declarations, so
       # both the declaring module's source and the macro's own source go away.
-      File.delete "app/point.iyi"
-      File.delete "app/derives.iyi"
+      File.delete "app/point.ri"
+      File.delete "app/derives.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "Point(@x=3;@y=4;)"
@@ -96,7 +96,7 @@ describe "Semantic: iyi derive" do
   it "reads whether an imported field's type implements a trait" do
     with_tempdir("iyi_derive_trait") do
       Dir.mkdir_p "app"
-      File.write "app/kinds.iyi", <<-IYI
+      File.write "app/kinds.ri", <<-IYI
         module app/kinds
 
         pub trait ToJSON
@@ -129,7 +129,7 @@ describe "Semantic: iyi derive" do
           end
         end
         IYI
-      File.write "app/order.iyi", <<-IYI
+      File.write "app/order.ri", <<-IYI
         module app/order
 
         import app/kinds::*
@@ -145,7 +145,7 @@ describe "Semantic: iyi derive" do
           derive json
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/order
@@ -154,21 +154,21 @@ describe "Semantic: iyi derive" do
         puts App::Order::Order.new(App::Kinds::Customer.new("ada"), 2).to_json
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       # `@count` is absent because `Int32` does not implement the trait, which
       # is the derive reading an answer it could only get from the type.
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq %({@customer:"ada",})
 
-      File.delete "app/kinds.iyi"
-      File.delete "app/order.iyi"
+      File.delete "app/kinds.ri"
+      File.delete "app/order.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq %({@customer:"ada",})
@@ -180,7 +180,7 @@ describe "Semantic: iyi derive" do
   it "reads the fields a macro above the derive declared" do
     with_tempdir("iyi_derive_getter") do
       Dir.mkdir_p "app"
-      File.write "app/derives.iyi", <<-IYI
+      File.write "app/derives.ri", <<-IYI
         module app/derives
 
         pub macro shapes(declaration)
@@ -193,7 +193,7 @@ describe "Semantic: iyi derive" do
           end
         end
         IYI
-      File.write "app/boxed.iyi", <<-IYI
+      File.write "app/boxed.ri", <<-IYI
         module app/boxed
 
         import app/derives::*
@@ -209,7 +209,7 @@ describe "Semantic: iyi derive" do
           derive shapes
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/boxed
@@ -217,19 +217,19 @@ describe "Semantic: iyi derive" do
         puts App::Boxed::Boxed.new(1, Array(Int32).new).shapes
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "@n:Int32,@tail:Array(Int32)"
 
-      File.delete "app/derives.iyi"
-      File.delete "app/boxed.iyi"
+      File.delete "app/derives.ri"
+      File.delete "app/boxed.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "@n:Int32,@tail:Array(Int32)"
@@ -238,7 +238,7 @@ describe "Semantic: iyi derive" do
 
   it "refuses to read a declaration written below the derive" do
     with_iyi_modules({
-      "app/derives.iyi" => <<-IYI,
+      "app/derives.ri" => <<-IYI,
         module app/derives
 
         pub macro shapes(declaration)
@@ -247,7 +247,7 @@ describe "Semantic: iyi derive" do
           end
         end
         IYI
-      "main.iyi" => <<-IYI,
+      "main.ri" => <<-IYI,
         module app/main
 
         import app/derives::*
@@ -263,7 +263,7 @@ describe "Semantic: iyi derive" do
         IYI
     }) do
       expect_raises(Iyi::TypeException, /cannot read `getter`.*Move `derive` below `getter`/) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
   end
@@ -273,7 +273,7 @@ describe "Semantic: iyi derive" do
   # and an artifact cannot carry them, so a derive may not ask them.
   it "refuses the program-wide type questions inside a derive" do
     with_iyi_modules({
-      "app/derives.iyi" => <<-IYI,
+      "app/derives.ri" => <<-IYI,
         module app/derives
 
         pub macro spread(declaration)
@@ -282,7 +282,7 @@ describe "Semantic: iyi derive" do
           end
         end
         IYI
-      "main.iyi" => <<-IYI,
+      "main.ri" => <<-IYI,
         module app/main
 
         import app/derives::*
@@ -298,7 +298,7 @@ describe "Semantic: iyi derive" do
         IYI
     }) do
       expect_raises(Iyi::TypeException, /`all_subclasses` is not available to a derive/) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
   end
@@ -309,7 +309,7 @@ describe "Semantic: iyi derive" do
   # type, the program-wide answer the rule above refuses.
   it "refuses the program-wide type questions in a method a derive generated" do
     with_iyi_modules({
-      "app/derives.iyi" => <<-IYI,
+      "app/derives.ri" => <<-IYI,
         module app/derives
 
         pub macro kinds(declaration)
@@ -318,7 +318,7 @@ describe "Semantic: iyi derive" do
           end
         end
         IYI
-      "main.iyi" => <<-IYI,
+      "main.ri" => <<-IYI,
         module app/main
 
         import app/derives::*
@@ -337,7 +337,7 @@ describe "Semantic: iyi derive" do
         IYI
     }) do
       expect_raises(Iyi::TypeException, /`all_subclasses` is not available to a derive/) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
   end
@@ -349,7 +349,7 @@ describe "Semantic: iyi derive" do
   it "refuses a hook inside a derive" do
     {"finished", "inherited"}.each do |hook|
       with_iyi_modules({
-        "app/derives.iyi" => <<-IYI,
+        "app/derives.ri" => <<-IYI,
           module app/derives
 
           pub macro late(declaration)
@@ -360,7 +360,7 @@ describe "Semantic: iyi derive" do
             end
           end
           IYI
-        "main.iyi" => <<-IYI,
+        "main.ri" => <<-IYI,
           module app/main
 
           import app/derives::*
@@ -374,7 +374,7 @@ describe "Semantic: iyi derive" do
           IYI
       }) do
         expect_raises(Iyi::TypeException, /`macro #{hook}` is not available to a derive/) do
-          semantic_iyi("main.iyi")
+          semantic_iyi("main.ri")
         end
       end
     end
@@ -384,7 +384,7 @@ describe "Semantic: iyi derive" do
   # declaration; inside a derive it ran, and the method answered its output.
   it "refuses `run` inside a derive" do
     with_iyi_modules({
-      "app/derives.iyi" => <<-IYI,
+      "app/derives.ri" => <<-IYI,
         module app/derives
 
         pub macro generated(declaration)
@@ -393,7 +393,7 @@ describe "Semantic: iyi derive" do
           end
         end
         IYI
-      "main.iyi" => <<-IYI,
+      "main.ri" => <<-IYI,
         module app/main
 
         import app/derives::*
@@ -409,14 +409,14 @@ describe "Semantic: iyi derive" do
         IYI
     }) do
       expect_raises(Iyi::TypeException, /`run` is not available to a derive: it runs another program/) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
   end
 
   it "leaves the program-wide type questions to an ordinary macro" do
     with_iyi_modules({
-      "main.iyi" => <<-IYI,
+      "main.ri" => <<-IYI,
         module app/main
 
         macro count_subs(t)
@@ -432,14 +432,14 @@ describe "Semantic: iyi derive" do
         count_subs(Base)
         IYI
     }) do
-      semantic_iyi("main.iyi")
+      semantic_iyi("main.ri")
     end
   end
 
   it "runs each macro named on one derive line" do
     with_tempdir("iyi_derive_many") do
       Dir.mkdir_p "app"
-      File.write "app/derives.iyi", <<-IYI
+      File.write "app/derives.ri", <<-IYI
         module app/derives
 
         pub macro named(declaration)
@@ -454,7 +454,7 @@ describe "Semantic: iyi derive" do
           end
         end
         IYI
-      File.write "app/pair.iyi", <<-IYI
+      File.write "app/pair.ri", <<-IYI
         module app/pair
 
         import app/derives::*
@@ -469,7 +469,7 @@ describe "Semantic: iyi derive" do
           derive named, counted
         end
         IYI
-      File.write "main.iyi", <<-IYI
+      File.write "main.ri", <<-IYI
         module main
 
         import app/pair
@@ -478,19 +478,19 @@ describe "Semantic: iyi derive" do
         puts pair.named + ":" + pair.counted.to_s
         IYI
 
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
 
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.compile source, File.expand_path("from-source")
       `./from-source`.chomp.should eq "Pair:2"
 
-      File.delete "app/derives.iyi"
-      File.delete "app/pair.iyi"
+      File.delete "app/derives.ri"
+      File.delete "app/pair.ri"
 
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.compile source, File.expand_path("from-artifact")
       `./from-artifact`.chomp.should eq "Pair:2"
@@ -499,7 +499,7 @@ describe "Semantic: iyi derive" do
 
   it "names the macro it could not find in a list" do
     with_iyi_modules({
-      "app/derives.iyi" => <<-IYI,
+      "app/derives.ri" => <<-IYI,
         module app/derives
 
         pub macro named(declaration)
@@ -508,7 +508,7 @@ describe "Semantic: iyi derive" do
           end
         end
         IYI
-      "main.iyi" => <<-IYI,
+      "main.ri" => <<-IYI,
         module app/main
 
         import app/derives::*
@@ -519,7 +519,7 @@ describe "Semantic: iyi derive" do
         IYI
     }) do
       expect_raises(Iyi::TypeException, /`absent` is not an available derive macro/) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
   end
@@ -529,7 +529,7 @@ describe "Semantic: iyi derive" do
   # headerless program's type was held to be in no module at all.
   it "implements a trait for the type it is attached to" do
     shared = {
-      "lib/shown.iyi" => <<-IYI,
+      "lib/shown.ri" => <<-IYI,
         module lib/shown
 
         pub trait Shown
@@ -549,7 +549,7 @@ describe "Semantic: iyi derive" do
         end
         IYI
     }
-    headed = shared.merge({"main.iyi" => <<-IYI})
+    headed = shared.merge({"main.ri" => <<-IYI})
       module main
 
       import lib/shown::{Shown, showable}
@@ -566,10 +566,10 @@ describe "Semantic: iyi derive" do
       Point.new.after_the_impl
       IYI
     with_iyi_modules(headed) do
-      semantic_iyi("main.iyi")
+      semantic_iyi("main.ri")
     end
 
-    headerless = shared.merge({"main.iyi" => <<-IYI})
+    headerless = shared.merge({"main.ri" => <<-IYI})
       import lib/shown::{Shown, showable}
 
       struct Point
@@ -583,22 +583,22 @@ describe "Semantic: iyi derive" do
       show(Point.new)
       IYI
     with_iyi_modules(headerless) do
-      semantic_iyi("main.iyi")
+      semantic_iyi("main.ri")
     end
 
     # And from the macro's artifact, whose declarations are iyi although
-    # `.iyimod` is no extension the lexer reads a language from.
+    # `.rimod` is no extension the lexer reads a language from.
     with_iyi_modules(headed) do
-      source = Iyi::Compiler::Source.new(File.expand_path("main.iyi"), File.read("main.iyi"))
+      source = Iyi::Compiler::Source.new(File.expand_path("main.ri"), File.read("main.ri"))
       producer = create_spec_compiler
-      producer.prelude = "iyi/prelude"
+      producer.prelude = "ris/prelude"
       producer.emit_iyimod = "mods"
       producer.no_codegen = true
       producer.compile source, File.expand_path("unused")
 
-      File.delete "lib/shown.iyi"
+      File.delete "lib/shown.ri"
       consumer = create_spec_compiler
-      consumer.prelude = "iyi/prelude"
+      consumer.prelude = "ris/prelude"
       consumer.use_iyimod = "mods"
       consumer.no_codegen = true
       consumer.compile source, File.expand_path("unused")
@@ -607,20 +607,20 @@ describe "Semantic: iyi derive" do
 
   it "still refuses an impl written in another module's type from a script" do
     files = {
-      "lib/shown.iyi" => <<-IYI,
+      "lib/shown.ri" => <<-IYI,
         module lib/shown
 
         pub trait Shown
           abstract def shown : String
         end
         IYI
-      "lib/point.iyi" => <<-IYI,
+      "lib/point.ri" => <<-IYI,
         module lib/point
 
         pub struct Point
         end
         IYI
-      "main.iyi" => <<-IYI,
+      "main.ri" => <<-IYI,
         import lib/shown::{Shown}
         import lib/point::{Point}
 
@@ -635,14 +635,14 @@ describe "Semantic: iyi derive" do
     }
     with_iyi_modules(files) do
       expect_raises(Iyi::TypeException, "R-3") do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
   end
 
   it "teaches that a derive names an exported macro" do
     with_iyi_modules({
-      "main.iyi" => <<-IYI,
+      "main.ri" => <<-IYI,
         module app/main
 
         pub struct Number
@@ -651,7 +651,7 @@ describe "Semantic: iyi derive" do
         IYI
     }) do
       expect_raises(Iyi::TypeException, /not an available derive macro.*pub macro missing/) do
-        semantic_iyi("main.iyi")
+        semantic_iyi("main.ri")
       end
     end
   end

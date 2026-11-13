@@ -3,7 +3,7 @@
 # artifact half of the registry design waits for its signature story.
 #
 # A path fetches from `https://<path>.git` at tag `v<version>`, shallow.
-# `IYI_MOD_MIRROR=<dir>` redirects every fetch to `<dir>/<path>` instead —
+# `RIS_MOD_MIRROR=<dir>` redirects every fetch to `<dir>/<path>` instead —
 # the offline hook the gates run on, and the reason nothing here needs a
 # network to be tested. The checkout lands in
 # `<cache>/mod/<path>@v<version>/` and is treated as immutable once its
@@ -50,7 +50,7 @@ module Iyi::Mod
             raise ModError.new(
               "#{path} v#{version} is not that commit's version: #{prefix} is v#{spelled}. " \
               "A pseudo-version is the commit's own time and hash after the version tag behind it; " \
-              "`iyi get #{path}@#{prefix}` writes it")
+              "`ris get #{path}@#{prefix}` writes it")
           end
           git(staging, "checkout", "--quiet", "--detach", sha) ||
             raise ModError.new("cannot check out #{prefix} of #{path}")
@@ -73,7 +73,7 @@ module Iyi::Mod
       unless Installer.manifest?(staging)
         FileUtils.rm_rf(staging)
         raise ModError.new(
-          "#{path} v#{version} has no ris.mod or iyi.mod at its root; " \
+          "#{path} v#{version} has no ris.mod at its root; " \
           "a module says whose it is before anything can require it")
       end
 
@@ -201,9 +201,9 @@ module Iyi::Mod
     end
 
     # The bytes a checkout writes are the bytes the tag holds, which is
-    # what `iyi.sum` hashes: Git for Windows' own default,
+    # what `ris.sum` hashes: Git for Windows' own default,
     # `core.autocrlf=true`, wrote every text file with CRLF, and a package's
-    # sum on Windows was not its sum anywhere else - an `iyi.sum` made on
+    # sum on Windows was not its sum anywhere else - an `ris.sum` made on
     # Linux was refused as tampering. `core.eol` too: a package whose
     # `.gitattributes` says `* text=auto` has its text files written with
     # `core.eol`, whose default is the platform's, whatever autocrlf says -
@@ -240,11 +240,11 @@ module Iyi::Mod
     # version of the repository without it, not a repository of its own.
     # A relative mirror is the working directory's, as every other path
     # given to a verb is: handed to git as written, it was read from the
-    # top of whatever repository the project sat in, and `IYI_MOD_MIRROR=
+    # top of whatever repository the project sat in, and `RIS_MOD_MIRROR=
     # ../mirror` in a project inside one was "not a git repository".
     def self.remote_for(path : String) : String
       repository, _ = ModFile.split_major(path)
-      if mirror = ENV["IYI_MOD_MIRROR"]?
+      if mirror = ENV["RIS_MOD_MIRROR"]?
         File.join(File.expand_path(mirror), repository)
       else
         "https://#{repository}.git"
@@ -254,7 +254,7 @@ module Iyi::Mod
     private def self.cache_target(path : String, version : SemanticVersion) : String
       # One entry under the compiler's cache root. The build rotation, which
       # keeps the ten most recent build directories, leaves `mod` alone
-      # (`CacheDir::NOT_BUILDS`): a checkout iyi.sum pins is what a build
+      # (`CacheDir::NOT_BUILDS`): a checkout ris.sum pins is what a build
       # with no network reads, and `clear_cache` is what removes it.
       Iyi::CacheDir.instance.join(File.join("mod", "#{path}@v#{version}"))
     end

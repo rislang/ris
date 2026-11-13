@@ -309,31 +309,31 @@ module Iyi
     end
 
     # iyi: the module path each imported file was named by, e.g.
-    # `/…/app/greeter.iyi => "app/greeter"`. The edges above are keyed on
-    # filenames because that is what load-once is keyed on; a `.iyimod` names
+    # `/…/app/greeter.ri => "app/greeter"`. The edges above are keyed on
+    # filenames because that is what load-once is keyed on; a `.rimod` names
     # modules, so it needs the way back (iyi SPEC IV.1).
     getter iyi_module_paths = {} of String => String
 
     # iyi: the same, for a module that arrived as an artifact — keyed by the
-    # `.iyimod`'s own path (iyi SPEC IV.1).
+    # `.rimod`'s own path (iyi SPEC IV.1).
     #
     # Two hashes rather than one because they answer different questions.
-    # `iyi_module_paths` is the set `--emit-iyimod` writes from, and a module
-    # read from a `.iyimod` must not be in it: it already has an artifact and
+    # `iyi_module_paths` is the set `--emit-rimod` writes from, and a module
+    # read from a `.rimod` must not be in it: it already has an artifact and
     # this build has not seen enough of it to write another. But the import
     # edges are keyed on filenames whichever way the module arrived, so naming
     # those edges needs the way back for both — without this, an artifact's
-    # `Imports` section records `mods/std/list.iyimod` where it means
+    # `Imports` section records `mods/std/list.rimod` where it means
     # `std/list`.
     getter iyi_artifact_modules = {} of String => String
 
-    # iyi: where a `.iyimod`'s module was written, by the path the
+    # iyi: where a `.rimod`'s module was written, by the path the
     # declarations were parsed under (`Artifact#source_path`).
     #
     # A macro travels with the module and a `run` inside one names its
     # program the way the file that wrote it could: `std/eiy` writes
-    # `run("./eiy/process", …)`, which is beside `src/std/eiy.iyi` and
-    # nowhere near `mods/std/eiy.iyimod`. Resolved against the artifact's
+    # `run("./eiy/process", …)`, which is beside `src/std/eiy.ri` and
+    # nowhere near `mods/std/eiy.rimod`. Resolved against the artifact's
     # own path it was "can't find "./eiy/process" relative to "mods/std"".
     #
     # A `run` needs its program's source at the consumer's compile time,
@@ -349,8 +349,8 @@ module Iyi
     # a module's artifact can carry.
     property? expanding_derive : Bool = false
 
-    # iyi: where to look for a `.iyimod` before falling back to a module's
-    # source, or nil (iyi SPEC IV.1). Set by `--use-iyimod`.
+    # iyi: where to look for a `.rimod` before falling back to a module's
+    # source, or nil (iyi SPEC IV.1). Set by `--use-rimod`.
     property iyi_module_dir : String? = nil
 
     # iyi: whether a module's *source* wins over its artifact where both
@@ -366,22 +366,22 @@ module Iyi
     #
     # What it is there for is the case where the source is *gone*, which is
     # the shape a library arrives in (III.7) and the one the server could
-    # not open at all: a workspace that builds with `--use-iyimod`
+    # not open at all: a workspace that builds with `--use-rimod`
     # answered `can't find module 'app/base'` on every import, with hover
     # and definition empty, about a module the build compiles against.
     property iyi_prefers_source = false
 
     # iyi: the manifest's answer — `{module path prefix, checkout dir}`,
-    # longest prefix first, filled from `iyi.mod` by `Mod::Installer` before
+    # longest prefix first, filled from `ris.mod` by `Mod::Installer` before
     # semantic runs (iyi SPEC III.7). Empty when the program has no manifest,
     # which is every program until it writes one.
     property iyi_mod_table = [] of {String, String}
 
     # iyi: the program's own package — `{module path, directory}` of the
-    # `iyi.mod` at its root (`Compiler.entry_root_of`) — when it has one.
+    # `ris.mod` at its root (`Compiler.entry_root_of`) — when it has one.
     # A package's modules live under its name in a consumer's build
     # (III.7), and they live there in the package's own build too:
-    # `codec.iyi` of `github.com/x/iyi-web` is `IyiWeb::Codec` in both, so
+    # `codec.ri` of `github.com/x/iyi-web` is `IyiWeb::Codec` in both, so
     # a `pub macro` that names it absolutely names it in both. It was
     # `::Codec` in its own build, and no spelling worked in both.
     property iyi_root_package : {String, String}? = nil
@@ -409,13 +409,13 @@ module Iyi
 
     # The package name *module_path* lives under in this build, when the
     # module is one of the program's own package's: the file it is read
-    # from is `<package root>/<module_path>.iyi`. A module on `IYI_PATH`,
+    # from is `<package root>/<module_path>.ri`. A module on `RIS_PATH`,
     # std's included, is not the package's, and nor is a dependency's,
     # which `SemanticVisitor#resolve_package` names by its own manifest.
     def iyi_root_package_name_for(module_path : String, filename : String) : String?
       return nil unless (root = @iyi_root_package) && (name = iyi_root_package_name)
       return nil if module_path.includes?('.')
-      return nil unless Iyi.same_file?(File.join(root[1], "#{module_path}.iyi"), filename)
+      return nil unless Iyi.same_file?(File.join(root[1], "#{module_path}.ri"), filename)
       name
     end
 
@@ -441,9 +441,9 @@ module Iyi
     property iyi_file_overrides = {} of String => String
 
     # The buffer for *filename*, asked the way the file system compares:
-    # the resolver spells a nested module `C:\root\calc/lexer.iyi`, with the
+    # the resolver spells a nested module `C:\root\calc/lexer.ri`, with the
     # module path's own `/`, and the server keys a buffer by the path its
-    # URI names, `C:\root\calc\lexer.iyi`. On Windows the two never met, so
+    # URI names, `C:\root\calc\lexer.ri`. On Windows the two never met, so
     # an importer compiled against the disk and not against an unsaved
     # edit - a rename in the buffer left the importer's verdict clean.
     # The buffers are the open documents, a handful, so the fold is a scan.
@@ -483,7 +483,7 @@ module Iyi
     property iyi_header_root : String? = nil
 
     # iyi: whether this build is writing artifacts as well as reading them
-    # (iyi SPEC IV.3). Set by the compiler from `--emit-iyimod`.
+    # (iyi SPEC IV.3). Set by the compiler from `--emit-rimod`.
     #
     # It decides what a *stale* artifact means. A build that only reads them
     # asked to be compiled against artifacts, so one that no longer describes
@@ -494,7 +494,7 @@ module Iyi
     # point.
     property iyi_rewrites_artifacts : Bool = false
 
-    # iyi: what each module read from a `.iyimod` hashed to (iyi SPEC IV.3), by
+    # iyi: what each module read from a `.rimod` hashed to (iyi SPEC IV.3), by
     # module path.
     #
     # Kept because an artifact this build *writes* records, for each module it
@@ -520,13 +520,13 @@ module Iyi
     getter iyi_artifact_objects = {} of String => Array(IyiMod::ObjectUnit)
 
     # iyi: types whose methods must be emitted as real functions because their
-    # module's `.iyimod` is being written (iyi SPEC IV.1g).
+    # module's `.rimod` is being written (iyi SPEC IV.1g).
     #
     # Codegen inlines a method whose body is a literal and emits no symbol for
     # it. That is right for a whole-program build and wrong for a module that
     # somebody else will link against: the consumer has no body to inline and
     # calls the symbol, which the artifact then turns out not to define. Empty
-    # unless `--emit-iyimod` asked for artifacts.
+    # unless `--emit-rimod` asked for artifacts.
     getter iyi_exported_owners = Set(Type).new
 
 
@@ -615,7 +615,7 @@ module Iyi
     # define ids for types it *has*, and `Array(Item)` exists in the producing
     # build because of a body that stays behind. So which ones a unit refers to
     # has to be collected here and carried, or the consumer has no way to know
-    # the type was ever wanted. Empty unless `--emit-iyimod` asked for
+    # the type was ever wanted. Empty unless `--emit-rimod` asked for
     # artifacts.
     getter iyi_unit_type_ids = {} of String => Set(Type)
 
@@ -629,7 +629,7 @@ module Iyi
     # `Kemal::Dsl::APP` from every exported method and nothing defined it. The
     # names travel and the consumer marks them used, which puts them back on the
     # ordinary path: the initialiser is already spliced in III.5's order, so it
-    # runs where it should. Empty unless `--emit-iyimod` asked for artifacts.
+    # runs where it should. Empty unless `--emit-rimod` asked for artifacts.
     getter iyi_unit_constants = {} of String => Set(Const)
 
     # iyi: the class variables each unit's object code refers to, by unit name
@@ -946,7 +946,7 @@ module Iyi
     # IV.6 #6 made the path-to-name mapping injective: two module paths cannot
     # denote one type, so this lookup cannot answer for the wrong module. The
     # package rule has one exception, the same in every build: `iyi-web`
-    # holding both `codec.iyi` and `iyi_web/codec.iyi` names both `IyiWeb::Codec`.
+    # holding both `codec.ri` and `iyi_web/codec.ri` names both `IyiWeb::Codec`.
     def iyi_module_type(module_path : String) : ModuleType?
       segments = Parser.iyi_package_segments(@iyi_module_packages[module_path]?, module_path.split('/'))
       segments.reduce(self.as(ModuleType?)) do |scope, segment|
@@ -1030,14 +1030,14 @@ module Iyi
 
     # ris: a type an artifact numbers, by its printed name. The runtime keeps
     # some of its types file-private (`private struct RisArrayPool(T)` in
-    # src/iyi/tape.iyi), so a name the program root cannot reach is looked up
+    # src/ris/tape.ri), so a name the program root cannot reach is looked up
     # from each runtime file as well: an artifact's `Array(String)` numbers
     # `Pointer(RisArrayPool(String))`.
     private def iyi_artifact_lookup_type(type_node : ASTNode) : Type
       lookup_type(type_node, include_private: true)
     rescue ex : CodeError
       file_modules.each do |filename, file_module|
-        next unless filename.includes?("src/iyi/")
+        next unless filename.includes?("src/ris/")
         begin
           return file_module.lookup_type(type_node, include_private: true)
         rescue CodeError
@@ -1490,7 +1490,7 @@ module Iyi
       define_crystal_string_constant "CACHE_DIR", CacheDir.instance.dir, <<-MD
         The cache directory configured for the Crystal compiler.
 
-        The value is defined by the environment variable `IYI_CACHE_DIR` and
+        The value is defined by the environment variable `RIS_CACHE_DIR` and
         defaults to the user's configured cache directory.
         MD
       define_crystal_string_constant "DEFAULT_PATH", Iyi::Config.path, <<-MD
@@ -1504,13 +1504,13 @@ module Iyi
       define_crystal_string_constant "PATH", Iyi::IyiPath.default_path, <<-MD
         Colon-separated paths where the compiler searches for required source files.
 
-        The value is defined by the environment variable `IYI_PATH`
+        The value is defined by the environment variable `RIS_PATH`
         and defaults to `DEFAULT_PATH`.
         MD
       define_crystal_string_constant "LIBRARY_PATH", Iyi::IyiLibraryPath.default_path, <<-MD
         Colon-separated paths where the compiler searches for (binary) libraries.
 
-        The value is defined by the environment variables `IYI_LIBRARY_PATH`.
+        The value is defined by the environment variables `RIS_LIBRARY_PATH`.
         MD
       define_crystal_string_constant "VERSION", Iyi::Config.version, <<-MD
         The version of the Crystal compiler.
@@ -1747,7 +1747,7 @@ module Iyi
       end
     end
 
-    # Finds *filename* in the configured IYI_PATH for this program,
+    # Finds *filename* in the configured RIS_PATH for this program,
     # relative to *relative_to*.
     def find_in_path(filename, relative_to = nil) : Array(String)?
       iyi_path.find filename, relative_to

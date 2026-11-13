@@ -125,8 +125,8 @@ module Iyi
     # the source file to compile.
     property prelude = "prelude"
 
-    # iyi: directory to write a `.iyimod` per imported module into, or nil
-    # (iyi SPEC IV.1). Set by `--emit-iyimod`.
+    # iyi: directory to write a `.rimod` per imported module into, or nil
+    # (iyi SPEC IV.1). Set by `--emit-rimod`.
     property emit_iyimod : String? = nil
 
     # iyi: a prepared requirement table (III.7), for a caller that resolved
@@ -143,7 +143,7 @@ module Iyi
 
     # iyi: the root the entry file's own header names, if its path ends with
     # it (IV.6 read backwards) — `module calc/parser` in
-    # `/p/calc/parser.iyi` is `/p`. Tried *after* the entry's directory, so
+    # `/p/calc/parser.ri` is `/p`. Tried *after* the entry's directory, so
     # building a nested module directly resolves its imports the way a build
     # from the root would, and a file whose header happens to end its path
     # does not change what a build that already worked resolves.
@@ -151,8 +151,8 @@ module Iyi
 
 
 
-    # iyi: directory to read a `.iyimod` per imported module from, or nil
-    # (iyi SPEC IV.1). Set by `--use-iyimod`. An import that finds one there is
+    # iyi: directory to read a `.rimod` per imported module from, or nil
+    # (iyi SPEC IV.1). Set by `--use-rimod`. An import that finds one there is
     # compiled against it and never opens the module's source, which is R-1's
     # contract and the reason the file exists.
     property use_iyimod : String? = nil
@@ -255,12 +255,12 @@ module Iyi
     # iyi: IV.6 read backwards, for every build and not only the server's.
     # A module's path is its file's path, so an entry whose header ends
     # its own path names the project root above both, and `import a/b`
-    # from `<root>/x/y.iyi` resolves the way a build from the root would.
+    # from `<root>/x/y.ri` resolves the way a build from the root would.
     # A tool that knows better has set the root already; an entry whose
     # header and path disagree, or that has none, keeps the entry-dir rule.
     #
     # Asked by the front end alone as well (`top_level_semantic`): it was
-    # asked in `compile` only, so `iyi tool dependencies app/main.iyi` and
+    # asked in `compile` only, so `iyi tool dependencies app/main.ri` and
     # `tool hierarchy` of it answered "can't find module 'app/util'" about
     # the import `run` and `check` of the same file resolve.
     private def adopt_header_root(source : Source | Array(Source)) : Nil
@@ -305,22 +305,21 @@ module Iyi
     end
 
     # The root the entry's header names, or nil: `module calc/parser` in
-    # `/p/calc/parser.iyi` is `/p`.
+    # `/p/calc/parser.ri` is `/p`.
     def self.header_root_of(path : String, text : String) : String?
       module_path = module_header_of(text)
       return nil unless module_path
-      # ris: the entry's own extension, `.ri` or the `.iyi` carried over.
-      suffix = "/#{module_path}#{path.ends_with?(".ri") ? ".ri" : ".iyi"}"
+      suffix = "/#{module_path}.ri"
       # Asked of the posix reading: a module path is posix by grammar (R-1) and
       # a path is the platform's, so on Windows no entry ever ended with its own
       # header — every build fell back to the entry-dir rule and `import
-      # shared/helper` from `pkg/eps_test.iyi` could not be found.
-      # And asked the way the file system compares: on Windows `APP\main.iyi`
-      # is `app/main.iyi`, and a path typed in another case found no root
+      # shared/helper` from `pkg/eps_test.ri` could not be found.
+      # And asked the way the file system compares: on Windows `APP\main.ri`
+      # is `app/main.ri`, and a path typed in another case found no root
       # and then no module its header's imports named.
       unless Iyi.path_key(::Path[path].to_posix.to_s).ends_with?(Iyi.path_key(suffix))
         # And asked of the long spelling, which only the file system knows:
-        # `APPLIC~1\main.iyi` is `applications_dir\main.iyi`, and an entry
+        # `APPLIC~1\main.ri` is `applications_dir\main.ri`, and an entry
         # reached through the 8.3 name - a CI runner's `RUNNER~1`, a working
         # directory a `cmd` window spelled short - found no root, and `run`,
         # `check` and `test` of it said "can't find module
@@ -338,8 +337,8 @@ module Iyi
     # is read there, and a workspace keeps `mods` there, for every verb
     # that compiles - a build, `check`, `test`, `mod context`, the language
     # server. The manifest was read beside the entry, so in a project whose
-    # `iyi.mod` sits above `greet/`, `iyi run main.iyi` built
-    # `greet/greeter.iyi` and `iyi check greet/greeter.iyi` refused it with
+    # `ris.mod` sits above `greet/`, `iyi run main.ri` built
+    # `greet/greeter.ri` and `iyi check greet/greeter.ri` refused it with
     # "no requirement covers 'example.test/user/liba'"; the test beside it
     # "does not build", and `check --affected` said two consumers broke.
     def self.entry_root_of(path : String, text : String) : String
@@ -381,7 +380,7 @@ module Iyi
       # optimisation mode, `debug`, `static` and the prelude itself are all in
       # `prelude_cache_key`, so an analysis that differs in any of them is a
       # different analysis. These are the ones that are not, and leaving them
-      # was not a degradation but a **silent lie**: `--use-iyimod` was accepted
+      # was not a degradation but a **silent lie**: `--use-rimod` was accepted
       # and ignored, and the build compiled every module from source while
       # saying nothing.
       program.iyi_module_dir = @use_iyimod
@@ -392,7 +391,7 @@ module Iyi
       # the artifact's `Docs` travel per module, and modules are parsed per
       # build — the prelude's own docs are nobody's surface.
       program.wants_doc = true unless @emit_iyimod.nil?
-      # The manifest too, for the same reason as `--use-iyimod` above: the
+      # The manifest too, for the same reason as `--use-rimod` above: the
       # analysis was made without this build's directory, and a table it
       # never computed is not one it can be said to have decided against.
       if table = @iyi_mod_table
@@ -491,7 +490,7 @@ module Iyi
     # A cache key is a claim that everything not in it does not matter, and this
     # one was written when the only thing reading it was prelude analysis. Every
     # switch added since had to be checked against it by hand, silently, with
-    # nothing enforcing the check — and `--use-iyimod` is what happened when
+    # nothing enforcing the check — and `--use-rimod` is what happened when
     # somebody did not: accepted, ignored, and the build compiled every module
     # from source without a word (iyi SPEC IV.1d).
     #
@@ -562,9 +561,9 @@ module Iyi
     # Yields a `Program` instance before compiling.
     def compile_configure_program(source : Source | Array(Source), output_filename : String, & : Program -> Nil) : Result
       source = [source] unless source.is_a?(Array)
-      return prelude_fork_probe(source, output_filename) if ENV["IYI_FORK_PROBE"]?
+      return prelude_fork_probe(source, output_filename) if ENV["RIS_FORK_PROBE"]?
 
-      # iyi: `IYI_WARM=1` — analyse the prelude and adopt it, in one process and
+      # iyi: `RIS_WARM=1` — analyse the prelude and adopt it, in one process and
       # **without forking**, printing the two halves.
       #
       # The daemon does three things at once: it analyses a prelude, it keeps
@@ -578,7 +577,7 @@ module Iyi
       # the fork costs 0.2 to 0.3 s of it (iyi SPEC IV.1d). A measurement tool
       # rather than a mode — it analyses the prelude in the foreground, so it is
       # always slower overall than an ordinary build.
-      if ENV["IYI_WARM"]? && !Compiler.preanalysed.has_key?(prelude_cache_key)
+      if ENV["RIS_WARM"]? && !Compiler.preanalysed.has_key?(prelude_cache_key)
         warm = Time.instant
         pre = preanalyse_prelude
         Compiler.preanalysed[pre.key] = pre
@@ -646,7 +645,7 @@ module Iyi
       prepared = program.iyi_module_paths.map do |filename, module_name|
         # Both hashes, because a dependency may have arrived either way and the
         # edge is keyed on a filename regardless. Asking only the source one
-        # left an import read from a `.iyimod` recorded as the path of that
+        # left an import read from a `.rimod` recorded as the path of that
         # file — an edge naming a build's directory layout rather than a
         # module, which the next build cannot resolve.
         #
@@ -701,7 +700,7 @@ module Iyi
         # generated code had just written (IV.3).
         artifact.hashes = IyiMod.hashes_for(artifact, File.read(filename))
 
-        {File.join(dir, "#{module_name}.iyimod"), artifact}
+        {File.join(dir, "#{module_name}.rimod"), artifact}
       end
 
       # Now that every module in this build has been hashed, each edge can say
@@ -1057,7 +1056,7 @@ module Iyi
     #
     # For a type reopened under a foreign name, which is the one place they
     # have to travel: the unit's own imports do not reach inside `class
-    # ::File`, so `src/std/file.iyi` writes a second one there, and a
+    # ::File`, so `src/std/file.ri` writes a second one there, and a
     # consumer reading the reopened section without it said `undefined
     # constant Path`.
     #
@@ -1350,7 +1349,7 @@ module Iyi
     # the consumer, not this module. Those are `MonoBodies`' business (IV.2).
     #
     # Carrying them was tried and is wrong, in a way worth recording because it
-    # looks right. `--emit-iyimod` runs inside an ordinary build, so the
+    # looks right. `--emit-rimod` runs inside an ordinary build, so the
     # producer's instantiations *are* the consumer's — it appears to work. It
     # does not: `List(Int32)::new` is synthesized from `initialize` rather than
     # read from the artifact, so the consumer generates its own and the link
@@ -1360,7 +1359,7 @@ module Iyi
     #
     # A module with a `module` header of its own is not walked into: `pkg/child`
     # is the namespace `Pkg::Child`, inside `pkg`'s `Pkg`, and it has an
-    # artifact of its own. Walked into, `pkg.iyimod` carried the child's units
+    # artifact of its own. Walked into, `pkg.rimod` carried the child's units
     # a second time and a program built from both failed to link.
     private def collect_iyi_unit_names(type : ModuleType, names : Array(String)) : Nil
       type.types?.try &.each_value do |declared|
@@ -1633,7 +1632,7 @@ module Iyi
     # methods and *no members*, and the consumer said `enum Kind must have at
     # least one member` — about a type it could not name, in a module whose
     # own code was the only thing using it. Seven of the sixty
-    # `test/cli/std_*_exercise.iyi` failed that way, `std/path` and `std/dir`
+    # `test/cli/std_*_exercise.ri` failed that way, `std/path` and `std/dir`
     # among them.
     #
     # *container* is the key a travelling body of one of its methods is
@@ -1664,7 +1663,7 @@ module Iyi
       # Unless it is declared under a foreign name, and then they do, for the
       # reason every reopened body travels: the unit is named after the type
       # and this module ships the units under its own namespace only.
-      # `src/std/file.iyi` writes `enum Type` inside `class ::File` and its
+      # `src/std/file.ri` writes `enum Type` inside `class ::File` and its
       # eight question methods by hand, and the link ended on
       # `File::Type#file?`.
       methods = [] of IyiMod::Signature
@@ -2601,17 +2600,17 @@ module Iyi
     end
 
     # Measures what a compile costs when the prelude has already been analysed,
-    # gated behind IYI_FORK_PROBE=1. Temporary instrumentation, like `Prof`.
+    # gated behind RIS_FORK_PROBE=1. Temporary instrumentation, like `Prof`.
     #
     # The parent runs the top-level passes over the prelude alone and forks. The
     # child then compiles the user program against a `Program` that already has
     # the prelude in it, so restoring the prelude costs it a `fork` — around a
-    # millisecond, a floor no serialised `.iyimod` can beat. The child's elapsed
-    # time is therefore the ceiling of the whole `.iyimod` idea, obtainable
+    # millisecond, a floor no serialised `.rimod` can beat. The child's elapsed
+    # time is therefore the ceiling of the whole `.rimod` idea, obtainable
     # without designing the format.
     #
     # Front-end only: the child stops after semantic analysis. Codegen and
-    # linking are LLVM's and the linker's problem, and `.iyimod`'s object-code
+    # linking are LLVM's and the linker's problem, and `.rimod`'s object-code
     # section addresses them separately.
     #
     # Known limit: compiling the compiler itself still fails under both models —
@@ -2623,19 +2622,19 @@ module Iyi
     # that. This is the next thing to fix before the probe becomes a build
     # daemon, and it is a real defect rather than a measurement caveat.
     #
-    # Set IYI_FORK_TRACE=1 to see how far the child gets, and
-    # IYI_FORK_SELFTEST=1 to check the runtime facilities a build needs (file
+    # Set RIS_FORK_TRACE=1 to see how far the child gets, and
+    # RIS_FORK_SELFTEST=1 to check the runtime facilities a build needs (file
     # write, flock, subprocess) before it starts.
     #
     # Two models, because they answer different questions:
     #
-    # * `IYI_FORK_PROBE=1` — the artifact exactly as Part IV describes it. The
+    # * `RIS_FORK_PROBE=1` — the artifact exactly as Part IV describes it. The
     #   parent runs only the *top-level* passes over the prelude, so the child
     #   still walks the combined tree in every pass after that, and three passes
-    #   still walk the whole type graph. That residual is the work a `.iyimod`
+    #   still walk the whole type graph. That residual is the work a `.rimod`
     #   would not remove on its own.
     #
-    # * `IYI_FORK_PROBE=full` — the artifact *plus* prelude-aware passes. The
+    # * `RIS_FORK_PROBE=full` — the artifact *plus* prelude-aware passes. The
     #   parent analyses the prelude completely and the child touches only its
     #   own nodes. This prices IV.1a's third row: what the later passes would
     #   have to become for the front end to reach its floor.
@@ -2649,7 +2648,7 @@ module Iyi
     #   types into it re-enters machinery that assumes declaration precedes
     #   typing. Subclassing a prelude type is enough to trip it — see iyi SPEC
     #   IV.1e. Part IV's artifact carries types and signatures, not typed method
-    #   bodies, so this model measures more than `.iyimod` restores. Treat its
+    #   bodies, so this model measures more than `.rimod` restores. Treat its
     #   numbers as a ceiling on a configuration that does not work.
     #
     #   One trap, because it looks like a soundness failure and is not. Give
@@ -2664,11 +2663,11 @@ module Iyi
     #   different reasons.
     private def prelude_fork_probe(sources : Array(Source), output_filename : String) : NoReturn
       {% unless flag?(:without_mt) %}
-        STDERR.puts "IYI_FORK_PROBE needs a single-threaded compiler: make crystal sequential_codegen=1"
+        STDERR.puts "RIS_FORK_PROBE needs a single-threaded compiler: make crystal sequential_codegen=1"
         exit 1
       {% else %}
         program = new_program(sources)
-        full = ENV["IYI_FORK_PROBE"]? == "full"
+        full = ENV["RIS_FORK_PROBE"]? == "full"
 
         prelude_elapsed = Time.instant
         location = Location.new(program.filename, 1, 1)
@@ -2686,7 +2685,7 @@ module Iyi
         probe_trace "[probe] parent: forking\n"
         pid = Crystal::System::Process.fork do
           probe_trace "[probe] child: alive\n"
-          if ENV["IYI_FORK_SELFTEST"]?
+          if ENV["RIS_FORK_SELFTEST"]?
             # Which runtime facility does a forked child actually lose? Each of
             # these is something a build needs, so whichever hangs is the one
             # standing between the probe and a real build daemon.
@@ -2729,14 +2728,14 @@ module Iyi
 
             # Proving the child's typed program is *codegen-able* is a stronger
             # claim than proving it reports the same diagnostics, so
-            # IYI_FORK_CODEGEN=1 goes on to emit object code. Pair it with
+            # RIS_FORK_CODEGEN=1 goes on to emit object code. Pair it with
             # `--cross-compile` and expect it to write the object and then hang:
             # everything after the emit spawns a subprocess, which is the one
             # thing the forked child cannot do. Kill it and compare the object.
             #
             # It is a verification tool, not a timing one — it never completes,
             # so it stays off by default and out of every measurement.
-            if !@no_codegen && ENV["IYI_FORK_CODEGEN"]?
+            if !@no_codegen && ENV["RIS_FORK_CODEGEN"]?
               # Codegen emits `fun` definitions and top-level code by walking the
               # AST, so it needs the prelude's tree even when the front end did
               # not. That is not a fudge: it is what Part IV's object-code
@@ -2775,7 +2774,7 @@ module Iyi
     # on the event loop or on the collector. Pass string literals only.
     # Resolved in the parent, before the fork, so the child never has to touch
     # ENV (which allocates) just to decide whether to trace.
-    PROBE_TRACE = !ENV["IYI_FORK_TRACE"]?.nil?
+    PROBE_TRACE = !ENV["RIS_FORK_TRACE"]?.nil?
 
     private def probe_trace(msg : String) : Nil
       return unless PROBE_TRACE
@@ -2786,7 +2785,7 @@ module Iyi
       @progress_tracker.clear
       Prof.report
       STDERR.puts
-      STDERR.puts "=== IYI_FORK_PROBE ==="
+      STDERR.puts "=== RIS_FORK_PROBE ==="
       STDERR.puts "prelude top level (parent, paid once) #{prelude_taken}"
       STDERR.puts "front end with prelude already analysed #{child_taken}"
     end
@@ -2826,7 +2825,7 @@ module Iyi
 
     private def new_program(sources)
       @program = program = Program.new
-      program.iyi_prelude = prelude.ends_with?("iyi/prelude")
+      program.iyi_prelude = prelude.ends_with?("ris/prelude")
       program.tape_scopes = program.iyi_prelude?
       program.compiler = self
       program.filename = sources.first.filename
@@ -2936,13 +2935,13 @@ module Iyi
       end
       parser.parse.tap { |nodes| FfiBoundaryChecker.check(program, nodes, source.filename) }
     rescue ex : InvalidByteSequenceError
-      # iyi: whichever language the file is written in. A `.iyi` file full of
+      # iyi: whichever language the file is written in. A `.ri` file full of
       # bytes that are not text was reported as "not a valid Crystal source
       # file", which names the other language for a file this one was asked
       # to read - the identity `test/cli/identity_floor.py` exists to keep.
-      language = source.filename.ris_source? ? "iyi" : "Crystal"
+      language = source.filename.ris_source? ? "ris" : "Crystal"
       # iyi: raised, never printed and exited on here. `Lsp::Analysis`
-      # compiles in the language server's own worker, and one `.iyi` file
+      # compiles in the language server's own worker, and one `.ri` file
       # saved as Windows-1254 ended that worker with exit 1 and its sentence
       # written to a buffer nobody read; and `check -f json`, which writes
       # data (`Command#json_report`), got the sentence as text. Whoever
@@ -2974,7 +2973,7 @@ module Iyi
       # layer refuses an entry named as its own output before anything
       # runs; a module the entry imports, or an artifact it compiled
       # against, is only known now - and linking the program over either
-      # would replace it in silence, which is what `-o good.iyi good.iyi`
+      # would replace it in silence, which is what `-o good.ri good.ri`
       # did to its source. Before the first object is written.
       if File.exists?(output_filename) && (read = program.requires.find { |filename| Iyi.same_file?(filename, output_filename) })
         raise Iyi::Error.new("#{Iyi.relative_filename(read)} is a file this build read, and linking the program " \
@@ -2983,7 +2982,7 @@ module Iyi
 
       # iyi: a `--release` build that writes artifacts keeps a unit per type:
       # an artifact's object code is its type's unit, and under one module
-      # there is none - the `.iyimod` said "object code (none)" and a
+      # there is none - the `.rimod` said "object code (none)" and a
       # consumer failed to link against it. A cross-compile and an `--emit`
       # still write one module, which is the one file they answer.
       #
@@ -3069,7 +3068,7 @@ module Iyi
       end
 
       if not_found
-        stderr << "Warning: The following DLLs are required at run time, but Crystal is unable to locate them in IYI_LIBRARY_PATH, the compiler's directory, or PATH: "
+        stderr << "Warning: The following DLLs are required at run time, but Crystal is unable to locate them in RIS_LIBRARY_PATH, the compiler's directory, or PATH: "
         not_found.sort!.join(stderr, ", ")
       end
     end
@@ -3223,7 +3222,7 @@ module Iyi
     # `cc` does not link. It computes a command — the dynamic linker's path,
     # `Scrt1.o`, `crti.o`, `crtbeginS.o`, the `-L` directories, `-lgcc -lc` and
     # the rest — and runs `collect2`, which scans the objects for constructors
-    # and runs `ld`. Measured here, linking `hello.iyi`: 0.129 s through `cc`
+    # and runs `ld`. Measured here, linking `hello.ri`: 0.129 s through `cc`
     # and **0.014 s** running the same `ld` command directly. The linker is not
     # the cost and never was; three of them come out between 0.009 s and
     # 0.023 s. The driver and its scanner are 0.11 s of every build.
@@ -3247,7 +3246,7 @@ module Iyi
     private def iyi_direct_link_command(object_names, output_filename, link_flags, lib_flags)
       return nil if @cross_compile
       return nil if @iyi_link_driver_only
-      return nil if ENV["IYI_LINK_DRIVER"]?
+      return nil if ENV["RIS_LINK_DRIVER"]?
       return nil unless DEFAULT_LINKER == "cc"
       # Where it has been measured, and nowhere else. The shape this parses is
       # a GNU driver's: `collect2`, an LTO plugin, `-fuse-ld=`. A macOS `cc`
@@ -3781,17 +3780,17 @@ module Iyi
 
         # LLVM's own options for this run, as `opt` takes them: what bisects
         # a miscompile to the pass that makes it (`-opt-bisect-limit=N`).
-        if llvm_args = ENV["IYI_LLVM_ARGS"]?
+        if llvm_args = ENV["RIS_LLVM_ARGS"]?
           LLVM.parse_command_line_options(["iyi"] + llvm_args.split)
         end
         # LLVM's verifier on the module as the pipeline receives it.
-        if check_path = ENV["IYI_VERIFY"]?
+        if check_path = ENV["RIS_VERIFY"]?
           message = Pointer(UInt8).null
           broken = LibLLVM.verify_module(llvm_mod, LLVM::VerifierFailureAction::ReturnStatusAction, pointerof(message))
           File.write(check_path, "broken=#{broken}\n#{message ? String.new(message) : ""}")
         end
         # The module as the pipeline receives it, for `opt` to run on.
-        if dump = ENV["IYI_DUMP_PREOPT"]?
+        if dump = ENV["RIS_DUMP_PREOPT"]?
           llvm_mod.write_bitcode_to_file(dump)
           llvm_mod.print_to_file("#{dump}.ll")
         end

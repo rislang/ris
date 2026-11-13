@@ -1,4 +1,5 @@
 def bad(counts = Hash.new(0))
   counts
 end
+
 bad

@@ -10,7 +10,7 @@ split: forty edits and hovers on a 327-line module took one server from
 reached 19 GB, at which point the kernel killed it — mid-keystroke, with
 the person's answers inside it.
 
-So `iyi lsp` is a proxy that keeps the protocol and the buffers and a
+So `ris lsp` is a proxy that keeps the protocol and the buffers and a
 worker that compiles and is replaced (`src/compiler/iyi/lsp/proxy.cr`).
 This file is what says that is true, and it is the only kind of proof
 that counts here: the same client traffic, the resident megabytes of the
@@ -28,7 +28,7 @@ Four things it holds to:
   4. a worker killed outright is one bad answer, not a dead session:
      whoever was waiting is told, and the next question is answered
 
-Run with `--direct` to drive `iyi lsp --worker` — the single-process
+Run with `--direct` to drive `ris lsp --worker` — the single-process
 shape — and watch 1 and 2 fail. That is the gate's teeth, kept in the
 gate rather than in a commit message.
 """
@@ -48,10 +48,10 @@ from lsp_session import LAST, Client, children, process_binary, rss_mb, tree_mb,
 REPO = Path(__file__).resolve().parents[2]
 # A module with imports and traits, so a compile is a real compile: this
 # is the file the 1,636 MB was measured on.
-MODULE = REPO / "src/std/semantic_version.iyi"
+MODULE = REPO / "src/std/semantic_version.ri"
 # A second open buffer, so the question below can be asked about the one
 # a successor's warm-up does not cover.
-OTHER = REPO / "src/std/levenshtein.iyi"
+OTHER = REPO / "src/std/levenshtein.ri"
 
 # `Proxy::RETIRE_IDLE`, in seconds: the quiet the proxy replaces a
 # worker in. Read here as a number rather than measured, because the
@@ -283,7 +283,7 @@ def killed_mid_compile(argv, direct, work):
     client = Client(argv)
     uri = open_module(client, MODULE, text)
     line, character, _ = hovering_position(client, uri, text)
-    slow = os.path.join(work, "slow.iyi")
+    slow = os.path.join(work, "slow.ri")
     with open(slow, "w") as sleeper:
         sleeper.write('module slow\n\nputs "started"\nsleep(2000)\n')
     slow_uri = "file://" + slow
@@ -460,7 +460,7 @@ def binary_gone():
 
 
 def workspace_pull(argv):
-    """`workspace/diagnostic` over `samples/iyi`, cold, and the peak tree
+    """`workspace/diagnostic` over `samples/ris`, cold, and the peak tree
     megabytes while it runs; then the same pull with the ids it handed
     out, which is every file `unchanged` only if the first answer judged
     every file. Returns the peak, the files judged, and whether the
@@ -507,7 +507,7 @@ def main():
     direct = "--direct" in sys.argv
     argv = ("lsp", "--worker") if direct else ("lsp",)
     if direct:
-        print("memory ---- driving `iyi lsp --worker`: one process, no "
+        print("memory ---- driving `ris lsp --worker`: one process, no "
               "retirement. This is the shape the bounds below rule out.")
     measured = rss_mb(os.getpid()) > 0
 
@@ -549,7 +549,7 @@ def main():
          else f"{first} -> {last}")
 
     peak, judged, whole = workspace_pull(argv)
-    detail = (f"{judged} files of samples/iyi in one answer"
+    detail = (f"{judged} files of samples/ris in one answer"
               f"{', every one' if whole else ', not every one'}, peak {peak} MB")
     if not measured:
         step("a workspace pull is bounded too", whole,

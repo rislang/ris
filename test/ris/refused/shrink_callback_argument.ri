@@ -1,4 +1,4 @@
-def invoke(b : String::Builder)
+def invoke(b : String::Builder, &)
   yield b
 end
 

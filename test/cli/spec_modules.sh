@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# spec: 6.7@10750e35, 6.8@82707d6b, 8.2@ddd1640f
+# spec: 6.7@436841dc, 6.8@82707d6b, 8.2@ddd1640f
 # Module clauses: discovery, ownership, reasons, review and labels.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -35,13 +35,13 @@ with tempfile.TemporaryDirectory(prefix='ris-module-spec-') as tmp:
     put('ris.mod', 'module example\n')
     put('SPEC.md', '# Demo\n\n## 1. Root\n\n* 1.1 Root promise.\n')
     put('test/root.sh', '# spec: 1.1\n')
-    put('src/std/json.iyi', owner('json', 10) + '\n' + owner('json', 2))
+    put('src/std/json.ri', owner('json', 10) + '\n' + owner('json', 2))
     put('src/route.ri', owner('route', text='Keeps its\n#   promise.'))
-    put('src/a/b.iyi', owner('a/b'))
-    put('src/plain.iyi', owner('plain'))
+    put('src/a/b.ri', owner('a/b'))
+    put('src/plain.ri', owner('plain'))
     reasons = ['first "quoted" reason', r'second \ reason']
     body = '\n'.join('  todo ' + json.dumps(r) for r in reasons)
-    put('src/std/log.iyi', owner('log', body=body))
+    put('src/std/log.ri', owner('log', body=body))
     # All exclusions use the shared project walk; none may own clauses.
     for directory in ('lib', 'mods', '.hidden', 'fixtures'):
         put(f'src/{directory}/bad.ri', owner('bad'))
@@ -78,22 +78,22 @@ with tempfile.TemporaryDirectory(prefix='ris-module-spec-') as tmp:
     assert [l.split()[0] for l in (root / '.spec.lock').read_text()
             .splitlines()] == ids
     run('check', 'spec', contains='0 to review')
-    before = (root / 'src/std/json.iyi').read_bytes()
+    before = (root / 'src/std/json.ri').read_bytes()
     run('check', 'spec', '--fix')
     run('check', 'spec', '--fix')
-    assert (root / 'src/std/json.iyi').read_bytes() == before
+    assert (root / 'src/std/json.ri').read_bytes() == before
     # The parser accepts both ids and several trailing todo statements.
     for path, header in [('src/route.ri', 'src/route'),
-                         ('src/a/b.iyi', 'src/a/b')]:
+                         ('src/a/b.ri', 'src/a/b')]:
         put(path, f'module {header}\n\n' + (root / path).read_text())
-    run('build', '--spec', '--no-codegen', 'src/std/log.iyi')
+    run('build', '--spec', '--no-codegen', 'src/std/log.ri')
     run('build', '--spec', '--no-codegen', 'src/route.ri')
-    run('build', '--spec', '--no-codegen', 'src/a/b.iyi')
-    put('src/std/log.iyi', owner('log', body=body + '\n  true'))
-    run('build', '--spec', '--no-codegen', 'src/std/log.iyi', ok=False,
+    run('build', '--spec', '--no-codegen', 'src/a/b.ri')
+    put('src/std/log.ri', owner('log', body=body + '\n  true'))
+    run('build', '--spec', '--no-codegen', 'src/std/log.ri', ok=False,
         contains='nothing runs after `todo`')
-    put('src/std/log.iyi', owner('log', body=body))
-    put('src/std/json.iyi', owner('json', 2))
+    put('src/std/log.ri', owner('log', body=body))
+    put('src/std/json.ri', owner('json', 2))
     run('spec', 'ack', 'json', contains='removed: json.10')
     assert 'json.10' not in (root / '.spec.lock').read_text()
 
@@ -107,14 +107,14 @@ with tempfile.TemporaryDirectory(prefix='ris-module-spec-') as tmp:
         else:
             put(path, previous)
 
-    refused('src/std/yaml.iyi', owner('json'), 'does not match yaml',
-            'move it to src/std/json.iyi')
+    refused('src/std/yaml.ri', owner('json'), 'does not match yaml',
+            'move it to src/std/json.ri')
     refused('src/route.ri', '# route.1 Orphan.\n\n', 'orphan clause',
             'put `spec route.1` directly after its comment')
     refused('src/route.ri', owner('route') * 2, 'duplicate owner',
             'keep one owning comment and block')
-    refused('src/route.iyi', '', 'two files are module route',
-            'keep one file')
+    refused('src/route.iyi', '', 'a ris file ends in .ri',
+            'rename it to route.ri')
     refused('src/json.ri', '', 'two files are module json',
             'keep one file')
     for number in ('0', '01', '-1'):

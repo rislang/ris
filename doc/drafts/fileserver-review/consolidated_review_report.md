@@ -12,7 +12,7 @@ held up with every reviewer; the draft's mechanism does not.
 
 B1. Header values cannot be stored as drafted. `tag`, `stamp` and the
     `Content-Range` text are built in `serve`'s scratch; `Outgoing#header`
-    stores a view (`String#as_tape` is identity, src/iyi/tape.iyi:213).
+    stores a view (`String#as_tape` is identity, src/ris/tape.ri:213).
     Probe (verified): a def doing `res.header("ETag", "\"" + n.to_s +
     "\"")` is refused: "cannot store data made in this def where it
     outlives the def (SPEC 1.1, 3.6)". So the drafted serve would not
@@ -21,8 +21,8 @@ B1. Header values cannot be stored as drafted. `tag`, `stamp` and the
     into res. That widens scope to std/http. (design B1, readiness B4)
 
 B2. Body read is wrong: `read_str(count : Int32, into)` returns after
-    one buffer fill (src/iyi/io.iyi:165-181); `reserve` truncates with
-    `to_i32` (src/iyi/tape.iyi:893). Specify a read loop, a size cap
+    one buffer fill (src/ris/io.ri:165-181); `reserve` truncates with
+    `to_i32` (src/ris/tape.ri:893). Specify a read loop, a size cap
     (at most Int32::MAX, likely far lower), and the short-read answer
     (file shrank after stat: 500, no partial 206). (readiness B3,
     design M4, zoom-out M2)
@@ -44,18 +44,18 @@ M2. Memory peak = file size x requests in flight up to max_connections:
     decide a default cap and its status (413/500); name the follow-up
     (Outgoing file body via existing sendfile, src/socket.cr:372).
     (zoom-out M2, design M3)
-M3. No file list or phases: fileserver.iyi, new test/ris/fileserver.ri,
-    check.sh, bench .iyi and .sh, router.iyi comment, http.iyi (B1, M1).
+M3. No file list or phases: fileserver.ri, new test/ris/fileserver.ri,
+    check.sh, bench .ri and .sh, router.ri comment, http.ri (B1, M1).
     (readiness B2)
 M4. bench/std_fileserver_exercise.sh:199 greps a literal source line of
-    fileserver.iyi; the .iyi runs on iyi, which lacks Incoming/Outgoing:
+    fileserver.ri; the .ri runs on iyi, which lacks Incoming/Outgoing:
     port, move or remove. (design M6, readiness M7)
 M5. Test plan: name, driver (real socket like answer.ri), temp dir,
     PASS line; add If-Modified-Since, If-Range mismatch, suffix range,
     NUL/backslash, redirect with query, missing index, empty file, HEAD
     Content-Length, over-cap file; RIS_TAPE_STATS growth 0.
     (readiness M8, zoom-out N4)
-M6. Doc comments become false (fileserver.iyi:13-14, 36-37, 49-50):
+M6. Doc comments become false (fileserver.ri:13-14, 36-37, 49-50):
     give new wording. (zoom-out N2, readiness M6, design N10)
 M7. Give new helper signatures: not_found(res), range_applies?(Incoming),
     imports, drop the Content-Length line. (readiness M5)
@@ -66,9 +66,9 @@ M9. Undefined terms for a newcomer: tape, scratch, ris vs iyi, gate;
     link SPEC 1.9 and AGENTS.md. (comprehension M1-M5)
 
 M10. The File is never closed: the old Response owned it. State
-     open, defer close, seek (File#seek, file.iyi:2150). (codebase M3)
-M11. The bench .iyi drives old `Server.serve` with `call(req) :
-     Response` (bench .iyi:56-131): porting means moving the harness to
+     open, defer close, seek (File#seek, file.ri:2150). (codebase M3)
+M11. The bench .ri drives old `Server.serve` with `call(req) :
+     Response` (bench .ri:56-131): porting means moving the harness to
      Server.answer, not "follows the new signature". Also
      test/ris/std_text_plain.ri:41 imports std/fileserver without
      calling serve. (codebase B2, M6)

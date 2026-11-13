@@ -1,5 +1,6 @@
 class State
   @@text : String? = nil
+
   def self.keep(text : String)
     @@text = text
   end

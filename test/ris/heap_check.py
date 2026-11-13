@@ -28,7 +28,7 @@ def command(args, *, stats=False, cache=None):
     # Builds of one source at once (a sample and its gate) each take a
     # cache of their own: a shared ~/.cache/iyi/<path> raced.
     if cache:
-        env["IYI_CACHE_DIR"] = cache
+        env["RIS_CACHE_DIR"] = cache
     # A release build of a large sample takes minutes on a few cores while
     # every sample builds at once; a hung compiler still fails.
     return subprocess.run([RIS, *args], capture_output=True, text=True,
@@ -154,6 +154,18 @@ def workload_source(path, scratch):
     return source, args, mode
 
 
+def sample_files():
+    """Keep new samples in the ratchet; imported examples have other gates."""
+    excluded = {line for line in
+                (ROOT / "test/ris/heap_excluded.txt").read_text().splitlines()
+                if line and not line.startswith("#")}
+    files = {str(p) for p in Path("samples/ris").rglob("*.ri")
+             if "trial" not in p.parts}
+    if excluded - files:
+        raise RuntimeError("stale sample in heap_excluded.txt")
+    return sorted(files - excluded)
+
+
 def main():
     budgets = {}
     if not RECORD:
@@ -161,9 +173,8 @@ def main():
             if line and not line.startswith("#"):
                 path, sites, allocations, mode = line.split()
                 budgets[path] = (int(sites), int(allocations), mode)
-    # samples/ris/trial has its own gate; blocked/ holds failing repros.
-    files = sorted(str(p) for p in Path("samples/ris").rglob("*.ri")
-                   if "trial" not in p.parts)
+    # samples/ris/trial has its own gate.
+    files = sample_files()
     if not RECORD and set(files) != set(budgets):
         raise RuntimeError("sample list differs from heap_budget.txt")
 

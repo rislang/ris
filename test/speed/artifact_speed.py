@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What reading a module from its `.iyimod` costs, against reading its source.
+"""What reading a module from its `.rimod` costs, against reading its source.
 
 iyi SPEC IV.1a asked this before the artifact existed and answered it with the
 fork probe, which is a ceiling rather than a measurement of the thing. This is
@@ -30,9 +30,9 @@ SAMPLES = ROOT / "samples" / "iyi"
 
 # The Kemal port: the largest import graph here, and the only sample whose
 # modules are a library rather than an illustration.
-PROGRAM = "webapp.iyi"
+PROGRAM = "webapp.ri"
 
-# The directories `webapp.iyi` imports from, which is what gets deleted so that
+# The directories `webapp.ri` imports from, which is what gets deleted so that
 # the second column cannot fall back to the source it is supposed to replace.
 MODULE_DIRS = ("app", "std", "boot", "kemal")
 
@@ -41,8 +41,8 @@ RUNS = 5
 
 def env_for(cache):
     env = dict(os.environ)
-    env["IYI_PATH"] = f"./lib:{ROOT / 'src'}"
-    env["IYI_CACHE_DIR"] = str(cache)
+    env["RIS_PATH"] = f"./lib:{ROOT / 'src'}"
+    env["RIS_CACHE_DIR"] = str(cache)
     return env
 
 
@@ -93,7 +93,7 @@ def main():
         # Written by a build that generates code, because an artifact from a
         # `--no-codegen` build carries declarations and nothing to link, and
         # the consumer would be measured failing rather than building.
-        writing = [str(CRYSTAL), "build", "--emit-iyimod", "mods", "-o", "out", PROGRAM]
+        writing = [str(CRYSTAL), "build", "--emit-rimod", "mods", "-o", "out", PROGRAM]
         if not run(writing, artifact_dir, root / "cache-emit"):
             sys.exit("could not write the artifacts")
 
@@ -102,7 +102,7 @@ def main():
             shutil.rmtree(artifact_dir / name, ignore_errors=True)
 
         from_source = [str(CRYSTAL), "build", "-o", "out", PROGRAM]
-        from_artifact = [str(CRYSTAL), "build", "--use-iyimod", "mods", "-o", "out", PROGRAM]
+        from_artifact = [str(CRYSTAL), "build", "--use-rimod", "mods", "-o", "out", PROGRAM]
         front_source = from_source + ["--no-codegen"]
         front_artifact = from_artifact + ["--no-codegen"]
 

@@ -53,7 +53,7 @@ statements with commas (158-160); "registrations included" is ambiguous
 ## Nits (merged)
 
 * Citation forms: bare "(3.2)"; path styles mixed.
-* compiler.cr:2834 is :2833; option_parser.iyi:117 is the command
+* compiler.cr:2834 is :2833; option_parser.ri:117 is the command
   branch (the dashed stores are :121, :134).
 * check.sh "never builds it": std_text_plain.ri imports it.
 * `banner`, `separator` unmentioned; help could write into the caller's

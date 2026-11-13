@@ -8,7 +8,7 @@ module Iyi
     # Returns the program where this type belongs.
     getter program
 
-    # iyi: declared by a `.iyimod` rather than by this build's source (iyi SPEC
+    # iyi: declared by a `.rimod` rather than by this build's source (iyi SPEC
     # IV.1g).
     #
     # Set on the types an artifact exports, and false for everything else —
@@ -1105,7 +1105,7 @@ module Iyi
 
     # iyi: the file whose `module` header made this a unit. Not the type's
     # first location: `module rel/util`, loaded first, makes `Rel` as its
-    # namespace, and the unit `rel` is `rel.iyi`'s - the wall asked of the
+    # namespace, and the unit `rel` is `rel.ri`'s - the wall asked of the
     # first location refused everyone who imported `rel` a name of `Rel`.
     property iyi_unit_file : String?
 
