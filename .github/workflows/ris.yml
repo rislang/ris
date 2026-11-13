@@ -103,6 +103,9 @@ jobs:
         run: bash test/cli/spec_blocks_lock.sh
         env:
           IYI: ./bin/ris
+      - name: module clauses share the spec tools
+        if: matrix.shard == 'heap'
+        run: bash test/cli/spec_modules.sh
       - name: ris init proves its clause with a spec block
         if: matrix.shard == 'heap'
         run: bash test/cli/spec_blocks_init.sh

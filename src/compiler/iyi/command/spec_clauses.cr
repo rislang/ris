@@ -47,11 +47,16 @@ class Iyi::Command
   # draft 5.9, 5.14): where it is, whether its body says `todo`, and the
   # clause label its line ends in (5.15), whitespace-collapsed.
   private record SpecBlock, path : String, line : Int32, number : String,
-    todo : Bool, label : String?
+    reasons : Array(String), label : String? do
+    def todo : Bool
+      !reasons.empty?
+    end
+  end
 
   # Read by spec_status; set by spec_load_or_abort.
   @spec_blocks = [] of SpecBlock
   @spec_lock = {} of String => String
+  @spec_owners = {} of String => {String, Int32}
   @spec_markers = {} of String => {String, Int32, String}
 
   private def spec_command
@@ -75,7 +80,7 @@ class Iyi::Command
         abort! "spec: unknown flag #{option}. `#{Command.program_name} spec --help` lists them", :USAGE_ERROR
       else
         abort! "spec: one clause or chapter at a time, not '#{option}' after #{target}", :USAGE_ERROR if target
-        abort! "spec: '#{option}' is no clause number: write N or N.M", :USAGE_ERROR unless spec_number?(option, chapter_ok: true)
+        abort! "spec: '#{option}' is no clause number: write N, N.M, MODULE or MODULE.N", :USAGE_ERROR unless spec_target?(option)
         target = option
       end
     end
@@ -100,7 +105,7 @@ class Iyi::Command
     end
     files = spec_files(root)
     compiler.ris_spec_file = files.size == 1 ? Iyi.relative_filename(files[0]) : "spec/*.md"
-    if files.empty?
+    if files.empty? && !Dir.exists?(File.join(root, "src"))
       compiler.ris_spec_file = Iyi.relative_filename(File.join(root, "SPEC.md"))
       return
     end
@@ -138,7 +143,16 @@ class Iyi::Command
   end
 
   private def spec_present?(root : String) : Bool
-    File.file?(File.join(root, "SPEC.md")) || Dir.exists?(File.join(root, "spec"))
+    return true if File.file?(File.join(root, "SPEC.md")) || Dir.exists?(File.join(root, "spec"))
+    src = File.join(root, "src")
+    return false unless Dir.exists?(src) && !File.symlink?(src)
+    files = [] of String
+    project_walk(src, files) { |name| name.ends_with?(".ri") || name.ends_with?(".iyi") }
+    files.any? do |file|
+      File.read_lines(file).any? do |line|
+        line.starts_with?("# ") && spec_number?(line[2..].split.first? || "", chapter_ok: false)
+      end
+    end
   end
 
   private def spec_files(root : String) : Array(String)
@@ -222,13 +236,15 @@ class Iyi::Command
       end
       flush.call(current)
     end
-    clauses.sort_by! { |clause| {clause.major, clause.minor} }
+    spec_module_clauses(root, clauses, seen)
+    clauses.sort_by! { |clause| spec_sort_key(clause.number) }
   end
 
   # `* 1.3 text` -> "1.3"; nil when the bullet holds no clause number.
   private def spec_clause_number(line : String) : String?
     rest = line[2..]
     word = rest.split(' ', 2).first
+    return nil unless word[0]?.try(&.ascii_number?)
     return nil unless spec_number?(word, chapter_ok: false)
     return nil unless rest.size > word.size && rest[word.size] == ' '
     word
@@ -237,7 +253,117 @@ class Iyi::Command
   private def spec_number?(word : String, chapter_ok : Bool) : Bool
     parts = word.split('.')
     return false unless parts.size == 2 || (chapter_ok && parts.size == 1)
+    if parts.size == 2 && spec_module_id?(parts[0])
+      return !parts[1].empty? && parts[1][0] != '0' && parts[1].each_char.all?(&.ascii_number?)
+    end
     parts.all? { |part| !part.empty? && part.each_char.all?(&.ascii_number?) }
+  end
+
+  private def spec_module_id?(word : String) : Bool
+    return false if word.empty?
+    word.split('/').each do |segment|
+      return false if segment.empty?
+      first = segment[0]
+      return false unless first.in?('a'..'z') || first == '_'
+      segment.each_char do |char|
+        return false unless char.in?('a'..'z') || char.ascii_number? || char == '_'
+      end
+    end
+    true
+  end
+
+  private def spec_target?(word : String) : Bool
+    spec_number?(word, chapter_ok: true) || spec_module_id?(word)
+  end
+
+  private def spec_sort_key(number : String) : {Int32, String, Int32, Int32}
+    prefix, _, suffix = number.rpartition('.')
+    if spec_module_id?(prefix)
+      {1, prefix, 0, suffix.to_i}
+    else
+      {0, "", prefix.to_i, suffix.to_i}
+    end
+  end
+
+  private def spec_selected?(clause : SpecClause, target : String) : Bool
+    clause.number == target || clause.number.rpartition('.')[0] == target
+  end
+
+  private def spec_owner?(block : SpecBlock) : Bool
+    @spec_owners[block.number]? == {block.path, block.line}
+  end
+
+  private def spec_module_clauses(root : String, clauses : Array(SpecClause),
+                                  seen : Set(String)) : Nil
+    @spec_owners.clear
+    src = File.join(root, "src")
+    return unless Dir.exists?(src) && !File.symlink?(src)
+    files = [] of String
+    project_walk(src, files) { |name| name.ends_with?(".ri") || name.ends_with?(".iyi") }
+    modules = {} of String => String
+    files.sort!.each do |file|
+      path = ::Path[file].relative_to(src).to_s
+      mod = path[0...-File.extname(path).size]
+      mod = mod[4..] if mod.starts_with?("std/")
+      shown = ::Path[file].relative_to(root).to_s
+      if other = modules[mod]?
+        raise SpecError.new("two files are module #{mod}: #{other}, #{shown}; " \
+                            "keep one file for module #{mod}")
+      end
+      modules[mod] = shown
+    end
+    modules.each do |mod, shown|
+      lines = File.read_lines(File.join(root, shown))
+      lines.each_with_index do |line, index|
+        next unless line.starts_with?("# ")
+        rest = line[2..]
+        number = rest.split(' ', 2).first
+        prefix, dot, suffix = number.rpartition('.')
+        next if dot.empty? || prefix.empty? || prefix[0].ascii_number?
+        next unless suffix[0]?.try { |c| c.ascii_number? || c == '-' }
+        stop = index + 1
+        while stop < lines.size && lines[stop].starts_with?('#')
+          stop += 1
+        end
+        head = stop < lines.size ? spec_block_head(lines[stop]) : nil
+        owns = head && head[0] == number
+        next unless prefix == mod || owns
+        if prefix != mod
+          base = shown.starts_with?("src/std/") ? "src/std" : "src"
+          destination = modules[prefix]? || "#{base}/#{prefix}#{File.extname(shown)}"
+          raise SpecError.new("#{shown}:#{index + 1}: module #{prefix} does not match #{mod}; " \
+                              "move it to #{destination}")
+        end
+        unless spec_module_id?(mod) && spec_number?(number, chapter_ok: false)
+          raise SpecError.new("#{shown}:#{index + 1}: invalid module clause #{number}; " \
+                              "write MODULE.N with lowercase path segments and N positive, without leading zeros")
+        end
+        unless owns
+          raise SpecError.new("#{shown}:#{index + 1}: orphan clause #{number}; " \
+                              "put `spec #{number}` directly after its comment")
+        end
+        unless seen.add?(number)
+          raise SpecError.new("#{shown}:#{index + 1}: duplicate owner of #{number}; " \
+                              "keep one owning comment and block; give a new clause the next free number")
+        end
+        if head.not_nil![1]
+          raise SpecError.new("#{shown}:#{stop + 1}: owning block takes no label; write `spec #{number}`")
+        end
+        unless rest.starts_with?(number + " ") && !rest[(number.size + 1)..].blank?
+          raise SpecError.new("#{shown}:#{index + 1}: clause needs text; write `# #{number} text`")
+        end
+        text = [rest[(number.size + 1)..]]
+        lines[(index + 1)...stop].each do |continuation|
+          unless continuation.starts_with?("#   ")
+            raise SpecError.new("#{shown}:#{index + 1}: invalid continuation; write `#   text`")
+          end
+          text << continuation[4..]
+        end
+        normalized = text.join(" ").split.join(" ")
+        clauses << SpecClause.new(number, 0, suffix.to_i, normalized, spec_version(normalized))
+        @spec_owners[number] = {shown, stop + 1}
+      end
+    end
   end
 
   private def spec_version(text : String) : String
@@ -319,12 +445,12 @@ class Iyi::Command
       open = false
       lines.each_with_index do |line, index|
         if head = spec_block_head(line)
-          blocks << SpecBlock.new(shown, index + 1, head[0], false, head[1])
+          blocks << SpecBlock.new(shown, index + 1, head[0], [] of String, head[1])
           open = true
         elsif open && line.rstrip == "end"
           open = false
-        elsif open && spec_todo_reason(line)
-          blocks[-1] = blocks[-1].copy_with(todo: true)
+        elsif open && (reason = spec_todo_reason(line))
+          blocks[-1].reasons << reason
         end
       end
     end
@@ -333,9 +459,9 @@ class Iyi::Command
 
   # `spec 1.5  # label` at a line's start -> {"1.5", "label"}.
   private def spec_block_head(line : String) : {String, String?}?
-    return nil unless line.starts_with?("spec ") && line[5]?.try(&.ascii_number?)
+    return nil unless line.starts_with?("spec ")
     rest = line[5..]
-    number = rest.each_char.take_while { |c| c.ascii_number? || c == '.' }.join
+    number = rest.split.first? || return nil
     return nil unless spec_number?(number, chapter_ok: false)
     after = rest[number.size..]
     return {number, nil} if after.blank?
@@ -381,9 +507,9 @@ class Iyi::Command
   private def spec_lock_write(root : String, lock : Hash(String, String),
                               clauses : Array(SpecClause)) : Nil
     known = clauses.map(&.number).to_set
+    lock.each_key { |number| puts "removed: #{number}" unless known.includes?(number) }
     lines = lock.select { |number, _| known.includes?(number) }.to_a.sort_by! do |number, _|
-      major, minor = number.split('.').map(&.to_i)
-      {major, minor}
+      spec_sort_key(number)
     end
     File.write(File.join(root, ".spec.lock"), lines.map { |number, hash| "#{number} #{hash}\n" }.join)
   end
@@ -468,7 +594,22 @@ class Iyi::Command
     return nil unless rest.starts_with?('"')
     close = rest.rindex('"')
     return nil unless close && close > 0
-    rest[1...close]
+    raw = rest[1...close]
+    String.build do |io|
+      escaped = false
+      raw.each_char do |char|
+        if escaped
+          io << '\\' unless char.in?('"', '\\')
+          io << char
+          escaped = false
+        elsif char == '\\'
+          escaped = true
+        else
+          io << char
+        end
+      end
+      io << '\\' if escaped
+    end
   end
 
   private def spec_changelog(root : String) : Array(SpecEntry)
@@ -507,7 +648,7 @@ class Iyi::Command
     while at = line.index('@', from)
       from = at + 1
       start = at
-      while start > 0 && (line[start - 1].ascii_number? || line[start - 1] == '.')
+      while start > 0 && (line[start - 1].ascii_alphanumeric? || line[start - 1].in?('.', '/', '_'))
         start -= 1
       end
       number = line[start...at]
@@ -552,6 +693,19 @@ class Iyi::Command
     @spec_blocks.select { |block| block.number == clause.number }
   end
 
+  private def spec_reasons(clause : SpecClause, tests : Array(SpecTest)) : Array(String)
+    reasons = spec_blocks_naming(clause).flat_map(&.reasons)
+    tests.each do |test|
+      if test.names?(clause.number) && (reason = test.todo)
+        reasons << reason
+      end
+    end
+    if marker = @spec_markers[clause.number]?
+      reasons.unshift(marker[2])
+    end
+    reasons
+  end
+
   private SPEC_STATUSES = ["ok", "todo", "to review", "uncovered", "unversioned"]
 
   private def spec_report(clauses : Array(SpecClause), tests : Array(SpecTest), json : Bool) : Nil
@@ -570,6 +724,7 @@ class Iyi::Command
                   builder.field "version", clause.version
                   builder.field "status", status
                   builder.field "text", clause.text
+                  builder.field "todo", spec_reasons(clause, tests)
                   if marker = @spec_markers[clause.number]?
                     builder.field "marker", marker[2]
                   end
@@ -621,7 +776,7 @@ class Iyi::Command
         builder.object do
           builder.field "file", "#{block.path}:#{block.line}"
           builder.field "block", true
-          builder.field "todo", block.todo
+          builder.field "todo", block.reasons
         end
       end
     end
@@ -629,7 +784,7 @@ class Iyi::Command
 
   private def spec_show(root : String, clauses : Array(SpecClause), tests : Array(SpecTest),
                         target : String, json : Bool) : Nil
-    chosen = clauses.select { |clause| clause.number == target || clause.major.to_s == target }
+    chosen = clauses.select { |clause| spec_selected?(clause, target) }
     if chosen.empty?
       abort! "spec: #{target} is no clause or chapter of the spec; `#{Command.program_name} spec` lists them", :USAGE_ERROR
     end
@@ -646,6 +801,7 @@ class Iyi::Command
                   builder.field "version", clause.version
                   builder.field "status", status
                   builder.field "text", clause.text
+                  builder.field "todo", spec_reasons(clause, tests)
                   if marker = @spec_markers[clause.number]?
                     builder.field "marker", marker[2]
                   end
@@ -716,12 +872,12 @@ class Iyi::Command
       puts ".spec.lock: #{seeded} clause#{seeded == 1 ? "" : "s"} locked from tags"
       exit
     end
-    unless target && spec_number?(target, chapter_ok: true) && options.empty?
+    unless target && spec_target?(target) && options.empty?
       abort! "spec ack takes one clause or chapter: `#{Command.program_name} spec ack 1.3` or `ack 1`; " \
              "`ack --from-tags` locks the clauses whose tags match", :USAGE_ERROR
     end
     root, clauses, tests = spec_load_or_abort
-    chosen = clauses.select { |clause| clause.number == target || clause.major.to_s == target }
+    chosen = clauses.select { |clause| spec_selected?(clause, target) }
     if chosen.empty?
       abort! "spec ack: #{target} is no clause or chapter of the spec; `#{Command.program_name} spec` lists them", :USAGE_ERROR
     end
@@ -781,6 +937,7 @@ class Iyi::Command
 
   # A label matches the clause text, whole or cut as spec_label_line cuts it.
   private def spec_label_ok?(block : SpecBlock, clause : SpecClause) : Bool
+    return block.label.nil? if spec_owner?(block)
     label = block.label || return false
     head = "spec #{clause.number}  # "
     label == clause.text || label == spec_label_line(clause.number, clause.text)[head.size..]
@@ -867,7 +1024,7 @@ class Iyi::Command
           end
         end
       end
-      unless recorded.includes?("#{clause.number}@#{clause.version}")
+      unless spec_module_id?(clause.number.rpartition('.')[0]) || recorded.includes?("#{clause.number}@#{clause.version}")
         failures << {"#{clause.number}: no CHANGELOG.md entry records #{clause.number}@#{clause.version}",
                      "add `## #{Time.local.to_s("%Y-%m-%d")} · #{clause.number}@#{clause.version}` to CHANGELOG.md with the reason"}
       end
@@ -895,6 +1052,7 @@ class Iyi::Command
     end
     _root, clauses, tests = spec_load_or_abort
     todos = tests.select(&.todo)
+    blocks = @spec_blocks.reject(&.reasons.empty?)
     markers = clauses.select { |clause| @spec_markers.has_key?(clause.number) }
     if json
       JSON.build(STDOUT) do |builder|
@@ -907,6 +1065,15 @@ class Iyi::Command
                   builder.field "clauses" { builder.array { builder.scalar clause.number } }
                   builder.field "file", "#{marker[0]}:#{marker[1]}"
                   builder.field "reason", marker[2]
+                end
+              end
+              blocks.each do |block|
+                block.reasons.each do |reason|
+                  builder.object do
+                    builder.field "clauses", [block.number]
+                    builder.field "file", "#{block.path}:#{block.line}"
+                    builder.field "reason", reason
+                  end
                 end
               end
               todos.each do |test|
@@ -930,7 +1097,12 @@ class Iyi::Command
         clauses = test.items.empty? ? "-" : test.items.map(&.[0]).join(",")
         puts "#{clauses.ljust(10)}#{test.path}: #{test.todo}"
       end
-      total = todos.size + markers.size
+      blocks.each do |block|
+        block.reasons.each do |reason|
+          puts "#{block.path}:#{block.line} #{block.number} #{reason}"
+        end
+      end
+      total = todos.size + markers.size + blocks.sum(&.reasons.size)
       puts "#{total} todo test#{total == 1 ? "" : "s"}"
     end
     exit
@@ -939,8 +1111,8 @@ class Iyi::Command
   private def spec_usage : String
     name = Command.program_name
     <<-USAGE
-      Usage: #{name} spec [N | N.M] [--json]
-             #{name} spec ack N[.M] | --from-tags
+      Usage: #{name} spec [N | N.M | MODULE | MODULE.N] [--json]
+             #{name} spec ack N[.M] | MODULE[.N] | --from-tags
              #{name} spec todo [--json]
 
       Link the spec's clauses (SPEC.md or spec/*.md at the root) to their
@@ -952,16 +1124,17 @@ class Iyi::Command
           (none)     one line per clause: status, proofs, first words;
                      then the counts. Status: ok, todo, to review,
                      uncovered, unversioned
+          MODULE[.N] a module or its clause; ids follow paths under src/
           N, N.M     that chapter or clause: text, version, changelog
                      entries, the proofs naming it
           ack N[.M]  after reviewing the proofs: .spec.lock takes the
                      clause's version (tags naming it too)
           ack --from-tags
                      lock each clause whose tags all match it
-          todo       every todo test or SPEC.md marker: clause, file, reason
+          todo       every todo block, test or marker: clause, file, reason
 
       `#{name} check spec` fails on an unreviewed clause, a tag, block or
-      lock line naming no clause, a version no CHANGELOG.md entry
+      lock line naming no clause, a root version no CHANGELOG.md entry
       records, a clause with no proof and a stale block label
       (`#{name} check --fix` writes labels).
       USAGE

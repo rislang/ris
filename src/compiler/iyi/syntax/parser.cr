@@ -267,7 +267,7 @@ module Iyi
       location = @token.location
       source_start = current_pos - "spec".bytesize
       rest = ris_rest_of_line
-      match = rest.match(/\A[ \t]+(\d+(?:\.\d+)+)[ \t]*(?:#[ \t]*(.*?))?[ \t]*\z/)
+      match = rest.match(/\A[ \t]+(\d+(?:\.\d+)+|[a-z_][a-z0-9_]*(?:\/[a-z_][a-z0-9_]*)*\.[1-9][0-9]*)[ \t]*(?:#[ \t]*(.*?))?[ \t]*\z/)
       unless match
         raise ris_spec_shape_error(rest), @token
       end
@@ -378,7 +378,7 @@ module Iyi
           statements = ris_block_statements(node)
           statements.each_with_index do |statement, index|
             if ris_todo_call?(statement)
-              if later = statements[index + 1]?
+              if later = statements[(index + 1)..].find { |node| !ris_todo_call?(node) }
                 raise "nothing runs after `todo`; move it to the end of the " \
                       "block", later.location || statement.location.not_nil!
               end

@@ -57,6 +57,20 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.
 
+### 2026-11-13 · 6.7@10750e35 6.8@82707d6b 8.2@ddd1640f
+
+* New: a std module's promises are clauses in its own file, a
+  `# json.3 text` comment above its `spec json.3` block (8.2). Module
+  clauses join `ris spec`, `ris check spec` and .spec.lock (6.7, 6.8);
+  a block may end in several `todo` lines and their reasons are listed.
+  Module clause versions need no CHANGELOG entry. No std clause has
+  moved yet.
+  Why: src/std/SPEC.md held 967 clauses no tool read, apart from their
+  proofs. Draft and EGM review: doc/drafts/std-spec/. The review made
+  discovery general under src/, defined module collisions and orphan
+  comments, kept every todo reason, made number reuse a review rule
+  helped by ack's `removed:` line, and set the per-module order.
+
 ### 2026-11-11 · 8.1@5897720c
 
 * New: std modules follow the standard named by their header; spec 8.1

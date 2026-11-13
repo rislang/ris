@@ -8,6 +8,11 @@ back.
 
 ## To take to iyi
 
+* Module clause tooling: MODULE.N ids from owning comments under src/,
+  ordered trailing todo reasons, module review targets and lock ordering.
+  This extends ris's spec blocks without depending on tape. Gate:
+  test/cli/spec_modules.sh.
+
 * Unused checks retain callers from both the plain program and spec
   blocks, using `build --spec` setup for the latter. Files without spec
   blocks keep the plain analysis. Generated spec program runners are
