@@ -986,7 +986,7 @@ strip_quotient = BigDecimal.new("0")
 3.times do
   strip_started = __iyi_monotonic_ns
   strip_hash = BigDecimal.new("1." + "0" * 40000).hash
-  strip_quotient = BigDecimal.new("3").div(BigDecimal.new("3"), 40000)
+  strip_quotient = BigDecimal.new("3").div(BigDecimal.new("3"), 40000).copy_to(Program.tape)
   stripped = __iyi_monotonic_ns
   (BigInt.new(10) ** 40000).to_s
   printed = __iyi_monotonic_ns

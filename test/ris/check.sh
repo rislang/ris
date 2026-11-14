@@ -119,7 +119,7 @@ expect construct_text_growth 'grow after new'
 
 # A module's top level grows a String local in place, as a def does.
 out=$("$RIS" run test/ris/module_text_growth.ri 2>&1)
-if [ "$?" -eq 0 ] && [ "$out" = '205 012' ]; then
+if [ "$?" -eq 0 ] && [ "$out" = $'205 012\n012\n123\n78' ]; then
   echo 'runs     module_text_growth'
 else
   echo "FAILED   module_text_growth: $out"; status=1
@@ -3528,6 +3528,18 @@ for pair in 'number_exercise|all number checks passed' \
     echo "FAILED   cli $name: $(tail -5 <<<"$out")"; status=1
   fi
   rm -rf "$(dirname "$bin")"
+done
+
+# test/cli programs that once built and then were refused unseen: the
+# checker must still accept them whole (every refusal reported).
+for name in std_big_exercise std_websocket_exercise; do
+  if out=$(RIS_SCOPE_ERRORS=all "$RIS" build --no-codegen \
+      "test/cli/$name.ri" 2>&1); then
+    echo "builds   cli $name"
+  else
+    echo "FAILED   cli $name: build: $(grep -m3 -e '^refused' -e '^Error' \
+      <<<"$out")"; status=1
+  fi
 done
 
 # Run heap workloads after the other gates to avoid compiler contention.

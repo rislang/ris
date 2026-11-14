@@ -1,10 +1,38 @@
 # spec: 1.5@9935f4c7
 # A module's top level grows a String local in place, as a def does: one
-# started from a literal and appended to in a block (SPEC 1.5).
+# started from a literal and appended to in a block, or assigned in a
+# block round and appended to there (SPEC 1.5).
 module test/ris/module_text_growth
+
+def piece(i : Int32) : String
+  i.to_s
+end
 
 text = "head:"
 100.times { |i| text << "ab" }
 count = ""
 3.times { |i| count << i }
 puts "#{text.bytesize} #{count}"
+# A local a block round assigns, appended in a loop in that round.
+2.times do |r|
+  head = ""
+  i = 0
+  while head.bytesize < 3
+    head << piece(i + r)
+    i += 1
+  end
+  puts head
+end
+# The same in a task: the task's own local, not its spawner's.
+group do |g|
+  g.spawn do
+    line = ""
+    i = 0
+    while line.bytesize < 2
+      line << piece(i + 7)
+      i += 1
+    end
+    puts line
+    0
+  end
+end

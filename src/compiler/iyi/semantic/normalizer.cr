@@ -498,6 +498,40 @@ module Iyi
     @ris_growing_fields = Set(String).new
     @ris_text_reassigned = Set(String).new
 
+    # Names assigned inside a `tape do` block, which lowers its own text.
+    class TapeBlockNames < Visitor
+      getter names = Set(String).new
+      @depth = 0
+
+      def visit(node : Call)
+        node.obj.try &.accept(self)
+        node.args.each &.accept(self)
+        node.named_args.try &.each &.value.accept(self)
+        if block = node.block
+          tape = node.name == "tape" && node.obj.nil?
+          @depth += 1 if tape
+          block.body.accept(self)
+          @depth -= 1 if tape
+        end
+        false
+      end
+
+      def visit(node : Assign)
+        if @depth > 0 && (target = node.target).is_a?(Var)
+          @names << target.name
+        end
+        true
+      end
+
+      def visit(node : Def | ClassDef | ModuleDef | Macro)
+        false
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
     # Scan before normalization introduces temporaries and rebinding calls.
     class GrowingTextScan < Visitor
       getter locals = Set(String).new
@@ -810,15 +844,20 @@ module Iyi
       scan = GrowingTextScan.new
       body.accept(scan)
       @ris_growing_locals = scan.locals
-      # A module unit: only a local its own top level assigns; one a block
-      # assigns (`tape do`) keeps that block's lowering.
+      # A module unit grows a local a block assigns too (`head = ""` in a
+      # task, appended in a loop), as a def does; one a `tape do` block
+      # assigns keeps that block's lowering, freed with each round.
       unless builders
+        taped = TapeBlockNames.new
+        body.accept(taped)
         statements = body.is_a?(Expressions) ? body.expressions : [body]
         direct = statements.compact_map do |e|
           target = e.as?(Assign).try(&.target)
           target.as?(Var).try(&.name)
         end
-        @ris_growing_locals &= direct.to_set
+        @ris_growing_locals.reject! do |name|
+          !direct.includes?(name) && taped.names.includes?(name)
+        end
       end
       # Lend only a local assigned once: a rebinding (`kept = x.copy_to(...)`
       # in a tape block) must keep its own lowering and lifetime checks.
