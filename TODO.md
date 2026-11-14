@@ -17,9 +17,6 @@ How to work (fewer tokens, faster to the goal):
 What CHANGELOG's 0.1.0 promises must work; the items stay in their
 sections below and are listed here in order:
 
-* Checking time per nested block: testing_test.ri now checks in 16 s;
-  time web/static_test.ri once it builds (it fails: web/spec import
-  before the first `spec` block, a web-side change).
 * Benches build (section 7), including `HTTP.tls_config=` callers.
 * Release: Linux tarball and its job, `install_ris.sh`, tag ris-v0.1.0;
   `ris --version` prints 0.1.0.
