@@ -1,4 +1,4 @@
-# spec: 5.1@610b0d22
+# spec: 5.1@b5c69786
 # Sockets: runtime verification exercise.
 #
 #   ./bin/ris run test/cli/socket_exercise.ri

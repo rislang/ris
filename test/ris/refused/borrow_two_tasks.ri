@@ -1,0 +1,22 @@
+# Two tasks of one group capture the same lent value.
+class TwoLog
+  @text : String::Builder
+
+  def initialize
+    @text = String::Builder.new(64)
+  end
+
+  def add(line : String) : Nil
+    @text << line
+  end
+end
+
+def run(log : TwoLog) : Nil
+  group do |g|
+    g.spawn { log.add("one"); 0 }
+    g.spawn { log.add("two"); 0 }
+    0
+  end
+end
+
+run(TwoLog.new)

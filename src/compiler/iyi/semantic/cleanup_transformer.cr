@@ -810,10 +810,8 @@ module Iyi
           # std's reviewed exceptions name the owner that joins the task
           # before the captured value's tape ends.
           next if @joined_task_blocks.includes?(a_def) && task_closure_unsafe_scope?
-          if type.to_s.in?("Std::Socket::IyiSocket",
-               "Std::Io::PipeReader", "Std::Io::PipeWriter") &&
-             (call = @joined_task_calls[a_def]?) &&
-             handed_off?(call, captured, meta)
+          if (call = @joined_task_calls[a_def]?) &&
+             taken?(call, captured, meta, type)
             next
           end
           captured.raise "this block becomes a proc, which may run after " \
@@ -907,7 +905,7 @@ module Iyi
           next if meta.belongs_to?(a_def)
           type = meta.type?
           next unless type
-          if (why = Iyi::Share.reason(type)) && !(thread == LOCAL_BOUNDARY && handed_off?(node, captured, meta))
+          if (why = Iyi::Share.reason(type)) && !(thread == LOCAL_BOUNDARY && (lent?(node, captured, meta) || handed_off?(node, captured, meta)))
             captured.raise "#{subject} captures `#{captured.name} : #{type}`, which is not Share: #{why}#{owning || thread == LOCAL_BOUNDARY ? "; " : " "}#{consequence}"
           end
           # A block behind a lock runs in the task that called it, so a
@@ -1018,6 +1016,55 @@ module Iyi
         region.is_a?(Block) && region.args.size == 1 &&
           region.args[0].type?.to_s == "IyiGroup"
       end
+    end
+
+    # ris: resources a local task may be handed (SPEC 5.1); any other tape
+    # value is lent to it instead (`lent?`). The Share check hands off any
+    # value, as before, or lends it.
+    HANDED_TYPES = {"Std::Socket::IyiSocket", "Std::Udp::UdpSocket",
+                    "Std::Io::PipeReader", "Std::Io::PipeWriter"}
+
+    private def taken?(start : Call, captured : Var, meta : MetaVar, type : Type) : Bool
+      return handed_off?(start, captured, meta) if type.to_s.in?(HANDED_TYPES)
+      lent?(start, captured, meta)
+    end
+
+    # ris: a value of the spawner's scope lent to one task of a `group do
+    # |g|` block (SPEC 5.1): set before the group, named by nothing else
+    # inside it - not the spawner, not a second task - and the spawner's
+    # again once the group has joined. Aliases and keeping calls before
+    # the spawn refuse, as for a hand-off. False when it is no loan.
+    private def lent?(start : Call, captured : Var, meta : MetaVar) : Bool
+      scope = meta.context
+      body, vars = case scope
+                   when Def, Block then {scope.body, scope.vars}
+                   else                 {@top_level, @program.vars}
+                   end
+      walk = CaptureAssignments.new(@program, meta, start, vars)
+      body.try &.accept(walk)
+      return false unless walk.found_start?
+      regions = walk.start_regions
+      return false if regions.empty?
+      return false unless regions.all? do |region|
+                            region.is_a?(Block) && region.args.size == 1 &&
+                              region.args[0].type?.to_s == "IyiGroup"
+                          end
+      group = regions.first
+      # Made inside the group (in a `tape do` there, say), it may end
+      # before the task does.
+      return false if walk.assigns.any? { |entry| entry[1].any?(&.same?(group)) }
+      if copy = walk.aliases.first?
+        copy.raise "`#{copy.target} = #{copy.value}` keeps a second name for the value lent to the task spawned at line #{start.location.try(&.line_number)}: the task borrows it until its group ends (SPEC 5.1). Use `#{captured.name}` alone"
+      end
+      walk.passed.each do |call, index|
+        next unless via = KeptArgument.new(@program).keeps?(call, index)
+        call.raise "`#{call}` may keep `#{captured.name}` (through `#{via}`) before it is lent to the task spawned at line #{start.location.try(&.line_number)}: the task borrows it until its group ends (SPEC 5.1). Make the call after the group, or inside the task"
+      end
+      walk.uses.each_with_index do |use, i|
+        next unless walk.use_regions[i].any?(&.same?(group))
+        use.raise "`#{captured.name}` is named here, inside the group whose task spawned at line #{start.location.try(&.line_number)} borrows it: the task has it until the group ends (SPEC 5.1). Use it after the group, or in that task alone"
+      end
+      true
     end
 
     # A def marked `@[TaskClosureUnsafe("…")]` names the owner that joins
@@ -1533,6 +1580,8 @@ module Iyi
       getter assigns = [] of {ASTNode, Array(ASTNode), Bool}
       getter start_regions = [] of ASTNode
       getter uses = [] of Var
+      # ris: the regions each use sits in, parallel to `uses`.
+      getter use_regions = [] of Array(ASTNode)
       getter aliases = [] of Assign
       getter? found_start = false
 
@@ -1658,6 +1707,7 @@ module Iyi
       def visit(node : Var)
         if @found_start && @scopes.last.try(&.[node.name]?).same?(@meta)
           @uses << node
+          @use_regions << @regions.dup
         end
         false
       end

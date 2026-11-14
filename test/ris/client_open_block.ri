@@ -1,0 +1,10 @@
+# HTTPClient#open with a block: the exchange holds the caller's client, and
+# the client keeps its idle connection under its own key text. That key
+# is the client's, not the exchange's scratch (it once read as "cannot
+# store a view beyond its owner scope"). Port 1 refuses: silent.
+import std/http::{HTTP, HTTPClient}
+
+client = HTTPClient.new
+got = client.open("GET", "http://127.0.0.1:1/") { |answer| answer.status }
+raise "port 1 answered #{got}" if got.is_a?(Int32)
+client.close

@@ -416,6 +416,17 @@ module Iyi::TapeScopeRuntime
 
   @@library_roots : Array(String)? = nil
 
+  # A std file (`src/std/` or `std/` under an `RIS_PATH` entry, as a
+  # bench's patched copy of std is), not the runtime.
+  def self.std_file?(filename : String) : Bool
+    filename = filename.gsub('\\', '/')
+    return true if filename.includes?("/src/std/")
+    return false if filename.includes?("/src/ris/")
+    return false unless library_file?(filename)
+    full = filename.starts_with?('/') ? filename : File.expand_path(filename).gsub('\\', '/')
+    @@library_roots.not_nil!.any? { |root| full.starts_with?(root + "std/") }
+  end
+
   # The prelude where it was loaded from, which a test may copy out of
   # `src/ris/` to change it.
   def self.prelude?(program : Program, location : Location?) : Bool

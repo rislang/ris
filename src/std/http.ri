@@ -3710,8 +3710,8 @@ pub class HTTPClient
       redirects, jar, decompress, self, @timeout_ms, @proxy)
   end
 
-  def open(method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", redirects : Int32 = 10, jar : CookieStore? = nil, decompress : Bool = true, &block : Response -> R) : R | Cancelled | SocketError | HTTPError forall R
-    HTTP.open(method, url, headers, body, redirects, jar, decompress, self, @timeout_ms, @proxy) { |response| block.call(response) }
+  def open(method : String, url : String, headers : Hash(String, String) = {} of String => String, body : String | IyiIO = "", redirects : Int32 = 10, jar : CookieStore? = nil, decompress : Bool = true, & : Response -> R) : R | Cancelled | SocketError | HTTPError forall R
+    HTTP.open(method, url, headers, body, redirects, jar, decompress, self, @timeout_ms, @proxy) { |response| yield response }
   end
 
   def get(url : String, headers : Hash(String, String) = {} of String => String) : Response | Cancelled | SocketError | HTTPError
@@ -4173,11 +4173,11 @@ struct RisParsedResponse
       start = split_at + 4
       if status >= 100 && status < 200 && status != 101 && start < text.bytesize
         why = HTTP.validate_response_fields(lines)
-        raise why if why
+        raise "HTTP: " + why if why
         next
       end
       why = HTTP.fields_into(held, lines, true)
-      raise why if why
+      raise "HTTP: " + why if why
       break
     end
     body = text[start, text.bytesize - start]
@@ -6456,6 +6456,7 @@ end
 # part that holds it is refused.
 pub class MultipartBuilder
   @boundary : String?
+  @sealed = false
   @parts : Array({String, String?, String?, String})
 
   def initialize(boundary : String? = nil)
@@ -6466,10 +6467,13 @@ pub class MultipartBuilder
     @parts = [] of {String, String?, String?, String}
   end
 
+  # The chosen boundary is made again from the parts each time it is
+  # asked for (it is theirs alone); `@sealed` says it was asked for.
   def boundary : String
-    if chosen = @boundary
-      return chosen
+    if given = @boundary
+      return given
     end
+    @sealed = true
     digest = SHA1.new
     @parts.each do |part|
       digest.update(part[0])
@@ -6477,12 +6481,13 @@ pub class MultipartBuilder
       digest.update(part[2] || "")
       digest.update(part[3])
     end
-    chosen = "iyi-" + digest.hexfinal[0, 32]
-    while @parts.any? { |part| MultipartBuilder.holds?(part[3], chosen) }
-      chosen = "iyi-" + SHA1.hexdigest(chosen)[0, 32]
-    end
-    @boundary = chosen
-    chosen
+    MultipartBuilder.clear_of(@parts, "iyi-" + digest.hexfinal[0, 32])
+  end
+
+  # *mark*, or the first of its rehashes that no part holds.
+  protected def self.clear_of(parts : Array({String, String?, String?, String}), mark : String) : String
+    return mark unless parts.any? { |part| MultipartBuilder.holds?(part[3], mark) }
+    MultipartBuilder.clear_of(parts, "iyi-" + SHA1.hexdigest(mark)[0, 32])
   end
 
   def content_type : String
@@ -6518,8 +6523,8 @@ pub class MultipartBuilder
   end
 
   private def add(name : String, filename : String?, type : String?, data : String) : self
-    if mark = @boundary
-      raise "HTTP: a multipart part's data holds its boundary" if MultipartBuilder.holds?(data, mark)
+    if @sealed || @boundary
+      raise "HTTP: a multipart part's data holds its boundary" if MultipartBuilder.holds?(data, boundary)
     end
     if kind = type
       raise "HTTP: a part's Content-Type contains a line break" if HTTP.has_break?(kind)

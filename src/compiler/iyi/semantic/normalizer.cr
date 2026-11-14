@@ -714,7 +714,7 @@ module Iyi
       return true if ris_program_code?(node)
       return false unless program.iyi_prelude?
       file = node.location.try(&.original_filename.try(&.gsub('\\', '/'))) || ""
-      file.includes?("/src/std/") && file.ends_with?(".ri")
+      TapeScopeRuntime.std_file?(file) && file.ends_with?(".ri")
     end
 
     private def refuse_plain_builders(body : ASTNode) : Nil

@@ -1,0 +1,35 @@
+# A holder that keeps a view of an owner's bytes (not the owner itself)
+# still sees them shrink: test/ris/owner_reference.ri's reference rule
+# does not hide this read after the refill.
+
+class ViewInner
+  @text : String::Builder
+
+  def initialize
+    @text = String::Builder.new(16)
+  end
+
+  def refill(text : String) : Nil
+    @text.clear
+    @text << text
+  end
+
+  def view : String
+    @text.finish
+  end
+end
+
+class ViewKeeper
+  def initialize(@seen : String)
+  end
+
+  def seen : String
+    @seen
+  end
+end
+
+inner = ViewInner.new
+inner.refill("abc")
+keeper = ViewKeeper.new(inner.view)
+inner.refill("de")
+puts keeper.seen

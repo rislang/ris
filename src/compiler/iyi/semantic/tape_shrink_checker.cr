@@ -12,7 +12,7 @@ class Iyi::TapeShrinkChecker
     procs : Array(ProcLiteral) = [] of ProcLiteral,
     unknown_proc : Bool = false
   record Use, views : Array(View), node : ASTNode, guards : Guards,
-    holder : String = ""
+    holder : String = "", roots : Array(UInt64) = [] of UInt64
   record Shrink, roots : Array(UInt64), at : Int32, node : Call, chain : String,
     guards : Guards, growth : Bool = false, last_use : Int32? = nil
   record Summary, seeds : Array(UInt64), shrinks : Hash(UInt64, String), result : Value,
@@ -387,9 +387,15 @@ class Iyi::TapeShrinkChecker
 
   private def source_scope(root : UInt64) : Array(UInt64)
     declaration = root
+    object = false
     while parent = @parents[declaration]?
       declaration = parent[0]
+      object ||= @parents.has_key?(declaration) && object_type?(field_type(declaration))
     end
+    # Storage reached through a field holding an object (an exchange's
+    # @client, the caller's HTTPClient) is that object's, which the holder
+    # references and does not own: no scope of the holder's ends it.
+    return [] of UInt64 if object
     type = @root_types[declaration]?
     # A copied tape handle's header is not the owner of its bytes. Only
     # named owners introduce a shorter lifetime than the caller's tape;
@@ -484,6 +490,9 @@ class Iyi::TapeShrinkChecker
       end
       parent = @parents[declaration]?
       return nil unless parent
+      # An object a field holds is referenced, not made on the holder's
+      # tape (see source_scope).
+      return nil if declaration != root && object_type?(field_type(declaration))
       declaration = parent[0]
     end
   end
@@ -1504,7 +1513,9 @@ class Iyi::TapeShrinkChecker
           next if (last = shrink.last_use) && i >= last
           next unless compatible?(shrink.guards, use.guards)
         end
-        if live = use.views.find { |view| !(shrink.growth && view.index) && view.born <= shrink.at && compatible?(view.guards, shrink.guards) && contains_root?(shrink.roots, view.root) }
+        # A holder used whole carries its fields' storage; what it holds
+        # through an object reference is that object's own to refill.
+        if live = use.views.find { |view| !(shrink.growth && view.index) && view.born <= shrink.at && compatible?(view.guards, shrink.guards) && contains_root?(shrink.roots, view.root) && !through_object?(view.root, use.roots, object_type?(use.node.type?)) }
           action = shrink.growth ? "grow a pool run" : "shrink tape storage"
           shrink.node.raise "cannot #{action} with a live view " \
                             "of #{root_name(live.root)} while shrinking " \
@@ -2704,7 +2715,7 @@ class Iyi::TapeShrinkChecker
   end
 
   private def use(v : Value, node : ASTNode, holder = "")
-    @uses << Use.new(v.views, node, @guards.dup, holder)
+    @uses << Use.new(v.views, node, @guards.dup, holder, v.roots)
   end
 
   private def proc_type_uncached(type : Type?) : Bool
@@ -2726,6 +2737,31 @@ class Iyi::TapeShrinkChecker
     Value.new(input.roots,
       (input.views + borrowed.map { |root| view(root) }).uniq,
       input.procs, input.unknown_proc)
+  end
+
+  # Whether *root* is a field path that passes through a field holding a
+  # class instance, under one of *tops* (the value used) or anywhere when
+  # the value used is itself an object (*whole*): a holder used whole (an
+  # AcmeClient over the caller's HTTPClient, or that HTTPClient) keeps a
+  # reference to that object, not a view of its storage, which the object
+  # refills through its own methods.
+  private def through_object?(root : UInt64, tops : Array(UInt64), whole : Bool) : Bool
+    current = root
+    object = false
+    while parent = @parents[current]?
+      above = parent[0]
+      return object if tops.includes?(above)
+      object ||= @parents.has_key?(above) && object_type?(field_type(above))
+      current = above
+    end
+    whole && object
+  end
+
+  private def object_type?(type : Type?) : Bool
+    return false unless type
+    type = type.remove_typedef
+    members = type.is_a?(UnionType) ? type.union_types : [type]
+    members.any? { |member| TapeChecker.class_instance?(@program, member) }
   end
 
   # A local's growing text lives in its slot's reservation: it carries the

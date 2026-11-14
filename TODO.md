@@ -185,10 +185,53 @@ Unknown must be refused (SPEC 3.6).
   struct) and `fix printed its edit` (split.ri already clean).
 
 * Build each test/cli program, group refusals by message, fix per group.
-  2026-11-14 (fourth round): 114 of 130 programs pass
-  `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 16 fail (112
-  after the third round, 107 after the second, 100 before the first).
+  2026-11-14 (fifth round): 114 of 130 programs pass
+  `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 16 fail (114
+  after the fourth round, 112 after the third, 107 after the second,
+  100 before the first). http joined; big (std_big_exercise.ri:989, a
+  BigDecimal kept from a times block) and websocket (:1606, a loop
+  round's store) fail since the main merge of 2026-11-14, before this
+  round's changes.
   Names omit std_ and _exercise where present; each failure appears once.
+
+  Fifth round (checker questions): http builds. The String to Builder
+  lowering covers std under an RIS_PATH entry's std/ (test/ris/
+  patched_std_lowering.sh). `server_reads` is a socket round trip to a
+  server whose handler describes the request; the 2 GB chunk is now a
+  413 (the server refuses it before it arrives). The test's
+  IyiThread servers became group tasks (program tape writes need one
+  thread), `x = x + piece` loops became `<<` in defs (gather, drain,
+  body_pieces: growth in a task block is not lowered, a compiler bug
+  left open). std fixes: MultipartBuilder's chosen boundary was a def's
+  scratch kept in a field (now made again from the parts each time);
+  a response head's field error lacked "HTTP: ". Checker: a holder used
+  whole no longer counts as a live view of storage it reaches through
+  an object field (test/ris/owner_reference.ri; refused/
+  owner_reference_view.ri keeps a real view refused), and such storage
+  is not the holder's scope or tape (test/ris/client_open_block.ri:
+  HTTPClient#open with a block). SPEC 5.1: a joined task may borrow one
+  value of its spawner (doc/drafts/joined-task-borrow/), UdpSocket may
+  be handed off. A compiler built from the same commit reuses
+  ~/.cache/ris check results: set RIS_CACHE_DIR to a fresh dir when
+  testing a checker change.
+  Left, with their cause:
+  - acme: past the read-after-shrink; now ~15 retained-def-data sites in
+    acme.ri (from, new_order, finalize_order, post, take_nonce, object,
+    problem), x509.ri:1716 from_pem and the test's request_fields: a
+    port, as big's was.
+  - autocert: tls.ri:6626 and :7005 (`identity_for` returns an owner)
+    and the test at line 40.
+  - tls: the group tasks borrow their config and answer through
+    `value`; left: `crafted`'s `Array({Int32, Array(UInt8)})` is a
+    runtime-sized collection of growing values (SPEC 2.2).
+  - http_https_records: the UdpSocket is handed off; left: `zone` is
+    shared mutable state between the DNS task and the checks (the
+    spawner sets `zone.https` while the task answers): RisBoard messages.
+  - fuzz: no parse_request left; TLS API drift as before, plus
+    `Server.handle` private and `String#compare`.
+  - The checker questions toml/yaml, zip, router, file, log/ocsp/x509
+    and iterator: design draft doc/drafts/checker-open-questions/
+    (EGM-reviewed, not implemented).
 
   Fourth round (the TLS-owner group): benchmark and websocket build.
   benchmark: bm and ips answer Nil, Tms and Entry are `@[OnTape]`
@@ -236,11 +279,10 @@ Unknown must be refused (SPEC 3.6).
   keep a block's values with `.copy_to(Program.tape)`. A top-level
   local named like a block's local (z, feed, x, key) makes the block's
   store refused at a line that does not say so: renamed.
-  tar.sh's mutation copies sit under patched/src/std (the String to
-  Builder lowering is for "/src/std/" paths only; 70 other .sh files
-  copy into patched/std and their mutation builds may fail the same
-  way); the "read after the reader moved on" refusal is now a build
-  refusal.
+  The String to Builder lowering now applies to std under any RIS_PATH
+  entry's std/ (fifth round), so tar.sh's mutation copies sit under
+  patched/std as the other .sh files' do; the "read after the reader
+  moved on" refusal is now a build refusal.
   The p256 and big tests' hex helpers appended `"0123456789abcdef"[i]`,
   a byte, as its decimal number: now `[i, 1]`.
   Built but failing at run time: hpke passes its plain build; its
@@ -324,10 +366,9 @@ Unknown must be refused (SPEC 3.6).
 
   Known outside this round: format fails on main; text panics at
   "string: chomp cr".
-* std_http_exercise's and std_fuzz's parse checks call
-  `Server.parse_request`, gone with `Request`: read through
-  `Server.parse_head` or a socket round trip. Most of
-  std_http_exercise.sh's mutation patterns no longer match http.ri.
+* Most of std_http_exercise.sh's mutation patterns no longer match
+  http.ri. Its program builds (fifth round) and fails at run time at "a
+  HEAD names the coding its GET would have, and writes no body".
 
 ## 8. Speed
 

@@ -149,7 +149,11 @@ section; a removed one leaves its number unused.
   A local task may take one value handed off: spawned once in its group
   block, never read or assigned by the spawner after the spawn; the task
   then owns it (an accepted socket, a pipe end), and no second local names
-  it, nor a call before the spawn that may keep it. Task handles are
+  it, nor a call before the spawn that may keep it. Any other value of
+  the spawner's scope, set before its group block, may be lent to one
+  task of that block: nothing else in the block names it after the
+  spawn, nor a second task; it is the spawner's again once the group
+  joins. A parallel task or thread borrows nothing. Task handles are
   Share. The block and the program methods and procs it calls (any proc
   of a called type) change no class variable or constant; a local task
   may set a scalar class variable (its spawner's thread), a thread may not.

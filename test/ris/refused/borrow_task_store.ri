@@ -1,0 +1,27 @@
+# A task keeps text it made on its own tape in the owner it borrowed: the
+# task's tape ends with the task, the owner lives on.
+class StoreLog
+  @last : String = ""
+
+  def keep(line : String) : Nil
+    @last = line
+  end
+
+  def last : String
+    @last
+  end
+end
+
+def run(log : StoreLog) : Nil
+  group do |g|
+    g.spawn do
+      made = "task " + 42.to_s
+      log.keep(made)
+      0
+    end
+    0
+  end
+  puts log.last
+end
+
+run(StoreLog.new)

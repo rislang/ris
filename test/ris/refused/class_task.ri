@@ -1,3 +1,5 @@
+# A class instance captured by two tasks of one group: one task may
+# borrow it (SPEC 5.1), not two.
 class TaskValue
   getter n : Int32
 
@@ -7,5 +9,6 @@ end
 
 value = TaskValue.new(1)
 group do |g|
+  g.spawn { puts value.n }
   g.spawn { puts value.n }
 end

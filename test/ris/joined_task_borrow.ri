@@ -1,0 +1,39 @@
+# spec: 5.1@b5c69786
+# A task of a group borrows an owner of its spawner's def (SPEC 5.1): the
+# def's parameter is lent to one task, unnamed elsewhere in the group,
+# and the def's again after the group joins. Silent on success.
+
+class BorrowLog
+  @text : String::Builder
+
+  def initialize
+    @text = String::Builder.new(64)
+  end
+
+  def add(line : String) : Nil
+    @text << line << "\n"
+  end
+
+  def size : Int32
+    @text.bytesize
+  end
+end
+
+def served(log : BorrowLog) : Int32
+  count = group do |g|
+    task = g.spawn do
+      log.add("from the task")
+      log.size
+    end
+    got = task.value
+    got.is_a?(Int32) ? got : -1
+  end
+  log.add("after the group")
+  count
+end
+
+log = BorrowLog.new
+log.add("before")
+seen = served(log)
+raise "the task saw #{seen} bytes" unless seen == 21
+raise "the log holds #{log.size} bytes" unless log.size == 37

@@ -251,7 +251,8 @@ class RisHttp6Handler
       end
       res.body << "#{total}"
     elsif req.path == "/whole"
-      res.body << req.body
+      whole = req.body_io.read_all
+      res.body << (whole.is_a?(String) ? whole : whole.message)
     elsif req.path == "/ignore"
       res.body << "ignored"
     elsif req.path == "/slow"
@@ -439,7 +440,6 @@ class RisHttp10Handler
       Params.parse(req.body).each { |name, value| form.add(name, value) }
       res.body << form.to_s
     elsif req.path == "/parts"
-      said = ""
       boundary = Multipart.boundary(req.header("Content-Type") || "")
       if boundary
         parts = Multipart.new(req.body_io, boundary)
@@ -449,16 +449,15 @@ class RisHttp10Handler
           break if part.nil?
           if part.is_a?(Part)
             data = part.read_all
-            said = said + "#{part.name || "-"}|#{part.filename || "-"}|#{part.content_type || "-"}|#{data.is_a?(String) ? data : data.message};"
+            res.body << (part.name || "-") << "|" << (part.filename || "-") << "|" << (part.content_type || "-") << "|" << (data.is_a?(String) ? data : data.message) << ";"
           else
-            said = said + "error: #{part.message}"
+            res.body << "error: " << part.message
             break
           end
         end
       else
-        said = "not multipart"
+        res.body << "not multipart"
       end
-      res.body << said
     else
       res.status = 404
       res.body << "no"
@@ -561,11 +560,12 @@ class RisHttp14Handler
   end
 
   def take_over(sock : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
-    said = leftover
+    said = ""
+    said << leftover
     while said.bytesize < 4
       got = sock.read(100)
       break unless got.is_a?(String) && got.bytesize > 0
-      said = said + got
+      said << got
     end
     sock.write("echo:" + said) if said.bytesize >= 4
   end
@@ -581,8 +581,48 @@ end
 
 # A single HTTP implementation serves the sequential scenarios. Only
 # copied scenario settings cross the task boundary; handlers stay local.
+class RisHttp15Handler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisExerciseServer.ready(RisHttpFactory)
+  end
+
+  # The request as the handler is handed it: method, path, query, each
+  # field once with its repeats joined by ", ", and the body.
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.body << req.method << " " << req.path << " ?" << (req.query || "-") << " "
+    fields = req.fields
+    i = 0
+    while i < fields.size
+      name = fields[i].name
+      first = true
+      j = 0
+      while j < i
+        first = false if HTTP.same_name?(fields[j].name, name)
+        j += 1
+      end
+      if first
+        res.body << name << "="
+        j = i
+        while j < fields.size
+          if HTTP.same_name?(fields[j].name, name)
+            res.body << ", " unless j == i
+            res.body << fields[j].value
+          end
+          j += 1
+        end
+        res.body << ";"
+      end
+      i += 1
+    end
+    res.body << " " << req.body.inspect
+  end
+end
+
 class RisHttpFactory
-  @handler : RisHttp1Handler | RisHttp2Handler | RisHttp3Handler | RisHttp4Handler | RisHttp5Handler | RisHttp6Handler | RisHttp7Handler | RisHttp8Handler | RisHttp9Handler | RisHttp10Handler | RisHttp11Handler | RisHttp12Handler | RisHttp13Handler | RisHttp14Handler
+  @handler : RisHttp1Handler | RisHttp2Handler | RisHttp3Handler | RisHttp4Handler | RisHttp5Handler | RisHttp6Handler | RisHttp7Handler | RisHttp8Handler | RisHttp9Handler | RisHttp10Handler | RisHttp11Handler | RisHttp12Handler | RisHttp13Handler | RisHttp14Handler | RisHttp15Handler
 
   def initialize(config : {Int32, String})
     @handler = case config[0]
@@ -614,6 +654,8 @@ class RisHttpFactory
                  RisHttp13Handler.new(0)
                when 14
                  RisHttp14Handler.new(0)
+               when 15
+                 RisHttp15Handler.new(0)
                else
                  raise "unknown HTTP exercise scenario"
                end
@@ -644,7 +686,7 @@ class RisHttpOtherFactory
   end
 end
 
-import std/http::{HTTP, HTTPClient, Response, Incoming, Outgoing, Server, HTTPError, Multipart, MultipartBuilder, Part, TlsStream, Upgraded}
+import std/http::{HTTP, HTTPClient, Response, Incoming, Outgoing, Server, HTTPError, Multipart, MultipartBuilder, Part, TlsStream, Upgraded, BodyReader}
 import std/socket::{IyiSocket, SocketError}
 import std/uri::{Params}
 import std/compress::{Gzip, Zlib, Deflate}
@@ -671,7 +713,7 @@ def read_request(conn : IyiSocket) : String | Cancelled | SocketError
     end
     chunk = conn.read(4096)!
     break if chunk.bytesize == 0
-    buf = buf + chunk
+    buf << chunk
   end
   buf
 end
@@ -695,7 +737,7 @@ def read_response(c : IyiSocket) : String
     end
     chunk = c.read(4096).or_panic
     raise "the server closed mid-response" if chunk.bytesize == 0
-    buf = buf + chunk
+    buf << chunk
   end
 end
 
@@ -705,7 +747,7 @@ def read_to_close(c : IyiSocket) : String
   while true
     chunk = c.read(4096).or_panic
     return buf if chunk.bytesize == 0
-    buf = buf + chunk
+    buf << chunk
   end
   buf
 end
@@ -728,7 +770,7 @@ def chunked(text : String) : String
   while i < text.bytesize
     n = text.bytesize - i
     n = 8 if n > 8
-    out = out + n.to_s + "\r\n" + text[i, n] + "\r\n"
+    out << n.to_s << "\r\n" << text[i, n] << "\r\n"
     i = i + n
   end
   out + "0\r\n\r\n"
@@ -737,37 +779,100 @@ end
 # What `work` answers, or "refused: <why>" when it raises: run as a task,
 # whose value catches the panic.
 def answer(&work : -> String) : String
-  said = "no answer"
   group do |g|
     task = g.spawn { work.call }
     case got = task.value
     in Panicked
-      said = "refused: " + got.message
+      "refused: " + got.message
     in String
-      said = got
+      got
     end
-    0
   end
-  said
 end
 
-# What the server makes of `text`: "<status> <why>" for a refusal, "more"
-# while a request is still arriving, or the request its block would be
-# handed.
+# What the server makes of `text` sent on a socket that then closes its
+# write side: "<status> <why>" for a refusal, "more" when the server
+# answered nothing, or the request its block was handed and whether the
+# connection is kept ("keep") or closed ("close").
 def server_reads(text : String) : String
-  answer do
-    parsed = Server.parse_request(text)
-    if req = parsed.request
-      heads = begin
-        io = ""; req.headers.each { |k, v| io << k << "=" << v << ";" }
-        io
-      end
-      "#{req.method} #{req.path} ?#{req.query || "-"} #{heads} #{req.body.inspect} #{parsed.close ? "close" : "keep"}"
-    elsif why = parsed.error
-      "#{parsed.status} #{why}"
-    else
-      "more"
+  port = RisExerciseServer.port
+  group do |g|
+    g.spawn do
+      RisExerciseServer.answer(port, {15, "".as_tape}, RisHttpFactory)
+      0
     end
+    RisExerciseServer.wait(RisHttpFactory)
+    raise "client text queue full" unless RisBoard.post(RisClientText.new(text))
+    client = g.spawn do
+      sent = RisBoard.take(RisClientText)
+      raise "cancelled" if sent.is_a?(Cancelled)
+      c = IyiSocket.connect("127.0.0.1", port).or_panic
+      c.write(sent.text)
+      c.close_write
+      got = drain(c)
+      c.close
+      RisExerciseServer.stop(RisHttpFactory)
+      wire_reads(got)
+    end
+    case got = client.value
+    in Panicked
+      "refused: " + got.message
+    in String
+      got
+    end
+  end
+end
+
+# What arrives on *c* until it ends, closes or fails.
+def drain(c : IyiSocket) : String
+  got = ""
+  while true
+    chunk = c.read(4096)
+    break unless chunk.is_a?(String)
+    break if chunk.bytesize == 0
+    got << chunk
+  end
+  got
+end
+
+# A streamed body read in pieces of 100 bytes, joined; *firsts* gets the
+# monotonic time the first piece came.
+def body_pieces(io : BodyReader, firsts : Array(Int64)) : String
+  joined = ""
+  while true
+    piece = io.read(100).or_panic
+    break if piece.bytesize == 0
+    firsts << __iyi_monotonic_ns if joined.empty?
+    joined << piece
+  end
+  joined
+end
+
+# *start* and what arrives on *c* after it, until there are *size* bytes
+# (when positive), the text ends in *ending* (when not empty), or *c*
+# ends, closes or fails.
+def gather(c : IyiSocket | TlsStream, start : String, size : Int32, ending : String) : String
+  got = ""
+  got << start
+  while true
+    break if size > 0 && got.bytesize >= size
+    break if !ending.empty? && got.includes?(ending)
+    chunk = c.read(4096)
+    break unless chunk.is_a?(String)
+    break if chunk.bytesize == 0
+    got << chunk
+  end
+  got
+end
+
+# A raw answer as server_reads says it.
+def wire_reads(got : String) : String
+  return "more" if got.empty?
+  res = HTTP.parse_response(got)
+  if res.status == 200
+    res.body + " " + (res.header("Connection") == "close" ? "close" : "keep")
+  else
+    res.status.to_s + " " + res.body.chomp
   end
 end
 
@@ -782,15 +887,35 @@ def formatted(status : Int32, body : String, name : String, value : String,
   ris_heap_text(Server.format_response(res, head, close))
 end
 
-# What the client makes of an answer: "<status> <reason> <headers> <body>".
+# An answer's text handed to the task that reads it.
+@[OnTape]
+struct RisClientText
+  getter text : String
+
+  def initialize(@text : String)
+  end
+end
+
+# What the client makes of an answer: "<status> <reason> <headers> <body>",
+# or "refused: <why>" when reading it panics. The text reaches the task
+# through the board: a task may capture no tape value of this def.
 def client_reads(text : String) : String
-  answer do
-    r = HTTP.parse_response(text)
-    heads = begin
-      io = ""; r.headers.each { |k, v| io << k << "=" << v << ";" }
-      io
+  raise "client text queue full" unless RisBoard.post(RisClientText.new(text))
+  group do |g|
+    task = g.spawn do
+      got = RisBoard.take(RisClientText)
+      raise "cancelled" if got.is_a?(Cancelled)
+      r = HTTP.parse_response(got.text)
+      heads = ""
+      r.headers.each { |k, v| heads << k << "=" << v << ";" }
+      "#{r.status} #{r.reason} #{heads} #{r.body.inspect}"
     end
-    "#{r.status} #{r.reason} #{heads} #{r.body.inspect}"
+    case got = task.value
+    in Panicked
+      "refused: " + got.message
+    in String
+      got
+    end
   end
 end
 
@@ -890,12 +1015,10 @@ puts "  a folded field is unfolded in an answer and refused in a request"
 # A body short of its Content-Length is a connection that ended early, as
 # a chunked body cut inside a chunk is: it was a whole 200 with the part
 # that came, a cut-off download read as a good one.
-short = "answered"
-group do |g|
+short = group do |g|
   cut = g.spawn { HTTP.parse_response("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\npartial"); 0 }
   outcome = cut.value
-  short = outcome.is_a?(Panicked) ? outcome.message.to_s : "answered"
-  0
+  outcome.is_a?(Panicked) ? outcome.message.to_s : "answered"
 end
 assert_str "HTTP: the body ended after 7 of its 100 bytes", short, "a short body is refused"
 puts "  a body short of its Content-Length is refused"
@@ -918,7 +1041,8 @@ puts "\n== messages at the edges"
 assert_str "400 chunked body: not a chunk size: \"zz\"", server_reads("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n"), "a chunk size that is not hexadecimal is a 400"
 assert_str "400 chunked body: a chunk is not followed by CRLF", server_reads("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabcXY"), "a chunk without its CRLF is a 400"
 # A chunk size near 2^31: where it ends passed Int32's, and the sum panicked.
-assert_str "more", server_reads("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n7fffffff\r\nab"), "a 2 GB chunk not here yet is waited for"
+# The server refuses it before it arrives, past its body limit.
+assert_str "413 chunked body past 67108864 bytes", server_reads("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n7fffffff\r\nab"), "a 2 GB chunk not here yet is a 413, not a panic"
 assert_str "refused: HTTP: chunked body ends inside a chunk", client_reads("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n7fffffff\r\nab"), "a 2 GB chunk cut short is refused as cut"
 puts "  a chunked body that is not one is a 400, and a 2 GB chunk size is a size"
 
@@ -1020,63 +1144,65 @@ puts "\n== over a socket"
 # is shared.
 listener = IyiSocket.listen(0)
 port = listener.local_port
-fd = listener
-server = IyiThread.start do
-  tape do
-    l = IyiSocket.new(fd)
-    i = 0
-    while i < 5
-      conn = l.accept.or_panic
-      saw = read_request(conn).or_panic
-      line = first_line(saw)
-      reply = if i == 0
-                "HTTP/1.1 200 OK\r\ncontent-length: #{saw.bytesize}\r\n\r\n" + saw
-              elsif i == 1
-                "HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n" + chunked(saw)
-              elsif i == 2
-                "HTTP/1.1 200 OK\r\nContent-Length: 99\r\nX-Request-Line: #{line}\r\n\r\n"
-              elsif i == 3
-                "HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw
-              else
-                has_length = saw.includes?("Content-Length") ? "yes" : "no"
-                "HTTP/1.1 204 No Content\r\nX-Request-Line: #{line}\r\nX-Request-Has-Length: #{has_length}\r\n\r\n"
-              end
-      conn.write(reply)
-      conn.close
-      i = i + 1
+fd = listener.fd
+group do |tg|
+  tg.spawn do
+    tape do
+      l = IyiSocket.new(fd)
+      i = 0
+      while i < 5
+        conn = l.accept.or_panic
+        saw = read_request(conn).or_panic
+        line = first_line(saw)
+        reply = if i == 0
+                  "HTTP/1.1 200 OK\r\ncontent-length: #{saw.bytesize}\r\n\r\n" + saw
+                elsif i == 1
+                  "HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n" + chunked(saw)
+                elsif i == 2
+                  "HTTP/1.1 200 OK\r\nContent-Length: 99\r\nX-Request-Line: #{line}\r\n\r\n"
+                elsif i == 3
+                  "HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw
+                else
+                  has_length = saw.includes?("Content-Length") ? "yes" : "no"
+                  "HTTP/1.1 204 No Content\r\nX-Request-Line: #{line}\r\nX-Request-Has-Length: #{has_length}\r\n\r\n"
+                end
+        conn.write(reply)
+        conn.close
+        i = i + 1
+      end
+      nil
     end
-    nil
   end
-end
 
-base = "http://127.0.0.1:#{port}"
-r = HTTP.get("#{base}/items?x=1").or_panic
-assert_true r.status == 200, "GET status"
-assert_true r.body.starts_with?("GET /items?x=1 HTTP/1.1\r\n"), "GET line with the query"
-assert_true r.body.includes?("Host: 127.0.0.1:#{port}\r\n"), "Host names the port when it is not 80"
-assert_true !r.body.includes?("Content-Length"), "GET carried no length"
-assert_str r.body.bytesize.to_s, r.header("Content-Length") || "", "GET length by any case"
-r = HTTP.post("#{base}/items", "{\"a\":1}", {"Content-Type" => "application/json"}).or_panic
-assert_true r.status == 201, "POST status"
-assert_true r.body.starts_with?("POST /items HTTP/1.1\r\n"), "POST line, through a chunked answer"
-assert_true r.body.includes?("Content-Type: application/json\r\n"), "POST carried the caller's header"
-assert_true r.body.includes?("Content-Length: 7\r\n"), "POST carried the body's length"
-assert_true r.body.ends_with?("\r\n\r\n{\"a\":1}"), "POST carried the body"
-r = HTTP.head("#{base}/items").or_panic
-assert_true r.status == 200, "HEAD status"
-assert_str "", r.body, "HEAD body"
-assert_str "99", r.header("Content-Length") || "", "HEAD length"
-assert_str "HEAD /items HTTP/1.1", r.header("X-Request-Line") || "", "HEAD line"
-r = HTTP.put("#{base}/items/1", "v=2", {"X-Token" => "abc"}).or_panic
-assert_true r.status == 200, "PUT status"
-assert_true r.body.starts_with?("PUT /items/1 HTTP/1.1\r\n"), "PUT line"
-assert_true r.body.includes?("X-Token: abc\r\n") && r.body.ends_with?("Content-Length: 3\r\n\r\nv=2"), "PUT carried the header and the body"
-r = HTTP.delete("#{base}/items/9").or_panic
-assert_true r.status == 204 && r.success?, "DELETE status"
-assert_str "", r.body, "DELETE body"
-assert_str "DELETE /items/9 HTTP/1.1", r.header("X-Request-Line") || "", "DELETE line"
-assert_str "no", r.header("X-Request-Has-Length") || "", "DELETE carried no length"
-server.join
+  base = "http://127.0.0.1:#{port}"
+  verb = HTTP.get("#{base}/items?x=1").or_panic
+  assert_true verb.status == 200, "GET status"
+  assert_true verb.body.starts_with?("GET /items?x=1 HTTP/1.1\r\n"), "GET line with the query"
+  assert_true verb.body.includes?("Host: 127.0.0.1:#{port}\r\n"), "Host names the port when it is not 80"
+  assert_true !verb.body.includes?("Content-Length"), "GET carried no length"
+  assert_str verb.body.bytesize.to_s, verb.header("Content-Length") || "", "GET length by any case"
+  verb = HTTP.post("#{base}/items", "{\"a\":1}", {"Content-Type" => "application/json"}).or_panic
+  assert_true verb.status == 201, "POST status"
+  assert_true verb.body.starts_with?("POST /items HTTP/1.1\r\n"), "POST line, through a chunked answer"
+  assert_true verb.body.includes?("Content-Type: application/json\r\n"), "POST carried the caller's header"
+  assert_true verb.body.includes?("Content-Length: 7\r\n"), "POST carried the body's length"
+  assert_true verb.body.ends_with?("\r\n\r\n{\"a\":1}"), "POST carried the body"
+  verb = HTTP.head("#{base}/items").or_panic
+  assert_true verb.status == 200, "HEAD status"
+  assert_str "", verb.body, "HEAD body"
+  assert_str "99", verb.header("Content-Length") || "", "HEAD length"
+  assert_str "HEAD /items HTTP/1.1", verb.header("X-Request-Line") || "", "HEAD line"
+  verb = HTTP.put("#{base}/items/1", "v=2", {"X-Token" => "abc"}).or_panic
+  assert_true verb.status == 200, "PUT status"
+  assert_true verb.body.starts_with?("PUT /items/1 HTTP/1.1\r\n"), "PUT line"
+  assert_true verb.body.includes?("X-Token: abc\r\n") && verb.body.ends_with?("Content-Length: 3\r\n\r\nv=2"), "PUT carried the header and the body"
+  verb = HTTP.delete("#{base}/items/9").or_panic
+  assert_true verb.status == 204 && verb.success?, "DELETE status"
+  assert_str "", verb.body, "DELETE body"
+  assert_str "DELETE /items/9 HTTP/1.1", verb.header("X-Request-Line") || "", "DELETE line"
+  assert_str "no", verb.header("X-Request-Has-Length") || "", "DELETE carried no length"
+  0
+end
 listener.close
 puts "  get, post, head, put, delete: five verbs, five connections, and what the server read is what each wrote"
 
@@ -1086,28 +1212,30 @@ puts "  get, post, head, put, delete: five verbs, five connections, and what the
 # whole answer the server resets after is `test/cli/std_http_exercise.sh`'s.)
 whole = IyiSocket.listen("127.0.0.1", 0)
 whole_port = whole.local_port
-whole_fd = whole
-whole_server = IyiThread.start do
-  tape do
-    l = IyiSocket.new(whole_fd)
-    2.times do |i|
-      conn = l.accept.or_panic
-      read_request(conn).or_panic
-      conn.write(i == 0 ? "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi" : "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n").or_panic
-      conn.read_timeout_ms = 3000
-      conn.read(16)
-      conn.close
+whole_fd = whole.fd
+group do |tg|
+  tg.spawn do
+    tape do
+      l = IyiSocket.new(whole_fd)
+      2.times do |i|
+        conn = l.accept.or_panic
+        read_request(conn).or_panic
+        conn.write(i == 0 ? "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi" : "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n").or_panic
+        conn.read_timeout_ms = 3000
+        conn.read(16)
+        conn.close
+      end
+      nil
     end
-    nil
   end
+  whole_started = __iyi_monotonic_ns
+  held = HTTP.get("http://127.0.0.1:#{whole_port}/held").or_panic
+  held_chunks = HTTP.get("http://127.0.0.1:#{whole_port}/held-chunks").or_panic
+  whole_ms = (__iyi_monotonic_ns - whole_started) // 1000000_i64
+  assert_true held.body == "hi" && held_chunks.body == "hi", "the answers on held connections: #{held.body.inspect}, #{held_chunks.body.inspect}"
+  assert_true whole_ms < 1500, "an answer is read to its length or its last chunk, not to a close three seconds later: #{whole_ms} ms"
+  0
 end
-whole_started = __iyi_monotonic_ns
-r = HTTP.get("http://127.0.0.1:#{whole_port}/held").or_panic
-held_chunks = HTTP.get("http://127.0.0.1:#{whole_port}/held-chunks").or_panic
-whole_ms = (__iyi_monotonic_ns - whole_started) // 1000000_i64
-assert_true r.body == "hi" && held_chunks.body == "hi", "the answers on held connections: #{r.body.inspect}, #{held_chunks.body.inspect}"
-assert_true whole_ms < 1500, "an answer is read to its length or its last chunk, not to a close three seconds later: #{whole_ms} ms"
-whole_server.join
 whole.close
 puts "  an answer is read to its length or its last chunk, under 1.5 s from a server that holds the connection 3 s"
 
@@ -1115,21 +1243,23 @@ puts "  an answer is read to its length or its last chunk, under 1.5 s from a se
 # was `Host: ::1:<port>`, which no server can split into host and port.
 v6 = IyiSocket.listen("::1", 0)
 v6_port = v6.local_port
-v6_fd = v6
-v6_server = IyiThread.start do
-  tape do
-    l = IyiSocket.new(v6_fd)
-    conn = l.accept.or_panic
-    saw = read_request(conn).or_panic
-    conn.write("HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw)
-    conn.close
-    nil
+v6_fd = v6.fd
+group do |tg|
+  tg.spawn do
+    tape do
+      l = IyiSocket.new(v6_fd)
+      conn = l.accept.or_panic
+      saw = read_request(conn).or_panic
+      conn.write("HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw)
+      conn.close
+      nil
+    end
   end
+  # Written in capitals, as RFC 3986 lets a scheme be: it was "only http://".
+  six = HTTP.get("HTTP://[::1]:#{v6_port}/six").or_panic
+  assert_true six.body.includes?("Host: [::1]:#{v6_port}\r\n"), "an IPv6 Host keeps its brackets: #{six.body.inspect}"
+  0
 end
-# Written in capitals, as RFC 3986 lets a scheme be: it was "only http://".
-r = HTTP.get("HTTP://[::1]:#{v6_port}/six").or_panic
-assert_true r.body.includes?("Host: [::1]:#{v6_port}\r\n"), "an IPv6 Host keeps its brackets: #{r.body.inspect}"
-v6_server.join
 v6.close
 puts "  an IPv6 literal's Host line keeps its brackets, under a scheme in capitals"
 
@@ -1137,25 +1267,27 @@ puts "  an IPv6 literal's Host line keeps its brackets, under a scheme in capita
 # under one with a length: the client keeps the head it parsed for both.
 cookie_listener = IyiSocket.listen("127.0.0.1", 0)
 cookie_port = cookie_listener.local_port
-cookie_fd = cookie_listener
-cookie_server = IyiThread.start do
-  tape do
-    l = IyiSocket.new(cookie_fd)
-    2.times do |i|
-      conn = l.accept.or_panic
-      read_request(conn).or_panic
-      framed = i == 0 ? "Transfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n" : "Content-Length: 2\r\n\r\nhi"
-      conn.write("HTTP/1.1 200 OK\r\nSet-Cookie: a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT\r\nSet-Cookie: b=2\r\n" + framed).or_panic
-      conn.close
+cookie_fd = cookie_listener.fd
+group do |tg|
+  tg.spawn do
+    tape do
+      l = IyiSocket.new(cookie_fd)
+      2.times do |i|
+        conn = l.accept.or_panic
+        read_request(conn).or_panic
+        framed = i == 0 ? "Transfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n" : "Content-Length: 2\r\n\r\nhi"
+        conn.write("HTTP/1.1 200 OK\r\nSet-Cookie: a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT\r\nSet-Cookie: b=2\r\n" + framed).or_panic
+        conn.close
+      end
+      nil
     end
-    nil
   end
+  ["chunked", "length"].each do |framing|
+    cookie = HTTP.get("http://localhost:#{cookie_port}/#{framing}").or_panic
+    assert_str "a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT|b=2", cookie.header_values("Set-Cookie").join("|"), "two Set-Cookie lines over a socket, #{framing}"
+  end
+  0
 end
-["chunked", "length"].each do |framing|
-  r = HTTP.get("http://localhost:#{cookie_port}/#{framing}").or_panic
-  assert_str "a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT|b=2", r.header_values("Set-Cookie").join("|"), "two Set-Cookie lines over a socket, #{framing}"
-end
-cookie_server.join
 cookie_listener.close
 puts "  two Set-Cookie lines arrive apart under a chunked body and a length"
 
@@ -1166,24 +1298,25 @@ puts "  two Set-Cookie lines arrive apart under a chunked body and a length"
 # counts the 64 KB pieces that went.
 endless = IyiSocket.listen("127.0.0.1", 0)
 endless_port = endless.local_port
-endless_fd = endless
+endless_fd = endless.fd
 endless_sent = Atomic(Int32).new(0)
-endless_server = IyiThread.start do
-  tape do
-    l = IyiSocket.new(endless_fd)
-    conn = l.accept.or_panic
-    read_request(conn).or_panic
-    conn.write("HTTP/1.1 200 OK\r\nX-Long: ")
-    field = "a" * 65536
-    while endless_sent.get < 1024 && conn.write(field).is_a?(Int32)
-      endless_sent.add(1)
+endless_said = group do |tg|
+  tg.spawn do
+    tape do
+      l = IyiSocket.new(endless_fd)
+      conn = l.accept.or_panic
+      read_request(conn).or_panic
+      conn.write("HTTP/1.1 200 OK\r\nX-Long: ")
+      field = "a" * 65536
+      while endless_sent.get < 1024 && conn.write(field).is_a?(Int32)
+        endless_sent.add(1)
+      end
+      conn.close
+      nil
     end
-    conn.close
-    nil
   end
+  answer { HTTP.get("http://127.0.0.1:#{endless_port}/long").or_panic.status.to_s }
 end
-endless_said = answer { HTTP.get("http://127.0.0.1:#{endless_port}/long").or_panic.status.to_s }
-endless_server.join
 endless.close
 assert_str "refused: HTTP: response headers past 1048576 bytes", endless_said, "a head past a megabyte is refused"
 assert_true endless_sent.get < 256, "the client stopped taking an endless head: #{endless_sent.get} pieces of 64 KB went"
@@ -1250,12 +1383,10 @@ puts "\n== the server, from a raw socket"
 # What the server does with the wire: keep-alive across requests, a
 # chunked request body, HEAD, a request that is not HTTP, and `Connection:
 # close`. The client here is a bare socket so every byte is ours.
-listener = RisExerciseServer.port
-sport = listener
-seen_paths = [] of String
+sport = RisExerciseServer.port
 group do |g|
   g.spawn do
-    RisExerciseServer.answer(listener, {2, "".as_tape}, RisHttpFactory)
+    RisExerciseServer.answer(sport, {2, "".as_tape}, RisHttpFactory)
     0
   end
   RisExerciseServer.wait(RisHttpFactory)
@@ -1351,13 +1482,13 @@ group do |g|
     ask = "GET /nothing HTTP/1.1\r\nHost: x\r\n\r\n"
     lean.write(ask).or_panic
     answer_size = read_response(lean).bytesize
-    scratch = Pointer(UInt8).malloc(4096_u64)
+    scratch = Array(UInt8).new(4096, 0_u8)
     lean_before = RisRegion.tape_bytes(1_u64)
     200.times do
       lean.write(ask).or_panic
       got = 0
       while got < answer_size
-        got = got + lean.read(scratch, 4096).or_panic.as(Int32)
+        got = got + lean.read(scratch, 0, 4096).or_panic.as(Int32)
       end
     end
     lean_bytes = (RisRegion.tape_bytes(1_u64) - lean_before) // 200_u64
@@ -1372,7 +1503,7 @@ group do |g|
     piped.write(batch).or_panic
     piped_got = 0
     while piped_got < answer_size * 1000
-      piped_got = piped_got + piped.read(scratch, 4096).or_panic.as(Int32)
+      piped_got = piped_got + piped.read(scratch, 0, 4096).or_panic.as(Int32)
     end
     piped_bytes = (RisRegion.tape_bytes(1_u64) - piped_before) // 1000_u64
     piped.close
@@ -1456,14 +1587,19 @@ end
 # The thousand written together and the head in pieces reached the block;
 # the 400s did not, nor the body that was declared and never came: only
 # what has arrived whole is answered. The block that panicked ran.
-1217.times do
+seen_count = 0
+seen_first = ""
+seen_third = ""
+1217.times do |i|
   observation = RisBoard.take(RisHttpSeen)
   raise "request observation cancelled" if observation.is_a?(Cancelled)
-  seen_paths << ris_heap_text(observation.line)
+  seen_count += 1
+  seen_first << observation.line if i == 0
+  seen_third << observation.line if i == 2
 end
-assert_true seen_paths.size == 1217, "the block ran 1217 times, not #{seen_paths.size}"
-assert_str "POST /echo", seen_paths[0], "the first request's line"
-assert_str "HEAD /echo", seen_paths[2], "the HEAD's"
+assert_true seen_count == 1217, "the block ran 1217 times, not #{seen_count}"
+assert_str "POST /echo", seen_first, "the first request's line"
+assert_str "HEAD /echo", seen_third, "the HEAD's"
 puts "  keep-alive, chunked, HEAD, 204, 404, 400s, Connection: close, HTTP/1.0, a block that panicked, 201 lean requests, a thousand written at once, a 256 KB head in pieces, a 64 MB body declared and not sent, 100-continue both ways, a 24 MB upload, a 16 MB chunked one, and the client against it"
 
 puts "\n== the block's own close"
@@ -1542,7 +1678,10 @@ group do |g|
     after = HTTP.parse_response(read_response(lines))
     assert_true after.status == 200 && after.body == "GET /b ", "the request after empty lines is served: #{after.status} #{after.body.inspect}"
     lines.close
-    assert_true !Server.parse_request("\r\nGET /c HTTP/1.1\r\nHost: x\r\n\r\n").request.nil?, "parse_request reads past an empty line"
+    first = IyiSocket.connect("127.0.0.1", blank_port).or_panic
+    first.write("\r\nGET /c HTTP/1.1\r\nHost: x\r\n\r\n").or_panic
+    assert_str "GET /c ", HTTP.parse_response(read_response(first)).body, "an empty line before a connection's first request"
+    first.close
     HTTP.get("http://127.0.0.1:#{blank_port}/stop").or_panic
     0
   end
@@ -1571,7 +1710,7 @@ group do |g|
     # An upload from a stream goes chunked, as it is read.
     counted = HTTP.post(stream_base + "/count", File.open(stream_dir + "/up.bin")).or_panic
     assert_str "300000", counted.body, "a 300 KB upload from an IyiIO, read by the block a piece at a time"
-    assert_str "abc", HTTP.post(stream_base + "/whole", "abc").or_panic.body, "a streaming server's `body` reads the rest whole"
+    assert_str "abc", HTTP.post(stream_base + "/whole", "abc").or_panic.body, "a streaming server's `body_io` reads the rest whole"
     # The block reads its body while the client is still sending it: half
     # is written, and the rest only once the block has seen a piece.
     RisBoard.take(RisHttpPiece)
@@ -1611,21 +1750,14 @@ group do |g|
     # A block that writes a piece, waits, and writes another is read a
     # piece at a time: the first is in hand before the second is written.
     started = __iyi_monotonic_ns
-    first_at = 0_i64
-    pieces = [] of String
-    HTTP.open("GET", stream_base + "/slow") do |resp|
+    firsts = [] of Int64
+    streamed = HTTP.open("GET", stream_base + "/slow") do |resp|
       assert_true resp.header("Transfer-Encoding") == "chunked", "a streamed answer goes chunked"
-      io = resp.body_io
-      while true
-        piece = io.read(100).or_panic
-        break if piece.bytesize == 0
-        first_at = __iyi_monotonic_ns if pieces.empty?
-        pieces << piece
-      end
-      0
+      body_pieces(resp.body_io, firsts)
     end.or_panic
+    first_at = firsts[0]
     first_ms = (first_at - started) // 1000000_i64
-    assert_str "first,second", pieces.join, "the streamed answer"
+    assert_str "first,second", streamed, "the streamed answer"
     assert_true first_ms < 300, "its first piece came before the block wrote its second: #{first_ms} ms"
     # A file goes out as it is read: chunked without a length, with the
     # block's length when it gives one; a HEAD reads none of it.
@@ -1646,25 +1778,25 @@ group do |g|
     assert_true old_answer.ends_with?("\r\n\r\nfirst,second") && !old_answer.includes?("chunked") && old_answer.includes?("Connection: close"), "a stream to an HTTP/1.0 client ends at the close: #{old_answer.inspect}"
     # A body cut short is an HTTPError the reader is handed, not a panic.
     cut_l = IyiSocket.listen("127.0.0.1", 0)
-    cut_said = "none"
-    group do |cg|
+    cut_port = cut_l.local_port
+    cut_said = group do |cg|
       cg.spawn do
         peer = cut_l.accept.or_panic
         read_request(peer)
         peer.write("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc").or_panic
         peer.close
+        cut_l.close
         0
       end
-      cg.spawn do
-        HTTP.open("GET", "http://127.0.0.1:#{cut_l.local_port}/") do |resp|
-          got = resp.body_io.read_all
-          cut_said = got.is_a?(HTTPError) ? got.message : "read #{got.inspect}"
-          0
+      reader = cg.spawn do
+        HTTP.open("GET", "http://127.0.0.1:#{cut_port}/") do |resp|
+          cut_body = resp.body_io.read_all
+          cut_body.is_a?(HTTPError) ? cut_body.message : "read #{cut_body.inspect}"
         end.or_panic
-        0
       end
+      cut_value = reader.value
+      cut_value.is_a?(String) ? cut_value : cut_value.inspect
     end
-    cut_l.close
     assert_str "HTTP: the body ended after 3 of its 10 bytes", cut_said, "a body cut short"
     HTTP.get(stream_base + "/stop").or_panic
     0
@@ -1883,16 +2015,25 @@ group do |g|
     0
   end
 end
-assert_str "refused: HTTP: a multipart part's data holds its boundary", answer { MultipartBuilder.new("b").field("a", "x\r\n--b\r\n").finish }, "data that holds the boundary refused"
-auto = MultipartBuilder.new.field("a", "1").file("f", "f.txt", "data")
-same = MultipartBuilder.new.field("a", "1").file("f", "f.txt", "data")
-other = MultipartBuilder.new.field("a", "2").file("f", "f.txt", "data")
+assert_str "refused: HTTP: a multipart part's data holds its boundary", answer { holds = MultipartBuilder.new("b"); holds.field("a", "x\r\n--b\r\n"); holds.finish }, "data that holds the boundary refused"
+auto = MultipartBuilder.new
+auto.field("a", "1")
+auto.file("f", "f.txt", "data")
+same = MultipartBuilder.new
+same.field("a", "1")
+same.file("f", "f.txt", "data")
+other = MultipartBuilder.new
+other.field("a", "2")
+other.file("f", "f.txt", "data")
 assert_true auto.boundary.starts_with?("iyi-") && auto.boundary.bytesize == 36, "a boundary made from the parts: #{auto.boundary}"
 assert_true auto.finish == same.finish && auto.boundary != other.boundary, "the same parts make the same body, other parts another boundary"
-held = MultipartBuilder.new.field("a", "x")
-trap = MultipartBuilder.new.field("a", "x").field("b", "\r\n--" + held.boundary + "\r\n")
+held = MultipartBuilder.new
+held.field("a", "x")
+trap = MultipartBuilder.new
+trap.field("a", "x")
+trap.field("b", "\r\n--" + held.boundary + "\r\n")
 assert_true trap.boundary != held.boundary && !trap.finish.includes?("\r\n--" + trap.boundary + "\r\n\r\n"), "a part that holds the boundary the parts would make moves it"
-assert_str "refused: HTTP: a multipart part's data holds its boundary", answer { auto.field("late", "\r\n--" + auto.boundary).finish }, "a part added after the boundary is chosen may not hold it"
+assert_str "refused: HTTP: a multipart part's data holds its boundary", answer { late = MultipartBuilder.new; late.field("a", "1"); late.file("f", "f.txt", "data"); late.field("late", "\r\n--" + late.boundary); late.finish }, "a part added after the boundary is chosen may not hold it"
 puts "  urlencoded, three parts, seven-byte pieces, preamble and padding, a part cut short, no boundary, refusals"
 
 puts "\n== kept connections"
@@ -1935,24 +2076,26 @@ end
 # saying so: what a kept-alive server's idle timeout does.
 rude = IyiSocket.listen("127.0.0.1", 0)
 rude_base = "http://127.0.0.1:#{rude.local_port}"
+rude_port = rude.local_port
 rude_served = 0
 group do |g|
-  g.spawn do
+  server = g.spawn do
+    served = 0
     while true
       peer = rude.accept
       break unless peer.is_a?(IyiSocket)
-      got = ""
-      while !got.includes?("\r\n\r\n")
-        piece = peer.read(4096)
-        break unless piece.is_a?(String) && piece.bytesize > 0
-        got = got + piece
+      got = gather(peer, "", 0, "\r\n\r\n")
+      if got.starts_with?("STOP")
+        peer.close
+        break
       end
-      rude_served = rude_served + 1
+      served = served + 1
       peer.write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
       sleep(50)
       peer.close
     end
-    0
+    rude.close
+    served
   end
   g.spawn do
     rc = HTTPClient.new
@@ -1963,9 +2106,14 @@ group do |g|
     refused = rc.post(rude_base + "/c", "x")
     assert_true !refused.is_a?(Response), "a POST whose kept connection the server closed is not sent again"
     rc.close
-    rude.close
+    stop = IyiSocket.connect("127.0.0.1", rude_port).or_panic
+    stop.write("STOP\r\n\r\n")
+    stop.close
     0
   end
+  count = server.value
+  rude_served = count.is_a?(Int32) ? count : -1
+  0
 end
 assert_true rude_served == 2, "the server answered twice, not #{rude_served} times"
 puts "  ten requests on one connection, a close, 30 KB left unread and kept, 200 KB left and closed, a GET sent again, a POST not"
@@ -2016,12 +2164,7 @@ group do |g|
     # server that waited for it.
     loris.write("\r\n\r\n")
     loris.read_timeout_ms = 3000
-    loris_heard = ""
-    while true
-      got = loris.read(4096)
-      break unless got.is_a?(String) && got.bytesize > 0
-      loris_heard = loris_heard + got
-    end
+    loris_heard = drain(loris)
     loris.close
     assert_str "", loris_heard, "a head sent a byte every 100 ms is closed, not answered"
     # In pieces, but inside the limit, it is answered.
@@ -2042,12 +2185,7 @@ group do |g|
     raise up_problem.inspect if up_problem
     sleep(1300)
     up.socket.write("late").or_panic
-    heard = up.leftover
-    while heard.bytesize < 9
-      got = up.socket.read(100)
-      break unless got.is_a?(String) && got.bytesize > 0
-      heard = heard + got
-    end
+    heard = gather(up.socket, up.leftover, 9, "")
     up.socket.close
     assert_str "echo:late", heard, "an upgraded connection idle past the limit"
     HTTP.get("http://127.0.0.1:#{slow_port}/stop").or_panic
@@ -2076,12 +2214,14 @@ mute = IyiSocket.listen("127.0.0.1", 0)
 mute_base = "http://127.0.0.1:#{mute.local_port}"
 group do |g|
   g.spawn do
+    # The two requests below, each on a connection of its own.
     muted = [] of IyiSocket
-    while true
+    while muted.size < 2
       peer = mute.accept
       break unless peer.is_a?(IyiSocket)
       muted << peer
     end
+    mute.close
     muted.each { |peer| peer.close }
     0
   end
@@ -2091,9 +2231,9 @@ group do |g|
     hung_ms = (__iyi_monotonic_ns - started) // 1000000_i64
     assert_true hung.is_a?(SocketError) && hung.timed_out?, "a request no answer comes to is a timeout"
     assert_true hung_ms >= 250 && hung_ms < 2000, "after the timeout: #{hung_ms} ms"
-    kept_hung = HTTPClient.new(timeout_ms: 300).get(mute_base + "/")
+    hung_client = HTTPClient.new(timeout_ms: 300)
+    kept_hung = hung_client.get(mute_base + "/")
     assert_true kept_hung.is_a?(SocketError) && kept_hung.timed_out?, "and through an HTTPClient"
-    mute.close
     0
   end
 end
@@ -2123,17 +2263,12 @@ group do |g|
     up_problem = up.connect(up_base + "/chat", "echo")
     raise up_problem.inspect if up_problem
     up.socket.write("pong").or_panic
-    heard = up.leftover
-    while heard.bytesize < 9
-      got = up.socket.read(100).or_panic
-      break if got.bytesize == 0
-      heard = heard + got
-    end
+    heard = gather(up.socket, up.leftover, 9, "")
     up.socket.close
     assert_true up.response.status == 101 && heard == "echo:pong", "HTTP.upgrade hands the socket over: #{heard.inspect}"
     refused = Upgraded.new
     refused_problem = refused.connect(up_base + "/chat", "other")
-    assert_true (r = refused_problem).is_a?(HTTPError) && r.message == "HTTP: the server answered 426 Upgrade Required to an upgrade to other, not 101 Switching Protocols", "an answer that is not 101 is an HTTPError"
+    assert_true (problem = refused_problem).is_a?(HTTPError) && problem.message == "HTTP: the server answered 426 Upgrade Required to an upgrade to other, not 101 Switching Protocols", "an answer that is not 101 is an HTTPError"
     # A connection handed over and still open when the listener closes is
     # closed with it: `serve` waited for its client, three seconds here.
     stays = Upgraded.new
@@ -2211,9 +2346,9 @@ puts "  NO_PROXY and the choice of variable as Go's httpproxy has them: #{go_use
 # A proxy refused by name before anything is sent: TLS to the proxy and
 # SOCKS are not spoken here, and must not be spoken in the clear.
 ["https://p.test:3128", "socks5://127.0.0.1:1080"].each do |written|
-  refused = HTTP.request("GET", "http://example.com/", proxy: written)
+  proxy_refused = HTTP.request("GET", "http://example.com/", proxy: written)
   scheme = written[0, written.index(':') || 0]
-  assert_true (r = refused_problem).is_a?(HTTPError) && r.message == "HTTP: a proxy over #{scheme}://, which this client does not speak; only http:// proxies", "a proxy over #{scheme}:// is refused: #{refused.inspect}"
+  assert_true (problem = proxy_refused).is_a?(HTTPError) && problem.message == "HTTP: a proxy over #{scheme}://, which this client does not speak; only http:// proxies", "a proxy over #{scheme}:// is proxy_refused: #{proxy_refused.inspect}"
 end
 
 # A proxy on a raw socket that answers what it read: an http:// request in
@@ -2226,82 +2361,79 @@ end
 # and curl.
 proxy_l = IyiSocket.listen("127.0.0.1", 0)
 proxy_port = proxy_l.local_port
-proxy_fd = proxy_l
-proxy_server = IyiThread.start do
-  tape do
-    l = IyiSocket.new(proxy_fd)
-    7.times do |i|
-      conn = l.accept.or_panic
-      rounds = i == 1 || i == 5 ? 2 : 1
-      rounds.times do |round|
-        saw = read_request(conn).or_panic
-        # A CONNECT not as the check below expects it is answered with what
-        # the proxy saw, for the client's error to name.
-        reply = if i == 0 || i == 1
-                  "HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw
-                elsif i == 2
-                  fine = saw == "CONNECT secure.test:443 HTTP/1.1\r\nHost: secure.test:443\r\nProxy-Authorization: Basic dXNlcjpwQHNz\r\n\r\n"
-                  "HTTP/1.1 407 #{fine ? "Proxy Authentication Required" : saw.inspect}\r\nProxy-Authenticate: Basic realm=\"gate\"\r\nContent-Length: 0\r\n\r\n"
-                elsif i == 3
-                  fine = saw == "CONNECT [::1]:8443 HTTP/1.1\r\nHost: [::1]:8443\r\nProxy-Authorization: Basic Z2F0ZTpzM2NyZXQ=\r\n\r\n"
-                  "HTTP/1.1 403 #{fine ? "Forbidden" : saw.inspect}\r\nContent-Length: 0\r\n\r\n"
-                elsif i == 5 && round == 0
-                  fine = saw == "CONNECT up.test:80 HTTP/1.1\r\nHost: up.test:80\r\nProxy-Authorization: Basic dXNlcjpwQHNz\r\n\r\n"
-                  fine ? "HTTP/1.1 200 Connection established\r\n\r\n" : "HTTP/1.1 407 #{saw.inspect}\r\nContent-Length: 0\r\n\r\n"
-                elsif i == 5
-                  # Inside the tunnel, the origin's 101 and what it was sent.
-                  "HTTP/1.1 101 Switching Protocols\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n" + saw
-                else
-                  "HTTP/1.1 200 Connection established\r\n\r\njunk"
-                end
-        conn.write(reply).or_panic
+proxy_fd = proxy_l.fd
+group do |tg|
+  tg.spawn do
+    tape do
+      l = IyiSocket.new(proxy_fd)
+      7.times do |i|
+        conn = l.accept.or_panic
+        rounds = i == 1 || i == 5 ? 2 : 1
+        rounds.times do |round|
+          saw = read_request(conn).or_panic
+          # A CONNECT not as the check below expects it is answered with what
+          # the proxy saw, for the client's error to name.
+          reply = if i == 0 || i == 1
+                    "HTTP/1.1 200 OK\r\nContent-Length: #{saw.bytesize}\r\n\r\n" + saw
+                  elsif i == 2
+                    fine = saw == "CONNECT secure.test:443 HTTP/1.1\r\nHost: secure.test:443\r\nProxy-Authorization: Basic dXNlcjpwQHNz\r\n\r\n"
+                    "HTTP/1.1 407 #{fine ? "Proxy Authentication Required" : saw.inspect}\r\nProxy-Authenticate: Basic realm=\"gate\"\r\nContent-Length: 0\r\n\r\n"
+                  elsif i == 3
+                    fine = saw == "CONNECT [::1]:8443 HTTP/1.1\r\nHost: [::1]:8443\r\nProxy-Authorization: Basic Z2F0ZTpzM2NyZXQ=\r\n\r\n"
+                    "HTTP/1.1 403 #{fine ? "Forbidden" : saw.inspect}\r\nContent-Length: 0\r\n\r\n"
+                  elsif i == 5 && round == 0
+                    fine = saw == "CONNECT up.test:80 HTTP/1.1\r\nHost: up.test:80\r\nProxy-Authorization: Basic dXNlcjpwQHNz\r\n\r\n"
+                    fine ? "HTTP/1.1 200 Connection established\r\n\r\n" : "HTTP/1.1 407 #{saw.inspect}\r\nContent-Length: 0\r\n\r\n"
+                  elsif i == 5
+                    # Inside the tunnel, the origin's 101 and what it was sent.
+                    "HTTP/1.1 101 Switching Protocols\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n" + saw
+                  else
+                    "HTTP/1.1 200 Connection established\r\n\r\njunk"
+                  end
+          conn.write(reply).or_panic
+        end
+        conn.close
       end
-      conn.close
+      nil
     end
-    nil
   end
+  proxy_url = "http://user:p%40ss@127.0.0.1:#{proxy_port}"
+  through = HTTP.request("GET", "http://origin.test:8080/a?b=1", {"Proxy-Authorization" => "Basic other"}, proxy: proxy_url).or_panic
+  assert_true through.body.starts_with?("GET http://origin.test:8080/a?b=1 HTTP/1.1\r\nHost: origin.test:8080\r\n"), "an http:// request through a proxy names the whole URL: #{first_line(through.body).inspect}"
+  assert_true through.body.includes?("\r\nProxy-Authorization: Basic dXNlcjpwQHNz\r\n") && !through.body.includes?("Basic other"), "an http:// request through a proxy carries the URL's credential, and the caller's no more: #{through.body.inspect}"
+  # With prior knowledge, which a proxy's absolute form does not take: the
+  # requests go as HTTP/1.1. A second origin that waits for a connection of
+  # its own is a timeout, named below, not a hang.
+  kept = HTTPClient.new(proxy: "127.0.0.1:#{proxy_port}", prior_knowledge: true, timeout_ms: 10000)
+  one = kept.get("http://a.test/one").or_panic
+  second = kept.get("http://b.test:81/two")
+  assert_true second.is_a?(Response), "two origins over one kept connection to the proxy: the second answered #{second.inspect}"
+  two = second.or_panic
+  assert_str "GET http://a.test/one HTTP/1.1|GET http://b.test:81/two HTTP/1.1", first_line(one.body) + "|" + first_line(two.body), "two origins through a proxy URL written without a scheme"
+  assert_true one.body.includes?("\r\nHost: a.test\r\n") && two.body.includes?("\r\nHost: b.test:81\r\n") && !two.body.includes?("Proxy-Authorization"), "each request through a proxy keeps its own Host, and no credential the proxy URL did not give: #{two.body.inspect}"
+  assert_true kept.connections_made == 1 && kept.connections_reused == 1, "two origins over one kept connection to the proxy: #{kept.connections_made} made, #{kept.connections_reused} reused"
+  kept.close
+  refused = HTTP.request("GET", "https://secure.test/x", proxy: proxy_url)
+  assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} answered 407 Proxy Authentication Required to CONNECT secure.test:443", refused.is_a?(HTTPError) ? refused.message : refused.inspect, "a CONNECT with the URL's credential, refused 407"
+  refused = HTTP.request("GET", "https://[::1]:8443/x", {"Proxy-Authorization" => "Basic Z2F0ZTpzM2NyZXQ="}, proxy: "http://127.0.0.1:#{proxy_port}")
+  assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} answered 403 Forbidden to CONNECT [::1]:8443", refused.is_a?(HTTPError) ? refused.message : refused.inspect, "a CONNECT to an IPv6 origin with the caller's credential, refused 403"
+  refused = HTTP.request("GET", "https://secure.test/x", proxy: "127.0.0.1:#{proxy_port}")
+  assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} sent 4 bytes after its 200 to CONNECT secure.test:443, before TLS began", refused.is_a?(HTTPError) ? refused.message : refused.inspect, "bytes after a CONNECT's 200 are refused"
+  # An upgrade to a ws:// origin through the proxy: a CONNECT with the URL's
+  # credential, then the handshake in origin form inside, with no
+  # credential in it.
+  inside = Upgraded.new
+  inside_problem = inside.connect("http://up.test/chat", "echo", {"Proxy-Authorization" => "Basic other"}, timeout_ms: 10000, proxy: proxy_url)
+  raise inside_problem.inspect if inside_problem
+  heard = gather(inside.socket, inside.leftover, 0, "\r\n\r\n")
+  inside.socket.close
+  assert_true heard.starts_with?("GET /chat HTTP/1.1\r\nHost: up.test\r\n") && heard.includes?("\r\nUpgrade: echo\r\n") && heard.includes?("\r\nConnection: Upgrade\r\n"), "an upgrade to http:// through a proxy goes in origin form inside its CONNECT tunnel: #{heard.inspect}"
+  assert_true !heard.includes?("Proxy-Authorization"), "and no credential inside the tunnel: #{heard.inspect}"
+  up_refused = Upgraded.new
+  refused_problem = up_refused.connect("http://up.test/chat", "echo", timeout_ms: 10000, proxy: "127.0.0.1:#{proxy_port}")
+  assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} sent 4 bytes after its 200 to CONNECT up.test:80, before the request began", (up_problem = refused_problem).is_a?(HTTPError) ? up_problem.message : up_problem.inspect, "bytes after an upgrade's CONNECT 200 are refused"
+  0
 end
-proxy_url = "http://user:p%40ss@127.0.0.1:#{proxy_port}"
-through = HTTP.request("GET", "http://origin.test:8080/a?b=1", {"Proxy-Authorization" => "Basic other"}, proxy: proxy_url).or_panic
-assert_true through.body.starts_with?("GET http://origin.test:8080/a?b=1 HTTP/1.1\r\nHost: origin.test:8080\r\n"), "an http:// request through a proxy names the whole URL: #{first_line(through.body).inspect}"
-assert_true through.body.includes?("\r\nProxy-Authorization: Basic dXNlcjpwQHNz\r\n") && !through.body.includes?("Basic other"), "an http:// request through a proxy carries the URL's credential, and the caller's no more: #{through.body.inspect}"
-# With prior knowledge, which a proxy's absolute form does not take: the
-# requests go as HTTP/1.1. A second origin that waits for a connection of
-# its own is a timeout, named below, not a hang.
-kept = HTTPClient.new(proxy: "127.0.0.1:#{proxy_port}", prior_knowledge: true, timeout_ms: 10000)
-one = kept.get("http://a.test/one").or_panic
-second = kept.get("http://b.test:81/two")
-assert_true second.is_a?(Response), "two origins over one kept connection to the proxy: the second answered #{second.inspect}"
-two = second.or_panic
-assert_str "GET http://a.test/one HTTP/1.1|GET http://b.test:81/two HTTP/1.1", first_line(one.body) + "|" + first_line(two.body), "two origins through a proxy URL written without a scheme"
-assert_true one.body.includes?("\r\nHost: a.test\r\n") && two.body.includes?("\r\nHost: b.test:81\r\n") && !two.body.includes?("Proxy-Authorization"), "each request through a proxy keeps its own Host, and no credential the proxy URL did not give: #{two.body.inspect}"
-assert_true kept.connections_made == 1 && kept.connections_reused == 1, "two origins over one kept connection to the proxy: #{kept.connections_made} made, #{kept.connections_reused} reused"
-kept.close
-refused = HTTP.request("GET", "https://secure.test/x", proxy: proxy_url)
-assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} answered 407 Proxy Authentication Required to CONNECT secure.test:443", refused.is_a?(HTTPError) ? refused.message : refused.inspect, "a CONNECT with the URL's credential, refused 407"
-refused = HTTP.request("GET", "https://[::1]:8443/x", {"Proxy-Authorization" => "Basic Z2F0ZTpzM2NyZXQ="}, proxy: "http://127.0.0.1:#{proxy_port}")
-assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} answered 403 Forbidden to CONNECT [::1]:8443", refused.is_a?(HTTPError) ? refused.message : refused.inspect, "a CONNECT to an IPv6 origin with the caller's credential, refused 403"
-refused = HTTP.request("GET", "https://secure.test/x", proxy: "127.0.0.1:#{proxy_port}")
-assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} sent 4 bytes after its 200 to CONNECT secure.test:443, before TLS began", (r = refused_problem).is_a?(HTTPError) ? r.message : r.inspect, "bytes after a CONNECT's 200 are refused"
-# An upgrade to a ws:// origin through the proxy: a CONNECT with the URL's
-# credential, then the handshake in origin form inside, with no
-# credential in it.
-inside = Upgraded.new
-inside_problem = inside.connect("http://up.test/chat", "echo", {"Proxy-Authorization" => "Basic other"}, timeout_ms: 10000, proxy: proxy_url)
-raise inside_problem.inspect if inside_problem
-heard = inside.leftover
-while !heard.ends_with?("\r\n\r\n")
-  got = inside.socket.read(4096).or_panic
-  break if got.bytesize == 0
-  heard = heard + got
-end
-inside.socket.close
-assert_true heard.starts_with?("GET /chat HTTP/1.1\r\nHost: up.test\r\n") && heard.includes?("\r\nUpgrade: echo\r\n") && heard.includes?("\r\nConnection: Upgrade\r\n"), "an upgrade to http:// through a proxy goes in origin form inside its CONNECT tunnel: #{heard.inspect}"
-assert_true !heard.includes?("Proxy-Authorization"), "and no credential inside the tunnel: #{heard.inspect}"
-refused = Upgraded.new
-refused_problem = refused.connect("http://up.test/chat", "echo", timeout_ms: 10000, proxy: "127.0.0.1:#{proxy_port}")
-assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} sent 4 bytes after its 200 to CONNECT up.test:80, before the request began", (r = refused_problem).is_a?(HTTPError) ? r.message : r.inspect, "bytes after an upgrade's CONNECT 200 are refused"
-proxy_server.join
 proxy_l.close
 puts "  an absolute-form request with the URL's credential, two origins on one kept proxy connection, CONNECT refused 407 and 403, bytes after a 200 refused, an upgrade to http:// through a tunnel"
 

@@ -265,7 +265,7 @@ pub struct AcmeAuthorization
   def challenge(kind : String) : AcmeChallenge | AcmeError
     found = @challenges.find { |c| c.kind == kind }
     return found if found
-    AcmeError.new("#{@identifier} is offered #{@challenges.map(&.kind).join(", ")}, not #{kind}")
+    AcmeError.new("#{@identifier} is offered #{@challenges.map(&.kind).join(", ")}, not #{kind}").copy_to(RisCurrentTape.new)
   end
 end
 
@@ -383,7 +383,7 @@ pub class AcmeClient
     scheme = uri ? uri.scheme : nil
     host = uri ? uri.hostname : nil
     return nil if scheme && scheme.downcase == "https" && host && !host.empty?
-    AcmeError.new("#{what} #{url.inspect} is not https://, which RFC 8555 section 6.1 requires of ACME")
+    AcmeError.new("#{what} #{url.inspect} is not https://, which RFC 8555 section 6.1 requires of ACME").copy_to(RisCurrentTape.new)
   end
 
   protected def account=(url : String?) : String?
@@ -489,7 +489,7 @@ pub class AcmeClient
     end
     response = post(directory.new_order, payload)!
     url = response.location
-    return AcmeError.new("newOrder answered #{response.status} without the order's Location") unless url
+    return AcmeError.new(keep("newOrder answered #{response.status} without the order's Location")) unless url
     refused = AcmeClient.https(url, "newOrder's Location")
     return refused if refused
     AcmeOrder.from(url, AcmeJson.object(response.body, "the order")!)
@@ -522,7 +522,7 @@ pub class AcmeClient
         return problem
       end
     end
-    AcmeError.new("the authorization for #{authorization.identifier} is #{authorization.status}")
+    AcmeError.new(keep("the authorization for #{authorization.identifier} is #{authorization.status}"))
   end
 
   # The order finalized with a certificate request for its names that
@@ -551,7 +551,7 @@ pub class AcmeClient
     if problem = order.error
       return problem
     end
-    AcmeError.new("the order #{order.url} is #{order.status}")
+    AcmeError.new(keep("the order #{order.url} is #{order.status}"))
   end
 
   # The certificate chain of a valid *order*, PEM, leaf first (section

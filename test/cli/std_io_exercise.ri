@@ -1,4 +1,4 @@
-# spec: 5.1@610b0d22
+# spec: 5.1@b5c69786
 # Exercises `std/io`: `Memory`, the `IyiIO` additions, `Sized`, `Delimited`,
 # `MultiWriter`, `Hexdump` and `ByteFormat`.
 #

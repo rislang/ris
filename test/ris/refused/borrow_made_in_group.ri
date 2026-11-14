@@ -1,0 +1,23 @@
+# A value made inside the group block is not lent: it may end before the
+# task does.
+class MadeLog
+  @text : String::Builder
+
+  def initialize
+    @text = String::Builder.new(64)
+  end
+
+  def add(line : String) : Nil
+    @text << line
+  end
+end
+
+def run : Nil
+  group do |g|
+    log = MadeLog.new
+    g.spawn { log.add("task"); 0 }
+    0
+  end
+end
+
+run

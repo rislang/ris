@@ -1,0 +1,21 @@
+# A UdpSocket handed to a task of a group, as an IyiSocket may be (SPEC
+# 5.1): the spawner never names it again; the task receives one datagram
+# and answers it. Silent on success.
+import std/udp::{UdpSocket}
+
+port = 0
+said = group do |g|
+  server = UdpSocket.bind("127.0.0.1", 0)
+  port = server.local_port
+  heard = g.spawn do
+    got = server.receive_from(64)
+    server.close
+    got.is_a?(Cancelled) ? "cancelled" : got[0]
+  end
+  client = UdpSocket.open
+  client.send_to("ping", "127.0.0.1", port)
+  client.close
+  answer = heard.value
+  answer.is_a?(String) ? answer : "panicked"
+end
+raise "heard #{said}" unless said == "ping"

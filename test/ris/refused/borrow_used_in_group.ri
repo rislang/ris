@@ -1,0 +1,22 @@
+# The spawner names a value it lent to a task while the group runs.
+class InGroupLog
+  @text : String::Builder
+
+  def initialize
+    @text = String::Builder.new(64)
+  end
+
+  def add(line : String) : Nil
+    @text << line
+  end
+end
+
+def run(log : InGroupLog) : Nil
+  group do |g|
+    g.spawn { log.add("task"); 0 }
+    log.add("spawner")
+    0
+  end
+end
+
+run(InGroupLog.new)

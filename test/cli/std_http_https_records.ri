@@ -1,3 +1,4 @@
+# spec: 5.1@b5c69786
 # HTTPS records (RFC 9460) in std/http's client, exercised end to end: an
 # `HTTPClient` with `use_https_records` set, a name server and a TLS
 # server in this program, and the server's ECH configuration (RFC 9849)
@@ -361,7 +362,12 @@ zone.addressed << "inner.test"
 zone.addressed << "svc.test"
 ports = [{other_port, "OTHER"}, {dead_port, "DEAD"}, {port, "PORT"}, {dns.local_port, "DNS"}]
 plain = Resolver.new(["127.0.0.1:#{dns.local_port}"], timeout_ms: 2000, attempts: 1)
-upstream = LocalUpstream.new(zone)
+# The upstream answers from a table of its own: the DNS task borrows
+# `zone` while the group runs (SPEC 5.1).
+upstream_zone = Zone.new
+upstream_zone.addressed << "inner.test"
+upstream_zone.addressed << "svc.test"
+upstream = LocalUpstream.new(upstream_zone)
 encrypted = Resolver.new([] of String, timeout_ms: 2000, attempts: 1)
 encrypted.encrypt(upstream.as(DnsUpstream))
 base = TlsConfig.new
@@ -386,6 +392,9 @@ group do |g|
       answer = zone.answer(packet)
       dns.send_to(answer, host, peer) if answer
     end
+    # The task owns the socket it was handed (SPEC 5.1): the group's
+    # cancellation ends the loop, and the task closes it.
+    dns.close
     0
   end
   [{listener, 1}, {other_listener, 2}].each do |served|
@@ -563,7 +572,7 @@ group do |g|
     [off, client, aliased, retrying, twice, disabled, passing, reliant, optional, fallen, secured, kept, resuming, turning, ticketed, mine].each(&.close)
     listener.close
     other_listener.close
-    dns.close
+    g.cancel_children
     0
   end
 end

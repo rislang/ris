@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # spec: 2.2@67a6a6f1, 1.9@3f448e8c, 3.5@4513f7df, 3.6@47d91b08, 1.1@fdc7907b
-# spec: 5.1@610b0d22, 1.5@9935f4c7, 3.2@9533bb9c, 7.1@e54681fa
+# spec: 5.1@b5c69786, 1.5@9935f4c7, 3.2@9533bb9c, 7.1@e54681fa
 # ris's own checks: every
 # program under test/ris/refused must be refused by the compiler with the
 # expected message, test/ris/allowed.ri must compile and run, the fibers test
@@ -84,7 +84,7 @@ for name in yield_owner_field yield_clone_attrs svcb_store \
   rsa_pem_lifetime current_copy_result time_location_kept decoded_maps \
   reader_read_str sse_reconnect_id rsa_string_message \
   response_owner typed_group_results multipart_owner enumerable_results \
-  const_folded_size zstd_whole_result big_shift_right; do
+  const_folded_size zstd_whole_result big_shift_right owner_reference client_open_block udp_handoff joined_task_borrow; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
   if [ "$code" -eq 0 ] && [ -z "$out" ]; then
     echo "runs     $name"
@@ -95,6 +95,13 @@ done
 expect yield_owner_field 'cannot return a value made in this block'
 expect block_item_downcase 'cannot store data made in this block'
 expect def_scratch_struct 'cannot store data made in this block'
+expect owner_reference_view 'cannot shrink tape storage with a live view'
+# A joined task borrows one value of its spawner (SPEC 5.1), no more.
+expect borrow_used_in_group 'inside the group whose task spawned'
+expect borrow_two_tasks 'inside the group whose task spawned'
+expect borrow_parallel 'this block becomes a proc'
+expect borrow_made_in_group 'this block becomes a proc'
+expect borrow_task_store 'cannot store data made in this block'
 expect block_current_copy 'cannot store data made in this block'
 expect inline_view_concat 'cannot store data made in this def'
 expect inline_view_interp 'cannot store data made in this def'
@@ -393,6 +400,14 @@ fi
 
 # Reflection must not expose unrelated private declarations.
 expect reflection_private 'does not export'
+
+# A patched copy of std is lowered as std is.
+out=$(RIS="$RIS" bash test/ris/patched_std_lowering.sh 2>&1)
+if [ "$?" -eq 0 ]; then
+  printf '%s\n' "$out"
+else
+  echo "FAILED   patched std lowering: $out"; status=1
+fi
 
 # Runtime storage has no application API.
 expect message_storage_private 'undefined constant RisMessagePool'
@@ -1078,7 +1093,7 @@ heap_trap text_literal_heap refused 4 \
 heap_trap borrowed_text runs
 
 expect class_field   "cannot store data made in this tape block"
-expect class_task "this block becomes a proc"
+expect class_task 'inside the group whose task spawned'
 expect class_share 'ClassShareValue is a tape type'
 expect class_finalize "tape class instances cannot finalize"
 expect class_inherited_finalize "tape class instances cannot finalize"

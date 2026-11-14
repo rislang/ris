@@ -57,6 +57,23 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.
 
+### 2026-11-14 · 5.1@b5c69786
+
+* New: a local task may borrow one value of its spawner's scope that is
+  set before its `group do |g|` block: nothing else in the block names it
+  after the spawn, nor a second task, and it is the spawner's again once
+  the group joins. A parallel task or thread borrows nothing. Resources
+  (IyiSocket, UdpSocket, pipe ends) are still handed off, not lent;
+  UdpSocket joins that list.
+  Why: std_tls_exercise ran a TLS server in a task over its caller's
+  TlsServerConfig, and std_http_https_records a DNS task over its def's
+  table and UdpSocket; the group joins before either ends, but only
+  Strings and handed-off resources could cross. Draft and EGM review:
+  doc/drafts/joined-task-borrow/. The review added: a value set inside
+  the group is not lent (it may end first), a second task's capture is
+  refused as a use, and a task storing its own tape data into the loan is
+  refused by the scope checker (probe tests under test/ris/refused/).
+
 ### 2026-11-13 · 6.7@436841dc 6.10@9b9f5766
 
 * New: a ris file ends in `.ri` (6.10). The compiler refuses a `.iyi`

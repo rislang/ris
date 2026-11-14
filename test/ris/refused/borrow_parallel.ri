@@ -1,0 +1,21 @@
+# A parallel task runs on another thread: it borrows nothing.
+class ParallelLog
+  @text : String::Builder
+
+  def initialize
+    @text = String::Builder.new(64)
+  end
+
+  def add(line : String) : Nil
+    @text << line
+  end
+end
+
+def run(log : ParallelLog) : Nil
+  group do |g|
+    g.spawn_parallel { log.add("other thread"); 0 }
+    0
+  end
+end
+
+run(ParallelLog.new)

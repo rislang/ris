@@ -1,4 +1,4 @@
-# spec: 5.1@610b0d22
+# spec: 5.1@b5c69786
 # Exercises std/tls: a TLS 1.3 client and server, and the client's TLS 1.2.
 #
 # With no argument: RFC 8448's "Simple 1-RTT Handshake" trace, held byte for
@@ -426,30 +426,31 @@ def ech_pair(server : TlsServerConfig, client : TlsConfig, host : String = "inne
              early : String? = nil, on : IyiSocket? = nil) : {String, String, Array(UInt8)?}
   listener = on || IyiSocket.listen("127.0.0.1", 0)
   port = listener.local_port
-  served = ""
-  said = ""
-  retry = nil.as(Array(UInt8)?)
   group do |g|
-    g.spawn do
+    # The server task borrows *server* until the group ends (SPEC 5.1)
+    # and answers what it saw.
+    serving = g.spawn do
       socket = listener.accept.as(IyiSocket)
       listener.close unless on
       conn = TlsServer.new(socket, server)
       conn_error = conn.accept(5000)
       if conn_error
-        served = "refused: #{conn_error.message}"
+        "refused: #{conn_error.message}"
       else
         came = conn.read_early
         got = conn.read
-        served = "ech=#{conn.ech_accepted?} name=#{conn.server_name} outer=#{conn.outer_server_name} alpn=#{conn.alpn_protocol} " +
-                 "early=#{came.is_a?(TlsError) ? came.message : came} read=#{got.is_a?(TlsError) ? got.message : got}"
+        seen = "ech=#{conn.ech_accepted?} name=#{conn.server_name} outer=#{conn.outer_server_name} alpn=#{conn.alpn_protocol} " +
+               "early=#{came.is_a?(TlsError) ? came.message : came} read=#{got.is_a?(TlsError) ? got.message : got}"
         conn.write("echo:" + (got.is_a?(TlsError) ? "" : got))
         conn.close
+        seen
       end
-      0
     end
     socket = IyiSocket.connect("127.0.0.1", port).as(IyiSocket)
     conn = TlsClient.new(socket, host, client, session)
     conn_error = conn.over(5000, early)
+    said = ""
+    retry = nil.as(Array(UInt8)?)
     if conn_error
       said = "refused: #{conn_error.message}"
       retry = ((configs = conn_error.retry_configs) ? configs.bytes : nil)
@@ -458,9 +459,9 @@ def ech_pair(server : TlsServerConfig, client : TlsConfig, host : String = "inne
       said = "ech=#{conn.ech_accepted?} alpn=#{conn.alpn_protocol} group=#{conn.named_group} resumed=#{conn.resumed?} early=#{conn.early_data} got=#{drain(conn)}"
       conn.close
     end
-    0
+    served = serving.value
+    {said, served.is_a?(String) ? served : "panicked: #{served.message}", retry}
   end
-  {said, served, retry}
 end
 
 def take(socket : IyiSocket, count : Int32) : Array(UInt8)
@@ -486,21 +487,20 @@ end
 def captured(client : TlsConfig, host : String, session : TlsSession? = nil, early : String? = nil, on : IyiSocket? = nil) : Array(UInt8)
   listener = on || IyiSocket.listen("127.0.0.1", 0)
   port = listener.local_port
-  hello = [] of UInt8
   group do |g|
-    g.spawn do
+    reading = g.spawn do
       socket = listener.accept.as(IyiSocket)
       listener.close unless on
       socket.read_timeout_ms = 5000
       hello = record_of(socket)[1]
       socket.close
-      0
+      hello
     end
     conn = TlsClient.new(IyiSocket.connect("127.0.0.1", port).as(IyiSocket), host, client, session)
     conn.over(5000, early)
-    0
+    hello = reading.value
+    hello.is_a?(Array(UInt8)) ? hello : [] of UInt8
   end
-  hello
 end
 
 # An encrypted_client_hello's payload size (RFC 9849 section 5): after its
@@ -578,26 +578,24 @@ end
 def crafted(server : TlsServerConfig, hellos : Array(Array(UInt8))) : {Array({Int32, Array(UInt8)}), String}
   listener = IyiSocket.listen("127.0.0.1", 0)
   port = listener.local_port
-  said = ""
-  answers = [] of {Int32, Array(UInt8)}
   group do |g|
-    g.spawn do
+    serving = g.spawn do
       conn = TlsServer.new(listener.accept.as(IyiSocket), server)
+      listener.close
       conn_error = conn.accept(5000)
-      said = conn_error ? conn_error.message : "held"
-      0
+      conn_error ? conn_error.message : "held"
     end
     socket = IyiSocket.connect("127.0.0.1", port).as(IyiSocket)
     socket.read_timeout_ms = 5000
+    answers = [] of {Int32, Array(UInt8)}
     hellos.each do |hello|
       socket.write(text([22_u8, 3_u8, 1_u8] + u16b(hello.size) + hello))
       answers << record_of(socket)
     end
     socket.close
-    0
+    said = serving.value
+    {answers, said.is_a?(String) ? said : "panicked: #{said.message}"}
   end
-  listener.close
-  {answers, said}
 end
 
 # What a record answering a crafted ClientHello was: "alert <code>",

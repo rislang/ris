@@ -1,4 +1,4 @@
-# spec: 5.1@610b0d22
+# spec: 5.1@b5c69786
 # A task's handle is its Share stop handle (SPEC 5.1): a sibling
 # cancels one task without reaching what it owns, the task's wait answers
 # Cancelled and its own code ends it; the other tasks run on, and a

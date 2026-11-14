@@ -1,0 +1,60 @@
+# A class holding the caller's owner holds a reference, not a view of the
+# owner's field bytes: the owner clearing and refilling its own buffer
+# leaves the holder usable (acme's AcmeClient over the caller's
+# HTTPClient, whose resolver refills its text). Silent on success.
+
+class RefInner
+  @text : String::Builder = String::Builder.new(16)
+  @names = [] of String
+
+  def refill(text : String) : Int32
+    @text.clear
+    @names.clear
+    @text << text
+    @names << @text.finish[0, text.bytesize]
+    @names.size + @text.bytesize
+  end
+end
+
+class RefStore
+  @inner : RefInner
+
+  def initialize
+    inner = RefInner.new
+    @inner = inner
+  end
+
+  def refill(text : String) : Int32
+    @inner.refill(text)
+  end
+end
+
+class RefHolder
+  @store : RefStore?
+
+  def initialize(@name : String, @store : RefStore? = nil)
+  end
+
+  def self.exchange(text : String, store : RefStore?) : Int32
+    if s = store
+      s.refill(text)
+    else
+      0
+    end
+  end
+
+  def run(text : String) : Int32
+    RefHolder.exchange(text, @store)
+  end
+end
+
+def again(holder : RefHolder, text : String) : Int32
+  holder.run(text)
+end
+
+store = RefStore.new
+holder = RefHolder.new("x", store: store)
+first = holder.run("abc")
+second = again(holder, "de")
+third = again(holder, "again")
+raise "sizes #{first} #{second} #{third}" unless first == 4 && second == 3 && third == 6
