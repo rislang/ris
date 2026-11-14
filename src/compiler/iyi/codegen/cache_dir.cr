@@ -229,8 +229,16 @@ module Iyi
     #
     # A build already says it is using its directory: it holds `compiler.lock`
     # there for the whole of codegen and linking. This asks.
+    #
+    # ris: a compiler that runs a macro helper holds `macro_run.lock` in the
+    # helper's directory, shared, for its whole life (`Program#macro_compile`).
+    MACRO_LOCK = "macro_run.lock"
+
     def directory_in_use?(dir : String) : Bool
-      lock = File.join(dir, "compiler.lock")
+      lock_in_use?(File.join(dir, "compiler.lock")) || lock_in_use?(File.join(dir, MACRO_LOCK))
+    end
+
+    private def lock_in_use?(lock : String) : Bool
       return false unless File.exists?(lock)
 
       File.open(lock, "r") do |file|

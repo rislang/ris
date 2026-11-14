@@ -176,7 +176,7 @@ class Iyi::Program
     # change the program behaviour even if files don't change, but this is
     # discouraged (and we should strongly document it) because it prevents
     # incremental compiles.
-    program_dir = CacheDir.instance.directory_for(filename)
+    program_dir = hold_macro_dir(filename)
     executable_path = File.join(program_dir, "macro_run")
     recorded_requires_path = File.join(program_dir, "recorded_requires")
     requires_path = File.join(program_dir, "requires")
@@ -233,6 +233,31 @@ class Iyi::Program
     end
 
     CompiledMacroRun.new(executable_path, time.elapsed, false)
+  end
+
+  # ris: the helper's cache directory, held for as long as this compiler
+  # lives. Every build keeps only the ten newest cache directories and
+  # deletes the rest unless a compiler holds a lock in them; the helper's
+  # directory held none, so parallel builds on one cache deleted it between
+  # its compile and its run: "Error: .../macro_run: No such file or
+  # directory". A shared lock on `macro_run.lock` says it is in use (see
+  # `CacheDir#directory_in_use?`); it is not `compiler.lock`, which the host
+  # compiler below takes exclusively in the same directory. A directory
+  # deleted before the lock was taken is made again.
+  @macro_dir_locks = [] of File
+
+  private def hold_macro_dir(filename) : String
+    loop do
+      dir = CacheDir.instance.directory_for(filename)
+      lock_path = File.join(dir, CacheDir::MACRO_LOCK)
+      file = File.open(lock_path, "a")
+      file.flock_shared
+      if File.exists?(lock_path)
+        @macro_dir_locks << file
+        return dir
+      end
+      file.close
+    end
   end
 
   # The copies `macro_compile` kept and a killed compiler left, an hour
