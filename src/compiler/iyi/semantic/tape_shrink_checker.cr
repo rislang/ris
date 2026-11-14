@@ -558,8 +558,12 @@ class Iyi::TapeShrinkChecker
     return result if viewing && node.is_a?(Call) &&
                      (VIEWS.includes?(node.name) || TEXT_VIEWS.includes?(node.name))
     return result if viewing && !node.is_a?(Call)
-    # A view of a builder's or an Array's storage is what it says.
-    if viewing && (result.roots + result.views.map(&.root)).all? { |r|
+    # A view of a builder's or an Array's storage is what it says. Not
+    # text a String's own method made: `s.downcase` of an Array's item
+    # views the item's bytes and is fresh, as one of a parameter is.
+    text_method = node.is_a?(Call) &&
+                  node.obj.try(&.type?).try { |t| type_name(t.remove_typedef) } == "String"
+    if viewing && !text_method && (result.roots + result.views.map(&.root)).all? { |r|
          !@runtime_made.includes?(r) && storage_type?(root_type(r)) &&
            type_name(root_type(r).not_nil!.remove_typedef) != "String"
        }

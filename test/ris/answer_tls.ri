@@ -1,7 +1,8 @@
 # `Server.answer` over TLS: a TLS 1.3 handshake and an answer, a second
 # connection resumed by a ticket (`tls_resumed?`), a streamed body over
 # HTTP/1.0 to the close; HTTP/2 by prior knowledge in the clear on the
-# fast path, whole and streamed, and an upgrade over HTTP/2 answered 501.
+# fast path, whole and streamed, and an upgrade over HTTP/2 reset with
+# HTTP_1_1_REQUIRED (RFC 9113 8.6), as test/cli/http2_exercise.ri asks.
 # (std/http's HTTPS client is refused by the owner check today, so the
 # TLS side is driven with TlsClient.)
 module test/ris/answer_tls
@@ -132,8 +133,9 @@ def get_block(path : String) : String
 end
 
 # Three requests over one cleartext connection with HTTP/2's preface
-# (prior knowledge): whether the statuses are 200, 200 and 501 (:status
-# indexed, or a literal "501" in Huffman code), and each stream's DATA.
+# (prior knowledge): whether the statuses are 200 and 200 (:status
+# indexed), the upgrade's stream reset with HTTP_1_1_REQUIRED (13), and
+# each stream's DATA.
 def h2c(port : Int32) : String
   socket = IyiSocket.connect("127.0.0.1", port).or_panic
   socket.read_timeout_ms = 5000
@@ -170,6 +172,9 @@ def h2c(port : Int32) : String
         h1 << payload if id == 1
         h3 << payload if id == 3
         h5 << payload if id == 5
+      elsif kind == 3 && id == 5
+        h5 << payload
+        ended += 1
       elsif kind == 0
         d1 << payload if id == 1
         d3 << payload if id == 3
@@ -180,7 +185,7 @@ def h2c(port : Int32) : String
   end
   socket.close
   ok = h1.byte_at(0) == 0x88_u8 && h3.byte_at(0) == 0x88_u8 &&
-       h5.starts_with?("\x48\x82\x6c\x01")
+       h5 == "\x00\x00\x00\x0d"
   "h2c statuses #{ok}: #{d1} | #{d3}"
 end
 

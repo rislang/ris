@@ -93,6 +93,7 @@ for name in yield_owner_field yield_clone_attrs svcb_store \
   fi
 done
 expect yield_owner_field 'cannot return a value made in this block'
+expect block_item_downcase 'cannot store data made in this block'
 expect inline_view_concat 'cannot store data made in this def'
 expect inline_view_interp 'cannot store data made in this def'
 expect inline_view_call 'cannot store data made in this def'
@@ -3488,6 +3489,29 @@ if [ "$?" -eq 0 ]; then
 else
   echo "FAILED   spec module uri: $out"; status=1
 fi
+
+# test/cli programs that once built but failed at run time. number:
+# a float after Unicode whitespace ("\u20281e-3".to_f) panicked. stop
+# and http2: an HTTP/2 request's header name made in a block round was
+# freed before HPACK sent it (PROTOCOL_ERROR); an upgrade over HTTP/2
+# was answered 501, not reset with HTTP_1_1_REQUIRED. resume: roots
+# assigned anew resumed the old session.
+for pair in 'number_exercise|all number checks passed' \
+    'std_http_stop|ALL CHECKS PASSED' \
+    'std_http_resume|ALL CHECKS PASSED' \
+    'http2_exercise|ALL CHECKS PASSED'; do
+  name=${pair%%|*} want=${pair#*|}
+  bin=$(mktemp -d)/$name
+  if ! out=$("$RIS" build -o "$bin" "test/cli/$name.ri" 2>&1); then
+    echo "FAILED   cli $name: build: $(tail -5 <<<"$out")"; status=1
+  elif out=$(RIS_H2_POOL_PENDING=1 timeout 180 "$bin" 2>&1) &&
+       grep -qxF -- "$want" <<<"$out" && ! grep -q '^FAIL' <<<"$out"; then
+    echo "runs     cli $name"
+  else
+    echo "FAILED   cli $name: $(tail -5 <<<"$out")"; status=1
+  fi
+  rm -rf "$(dirname "$bin")"
+done
 
 # Run heap workloads after the other gates to avoid compiler contention.
 # Keep their fixed timeouts: a hung census must still fail.

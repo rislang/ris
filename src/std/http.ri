@@ -2234,7 +2234,8 @@ pub struct Outgoing
   # protocol's own). After `call` returns the server writes it and calls
   # the handler's `take_over(socket, leftover, res)` with the connection
   # - the socket, or under TLS the `TlsStream` - the bytes the client sent
-  # after its request, and this answer. HTTP/2 answers it 501.
+  # after its request, and this answer. HTTP/2 resets its stream with
+  # HTTP_1_1_REQUIRED.
   def upgrade : Nil
     if @state[4] != 0 || @body.length > 0
       raise "HTTP: write the body inside stream, or only into body"
@@ -7661,7 +7662,8 @@ class H2Connection
     s = @streams[id]?
     return @fault == FAULT_NONE if s.nil? || s.reset >= 0
     if res.upgrading?
-      refuse_request(id, 501, "an upgrade is not served over HTTP/2")
+      # RFC 9113 8.6: the client asks again over HTTP/1.1.
+      refuse(id, HTTP_1_1_REQUIRED)
       return @fault == FAULT_NONE
     end
     if res.ending != 0
@@ -7757,8 +7759,14 @@ class H2Connection
     @streams[id] = s
     fields = [Std::Hpack::HeaderField.new(":method", method), Std::Hpack::HeaderField.new(":scheme", scheme),
               Std::Hpack::HeaderField.new(":authority", authority), Std::Hpack::HeaderField.new(":path", path)]
+    # The lower-case names are written into one builder made before the
+    # loop: a `name.downcase` made in the block's round was freed with it,
+    # and the encoder's bytes once overwrote "x-test".
+    names = String::Builder.new(headers.sum { |k, _| k.bytesize })
     headers.each do |name, value|
-      lower = name.downcase
+      from = names.bytesize
+      name.each_byte { |b| names.push(b >= 65_u8 && b <= 90_u8 ? b + 32_u8 : b) }
+      lower = names.finish[from, name.bytesize]
       next if H2Connection.connection_specific?(lower) || lower == "host"
       raise "HTTP: header #{name} contains a line break" if HTTP.has_break?(value)
       raise "HTTP: header #{name} contains a control character" if HTTP.control?(value)

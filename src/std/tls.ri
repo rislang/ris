@@ -4027,6 +4027,8 @@ pub class TlsMadeUnder
 
   getter root_values : Array(UInt8)
   getter root_offsets : Array(Int32)
+  # Each root's `store_id`.
+  @root_stores : Array(UInt64)
   getter roots_generation : UInt64
   @ech_storage : Array(UInt8)
 
@@ -4035,12 +4037,14 @@ pub class TlsMadeUnder
     root_values = Array(UInt8).new(4096)
     root_offsets = Array(Int32).new
     root_offsets << 0
+    root_stores = Array(UInt64).new
     @roots_generation = @config.system_roots_generation
     @roots = @config.roots
     roots = @roots || @config.kept_certificates
     roots.each do |root|
       root.raw.each { |byte| root_values << byte }
       root_offsets << root_values.size
+      root_stores << root.store_id
       nil
     end
     @identity = @config.identity
@@ -4055,6 +4059,7 @@ pub class TlsMadeUnder
     @ech_storage = ech_storage
     @root_values = root_values
     @root_offsets = root_offsets
+    @root_stores = root_stores
   end
 
   def configure(config : TlsConfig) : Nil
@@ -4066,10 +4071,12 @@ pub class TlsMadeUnder
     @root_values.clear
     @root_offsets.clear
     @root_offsets << 0
+    @root_stores.clear
     roots = @roots || config.kept_certificates
     roots.each do |root|
       root.raw.each { |byte| @root_values << byte }
       @root_offsets << @root_values.size
+      @root_stores << root.store_id
       nil
     end
     @identity = config.identity
@@ -4104,6 +4111,9 @@ pub class TlsMadeUnder
     while at < roots.size
       first = @root_offsets[at]
       return false unless @root_values[first, @root_offsets[at + 1] - first] == roots[at].raw
+      # The same bytes read into another store are roots assigned anew:
+      # "new roots" in test/cli/std_http_resume.ri once resumed.
+      return false unless @root_stores[at] == roots[at].store_id
       at += 1
     end
     true

@@ -455,31 +455,17 @@ struct String
   end
 
   def to_f : Float64
-    first = 0
-    stop = @bytesize
-    while first < stop && numeric_blank?(self[first])
-      first += 1
-    end
-    while stop > first && numeric_blank?(self[stop - 1])
-      stop -= 1
-    end
+    # The whitespace `to_i?` and `strip` skip, Unicode's: "\u20281e-3"
+    # once panicked here, where only ASCII blanks were skipped.
+    first = space_end
+    stop = space_start(first)
     IyiFloatText.parse(self[first, stop - first])
-  end
-
-  private def numeric_blank?(byte : UInt8) : Bool
-    byte == 32_u8 || (byte >= 9_u8 && byte <= 13_u8)
   end
 
   def to_i64?(base : Int32) : Int64?
     raise "base #{base} out of range (2..36)" if base < 2 || base > 36
-    index = 0
-    stop = @bytesize
-    while index < stop && numeric_blank?(self[index])
-      index += 1
-    end
-    while stop > index && numeric_blank?(self[stop - 1])
-      stop -= 1
-    end
+    index = space_end
+    stop = space_start(index)
     return nil if index == stop
 
     negative = to_unsafe[index] == 45_u8
