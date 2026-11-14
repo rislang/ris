@@ -427,10 +427,14 @@ pub struct HpkeSuite
            sender_key : HpkePrivateKey | Nil = nil) : {Array(UInt8), String} | HpkeError
     context = HpkeSender.new
     problem = context.setup(self, recipient, info, randomness, psk, psk_id, sender_key)
-    return problem if problem
-    sealed = context.seal(plaintext, aad)
-    return sealed if sealed.is_a?(HpkeError)
-    {context.enc, sealed}
+    # One answer, copied out of the context this def owns.
+    result = if problem
+               problem
+             else
+               sealed = context.seal(plaintext, aad)
+               sealed.is_a?(HpkeError) ? sealed : {context.enc, sealed}
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   # Single-shot Open<MODE> (section 6.1): the plaintext, or an `HpkeError`.
@@ -450,8 +454,8 @@ pub struct HpkeSuite
                   sender_key : HpkePrivateKey | Nil = nil) : {Array(UInt8), Array(UInt8)} | HpkeError
     context = HpkeSender.new
     problem = context.setup(self, recipient, info, randomness, psk, psk_id, sender_key)
-    return problem if problem
-    {context.enc, context.export(exporter_context, length)}
+    result = problem ? problem : {context.enc, context.export(exporter_context, length)}
+    result.copy_to(RisCurrentTape.new)
   end
 
   # Single-shot ReceiveExport<MODE> (section 6.2): what `send_export`
@@ -563,13 +567,15 @@ pub struct HpkePrivateKey
   # X25519 key is clamped (section 7.1.2).
   def self.from_bytes(kem : HpkeKem, bytes : String | Array::View(UInt8)) : HpkePrivateKey | HpkeError
     raw = HpkeBytes.copy(bytes)
-    unless raw.size == kem.private_key_size
-      return HpkeError.new("HPKE: a #{kem.name} private key is #{kem.private_key_size} bytes, not #{raw.size}")
-    end
-    return x25519(raw) if kem == HpkeKem::X25519Sha256
-    key = nist(kem, raw)
-    return HpkeError.new("HPKE: the #{kem.name} private key is refused: #{key.message}") if key.is_a?(EcdsaError)
-    key
+    result = if raw.size != kem.private_key_size
+               HpkeError.new("HPKE: a #{kem.name} private key is #{kem.private_key_size} bytes, not #{raw.size}")
+             elsif kem == HpkeKem::X25519Sha256
+               x25519(raw)
+             else
+               key = nist(kem, raw)
+               key.is_a?(EcdsaError) ? HpkeError.new("HPKE: the #{kem.name} private key is refused: #{key.message}") : key
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   private def self.x25519(secret : Array(UInt8)) : HpkePrivateKey

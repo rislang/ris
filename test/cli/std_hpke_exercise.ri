@@ -319,9 +319,9 @@ def oracle_seal(w : Array(String)) : String
   end
   exported = sender.export(bytes_or_empty(w[10]), w[11].to_i)
   sealed = message_pairs(w[12]).map do |m|
-    got = sender.seal(message_part(m, 1), message_part(m, 0))
-    return "refused: #{got.message}" if got.is_a?(HpkeError)
-    hex(got)
+    one = sender.seal(message_part(m, 1), message_part(m, 0))
+    return "refused: #{one.message}" if one.is_a?(HpkeError)
+    hex(one)
   end
   "#{hex(sender.enc)} #{hex(exported)} #{sealed.empty? ? "-" : sealed.join(",")}"
 end
@@ -344,9 +344,9 @@ def oracle_open(w : Array(String)) : String
   end
   exported = recipient.export(bytes_or_empty(w[10]), w[11].to_i)
   opened = message_pairs(w[12]).map_with_index do |m, i|
-    got = recipient.open(message_part(m, 1), message_part(m, 0))
-    return "refused: message #{i}: #{got.message}" if got.is_a?(HpkeError)
-    got.empty? ? "-" : hex(got)
+    one = recipient.open(message_part(m, 1), message_part(m, 0))
+    return "refused: message #{i}: #{one.message}" if one.is_a?(HpkeError)
+    one.empty? ? "-" : hex(one)
   end
   "#{hex(exported)} #{opened.empty? ? "-" : opened.join(",")}"
 end
@@ -495,31 +495,31 @@ KEMS.each do |kem|
       suite = HpkeSuite.new(kem, kdf, aead)
       4.times do |mode|
         name = "#{suite}, #{MODES[mode]}"
-        key = HpkePrivateKey.derive(kem, drawn("#{name} r", kem.private_key_size))
+        trip_key = HpkePrivateKey.derive(kem, drawn("#{name} r", kem.private_key_size))
         mine = HpkePrivateKey.derive(kem, drawn("#{name} s", kem.private_key_size + 7))
         psk = mode == 1 || mode == 3 ? drawn("#{name} psk", 32 + mode) : nil
         psk_id = psk.nil? ? nil : drawn("#{name} psk_id", mode)
         sender_key = mode >= 2 ? mine : nil
         sender_public = mode >= 2 ? HpkePublicKey.from_bytes(kem, mine.public_key.bytes).as(HpkePublicKey) : nil
-        public = HpkePublicKey.from_bytes(kem, key.public_key.bytes).as(HpkePublicKey)
-        info = drawn("#{name} info", mode * 9)
+        trip_public = HpkePublicKey.from_bytes(kem, trip_key.public_key.bytes).as(HpkePublicKey)
+        trip_info = drawn("#{name} info", mode * 9)
         trip_sender = HpkeSender.new
-        if problem = trip_sender.setup(suite, public, info, drawn("#{name} e", kem.private_key_size), psk, psk_id, sender_key)
+        if problem = trip_sender.setup(suite, trip_public, trip_info, drawn("#{name} e", kem.private_key_size), psk, psk_id, sender_key)
           raise problem.message
         end
         check trip_sender.mode.value == mode, "#{name}: the mode"
-        read = HpkePrivateKey.from_bytes(kem, key.bytes).as(HpkePrivateKey)
+        read = HpkePrivateKey.from_bytes(kem, trip_key.bytes).as(HpkePrivateKey)
         trip_recipient = HpkeRecipient.new
-        if problem = trip_recipient.setup(suite, read, trip_sender.enc, info, psk, psk_id, sender_public)
+        if problem = trip_recipient.setup(suite, read, trip_sender.enc, trip_info, psk, psk_id, sender_public)
           raise problem.message
         end
         unless aead == HpkeAead::ExportOnly
           3.times do |m|
             pt = drawn("#{name} pt #{m}", m * 500)
             aad = drawn("#{name} aad #{m}", m * 3)
-            sealed = trip_sender.seal(pt, aad).as(String)
-            check sealed.bytesize == pt.size + 16, "#{name}: message #{m} is its plaintext and a tag"
-            check opened?(trip_recipient.open(sealed, aad), pt), "#{name}: message #{m} opened"
+            trip_sealed = trip_sender.seal(pt, aad).as(String)
+            check trip_sealed.bytesize == pt.size + 16, "#{name}: message #{m} is its plaintext and a tag"
+            check opened?(trip_recipient.open(trip_sealed, aad), pt), "#{name}: message #{m} opened"
           end
         end
         check trip_sender.export("ctx", 77) == trip_recipient.export("ctx", 77), "#{name}: the exports"

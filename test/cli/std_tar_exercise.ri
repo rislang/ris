@@ -53,18 +53,26 @@ class ZeroSource < IyiIO
 
   def initialize(@head : String, @left : Int64)
     super(-1_i64, 16, false)
+    @at = 0
   end
 
   def read_bytes(count : Int32) : String
-    unless @head.empty?
-      n = count < @head.bytesize ? count : @head.bytesize
-      got = @head[0, n]
-      @head = @head[n, @head.bytesize - n]
+    if @at < @head.bytesize
+      n = count < @head.bytesize - @at ? count : @head.bytesize - @at
+      got = @head[@at, n]
+      @at = @at + n
       return got
     end
     n = @left < count.to_i64 ? @left.to_i32 : count
     @left = @left - n.to_i64
     n == 65536 ? ZEROS : "\u0000" * n
+  end
+
+  # The reader asks for bytes appended to its own text.
+  def read_str(count : Int32, into : String::Builder) : Int32
+    got = read_bytes(count)
+    into << got
+    got.bytesize
   end
 end
 
@@ -92,9 +100,61 @@ class CountingSink < IyiIO
   end
 end
 
+# An entry's fields, copied out of its reader: an entry views the
+# reader's buffers, which the next entry reuses.
+pub class Seen
+  getter name : String
+  getter linkname : String
+  getter size : Int64
+  getter mode : Int32
+  getter uid : Int64
+  getter gid : Int64
+  getter uname : String
+  getter gname : String
+  getter mtime : Time
+  getter typeflag : UInt8
+  getter format : TarFormat
+  getter type : TarType
+  getter pax : Hash(String, String)
+  getter type_name : String
+
+  def initialize(e : TarEntry) : Nil
+    @name = e.name
+    @linkname = e.linkname
+    @size = e.size
+    @mode = e.mode
+    @uid = e.uid
+    @gid = e.gid
+    @uname = e.uname
+    @gname = e.gname
+    @mtime = e.mtime
+    @typeflag = e.typeflag
+    @format = e.format
+    @type = e.type
+    @pax = e.pax
+    @type_name = e.type_name
+  end
+
+  def file? : Bool
+    @type == TarType::Regular || @type == TarType::Contiguous
+  end
+
+  def directory? : Bool
+    @type == TarType::Directory
+  end
+
+  def symlink? : Bool
+    @type == TarType::Symlink
+  end
+
+  def hardlink? : Bool
+    @type == TarType::Hardlink
+  end
+end
+
 # What an archive holds: each entry with its data.
-def listed(data : String, label : String) : Array({TarEntry, String})
-  out = [] of {TarEntry, String}
+def listed(data : String, label : String) : Array({Seen, String})
+  out = [] of {Seen, String}
   source = Memory.new(data)
   r = TarReader.new(source)
   while true
@@ -103,7 +163,7 @@ def listed(data : String, label : String) : Array({TarEntry, String})
     break unless e
     body = e.read_all
     raise "ASSERTION FAILED: #{label}: #{e.name.inspect} refused with #{body.message.inspect}" if body.is_a?(TarError)
-    out << {e, body}
+    out << {Seen.new(e).copy_to(Program.tape), body.copy_to(Program.tape)}
   end
   out
 end
@@ -114,10 +174,10 @@ def first_error(data : String) : TarError?
   r = TarReader.new(memory_1)
   while true
     e = r.next_entry
-    return e if e.is_a?(TarError)
+    return e.copy_to(Program.tape) if e.is_a?(TarError)
     return nil unless e
     body = e.read_all
-    return body if body.is_a?(TarError)
+    return body.copy_to(Program.tape) if body.is_a?(TarError)
   end
   nil
 end
@@ -251,7 +311,7 @@ def stamp(t : Time) : String
   whole + "." + frac
 end
 
-def kind_of(e : TarEntry) : String
+def kind_of(e : Seen) : String
   return "file" if e.file?
   case e.type
   when TarType::Directory   then "dir"
@@ -378,7 +438,7 @@ assert_true round.byte_index("15 uid=3000000\n") != nil && round.byte_index("15 
 assert_true round.byte_index("15 mtime=-1000\n") != nil && round.byte_index("20 mtime=9000000000\n") != nil, "times before 1970 and after 2242 in pax"
 assert_true listed(round, "round trip")[0][0].uname == "naruto", "uname read"
 mem2 = Memory.new
-tarwriter_1 = TarWriter.new(mem)
+tarwriter_1 = TarWriter.new(mem2)
 tarwriter_1.finish
 empty_archive = mem2.to_s
 assert_true empty_archive.bytesize == 10240 && listed(empty_archive, "an empty archive").empty?, "an empty archive: one record of zeros"
@@ -417,7 +477,7 @@ memory_3 = Memory.new(round)
 r = TarReader.new(memory_3)
 names = [] of String
 while e = r.next_entry.as(TarEntry | Nil)
-  names << e.name
+  names << e.name.copy_to(Program.tape)
   if e.name == "text.txt"
     first = e.read(1000).as(String)
     assert_str text[0, 1000], first, "the first 1000 bytes"
@@ -531,7 +591,8 @@ assert_true head[1024 + 124, 12] == "00000000000\u0000", "past 8 GiB: the header
 total = 1536_i64 + big + 511_i64 + 1024_i64
 total = total + (10240_i64 - total % 10240_i64) % 10240_i64
 assert_true sink.total == total, "past 8 GiB: #{sink.total} bytes written, #{total} wanted"
-r2 = TarReader.new(ZeroSource.new(head[0, 1536], total - 1536_i64))
+zero_source = ZeroSource.new(head[0, 1536], total - 1536_i64)
+r2 = TarReader.new(zero_source)
 e = r2.next_entry.as(TarEntry)
 assert_true e.size == big && e.format == TarFormat::Pax, "past 8 GiB: the size read back from pax"
 assert_true e.read_all.is_a?(TarError), "past 8 GiB: read_all refuses what a string cannot hold"
@@ -549,7 +610,7 @@ puts "  #{big} bytes written and read back, size in pax"
 
 puts "== gzip"
 mem3 = Memory.new
-w3 = TarWriter.new(mem, gzip: true)
+w3 = TarWriter.new(mem3, gzip: true)
 specs.each { |s| s.write(w3) }
 w3.finish
 gz = mem3.to_s
@@ -647,9 +708,10 @@ memory_10 = Memory.new(round[0, 1000])
 r10 = TarReader.new(memory_10)
 r10.next_entry
 second = r10.next_entry
-assert_true second.is_a?(TarError) && second.message.includes?("ends inside \"hello.txt\"'s data"), "an entry's padding cut short, read past"
+second_said = second.is_a?(TarError) ? second.message.copy_to(Program.tape) : ""
+assert_true second_said.includes?("ends inside \"hello.txt\"'s data"), "an entry's padding cut short, read past"
 again = r10.next_entry
-assert_true again.is_a?(TarError) && again.message == second.as(TarError).message, "an error answered again"
+assert_true again.is_a?(TarError) && again.message == second_said, "an error answered again"
 refused(raw("././@PaxHeader", 'x', 2000000_i64) + "\u0000" * 4096, "is 2000000 bytes, past the 1048576 this reader holds", "an extended header past 1 MiB")
 refused(pax("12 path=a\n") + raw("a", '0', 0_i64) + END_BLOCKS, "a record that is not one", "a pax record whose length is wrong")
 refused(pax("10 patha\n\n") + raw("a", '0', 0_i64) + END_BLOCKS, "no key=value", "a pax record with no =")
@@ -781,10 +843,12 @@ def entries_in_file(path : String) : Int32
 end
 
 # Extracts the tar in *data* into *dir*, or why it could not.
-def extract_bytes(data : String, dir : String)
+def extract_bytes(data : String, dir : String) : TarError?
   memory = Memory.new(data)
   reader = TarReader.new(memory)
-  reader.extract(dir)
+  done = reader.extract(dir)
+  return done.copy_to(Program.tape) if done.is_a?(TarError)
+  nil
 end
 
 if !scratch && File.exists?(work + "/index.txt")

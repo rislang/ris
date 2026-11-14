@@ -1,0 +1,10 @@
+# A negative BigInt shifted right is floor(self / 2^count): the value
+# the shift's initializer worked out was dropped, and -7 >> 1 was -7.
+import std/big::{BigInt}
+import std/tuple
+
+{ {-7_i64, 1, "-4"}, {-8_i64, 1, "-4"}, {-1_i64, 5, "-1"},
+ {-(1_i64 << 40) - 1_i64, 33, "-129"} }.each do |c|
+  got = (BigInt.new(c[0]) >> c[1]).to_s
+  raise "#{c[0]} >> #{c[1]}: #{got}" unless got == c[2]
+end

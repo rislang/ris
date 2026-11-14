@@ -185,11 +185,58 @@ Unknown must be refused (SPEC 3.6).
   struct) and `fix printed its edit` (split.ri already clean).
 
 * Build each test/cli program, group refusals by message, fix per group.
-  2026-11-14 (second round): 107 of 130 programs pass
-  `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 23 fail (106
-  after the first round, 100 before it). Names omit std_ and _exercise
-  where present; each failure appears once.
+  2026-11-14 (third round): 112 of 130 programs pass
+  `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 18 fail (107
+  after the second round, 100 before the first). Names omit std_ and
+  _exercise where present; each failure appears once.
 
+  Third round: tar, compress, big, p256 and hpke build. Found on the
+  way: `-7 >> 1` was -7 (BigInt's negative right shift dropped its
+  value; test/ris/big_shift_right.ri); BigDecimal `+ - * // %`,
+  BigRational `+ - *` and BigFloat's rounded results ended with a
+  constructor over a scratch BigInt and read freed limbs (the checker
+  accepts it); each now ends `.copy_to(RisCurrentTape.new)`. A def's
+  copy is accepted only as its last expression, never in `return X
+  if`, so guarded returns became one `result = if ...` (big, hpke).
+  Loop-carried BigInts refill a limbs Array (BigInt.refill). Benches
+  keep a block's values with `.copy_to(Program.tape)`. A top-level
+  local named like a block's local (z, feed, x, key) makes the block's
+  store refused at a line that does not say so: renamed.
+  tar.sh's mutation copies sit under patched/src/std (the String to
+  Builder lowering is for "/src/std/" paths only; 70 other .sh files
+  copy into patched/std and their mutation builds may fail the same
+  way); the "read after the reader moved on" refusal is now a build
+  refusal.
+  The p256 and big tests' hex helpers appended `"0123456789abcdef"[i]`,
+  a byte, as its decimal number: now `[i, 1]`.
+  Built but failing at run time: hpke passes its plain build; its
+  --release build segfaults in HpkeContext#configure (hpke.ri:784)
+  from the first vector's `sender.setup`, so the release, no-argument,
+  every-vector and Python oracle steps of its .sh fail. tar.sh passes
+  every step it reaches but its 31 mutation builds outlast a 25-minute
+  run.
+  p256.sh passes but for two stale patch sites ("SEC 1's public key
+  unchecked", "SEC 1's curve unchecked").
+  big.sh passes its plain, release and oracle steps; six mutations
+  (negate, abs, exponentiation, decimal division, exact division,
+  decimal zero) report "the patch changed nothing".
+  Left from this round's list, with their cause:
+  - user: `User.parse_line` ends with `User.new(..., uid.to_s, ...)`;
+    the class views its def's scratch and the checker accepts it
+    (ids read back as garbage); `.copy_to(RisCurrentTape.new)` there
+    is accepted too and still dangles when called in a block round. A
+    checker hole and an owner question: not applied.
+  - benchmark: `Job#report` keeps the block's proc in an Entry made in
+    the def; copy_to refuses procs (Procs outliving their tape).
+  - compress: builds and passes; its .sh fails only "runs the same from
+    its artifacts": with --use-rimod, Inflater#read is an opaque
+    contract and the reader `z` itself counts as a live view at the
+    next read (checker question).
+  - websocket: ~40 sites, TLS store (tls.ri:4606) and HttpHead
+    fields; acme: RsaPrivateKey.copy_into_identity is refused at
+    tls.ri:4606; autocert: `AutocertIssuer#client` returns an owner;
+    http: HTTP.upgrade callers; tls: from_pem owners;
+    http_https_records: a proc captures a UdpSocket. Not started.
   Second round: csv builds and its program passes (the header is asked
   after the rows; a tape-bytes drop no longer underflows); its .sh
   oracle and refusal programs still need owner declarations. toml and
@@ -224,18 +271,14 @@ Unknown must be refused (SPEC 3.6).
   http_stop (HTTP/2 PROTOCOL_ERROR reset on the first GET), http_resume
   ("new roots" resumes) and number (panic: not a number "\u20281e-3").
 
-  - TLS owners, 4: tls (2000 lines, ~25 sites: from_pem, TlsClient.over,
+  - TLS owners, 3: tls (2000 lines, ~25 sites: from_pem, TlsClient.over,
     TlsServer.over), autocert (std/autocert's AutocertIssuer#client
-    returns an AcmeClient owner it makes lazily), hpke (std/hpke's
-    single-shot seal/open and HpkePrivateKey.from_bytes return values of
-    their own scratch; the test's sender/recipient port is done) and
-    http (Server.parse_request is gone, see below; HTTP.upgrade callers).
-  - Block/round storage, 3: big (BigInt operators return scratch),
-    user and websocket.
+    returns an AcmeClient owner it makes lazily) and http
+    (Server.parse_request is gone, see below; HTTP.upgrade callers).
+  - Block/round storage, 2: user and websocket (third round above).
   - Procs outliving their tape, 4: file, router, http_https_records and
     benchmark (Job#report keeps a block's proc in an Entry; bm and ips
     return their owner job).
-  - Decoder/source backing, 2: compress and tar.
   - Program-owned retained data, 3: log, ocsp and x509. A Time constant
     (`NOW = Time.utc(...)`, even with copy_to(Program.tape)) and a
     constant of certificates are refused at time.ri's Zone#initialize;
@@ -247,7 +290,6 @@ Unknown must be refused (SPEC 3.6).
   - API drift, 1: fuzz.
   - Opaque callback, 1: iterator's to_a (a loop without the block trades
     it for a live-view refusal: a checker question).
-  - Runtime Array of growing owners, 1: p256 private keys.
 
   Earlier round (2026-11-12): bzip2, eiy, file_utils, rsa, slice, sse,
   xz and tls_probe built and ran; each bug has a regression in

@@ -33,7 +33,7 @@ end
 
 def hex(bytes : Array(UInt8)) : String
   begin
-    io = ""; bytes.each { |x| io << "0123456789abcdef"[x.to_i32 >> 4] << "0123456789abcdef"[x.to_i32 & 15] }
+    io = ""; bytes.each { |x| io << "0123456789abcdef"[x.to_i32 >> 4, 1] << "0123456789abcdef"[x.to_i32 & 15, 1] }
     io
   end
 end
@@ -107,7 +107,7 @@ check one.public_key.y.to_s(16) == "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b31
 last = P256PrivateKey.from_bytes(b("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632550")).or_panic
 check last.public_key.x.to_s(16) == "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296", "d = n - 1: -G's x"
 check last.public_key.y.to_s(16) == "b01cbd1c01e58065711814b583f061e9d431cca994cea1313449bf97c840ae0a", "d = n - 1: -G's y, p - G's"
-[one, last].each_with_index do |k, i|
+{one, last}.each_with_index do |k, i|
   signature = k.sign(EcdsaHash::SHA256, "edge #{i}")
   check k.public_key.verify(EcdsaHash::SHA256, "edge #{i}", signature), "the edge key #{i} signs what std/ecdsa takes"
 end

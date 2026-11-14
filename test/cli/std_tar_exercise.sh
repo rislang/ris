@@ -420,47 +420,84 @@ refuses() { # refuses <label> <name> <phrase> <statements>
   printf '  %s: exits %s at "%s"\n' "$label" "$code" "$phrase"
 }
 refuses "an add after finish" add_after "TarWriter: add after finish" \
-  'w = TarWriter.new(Memory.new)
+  'm = Memory.new
+w = TarWriter.new(m)
 w.finish
 w.add("a", "b")'
 refuses "finish twice" finish_twice "TarWriter: finish was called twice" \
-  'w = TarWriter.new(Memory.new)
+  'm = Memory.new
+w = TarWriter.new(m)
 w.finish
 w.finish'
 refuses "an empty name" empty_name "TarWriter: an entry needs a name" \
-  'TarWriter.new(Memory.new).add("", "x")'
+  'm = Memory.new
+w = TarWriter.new(m)
+w.add("", "x")'
 refuses "an absolute name" absolute "TarWriter: \"/etc/passwd\" is absolute; a name in an archive is relative" \
-  'TarWriter.new(Memory.new).add("/etc/passwd", "x")'
+  'm = Memory.new
+w = TarWriter.new(m)
+w.add("/etc/passwd", "x")'
 refuses "a NUL in a name" nul_name 'TarWriter: "a\u0000b" holds a NUL byte, which ends a name in a tar header' \
-  'TarWriter.new(Memory.new).add("a\u0000b", "x")'
+  'm = Memory.new
+w = TarWriter.new(m)
+w.add("a\u0000b", "x")'
 refuses "a link without a target" no_target "TarWriter: the link \"l\" needs a target" \
-  'TarWriter.new(Memory.new).add_symlink("l", "")'
+  'm = Memory.new
+w = TarWriter.new(m)
+w.add_symlink("l", "")'
 refuses "a mode past 0o7777" big_mode "TarWriter: \"a\" has mode 0o10000; a mode is 0 to 0o7777" \
-  'TarWriter.new(Memory.new).add("a", "x", mode: 0o10000)'
+  'm = Memory.new
+w = TarWriter.new(m)
+w.add("a", "x", mode: 0o10000)'
 refuses "a negative uid" negative_uid "TarWriter: \"a\" has uid -1; an id is not negative" \
-  'TarWriter.new(Memory.new).add("a", "x", uid: -1_i64)'
+  'm = Memory.new
+w = TarWriter.new(m)
+w.add("a", "x", uid: -1_i64)'
 refuses "a negative size" negative_size "TarWriter: \"a\" is to hold -1 bytes; a size is not negative" \
-  'TarWriter.new(Memory.new).add("a", Memory.new("x"), -1_i64)'
+  'm = Memory.new
+w = TarWriter.new(m)
+src = Memory.new("x")
+w.add("a", src, -1_i64)'
 refuses "a source shorter than its size" short_source "TarWriter: \"a\" is to hold 10 bytes, and its source ended after 3" \
-  'TarWriter.new(Memory.new).add("a", Memory.new("abc"), 10_i64)'
+  'm = Memory.new
+w = TarWriter.new(m)
+src = Memory.new("abc")
+w.add("a", src, 10_i64)'
 refuses "a read of no bytes" read_zero "TarEntry: read wants at least one byte, not 0" \
   'm = Memory.new
 w = TarWriter.new(m)
 w.add("a", "b")
 w.finish
-TarReader.new(Memory.new(m.to_s)).next_entry.or_panic.as(TarEntry).read(0)'
-refuses "a read after the reader moved on" read_past "TarEntry: \"a\" was read past; its data is read before the next next_entry" \
+src = Memory.new(m.to_s)
+r = TarReader.new(src)
+r.next_entry.or_panic.as(TarEntry).read(0)'
+# An entry kept past the next next_entry views bytes the reader clears:
+# the compiler refuses it, before a run could read them.
+printf 'module main\n\nimport std/tar::{TarReader, TarWriter, TarEntry}\nimport std/io::{Memory}\n\n%s\n' \
   'm = Memory.new
 w = TarWriter.new(m)
 w.add("a", "b")
 w.add("c", "d")
 w.finish
-r = TarReader.new(Memory.new(m.to_s))
+src = Memory.new(m.to_s)
+r = TarReader.new(src)
 a = r.next_entry.or_panic.as(TarEntry)
 r.next_entry
-a.read'
+a.read' > "$WORK/read_past.ri"
+if "$RIS" build -o "$WORK/read_past" "$WORK/read_past.ri" > "$WORK/read_past.build" 2>&1; then
+  echo "  a read after the reader moved on: it built"
+  status=1
+elif grep -q "cannot shrink tape storage with a live view" "$WORK/read_past.build"; then
+  echo "  a read after the reader moved on: refused when built"
+else
+  echo "  a read after the reader moved on: refused, but not for its live view"
+  sed -n '1,8p' "$WORK/read_past.build"
+  status=1
+fi
 refuses "not an archive, or_panic" not_tar 'tar: the block at offset 0 is not a tar header: its checksum field holds "xxxxxxxx"' \
-  'TarReader.new(Memory.new("x" * 600)).next_entry.or_panic'
+  'src = Memory.new("x" * 600)
+r = TarReader.new(src)
+r.next_entry.or_panic'
 
 echo
 echo "== proving the checks can fail when the module is broken"
@@ -470,21 +507,21 @@ mutations=0
 prove_broken() {
   mutations=$((mutations + 1))
   rm -rf "$WORK/patched"
-  mkdir -p "$WORK/patched/std"
+  mkdir -p "$WORK/patched/src/std"
   if ! OLD="$3" NEW="$4" "$PY" - <<PY
 import os
 from pathlib import Path
 src = Path("$REPO/src/std/tar.ri").read_text()
 if os.environ["OLD"] not in src:
     raise SystemExit("patch site missing: " + os.environ["OLD"])
-Path("$WORK/patched/std/tar.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
+Path("$WORK/patched/src/std/tar.ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1))
 PY
   then
     echo "  the $1 patch did not apply"
     status=1
   # Build first, then run: a patch that does not compile would also "fail",
   # and that proves nothing about whether the exercise catches the break.
-  elif ! RIS_PATH="$WORK/patched${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_tar_exercise.ri" >"$WORK/mut.out" 2>&1; then
+  elif ! RIS_PATH="$WORK/patched/src${PSEP}$REPO/src${PSEP}$REPO/samples/ris" "$RIS" build -o "$WORK/mut-$mutations.bin" "$REPO/test/cli/std_tar_exercise.ri" >"$WORK/mut.out" 2>&1; then
     echo "  the $1 copy did not compile"
     sed -n '1,6p' "$WORK/mut.out"
     status=1
@@ -505,11 +542,13 @@ prove_broken "a checksum never compared" "a corrupted checksum is refused" \
 prove_broken "a signed checksum not accepted" "a signed checksum is accepted" \
   'unless stored == unsigned || stored == signed' 'unless stored == unsigned'
 prove_broken "a ustar prefix ignored" "every entry read back as it was written" \
-  'name = prefix + "/" + name unless prefix.empty?' 'name = name + "" unless prefix.empty?'
+  '      unless prefix.empty?
+        start = @names.bytesize' '      unless true
+        start = @names.bytesize'
 prove_broken "a pax path ignored" "every entry read back as it was written" \
   'when "path"     then name = v' 'when "pathX"     then name = v'
 prove_broken "a GNU long name ignored" "GNU long name and long link name" \
-  'long_name = TarBytes.cut_nul(data)' 'long_name = nil'
+  'long_name = keep(TarBytes.cut_nul(data))' 'long_name = ""'
 prove_broken "base-256 not read" "base-256 size 1000" \
   'if p[at] & 0x80_u8 != 0_u8' 'if false'
 prove_broken "a negative base-256 number read as positive" "negative base-256 mtime" \
@@ -519,7 +558,7 @@ prove_broken "a pax mtime's fraction dropped" "a fractional pax mtime" \
 prove_broken "a negative pax fraction added, not taken" "a negative fractional pax mtime" \
   '{-secs - 1_i64, 1000000000 - nanos}' '{-secs, nanos}'
 prove_broken "a global pax header ignored" "a global pax header holds for every entry after it" \
-  'TarReader.records(data, at, @global, true)!' 'TarReader.records(data, at, {} of String => String, true)!'
+  '    @global.each { |k, v| pax[k] = v }' '    @global.size'
 prove_broken "the v7 directory by its slash missed" "a v7 directory" \
   '@name.ends_with?("/") ? TarType::Directory : TarType::Regular' 'TarType::Regular'
 prove_broken "a directory's size read as data" "a directory's size carries no data" \
@@ -528,8 +567,8 @@ prove_broken "the padding after data not read past" "round trip: refused with" \
   '@pad = @left == 0_i64 ? 0_i64 : pad' '@pad = 0_i64'
 prove_broken "an entry cut short handed out" "an entry cut short" \
   '    if got.bytesize < n
-      fault = TarError.new' '    if false
-      fault = TarError.new'
+      @failed = true' '    if false
+      @failed = true'
 prove_broken "no bound on an extended header" "an extended header past 1 MiB" \
   'if size > TarBytes::MAX_SPECIAL' 'if false'
 prove_broken "gzip not recognised" "gzip read: every entry as it was written" \

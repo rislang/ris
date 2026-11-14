@@ -188,12 +188,12 @@ def shift_divmod(a : BigInt, b : BigInt) : {BigInt, BigInt}
   k = 32
   while k >= 0
     if r >= (b << k)
-      r = r - (b << k)
+      r = (r - (b << k)).copy_to(Program.tape)
       q = q | (1_i64 << k)
     end
     k = k - 1
   end
-  {BigInt.new(q), r}
+  {BigInt.new(q), r}.copy_to(Program.tape)
 end
 
 quotient_cases = PowCases.new(0x2545F4914F6CDD1D_u64)
@@ -250,7 +250,7 @@ puts "    bitwise operations: &, |, ^, <<, >> with two's complement signed seman
 fact100 = 1.to_big
 factor = 2
 while factor <= 100
-  fact100 = fact100 * factor
+  fact100 = (fact100 * factor).copy_to(Program.tape)
   factor = factor + 1
 end
 fact100_s = fact100.to_s
@@ -268,7 +268,7 @@ fib_prev = 0.to_big
 fib_curr = 1.to_big
 step = 2
 while step <= 100
-  next_fib = fib_prev + fib_curr
+  next_fib = (fib_prev + fib_curr).copy_to(Program.tape)
   fib_prev = fib_curr
   fib_curr = next_fib
   step = step + 1
@@ -276,7 +276,7 @@ end
 raise "known: fib(100)" unless fib_curr.to_s == "354224848179261915075"
 
 while step <= 200
-  next_fib = fib_prev + fib_curr
+  next_fib = (fib_prev + fib_curr).copy_to(Program.tape)
   fib_prev = fib_curr
   fib_curr = next_fib
   step = step + 1
@@ -325,17 +325,17 @@ puts "    round trips: 200-digit decimal and 100-digit hex verified byte for byt
 # for every modulus: the reference the Montgomery path is held to, and the
 # "before" of the timings below.
 def square_and_multiply(base : BigInt, exp : BigInt, mod : BigInt) : BigInt
-  return BigInt.zero if mod == 1
+  return BigInt.zero.copy_to(Program.tape) if mod == 1
   b = base % mod
   b = b + mod if b.negative?
   result = BigInt.one
   e = exp
   while !e.zero?
-    result = (result * b) % mod if e.odd?
-    e = e >> 1
-    b = (b * b) % mod if !e.zero?
+    result = ((result * b) % mod).copy_to(Program.tape) if e.odd?
+    e = (e >> 1).copy_to(Program.tape)
+    b = ((b * b) % mod).copy_to(Program.tape) if !e.zero?
   end
-  result
+  result.copy_to(Program.tape)
 end
 
 class PowCases
@@ -359,7 +359,7 @@ class PowCases
 
   # A value of exactly *count* bits, its top bit set; zero for none.
   def bits(count : Int32) : BigInt
-    return BigInt.zero if count <= 0
+    return BigInt.zero.copy_to(Program.tape) if count <= 0
     limbs = Array(UInt64).new((count + 31) // 32, 0_u64)
     i = 0
     while i < limbs.size
@@ -369,13 +369,13 @@ class PowCases
     top = ((count - 1) & 31).to_u64
     last = limbs.size - 1
     limbs[last] = (limbs[last] & (1_u64.unsafe_shl(top + 1_u64) &- 1_u64)) | 1_u64.unsafe_shl(top)
-    BigInt.new(1, limbs)
+    BigInt.new(1, limbs).copy_to(Program.tape)
   end
 
   # An odd modulus of *count* bits, at least 3.
   def odd(count : Int32) : BigInt
     m = bits(count < 2 ? 2 : count)
-    m.even? ? m + 1 : m
+    (m.even? ? m + 1 : m).copy_to(Program.tape)
   end
 end
 
@@ -384,12 +384,12 @@ mersenne = [31, 61, 89, 107, 127, 521, 607, 1279]
 short_exponents = [0, 1, 2, 3, 17, 65537, 8388607]
 # A Mersenne prime's low word is all ones, its own inverse, so n' is
 # right before Newton's first step; the random moduli are what hold n'.
-roomy = mersenne.map { |p| (BigInt.one << p) - 1 }
+roomy = mersenne.map { |p| ((BigInt.one << p) - 1).copy_to(Program.tape) }
 8.times { |w| 4.times { roomy << pow_cases.odd(64 * (w + 1) - 3 - pow_cases.below(58)) } }
 roomy.each do |m|
   bases = [BigInt.zero, BigInt.one, 2.to_big, 3.to_big, m - 1, m, m + 2, -(7.to_big), pow_cases.bits(m.to_s(2).size + 40)]
   bases.each do |b|
-    exponents = short_exponents.map { |e| e.to_big } + [pow_cases.bits(1 + pow_cases.below(23))]
+    exponents = short_exponents.map { |e| e.to_big.copy_to(Program.tape) } + [pow_cases.bits(1 + pow_cases.below(23))]
     exponents.each do |e|
       raise "pow_mod: short exponents modulo a modulus with room in its top word, #{m.to_s(2).size} bits: #{b} ^ #{e}" unless b.pow_mod(e, m) == square_and_multiply(b, e, m)
     end
@@ -467,9 +467,9 @@ raise "pow_mod_secret: a negative base" unless (-(2.to_big)).pow_mod_secret(3.to
 # python's pow(x, -1, m).
 (2..700).each do |length|
   m = pow_cases.odd(length)
-  x = BigInt.one << (length - 1)
-  inverse = x.inverse_mod_secret(m)
-  raise "inverse_mod_secret: 2^(len - 1), which takes every step, modulo #{length} bits" unless inverse && (x * inverse) % m == 1
+  xv = BigInt.one << (length - 1)
+  inverse = xv.inverse_mod_secret(m)
+  raise "inverse_mod_secret: 2^(len - 1), which takes every step, modulo #{length} bits" unless inverse && (xv * inverse) % m == 1
 end
 # The stand-ins mislead when x and m agree in their top 33 bits and differ
 # below them: alike in their low 31 bits too, a round takes m from x and
@@ -478,10 +478,10 @@ end
 [96, 128, 200, 1024, 2048].each do |length|
   high = ((BigInt.one << 32) + 0x12345.to_big) << (length - 33)
   m = high + (0x5555.to_big << 31) + 0x10000001.to_big
-  [high + (0x1111.to_big << 31) + 0x10000001.to_big, high + (0x1111.to_big << 31) + 0x7FFFFFF1.to_big].each do |x|
-    inverse = x.inverse_mod_secret(m)
-    raise "inverse_mod_secret: a round that leaves a negative, modulo #{length} bits" unless inverse && (x * inverse) % m == 1
-    puts "inverse: #{x.to_s(16)} #{m.to_s(16)} = #{inverse.to_s(16)}"
+  [high + (0x1111.to_big << 31) + 0x10000001.to_big, high + (0x1111.to_big << 31) + 0x7FFFFFF1.to_big].each do |xv|
+    inverse = xv.inverse_mod_secret(m)
+    raise "inverse_mod_secret: a round that leaves a negative, modulo #{length} bits" unless inverse && (xv * inverse) % m == 1
+    puts "inverse: #{xv.to_s(16)} #{m.to_s(16)} = #{inverse.to_s(16)}"
   end
 end
 inverse_cases = 0
@@ -489,34 +489,34 @@ refused_inverses = 0
 300.times do |i|
   m = pow_cases.odd(1 + pow_cases.below(i < 250 ? 700 : 4100))
   m = m * 3.to_big if i % 7 == 3
-  x = pow_cases.bits(pow_cases.below(m.to_s(2).size + 1)) % m
-  x = x // 3.to_big * 3.to_big if i % 7 == 3
-  inverse = x.inverse_mod_secret(m)
-  if x.gcd(m) != 1
-    raise "inverse_mod_secret: nil exactly when x shares a factor with the modulus, #{m.to_s(2).size} bits" unless inverse.nil?
+  xv = pow_cases.bits(pow_cases.below(m.to_s(2).size + 1)) % m
+  xv = xv // 3.to_big * 3.to_big if i % 7 == 3
+  inverse = xv.inverse_mod_secret(m)
+  if xv.gcd(m) != 1
+    raise "inverse_mod_secret: nil exactly when xv shares a factor with the modulus, #{m.to_s(2).size} bits" unless inverse.nil?
     refused_inverses = refused_inverses + 1
   else
-    raise "inverse_mod_secret: x times its inverse is 1, modulo #{m.to_s(2).size} bits" unless inverse && (x * inverse) % m == 1 && !inverse.negative? && inverse < m
+    raise "inverse_mod_secret: xv times its inverse is 1, modulo #{m.to_s(2).size} bits" unless inverse && (xv * inverse) % m == 1 && !inverse.negative? && inverse < m
   end
   inverse_cases = inverse_cases + 1
 end
 raise "inverse_mod_secret: modulo 1" unless 5.to_big.inverse_mod_secret(BigInt.one) == BigInt.zero
-raise "inverse_mod_secret: a negative x" unless (-(2.to_big)).inverse_mod_secret(m31) == (m31 - 1) // 2
+raise "inverse_mod_secret: a negative xv" unless (-(2.to_big)).inverse_mod_secret(m31) == (m31 - 1) // 2
 raise "inverse_mod_secret: 0 has none" unless BigInt.zero.inverse_mod_secret(m127).nil?
 1000.times do |i|
   bits = i % 10 == 0 ? 1 + pow_cases.below(4096) : 1 + pow_cases.below(1100)
   m = pow_cases.odd(bits)
   m = m * 5.to_big if i % 9 == 2
-  x = pow_cases.bits(pow_cases.below(m.to_s(2).size + 1)) % m
-  x = x // 5.to_big * 5.to_big if i % 9 == 2
-  x = BigInt.zero if i % 50 == 7
-  x = BigInt.one if i % 50 == 8
-  x = m - 1 if i % 50 == 9
-  x = BigInt.one << (m.to_s(2).size - 1) if i % 50 == 10
-  x = x + m if i % 40 == 11
-  x = -x if i % 13 == 4
-  inverse = x.inverse_mod_secret(m)
-  puts "inverse: #{x.to_s(16)} #{m.to_s(16)} = #{inverse ? inverse.to_s(16) : "none"}"
+  xv = pow_cases.bits(pow_cases.below(m.to_s(2).size + 1)) % m
+  xv = xv // 5.to_big * 5.to_big if i % 9 == 2
+  xv = BigInt.zero if i % 50 == 7
+  xv = BigInt.one if i % 50 == 8
+  xv = m - 1 if i % 50 == 9
+  xv = BigInt.one << (m.to_s(2).size - 1) if i % 50 == 10
+  xv = xv + m if i % 40 == 11
+  xv = -xv if i % 13 == 4
+  inverse = xv.inverse_mod_secret(m)
+  puts "inverse: #{xv.to_s(16)} #{m.to_s(16)} = #{inverse ? inverse.to_s(16) : "none"}"
 end
 puts "    modular inverses: inverse_mod_secret #{inverse_cases} times against its own product (#{refused_inverses} sharing a factor), 2^(len - 1) modulo every length from 2 to 700 bits, 1000 cases for python"
 
@@ -611,7 +611,7 @@ class TestPrng
     end
     limbs[count - 1] = (limbs[count - 1] | 1_u64) # Non-zero high limb
     sign = (next_u64 & 1_u64) == 0_u64 ? 1 : -1
-    BigInt.new(sign, limbs)
+    BigInt.new(sign, limbs).copy_to(Program.tape)
   end
 end
 
@@ -923,11 +923,11 @@ def exact_bits(bits : Int32, seed : UInt64) : BigInt
     io << "0"
     ((bits - 1) // 4).times do
       s = s &* 6364136223846793005_u64 &+ 1442695040888963407_u64
-      io << "0123456789abcdef"[(s >> 60).to_i32]
+      io << "0123456789abcdef"[(s >> 60).to_i32, 1]
     end
     io
   end
-  (BigInt.one << (bits - 1)) + BigInt.new(low, 16)
+  ((BigInt.one << (bits - 1)) + BigInt.new(low, 16)).copy_to(Program.tape)
 end
 
 divisions = [
@@ -1009,11 +1009,11 @@ raise "flt: an addend under the last place" unless (BigFloat.new(1) + BigFloat.n
 raise "flt: equal at two precisions" unless BigFloat.new(1.5) == BigFloat.new(1.5, 300) && BigFloat.new(1.5).hash == BigFloat.new(1.5, 300).hash
 raise "flt: round, floor, ceil" unless BigFloat.new("2.5").round.to_s == "2.0" && BigFloat.new("-2.5").round.to_s == "-2.0" && BigFloat.new("-1.25").floor.to_s == "-2.0" && BigFloat.new("1.25").ceil.to_s == "2.0"
 raise "flt: the largest value a double holds and past it" unless BigFloat.new("1e400").to_f64 == 1.0 / 0.0 && BigFloat.new("1e-400").to_f64 == 0.0
-assert_panics("BigFloat: division by zero") { BigFloat.new(1) / BigFloat.new(0) }
-assert_panics("BigFloat: the square root of a negative number") { BigFloat.new(-4).sqrt }
-assert_panics("BigFloat: not a number: \"1.5x\"") { BigFloat.new("1.5x") }
-assert_panics("BigFloat: a precision of 0 bits; it is at least 1") { BigFloat.new(1, 0) }
-assert_panics("is not a finite number") { BigFloat.new(0.0 / 0.0) }
+assert_panics("BigFloat: division by zero") { BigFloat.new(1) / BigFloat.new(0); nil }
+assert_panics("BigFloat: the square root of a negative number") { BigFloat.new(-4).sqrt; nil }
+assert_panics("BigFloat: not a number: \"1.5x\"") { BigFloat.new("1.5x"); nil }
+assert_panics("BigFloat: a precision of 0 bits; it is at least 1") { BigFloat.new(1, 0); nil }
+assert_panics("is not a finite number") { BigFloat.new(0.0 / 0.0); nil }
 
 class FloatCases
   @state = 0x2545F4914F6CDD1D_u64
@@ -1034,14 +1034,14 @@ class FloatCases
   # A value of up to ten bits more than *precision*, rounded to it, times
   # a power of two, now and then zero or negative.
   def float(precision : Int32) : BigFloat
-    return BigFloat.new(0, precision) if below(20) == 0
+    return BigFloat.new(0, precision).copy_to(Program.tape) if below(20) == 0
     m = BigInt.zero
-    ((precision + 72) // 63).times { m = (m << 63) + BigInt.new(self.next.unsafe_shr(1_u64).to_i64) }
+    ((precision + 72) // 63).times { m = ((m << 63) + BigInt.new(self.next.unsafe_shr(1_u64).to_i64)).copy_to(Program.tape) }
     m = m >> below(precision + 10) if m > BigInt.one
     m = BigInt.one if m.zero?
     # A power of two is exact at any precision, so the value keeps its own.
     x = BigFloat.new(m, precision) * (BigFloat.new(2, precision) ** (below(600) - 300))
-    below(2) == 0 ? -x : x
+    (below(2) == 0 ? -x : x).copy_to(Program.tape)
   end
 
   def decimal : String
