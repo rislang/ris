@@ -84,7 +84,7 @@ for name in yield_owner_field yield_clone_attrs svcb_store \
   rsa_pem_lifetime current_copy_result time_location_kept decoded_maps \
   reader_read_str sse_reconnect_id rsa_string_message \
   response_owner typed_group_results multipart_owner enumerable_results \
-  const_folded_size zstd_whole_result; do
+  const_folded_size zstd_whole_result big_shift_right; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
   if [ "$code" -eq 0 ] && [ -z "$out" ]; then
     echo "runs     $name"

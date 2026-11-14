@@ -128,7 +128,7 @@ tree = sorted(glob.glob(os.path.join(repo, "src/std/*.ri"))) + sorted(glob.glob(
 big = b"".join(open(p, "rb").read() for p in tree)
 big = (big * (10_000_000 // len(big) + 1))[:10_000_000]
 levels = {
-    "l_text": read("iyi SPEC"),
+    "l_text": read("doc/archive/iyi/SPEC.md"),
     "l_source": read("src/std/json.ri") + read("src/std/http.ri"),
     "l_json": json.dumps(records, indent=1).encode(),
     "l_random": bytes(lrng.getrandbits(8) for _ in range(200000)),
@@ -560,12 +560,11 @@ PY
     echo "  $label: caught"
   fi
 }
-mutate "a back-reference copied from one byte off" 'dst[i] = src[i]' 'dst[i] = src[i + 1]'
+mutate "a back-reference copied from one byte off" 'buf[to + i] = buf[from + i]' 'buf[to + i] = buf[from + i + 1]'
 mutate "a Huffman code written the wrong way round" '@code[i] = Tree.reverse(nxt[l], l)' '@code[i] = nxt[l]'
 mutate "a match finder that never looks" 'if hash_head != 0 && prev_length < lazy && s - hash_head <= WSIZE' \
   'if false && hash_head != 0 && prev_length < lazy && s - hash_head <= WSIZE' "a 100,000-byte run"
 mutate "a length table off by one" '@lbase = fill([3, 4, 5, 6' '@lbase = fill([3, 4, 5, 7'
-mutate "a back-reference copied a word from one byte off" '(dst + i.to_i64).as(Pointer(UInt64)).value = (src + i.to_i64)' '(dst + i.to_i64).as(Pointer(UInt64)).value = (src + (i + 1).to_i64)'
 mutate "a code table indexed by the code's bits unreversed" '(((code >> bit) & 1) << (len - 1 - bit))' '(((code >> bit) & 1) << bit)'
 # The writing side's own: the length limit, the header's order, the lazy
 # match, the distance codes, the block choice, and the rebase.

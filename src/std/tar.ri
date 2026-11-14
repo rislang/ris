@@ -661,7 +661,10 @@ pub class TarReader
   def extract(dir : String) : Nil | TarError
     windows = {% if flag?(:win32) %} true {% else %} false {% end %}
     Dir.mkdir_p(dir)
-    later = [] of {String, Int32, Int64}
+    # Each directory's path is kept in *paths*, its place in *later*: a
+    # path made in a round is cleared when the round ends.
+    paths = String::Builder.new
+    later = [] of {Int32, Int32, Int32, Int64}
     while true
       e = next_entry!
       break unless e
@@ -708,7 +711,8 @@ pub class TarReader
       secs = e.mtime.to_unix
       if e.directory?
         Dir.mkdir(path) unless there
-        later << {path, e.mode & 0o777, secs}
+        later << {paths.bytesize, path.bytesize, e.mode & 0o777, secs}
+        paths << path
       elsif e.symlink?
         File.symlink(e.linkname, path)
       elsif e.hardlink?
@@ -739,8 +743,9 @@ pub class TarReader
     k = later.size - 1
     while k >= 0
       d = later[k]
-      File.chmod(d[0], d[1])
-      File.touch(d[0], d[2]) if d[2] > 0_i64
+      path = paths.to_s[d[0], d[1]]
+      File.chmod(path, d[2])
+      File.touch(path, d[3]) if d[3] > 0_i64
       k = k - 1
     end
     nil
@@ -749,10 +754,12 @@ pub class TarReader
   # Nil when no part of *dir*/*parts* before the last is a symbolic link
   # or other than a directory.
   private def through(dir : String, parts : Array(String), name : String) : Nil | TarError
-    path = dir
+    path = ""
+    path << dir
     i = 0
     while i < parts.size - 1
-      path = path + "/" + parts[i]
+      path << "/"
+      path << parts[i]
       info = File.info?(path, follow_symlinks: false)
       if info
         if info.symlink?

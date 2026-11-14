@@ -261,7 +261,7 @@ def declared_lengths(stream : String) : {Array(Int32), Array(Int32)}?
       times.times { lengths << value }
     end
   end
-  {Array(Int32).new(hlit) { |k| lengths[k] }, Array(Int32).new(hdist) { |k| lengths[hlit + k] }}
+  {Array(Int32).new(hlit) { |k| lengths[k] }, Array(Int32).new(hdist) { |k| lengths[hlit + k] }}.copy_to(Program.tape)
 end
 
 # Whether lengths make a complete prefix code: their 2^-length sum to one.
@@ -333,7 +333,7 @@ round_trip "a sentence", "the quick brown fox jumps over the lazy dog"
 text = ""
 i = 0
 while i < 400
-  text = text + "line #{i}: the quick brown fox jumps over the lazy dog #{i % 7}\n"
+  text << "line #{i}: the quick brown fox jumps over the lazy dog #{i % 7}\n"
   i = i + 1
 end
 round_trip "repetitive text", text
@@ -489,9 +489,9 @@ assert_true Gzip.decompress(bytes([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x0
 two_members = bytes([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x4b, 0x4c, 0x02, 0x00, 0x6d, 0x48, 0x83, 0x9e, 0x02, 0x00, 0x00, 0x00,
                      0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x4b, 0x4e, 0x01, 0x00, 0xda, 0x8f, 0xd6, 0x45, 0x02, 0x00, 0x00, 0x00])
 assert_true Gzip.decompress(two_members) == "abcd", "two gzip members read as one (#{Gzip.decompress(two_members).inspect})"
-z = Zlib.compress("abc")
-assert_true z.bytesize == 11 && z.byte_at(0) == 0x78_u8 && z.byte_at(1) == 0x9c_u8, "the zlib header is 78 9c"
-assert_true z.byte_at(7) == 0x02_u8 && z.byte_at(8) == 0x4d_u8 && z.byte_at(9) == 0x01_u8 && z.byte_at(10) == 0x27_u8, "the Adler-32 of abc is 024d0127, big-endian"
+zabc = Zlib.compress("abc")
+assert_true zabc.bytesize == 11 && zabc.byte_at(0) == 0x78_u8 && zabc.byte_at(1) == 0x9c_u8, "the zlib header is 78 9c"
+assert_true zabc.byte_at(7) == 0x02_u8 && zabc.byte_at(8) == 0x4d_u8 && zabc.byte_at(9) == 0x01_u8 && zabc.byte_at(10) == 0x27_u8, "the Adler-32 of abc is 024d0127, big-endian"
 g = Gzip.compress("abc")
 assert_true g.bytesize == 23 && g.byte_at(0) == 0x1f_u8 && g.byte_at(1) == 0x8b_u8 && g.byte_at(2) == 8_u8, "the gzip header"
 assert_true g.byte_at(15) == 0xc2_u8 && g.byte_at(16) == 0x41_u8 && g.byte_at(17) == 0x24_u8 && g.byte_at(18) == 0x35_u8, "the CRC-32 of abc is 352441c2, little-endian"
@@ -567,17 +567,29 @@ puts "  matches from 32 KiB back, across the window's slides, read a byte and 10
 # source for more: the first bytes of a long stream come out long before
 # the stream has all been fed.
 long_gzip = Gzip.compress(text)
-feed = Feed.new(long_gzip, 1)
-early = Inflater.new(Envelope::Gzip, feed)
+early_feed = Feed.new(long_gzip, 1)
+early = Inflater.new(Envelope::Gzip, early_feed)
 first = early.read
 case first
 when CompressError
   raise "ASSERTION FAILED: the first read refused with #{first.message}"
 else
-  assert_true first.bytesize > 0 && feed.at < long_gzip.bytesize // 4, "the first read answered #{first.bytesize} bytes after #{feed.at} of #{long_gzip.bytesize} fed"
+  assert_true first.bytesize > 0 && early_feed.at < long_gzip.bytesize // 4, "the first read answered #{first.bytesize} bytes after #{early_feed.at} of #{long_gzip.bytesize} fed"
 end
 assert_true !early.finished? && early.leftover == "", "an Inflater part way is not finished and has nothing left over"
-puts "  the first read answers after #{feed.at} of #{long_gzip.bytesize} bytes fed"
+puts "  the first read answers after #{early_feed.at} of #{long_gzip.bytesize} bytes fed"
+
+# A stream cut at *cut*, fed *piece* bytes at a time, is refused as
+# ended.
+def cut_refused(envelope : Envelope, whole : String, cut : Int32, piece : Int32) : Nil
+  got = stream_through(envelope, piece_of(whole, 0, cut), piece, 65536)
+  case got
+  when CompressError
+    assert_true got.message.includes?(" ends ") || got.message.includes?(" shorter "), "#{envelope} cut at #{cut}: #{got.message.inspect} does not say the stream ended"
+  else
+    raise "ASSERTION FAILED: #{envelope} cut at #{cut} read #{got.bytesize} bytes instead of refusing"
+  end
+end
 
 puts "\n== refused as a value"
 # A stream that is not what it says is a `CompressError` from `read`, the
@@ -589,16 +601,8 @@ sample = "the quick brown fox jumps over the lazy dog, the lazy dog sleeps\n" * 
   whole = pair[1]
   cut = 0
   while cut < whole.bytesize
-    {1, cut > 0 ? cut : 1}.each do |piece|
-      got = stream_through(envelope, piece_of(whole, 0, cut), piece, 65536)
-      case got
-      when CompressError
-        said = got.message
-        assert_true said.includes?(" ends ") || said.includes?(" shorter "), "#{envelope} cut at #{cut}: #{said.inspect} does not say the stream ended"
-      else
-        raise "ASSERTION FAILED: #{envelope} cut at #{cut} read #{got.bytesize} bytes instead of refusing"
-      end
-    end
+    cut_refused(envelope, whole, cut, 1)
+    cut_refused(envelope, whole, cut, cut) if cut > 0
     cut = cut + 1
   end
   # A raw stream has no checksum, so a flipped byte can decode to other
@@ -649,8 +653,8 @@ every_feed(Envelope::Gzip, good_hcrc, "abc", "a gzip header with its CRC-16")
     piece, "DEFLATE: the literal/length code is incomplete", "an incomplete literal/length code")
 end
 # And once refused, refused for good: the same error to every read after.
-feed = Feed.new(bad_crc, 64)
-broken = Inflater.new(Envelope::Gzip, feed)
+broken_feed = Feed.new(bad_crc, 64)
+broken = Inflater.new(Envelope::Gzip, broken_feed)
 said = drain(broken, 65536)
 again = broken.read
 assert_true said.is_a?(CompressError) && again.is_a?(CompressError) && again.message == said.message, "a second read after the error answers it again"
@@ -719,22 +723,22 @@ given = pieces.join
 deflated = [] of String
 [Envelope::Raw, Envelope::Zlib, Envelope::Gzip].each do |envelope|
   d = Deflater.new(envelope)
-  written = ""
-  so_far = ""
+  wrote = String::Builder.new
+  given_so_far = String::Builder.new
   pieces.each do |piece|
-    written = written + d.compress(piece)
-    so_far = so_far + piece
-    next if so_far.bytesize == 0
-    feed = Feed.new(written, written.bytesize)
+    wrote << d.compress(piece)
+    given_so_far << piece
+    next if given_so_far.bytesize == 0
+    feed = Feed.new(wrote.to_s, wrote.bytesize)
     z = Inflater.new(envelope, feed)
-    assert_true read_exactly(z, so_far.bytesize, "#{envelope} after #{so_far.bytesize} bytes") == so_far, "#{envelope}: what was written decodes to all #{so_far.bytesize} bytes given"
+    assert_true read_exactly(z, given_so_far.bytesize, "#{envelope} after #{given_so_far.bytesize} bytes") == given_so_far.to_s, "#{envelope}: what was written decodes to all #{given_so_far.bytesize} bytes given"
     assert_true feed.calls == 1, "#{envelope}: and the decoder asked for nothing more (#{feed.calls} calls)"
   end
-  stream = written + d.finish
+  stream = wrote.to_s + d.finish
   every_feed(envelope, stream, given, "#{envelope} from a Deflater")
   whole = envelope == Envelope::Raw ? Deflate.decompress(stream) : (envelope == Envelope::Zlib ? Zlib.decompress(stream) : Gzip.decompress(stream))
   assert_true whole == given, "#{envelope} from a Deflater, read whole"
-  deflated << stream
+  deflated << stream.copy_to(Program.tape)
 end
 assert_true Deflater.new(Envelope::Raw).finish == bytes([0x03, 0x00]), "an empty raw Deflater is an empty fixed block"
 assert_true Deflater.new(Envelope::Zlib).finish == bytes([0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]), "an empty zlib Deflater is zlib's own empty stream"
@@ -758,22 +762,30 @@ puts "  3,000 bytes of noise given twice: #{kept_first.bytesize} bytes, then #{k
 class Pending < Reader
   getter starved : Int32
 
+  # Every piece pushed, one after another, and where each ends: a piece
+  # is kept in the reader's own text, not as the caller's String.
   def initialize
     super()
-    @pieces = [] of String
+    @data = ""
+    @ends = [] of Int32
+    @taken = 0
     @starved = 0
   end
 
   def push(s : String) : Nil
-    @pieces << s if s.bytesize > 0
+    return if s.bytesize == 0
+    @data << s
+    @ends << @data.bytesize
   end
 
   def next : String?
-    if @pieces.empty?
+    if @taken >= @ends.size
       @starved = @starved + 1
       return nil
     end
-    @pieces.shift
+    from = @taken == 0 ? 0 : @ends[@taken - 1]
+    @taken = @taken + 1
+    @data.byte_slice(from, @ends[@taken - 1] - from)
   end
 
   # The decoders read 64 KiB at a time; each read is the next piece.
@@ -797,7 +809,7 @@ in_pieces = [] of {String, String, String}
     rng = Random.new((level * 3 + envelope.value + 1).to_u64)
     d = Deflater.new(envelope, level)
     pending = Pending.new
-    z = Inflater.new(envelope, pending)
+    zi = Inflater.new(envelope, pending)
     written = String::Builder.new
     index = String::Builder.new
     at = 0
@@ -815,16 +827,16 @@ in_pieces = [] of {String, String, String}
       count = count + 1
       index << "#{at} #{out_at}\n"
       label = "level #{level} #{envelope}, piece #{count}"
-      assert_true read_exactly(z, n, label) == piece, "#{label}: #{n} bytes read back as soon as they were written"
+      assert_true read_exactly(zi, n, label) == piece, "#{label}: #{n} bytes read back as soon as they were written"
       assert_true pending.starved == 0, "#{label}: the reader waited on the next piece"
     end
     last = d.finish
     written << last
     pending.push(last)
     index << "#{at} #{out_at + last.bytesize}\n"
-    ended = z.read
-    assert_true ended == "" && z.finished?, "level #{level} #{envelope}: the stream ends, its trailer checked, after the last piece"
-    in_pieces << {"#{level}.#{envelope.to_s.downcase}", written.to_s, index.to_s}
+    ended = zi.read
+    assert_true ended == "" && zi.finished?, "level #{level} #{envelope}: the stream ends, its trailer checked, after the last piece"
+    in_pieces << {"#{level}.#{envelope.to_s.downcase}", written.to_s, index.to_s}.copy_to(Program.tape)
   end
 end
 puts "  #{mixed.bytesize} bytes in pieces of 0 to 12,000 at levels 0, 1, 6 and 9 in three envelopes, each read back as it was written"
@@ -901,7 +913,7 @@ if args.size > 0
       sizes << raw.bytesize
       ns = (t1 - t0).to_i64
       ns = 1_i64 if ns < 1_i64
-      speeds << "#{level}: #{ns // 1000000} ms, #{plain.bytesize.to_i64 * 1000_i64 // ns} MB/s"
+      speeds << "#{level}: #{ns // 1000000} ms, #{plain.bytesize.to_i64 * 1000_i64 // ns} MB/s".copy_to(Program.tape)
     end
     puts "  #{name}: #{plain.bytesize} bytes, levels 0 to 9: #{sizes.join(" ")}"
     puts "  speed of iyi over #{name}'s #{plain.bytesize} bytes, level #{speeds.join("; ")}" if name == "l_big"

@@ -705,10 +705,15 @@ pub struct BigInt
   end
 
   def *(other : Int64) : BigInt
-    return BigInt.zero if zero? || other == 0_i64
     magnitude = other == -9223372036854775808_i64 ? 0x8000000000000000_u64 : (other < 0_i64 ? -other : other).to_u64
-    return self * BigInt.new(other) if magnitude > 0xFFFFFFFF_u64
-    BigInt.new(other < 0_i64 ? -@sign : @sign, mul_limb(@limbs, magnitude))
+    result = if zero? || other == 0_i64
+               BigInt.zero
+             elsif magnitude > 0xFFFFFFFF_u64
+               self * BigInt.new(other)
+             else
+               BigInt.new(other < 0_i64 ? -@sign : @sign, mul_limb(@limbs, magnitude))
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   def *(other : Int32) : BigInt
@@ -1535,11 +1540,9 @@ pub struct BigInt
         has_remainder = (m.limbs[limb_shift] & mask) != 0_u64
       end
 
-      if has_remainder
-        -(shifted + BigInt.one)
-      else
-        -shifted
-      end
+      # The value is this initializer's: an expression left here was
+      # dropped, and -7 >> 1 read back as -7.
+      initialize(has_remainder ? -(shifted + BigInt.one) : -shifted)
     end
   end
 
@@ -1550,46 +1553,47 @@ pub struct BigInt
 
   # Bitwise AND (&) with two's complement semantics
   def &(other : BigInt) : BigInt
-    if positive? && other.positive?
-      n = @limbs.size < other.limbs.size ? @limbs.size : other.limbs.size
-      res = Array(UInt64).new(n)
-      i = 0
-      while i < n
-        res << (@limbs[i] & other.limbs[i])
-        i = i + 1
-      end
-      BigInt.new(1, res)
-    elsif positive? && other.negative?
-      # a & (~mb)
-      mb = other.twos_mag
-      n = @limbs.size
-      res = Array(UInt64).new(n)
-      i = 0
-      while i < n
-        b_limb = i < mb.limbs.size ? mb.limbs[i] : 0_u64
-        res << (@limbs[i] & (b_limb ^ 0xFFFFFFFF_u64))
-        i = i + 1
-      end
-      BigInt.new(1, res)
-    elsif negative? && other.positive?
-      other & self
-    elsif negative? && other.negative?
-      # (~ma) & (~mb) = ~(ma | mb) = -((ma | mb) + 1)
-      ma = twos_mag
-      mb = other.twos_mag
-      n = ma.limbs.size > mb.limbs.size ? ma.limbs.size : mb.limbs.size
-      res = Array(UInt64).new(n)
-      i = 0
-      while i < n
-        va = i < ma.limbs.size ? ma.limbs[i] : 0_u64
-        vb = i < mb.limbs.size ? mb.limbs[i] : 0_u64
-        res << (va | vb)
-        i = i + 1
-      end
-      -(BigInt.new(1, res) + BigInt.one)
-    else
-      BigInt.zero
-    end
+    result = if positive? && other.positive?
+               n = @limbs.size < other.limbs.size ? @limbs.size : other.limbs.size
+               res = Array(UInt64).new(n)
+               i = 0
+               while i < n
+                 res << (@limbs[i] & other.limbs[i])
+                 i = i + 1
+               end
+               BigInt.new(1, res)
+             elsif positive? && other.negative?
+               # a & (~mb)
+               mb = other.twos_mag
+               n = @limbs.size
+               res = Array(UInt64).new(n)
+               i = 0
+               while i < n
+                 b_limb = i < mb.limbs.size ? mb.limbs[i] : 0_u64
+                 res << (@limbs[i] & (b_limb ^ 0xFFFFFFFF_u64))
+                 i = i + 1
+               end
+               BigInt.new(1, res)
+             elsif negative? && other.positive?
+               other & self
+             elsif negative? && other.negative?
+               # (~ma) & (~mb) = ~(ma | mb) = -((ma | mb) + 1)
+               ma = twos_mag
+               mb = other.twos_mag
+               n = ma.limbs.size > mb.limbs.size ? ma.limbs.size : mb.limbs.size
+               res = Array(UInt64).new(n)
+               i = 0
+               while i < n
+                 va = i < ma.limbs.size ? ma.limbs[i] : 0_u64
+                 vb = i < mb.limbs.size ? mb.limbs[i] : 0_u64
+                 res << (va | vb)
+                 i = i + 1
+               end
+               -(BigInt.new(1, res) + BigInt.one)
+             else
+               BigInt.zero
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   # Bitwise OR (|) with two's complement semantics
@@ -1597,45 +1601,46 @@ pub struct BigInt
     return other if zero?
     return self if other.zero?
 
-    if positive? && other.positive?
-      n = @limbs.size > other.limbs.size ? @limbs.size : other.limbs.size
-      res = Array(UInt64).new(n)
-      i = 0
-      while i < n
-        va = i < @limbs.size ? @limbs[i] : 0_u64
-        vb = i < other.limbs.size ? other.limbs[i] : 0_u64
-        res << (va | vb)
-        i = i + 1
-      end
-      BigInt.new(1, res)
-    elsif positive? && other.negative?
-      # a | (~mb) = ~ (mb & ~a) = -((mb & ~a) + 1)
-      mb = other.twos_mag
-      n = mb.limbs.size
-      res = Array(UInt64).new(n)
-      i = 0
-      while i < n
-        va = i < @limbs.size ? @limbs[i] : 0_u64
-        vb = mb.limbs[i]
-        res << (vb & (va ^ 0xFFFFFFFF_u64))
-        i = i + 1
-      end
-      -(BigInt.new(1, res) + BigInt.one)
-    elsif negative? && other.positive?
-      other | self
-    else
-      # (~ma) | (~mb) = ~(ma & mb) = -((ma & mb) + 1)
-      ma = twos_mag
-      mb = other.twos_mag
-      n = ma.limbs.size < mb.limbs.size ? ma.limbs.size : mb.limbs.size
-      res = Array(UInt64).new(n)
-      i = 0
-      while i < n
-        res << (ma.limbs[i] & mb.limbs[i])
-        i = i + 1
-      end
-      -(BigInt.new(1, res) + BigInt.one)
-    end
+    result = if positive? && other.positive?
+               n = @limbs.size > other.limbs.size ? @limbs.size : other.limbs.size
+               res = Array(UInt64).new(n)
+               i = 0
+               while i < n
+                 va = i < @limbs.size ? @limbs[i] : 0_u64
+                 vb = i < other.limbs.size ? other.limbs[i] : 0_u64
+                 res << (va | vb)
+                 i = i + 1
+               end
+               BigInt.new(1, res)
+             elsif positive? && other.negative?
+               # a | (~mb) = ~ (mb & ~a) = -((mb & ~a) + 1)
+               mb = other.twos_mag
+               n = mb.limbs.size
+               res = Array(UInt64).new(n)
+               i = 0
+               while i < n
+                 va = i < @limbs.size ? @limbs[i] : 0_u64
+                 vb = mb.limbs[i]
+                 res << (vb & (va ^ 0xFFFFFFFF_u64))
+                 i = i + 1
+               end
+               -(BigInt.new(1, res) + BigInt.one)
+             elsif negative? && other.positive?
+               other | self
+             else
+               # (~ma) | (~mb) = ~(ma & mb) = -((ma & mb) + 1)
+               ma = twos_mag
+               mb = other.twos_mag
+               n = ma.limbs.size < mb.limbs.size ? ma.limbs.size : mb.limbs.size
+               res = Array(UInt64).new(n)
+               i = 0
+               while i < n
+                 res << (ma.limbs[i] & mb.limbs[i])
+                 i = i + 1
+               end
+               -(BigInt.new(1, res) + BigInt.one)
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   # Bitwise XOR (^) with two's complement semantics
@@ -1643,47 +1648,48 @@ pub struct BigInt
     return other if zero?
     return self if other.zero?
 
-    if positive? && other.positive?
-      n = @limbs.size > other.limbs.size ? @limbs.size : other.limbs.size
-      res = Array(UInt64).new(n)
-      i = 0
-      while i < n
-        va = i < @limbs.size ? @limbs[i] : 0_u64
-        vb = i < other.limbs.size ? other.limbs[i] : 0_u64
-        res << (va ^ vb)
-        i = i + 1
-      end
-      BigInt.new(1, res)
-    elsif positive? && other.negative?
-      # a ^ (~mb) = ~(a ^ mb) = -((a ^ mb) + 1)
-      mb = other.twos_mag
-      n = @limbs.size > mb.limbs.size ? @limbs.size : mb.limbs.size
-      res = Array(UInt64).new(n)
-      i = 0
-      while i < n
-        va = i < @limbs.size ? @limbs[i] : 0_u64
-        vb = i < mb.limbs.size ? mb.limbs[i] : 0_u64
-        res << (va ^ vb)
-        i = i + 1
-      end
-      -(BigInt.new(1, res) + BigInt.one)
-    elsif negative? && other.positive?
-      other ^ self
-    else
-      # (~ma) ^ (~mb) = ma ^ mb
-      ma = twos_mag
-      mb = other.twos_mag
-      n = ma.limbs.size > mb.limbs.size ? ma.limbs.size : mb.limbs.size
-      res = Array(UInt64).new(n)
-      i = 0
-      while i < n
-        va = i < ma.limbs.size ? ma.limbs[i] : 0_u64
-        vb = i < mb.limbs.size ? mb.limbs[i] : 0_u64
-        res << (va ^ vb)
-        i = i + 1
-      end
-      BigInt.new(1, res)
-    end
+    result = if positive? && other.positive?
+               n = @limbs.size > other.limbs.size ? @limbs.size : other.limbs.size
+               res = Array(UInt64).new(n)
+               i = 0
+               while i < n
+                 va = i < @limbs.size ? @limbs[i] : 0_u64
+                 vb = i < other.limbs.size ? other.limbs[i] : 0_u64
+                 res << (va ^ vb)
+                 i = i + 1
+               end
+               BigInt.new(1, res)
+             elsif positive? && other.negative?
+               # a ^ (~mb) = ~(a ^ mb) = -((a ^ mb) + 1)
+               mb = other.twos_mag
+               n = @limbs.size > mb.limbs.size ? @limbs.size : mb.limbs.size
+               res = Array(UInt64).new(n)
+               i = 0
+               while i < n
+                 va = i < @limbs.size ? @limbs[i] : 0_u64
+                 vb = i < mb.limbs.size ? mb.limbs[i] : 0_u64
+                 res << (va ^ vb)
+                 i = i + 1
+               end
+               -(BigInt.new(1, res) + BigInt.one)
+             elsif negative? && other.positive?
+               other ^ self
+             else
+               # (~ma) ^ (~mb) = ma ^ mb
+               ma = twos_mag
+               mb = other.twos_mag
+               n = ma.limbs.size > mb.limbs.size ? ma.limbs.size : mb.limbs.size
+               res = Array(UInt64).new(n)
+               i = 0
+               while i < n
+                 va = i < ma.limbs.size ? ma.limbs[i] : 0_u64
+                 vb = i < mb.limbs.size ? mb.limbs[i] : 0_u64
+                 res << (va ^ vb)
+                 i = i + 1
+               end
+               BigInt.new(1, res)
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   # Converts this BigInt to a string in the given base (default 10).
@@ -2942,11 +2948,11 @@ pub struct BigDecimal
   end
 
   def abs : BigDecimal
-    BigDecimal.new(@value.abs, @scale)
+    BigDecimal.new(@value.abs, @scale).copy_to(RisCurrentTape.new)
   end
 
   def negate : BigDecimal
-    BigDecimal.new(-@value, @scale)
+    BigDecimal.new(-@value, @scale).copy_to(RisCurrentTape.new)
   end
 
   def - : BigDecimal
@@ -2958,22 +2964,23 @@ pub struct BigDecimal
   end
 
   protected def self.align(a : BigDecimal, b : BigDecimal) : Tuple(BigInt, BigInt, Int32)
-    if a.scale == b.scale
-      {a.value, b.value, a.scale}
-    elsif a.scale > b.scale
-      diff = a.scale - b.scale
-      factor = BigInt.new(10_i64) ** diff
-      {a.value, b.value * factor, a.scale}
-    else
-      diff = b.scale - a.scale
-      factor = BigInt.new(10_i64) ** diff
-      {a.value * factor, b.value, b.scale}
-    end
+    result = if a.scale == b.scale
+               {a.value, b.value, a.scale}
+             elsif a.scale > b.scale
+               diff = a.scale - b.scale
+               factor = BigInt.new(10_i64) ** diff
+               {a.value, b.value * factor, a.scale}
+             else
+               diff = b.scale - a.scale
+               factor = BigInt.new(10_i64) ** diff
+               {a.value * factor, b.value, b.scale}
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   def +(other : BigDecimal) : BigDecimal
     tup = BigDecimal.align(self, other)
-    BigDecimal.new(tup[0] + tup[1], tup[2])
+    BigDecimal.new(tup[0] + tup[1], tup[2]).copy_to(RisCurrentTape.new)
   end
 
   def +(other : Int32 | Int64) : BigDecimal
@@ -2982,7 +2989,7 @@ pub struct BigDecimal
 
   def -(other : BigDecimal) : BigDecimal
     tup = BigDecimal.align(self, other)
-    BigDecimal.new(tup[0] - tup[1], tup[2])
+    BigDecimal.new(tup[0] - tup[1], tup[2]).copy_to(RisCurrentTape.new)
   end
 
   def -(other : Int32 | Int64) : BigDecimal
@@ -2990,7 +2997,7 @@ pub struct BigDecimal
   end
 
   def *(other : BigDecimal) : BigDecimal
-    BigDecimal.new(@value * other.value, @scale + other.scale)
+    BigDecimal.new(@value * other.value, @scale + other.scale).copy_to(RisCurrentTape.new)
   end
 
   def *(other : Int32 | Int64) : BigDecimal
@@ -3004,7 +3011,6 @@ pub struct BigDecimal
   def div(other : BigDecimal, precision : Int32) : BigDecimal
     raise "division by zero" if other.zero?
     raise "negative precision: #{precision}" if precision < 0
-    return BigDecimal.zero if zero?
     # self / other = (@value / other.value) * 10^(other.scale - @scale);
     # scale that by 10^precision and divide as integers.
     shift = other.scale - @scale + precision
@@ -3018,11 +3024,18 @@ pub struct BigDecimal
     qr = num.divmod(den)
     q = qr[0]
     r = qr[1]
-    return BigDecimal.new(q, precision).normalized if r.zero?
-    if ((r.abs * 2) <=> den.abs) >= 0
+    exact = r.zero?
+    if !exact && ((r.abs * 2) <=> den.abs) >= 0
       q = @value.sign == other.value.sign ? q + 1 : q - 1
     end
-    BigDecimal.new(q, precision)
+    result = if zero?
+               BigDecimal.zero
+             elsif exact
+               BigDecimal.new(q, precision).normalized
+             else
+               BigDecimal.new(q, precision)
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   def /(other : BigDecimal) : BigDecimal
@@ -3036,24 +3049,27 @@ pub struct BigDecimal
   def //(other : BigDecimal) : BigDecimal
     raise "division by zero" if other.zero?
     tup = BigDecimal.align(self, other)
-    BigDecimal.new(tup[0] // tup[1], 0)
+    BigDecimal.new(tup[0] // tup[1], 0).copy_to(RisCurrentTape.new)
   end
 
   def %(other : BigDecimal) : BigDecimal
     raise "modulo by zero" if other.zero?
     tup = BigDecimal.align(self, other)
-    BigDecimal.new(tup[0] % tup[1], tup[2])
+    BigDecimal.new(tup[0] % tup[1], tup[2]).copy_to(RisCurrentTape.new)
   end
 
   # The same value with the smallest non-negative scale: trailing zeros of
   # the fraction are dropped and a negative scale is multiplied out.
   def normalized : BigDecimal
-    return BigDecimal.zero if zero?
-    if @scale < 0
-      return BigDecimal.new(@value * (BigInt.new(10_i64) ** (-@scale)), 0)
-    end
-    stripped = strip_zeros(@scale)
-    BigDecimal.new(stripped[0], @scale - stripped[1])
+    result = if zero?
+               BigDecimal.zero
+             elsif @scale < 0
+               BigDecimal.new(@value * (BigInt.new(10_i64) ** (-@scale)), 0)
+             else
+               stripped = strip_zeros(@scale)
+               BigDecimal.new(stripped[0], @scale - stripped[1])
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   # The value without its trailing zeros, at most `limit` of them, and how
@@ -3071,7 +3087,8 @@ pub struct BigDecimal
       count = count + 1
     end
     return {@value, 0} if count == 0
-    {@value // (BigInt.new(10_i64) ** count), count}
+    result = {@value // (BigInt.new(10_i64) ** count), count}
+    result.copy_to(RisCurrentTape.new)
   end
 
   def !=(other : BigDecimal) : Bool
@@ -3251,11 +3268,11 @@ pub struct BigRational
   end
 
   def abs : BigRational
-    BigRational.new(@numerator.abs, @denominator)
+    BigRational.new(@numerator.abs, @denominator).copy_to(RisCurrentTape.new)
   end
 
   def negate : BigRational
-    BigRational.new(-@numerator, @denominator)
+    BigRational.new(-@numerator, @denominator).copy_to(RisCurrentTape.new)
   end
 
   def - : BigRational
@@ -3268,11 +3285,12 @@ pub struct BigRational
 
   def inv : BigRational
     raise "division by zero" if @numerator.zero?
-    BigRational.new(@denominator, @numerator)
+    result = BigRational.new(@denominator, @numerator)
+    result.copy_to(RisCurrentTape.new)
   end
 
   def +(other : BigRational) : BigRational
-    BigRational.new(@numerator * other.denominator + other.numerator * @denominator, @denominator * other.denominator)
+    BigRational.new(@numerator * other.denominator + other.numerator * @denominator, @denominator * other.denominator).copy_to(RisCurrentTape.new)
   end
 
   def +(other : Int32 | Int64 | BigInt) : BigRational
@@ -3280,7 +3298,7 @@ pub struct BigRational
   end
 
   def -(other : BigRational) : BigRational
-    BigRational.new(@numerator * other.denominator - other.numerator * @denominator, @denominator * other.denominator)
+    BigRational.new(@numerator * other.denominator - other.numerator * @denominator, @denominator * other.denominator).copy_to(RisCurrentTape.new)
   end
 
   def -(other : Int32 | Int64 | BigInt) : BigRational
@@ -3288,7 +3306,7 @@ pub struct BigRational
   end
 
   def *(other : BigRational) : BigRational
-    BigRational.new(@numerator * other.numerator, @denominator * other.denominator)
+    BigRational.new(@numerator * other.numerator, @denominator * other.denominator).copy_to(RisCurrentTape.new)
   end
 
   def *(other : Int32 | Int64 | BigInt) : BigRational
@@ -3297,7 +3315,8 @@ pub struct BigRational
 
   def /(other : BigRational) : BigRational
     raise "division by zero" if other.zero?
-    BigRational.new(@numerator * other.denominator, @denominator * other.numerator)
+    result = BigRational.new(@numerator * other.denominator, @denominator * other.numerator)
+    result.copy_to(RisCurrentTape.new)
   end
 
   def /(other : Int32 | Int64 | BigInt) : BigRational
@@ -3343,7 +3362,7 @@ pub struct BigRational
   end
 
   def to_big_d : BigDecimal
-    BigDecimal.new(@numerator) / BigDecimal.new(@denominator)
+    (BigDecimal.new(@numerator) / BigDecimal.new(@denominator)).copy_to(RisCurrentTape.new)
   end
 
   # The Float64 nearest this value, ties to even, as python's
@@ -3503,18 +3522,20 @@ pub struct BigFloat
       negative = bytes[at] == 45_u8
       at = at + 1
     end
-    digits = BigInt.zero
+    # The digits' value, refilled in each round (a round's BigInt is
+    # freed when it ends).
+    acc = [] of UInt64
     seen = 0
     scale = 0_i64
     while at < size && bytes[at] >= 48_u8 && bytes[at] <= 57_u8
-      digits = digits * 10 + (bytes[at] - 48_u8).to_i32
+      BigInt.refill(acc, BigInt.new(1, acc) * 10 + (bytes[at] - 48_u8).to_i32)
       seen = seen + 1
       at = at + 1
     end
     if at < size && bytes[at] == 46_u8
       at = at + 1
       while at < size && bytes[at] >= 48_u8 && bytes[at] <= 57_u8
-        digits = digits * 10 + (bytes[at] - 48_u8).to_i32
+        BigInt.refill(acc, BigInt.new(1, acc) * 10 + (bytes[at] - 48_u8).to_i32)
         scale = scale - 1_i64
         seen = seen + 1
         at = at + 1
@@ -3540,11 +3561,13 @@ pub struct BigFloat
       scale = scale + (down ? 0_i64 - power : power)
     end
     return nil if at != size
-    if scale >= 0_i64
-      rounded(negative, digits * (BigInt.new(10_i64) ** scale.to_i32), BigInt.one, 0_i64, precision)
-    else
-      rounded(negative, digits, BigInt.new(10_i64) ** (0_i64 - scale).to_i32, 0_i64, precision)
-    end
+    digits = BigInt.new(1, acc)
+    result = if scale >= 0_i64
+               rounded(negative, digits * (BigInt.new(10_i64) ** scale.to_i32), BigInt.one, 0_i64, precision)
+             else
+               rounded(negative, digits, BigInt.new(10_i64) ** (0_i64 - scale).to_i32, 0_i64, precision)
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   # *num*/*den* · 2^*shift* (both non-negative, *den* not zero), rounded to
@@ -3624,7 +3647,7 @@ pub struct BigFloat
 
   # This value at another precision, rounded if it is fewer bits.
   def with_precision(bits : Int32) : BigFloat
-    BigFloat.rounded(@negative, @mantissa, BigInt.one, @exponent, bits)
+    BigFloat.rounded(@negative, @mantissa, BigInt.one, @exponent, bits).copy_to(RisCurrentTape.new)
   end
 
   def - : BigFloat
@@ -3648,12 +3671,13 @@ pub struct BigFloat
   end
 
   def *(other : BigFloat) : BigFloat
-    BigFloat.rounded(@negative != other.negative?, @mantissa * other.mantissa, BigInt.one, @exponent + other.exponent, @precision > other.precision ? @precision : other.precision)
+    BigFloat.rounded(@negative != other.negative?, @mantissa * other.mantissa, BigInt.one, @exponent + other.exponent, @precision > other.precision ? @precision : other.precision).copy_to(RisCurrentTape.new)
   end
 
   def /(other : BigFloat) : BigFloat
     raise "BigFloat: division by zero" if other.zero?
-    BigFloat.rounded(@negative != other.negative?, @mantissa, other.mantissa, @exponent - other.exponent, @precision > other.precision ? @precision : other.precision)
+    result = BigFloat.rounded(@negative != other.negative?, @mantissa, other.mantissa, @exponent - other.exponent, @precision > other.precision ? @precision : other.precision)
+    result.copy_to(RisCurrentTape.new)
   end
 
   def +(other : Int32 | Int64 | BigInt) : BigFloat
@@ -3666,13 +3690,13 @@ pub struct BigFloat
 
   def *(other : Int32 | Int64 | BigInt) : BigFloat
     exact = BigFloat.exactly(other)
-    BigFloat.rounded(@negative != exact.negative?, @mantissa * exact.mantissa, BigInt.one, @exponent + exact.exponent, @precision)
+    BigFloat.rounded(@negative != exact.negative?, @mantissa * exact.mantissa, BigInt.one, @exponent + exact.exponent, @precision).copy_to(RisCurrentTape.new)
   end
 
   def /(other : Int32 | Int64 | BigInt) : BigFloat
     exact = BigFloat.exactly(other)
     raise "BigFloat: division by zero" if exact.zero?
-    BigFloat.rounded(@negative != exact.negative?, @mantissa, exact.mantissa, @exponent - exact.exponent, @precision)
+    BigFloat.rounded(@negative != exact.negative?, @mantissa, exact.mantissa, @exponent - exact.exponent, @precision).copy_to(RisCurrentTape.new)
   end
 
   # An integer at exactly the bits it has.
@@ -3687,16 +3711,21 @@ pub struct BigFloat
   # last place, even where that place halves below a power of two - and
   # is not shifted out to a size it would only be rounded away from.
   protected def sum(other : BigFloat, precision : Int32) : BigFloat
-    return other.with_precision(precision) if zero?
-    return with_precision(precision) if other.zero?
-    gap = top - other.top
-    return with_precision(precision) if gap > precision.to_i64 + 2_i64
-    return other.with_precision(precision) if 0_i64 - gap > precision.to_i64 + 2_i64
-    low = @exponent < other.exponent ? @exponent : other.exponent
-    mine = @mantissa << (@exponent - low).to_i32
-    theirs = other.mantissa << (other.exponent - low).to_i32
-    total = (@negative ? -mine : mine) + (other.negative? ? -theirs : theirs)
-    BigFloat.rounded(total.negative?, total.abs, BigInt.one, low, precision)
+    gap = zero? || other.zero? ? 0_i64 : top - other.top
+    result = if zero?
+               other.with_precision(precision)
+             elsif other.zero? || gap > precision.to_i64 + 2_i64
+               with_precision(precision)
+             elsif 0_i64 - gap > precision.to_i64 + 2_i64
+               other.with_precision(precision)
+             else
+               low = @exponent < other.exponent ? @exponent : other.exponent
+               mine = @mantissa << (@exponent - low).to_i32
+               theirs = other.mantissa << (other.exponent - low).to_i32
+               total = (@negative ? -mine : mine) + (other.negative? ? -theirs : theirs)
+               BigFloat.rounded(total.negative?, total.abs, BigInt.one, low, precision)
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   # The square root, rounded once. The mantissa is widened to at least
@@ -3712,31 +3741,37 @@ pub struct BigFloat
     square = @mantissa << widen
     root = BigFloat.isqrt(square)
     sticky = root * root == square ? BigInt.zero : BigInt.one
-    BigFloat.rounded(false, (root << 1) + sticky, BigInt.new(2_i64), (@exponent - widen.to_i64) // 2_i64, @precision)
+    result = BigFloat.rounded(false, (root << 1) + sticky, BigInt.new(2_i64), (@exponent - widen.to_i64) // 2_i64, @precision)
+    result.copy_to(RisCurrentTape.new)
   end
 
   # The largest integer whose square is at most *value*, by Newton's
   # method from above.
   protected def self.isqrt(value : BigInt) : BigInt
     return value if value < BigInt.new(2_i64)
-    x = BigInt.one << ((BigInt.bit_length(value) + 1) // 2)
-    while true
-      y = (x + value // x) >> 1
-      return x if y >= x
-      x = y
+    x = [] of UInt64
+    BigInt.refill(x, BigInt.one << ((BigInt.bit_length(value) + 1) // 2))
+    y = [] of UInt64
+    BigInt.refill(y, (BigInt.new(1, x) + value // BigInt.new(1, x)) >> 1)
+    while BigInt.new(1, y) < BigInt.new(1, x)
+      BigInt.refill(x, BigInt.new(1, y))
+      BigInt.refill(y, (BigInt.new(1, x) + value // BigInt.new(1, x)) >> 1)
     end
+    BigInt.new(1, x).copy_to(RisCurrentTape.new)
   end
 
   # The power, its exact value rounded once; a negative exponent is the
   # reciprocal of the power, rounded once.
   def **(exponent : Int32) : BigFloat
     odd = exponent % 2 != 0
-    if exponent < 0
-      raise "BigFloat: division by zero" if zero?
-      power = @mantissa ** (0 - exponent)
-      return BigFloat.rounded(@negative && odd, BigInt.one, power, 0_i64 - @exponent * (0 - exponent).to_i64, @precision)
-    end
-    BigFloat.rounded(@negative && odd, @mantissa ** exponent, BigInt.one, @exponent * exponent.to_i64, @precision)
+    raise "BigFloat: division by zero" if exponent < 0 && zero?
+    result = if exponent < 0
+               power = @mantissa ** (0 - exponent)
+               BigFloat.rounded(@negative && odd, BigInt.one, power, 0_i64 - @exponent * (0 - exponent).to_i64, @precision)
+             else
+               BigFloat.rounded(@negative && odd, @mantissa ** exponent, BigInt.one, @exponent * exponent.to_i64, @precision)
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   # The exact value as a fraction.
@@ -3771,38 +3806,49 @@ pub struct BigFloat
 
   def trunc : BigFloat
     whole = trunc_whole
-    BigFloat.rounded(whole.negative?, whole.abs, BigInt.one, 0_i64, @precision)
+    BigFloat.rounded(whole.negative?, whole.abs, BigInt.one, 0_i64, @precision).copy_to(RisCurrentTape.new)
   end
 
   def floor : BigFloat
     whole = trunc_whole
     whole = whole - BigInt.one if @negative && !exact_whole?
-    BigFloat.rounded(whole.negative?, whole.abs, BigInt.one, 0_i64, @precision)
+    result = BigFloat.rounded(whole.negative?, whole.abs, BigInt.one, 0_i64, @precision)
+    result.copy_to(RisCurrentTape.new)
   end
 
   def ceil : BigFloat
     whole = trunc_whole
     whole = whole + BigInt.one if !@negative && !zero? && !exact_whole?
-    BigFloat.rounded(whole.negative?, whole.abs, BigInt.one, 0_i64, @precision)
+    result = BigFloat.rounded(whole.negative?, whole.abs, BigInt.one, 0_i64, @precision)
+    result.copy_to(RisCurrentTape.new)
   end
 
   # Under one half is zero; from there the fraction is at most
   # *precision* bits, compared with one half exactly.
   def round : BigFloat
     return self if exact_whole?
-    return BigFloat.rounded(false, BigInt.zero, BigInt.one, 0_i64, @precision) if top < 0_i64
-    drop = (0_i64 - @exponent).to_i32
-    whole = @mantissa >> drop
-    rest = @mantissa - (whole << drop)
-    against = rest <=> (BigInt.one << (drop - 1))
-    whole = whole + BigInt.one if against > 0 || (against == 0 && whole.odd?)
-    BigFloat.rounded(@negative && !whole.zero?, whole, BigInt.one, 0_i64, @precision)
+    result = if top < 0_i64
+               BigFloat.rounded(false, BigInt.zero, BigInt.one, 0_i64, @precision)
+             else
+               drop = (0_i64 - @exponent).to_i32
+               whole = @mantissa >> drop
+               rest = @mantissa - (whole << drop)
+               against = rest <=> (BigInt.one << (drop - 1))
+               whole = whole + BigInt.one if against > 0 || (against == 0 && whole.odd?)
+               BigFloat.rounded(@negative && !whole.zero?, whole, BigInt.one, 0_i64, @precision)
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   protected def trunc_whole : BigInt
-    return signed(@mantissa << @exponent.to_i32) if @exponent >= 0_i64
-    return BigInt.zero if top <= 0_i64
-    signed(@mantissa >> (0_i64 - @exponent).to_i32)
+    result = if @exponent >= 0_i64
+               signed(@mantissa << @exponent.to_i32)
+             elsif top <= 0_i64
+               BigInt.zero
+             else
+               signed(@mantissa >> (0_i64 - @exponent).to_i32)
+             end
+    result.copy_to(RisCurrentTape.new)
   end
 
   private def exact_whole? : Bool
@@ -3951,12 +3997,15 @@ pub struct BigFloat
   # its trailing zero bits.
   def hash : Int32
     return 0 if zero?
-    m = @mantissa
+    # Trailing zero bits counted, then dropped at once: a BigInt made in
+    # a round is freed when it ends.
     e = @exponent
-    while !m.odd?
-      m = m >> 1
-      e = e + 1_i64
+    drop = 0
+    while (@mantissa.limbs[drop >> 5].unsafe_shr((drop & 31).to_u64) & 1_u64) == 0_u64
+      drop = drop + 1
     end
+    m = @mantissa >> drop
+    e = e + drop.to_i64
     (m.hash &* 31 &+ e.to_i32) &* (@negative ? -1 : 1)
   end
 
