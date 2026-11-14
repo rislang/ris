@@ -176,15 +176,19 @@ pub struct User
       # front of one as the name asked for.
       return nil if name.empty? || name.includes?("\0")
       {% if flag?(:linux) %}
+        # Each entry views the file's text, read in this def: the one
+        # found is copied out to the caller's tape.
+        text = UserFiles.read(UserFiles::PASSWD)
+        return nil if text.nil?
         found = nil
-        UserFiles.each_line(UserFiles::PASSWD) do |line|
+        text.split('\n').each do |line|
           entry = parse_line(line)
           if entry && entry.name == name
             found = entry
             break
           end
         end
-        found
+        found ? found.copy_to(RisCurrentTape.new) : nil
       {% else %}
         UserFiles.darwin_user(name, 0_u32)
       {% end %}
@@ -203,15 +207,17 @@ pub struct User
       return nil if number.nil?
       {% if flag?(:linux) %}
         wanted = number.to_s
+        text = UserFiles.read(UserFiles::PASSWD)
+        return nil if text.nil?
         found = nil
-        UserFiles.each_line(UserFiles::PASSWD) do |line|
+        text.split('\n').each do |line|
           entry = parse_line(line)
           if entry && entry.id == wanted
             found = entry
             break
           end
         end
-        found
+        found ? found.copy_to(RisCurrentTape.new) : nil
       {% else %}
         UserFiles.darwin_user(nil, number)
       {% end %}
@@ -264,7 +270,8 @@ pub struct User
   # One `/etc/passwd` line, or nil for a line the lookups skip: blank, a
   # comment, fewer than seven fields, a name empty or starting `+` or `-`,
   # or a uid or gid that is not a number. The shell is the rest of the
-  # line, colons and all, as glibc reads it.
+  # line, colons and all, as glibc reads it. Every field views *raw*: a
+  # User kept past a loop round is kept with the text it views.
   protected def self.parse_line(raw : String) : User?
     line = raw.strip
     return nil if line.empty? || line.starts_with?('#')
@@ -272,11 +279,11 @@ pub struct User
     return nil if fields.size < 7
     name = fields[0]
     return nil if name.empty? || name.starts_with?('+') || name.starts_with?('-')
-    uid = UserFiles.decimal(fields[2])
-    gid = UserFiles.decimal(fields[3])
+    uid = UserFiles.number_text(fields[2])
+    gid = UserFiles.number_text(fields[3])
     return nil if uid.nil? || gid.nil?
-    shell = fields.size == 7 ? fields[6] : fields[6, fields.size - 6].join(":")
-    User.new(name, uid.to_s, gid.to_s, UserFiles.first_gecos(fields[4]), fields[5], shell)
+    shell = UserFiles.field_start(line, 6)
+    User.new(name, uid, gid, UserFiles.first_gecos(fields[4]), fields[5], line[shell, line.bytesize - shell])
   end
 end
 
@@ -296,6 +303,9 @@ pub struct Group
     @members = members.view
   end
 
+  def initialize(@name : String, @id : String, @members : Array::View(String))
+  end
+
   # The group called *name*, or nil when there is none.
   def self.find_by_name(name : String) : Group?
     {% if flag?(:win32) %}
@@ -304,15 +314,18 @@ pub struct Group
     {% else %}
       return nil if name.empty? || name.includes?("\0")
       {% if flag?(:linux) %}
+        text = UserFiles.read(UserFiles::GROUP)
+        return nil if text.nil?
+        members = [] of String
         found = nil
-        UserFiles.each_line(UserFiles::GROUP) do |line|
-          entry = parse_line(line)
+        text.split('\n').each do |line|
+          entry = parse_line(line, members)
           if entry && entry.name == name
             found = entry
             break
           end
         end
-        found
+        found ? found.copy_to(RisCurrentTape.new) : nil
       {% else %}
         UserFiles.darwin_group(name, 0_u32)
       {% end %}
@@ -330,15 +343,18 @@ pub struct Group
       return nil if number.nil?
       {% if flag?(:linux) %}
         wanted = number.to_s
+        text = UserFiles.read(UserFiles::GROUP)
+        return nil if text.nil?
+        members = [] of String
         found = nil
-        UserFiles.each_line(UserFiles::GROUP) do |line|
-          entry = parse_line(line)
+        text.split('\n').each do |line|
+          entry = parse_line(line, members)
           if entry && entry.id == wanted
             found = entry
             break
           end
         end
-        found
+        found ? found.copy_to(RisCurrentTape.new) : nil
       {% else %}
         UserFiles.darwin_group(nil, number)
       {% end %}
@@ -349,30 +365,40 @@ pub struct Group
   # (`name:password:gid:member,member`), in order, without the lines a
   # lookup skips.
   def self.parse(text : String) : Array(Group)
+    # Every group's members are a run of this one Array, which the copy
+    # out takes along.
+    members = [] of String
     groups = [] of Group
     text.split('\n').each do |line|
-      entry = parse_line(line)
+      entry = parse_line(line, members)
       groups << entry if entry
     end
-    groups
+    groups.copy_to(RisCurrentTape.new)
   end
 
   # One `/etc/group` line, or nil for a line the lookups skip: blank, a
   # comment, fewer than four fields, a name empty or starting `+` or `-`,
   # or a gid that is not a number. The members are the rest of the line
   # split at commas, empty names dropped, as glibc's list parser drops
-  # them.
-  protected def self.parse_line(raw : String) : Group?
+  # them. The fields view *raw*; the members are appended to *members*,
+  # which the Group views a run of.
+  protected def self.parse_line(raw : String, members : Array(String)) : Group?
     line = raw.strip
     return nil if line.empty? || line.starts_with?('#')
-    fields = line.split(':')
-    return nil if fields.size < 4
-    name = fields[0]
+    return nil if UserFiles.colons(line) < 3
+    name = UserFiles.field(line, 0)
     return nil if name.empty? || name.starts_with?('+') || name.starts_with?('-')
-    gid = UserFiles.decimal(fields[2])
+    gid = UserFiles.number_text(UserFiles.field(line, 2))
     return nil if gid.nil?
-    list = fields.size == 4 ? fields[3] : fields[3, fields.size - 3].join(":")
-    Group.new(name, gid.to_s, list.split(',').reject(&.empty?))
+    start = members.size
+    at = UserFiles.field_start(line, 3)
+    while at <= line.bytesize
+      comma = line.index(',', at) || line.bytesize
+      members << line[at, comma - at] if comma > at
+      at = comma + 1
+    end
+    listed = members.view[start, members.size - start]
+    Group.new(name, gid, listed)
   end
 end
 
@@ -407,17 +433,47 @@ struct UserFiles
     value.to_u32
   end
 
+  # *text* as `decimal` reads it, written without leading zeros: a view
+  # of *text*, `"0"` when it is all zeros. nil when it is no id.
+  def self.number_text(text : String) : String?
+    return nil if decimal(text).nil?
+    start = 0
+    while start < text.bytesize - 1 && text.byte_at(start) == '0'.ord
+      start += 1
+    end
+    text[start, text.bytesize - start]
+  end
+
+  # How many colons *line* holds.
+  def self.colons(line : String) : Int32
+    count = 0
+    line.each_byte { |byte| count += 1 if byte == ':'.ord }
+    count
+  end
+
+  # Field *index* of *line*, counted from 0: a view up to the next colon.
+  def self.field(line : String, index : Int32) : String
+    at = field_start(line, index)
+    stop = line.index(':', at) || line.bytesize
+    line[at, stop - at]
+  end
+
+  # Where *line* goes on after its first *fields* colons; its size when
+  # it has fewer.
+  def self.field_start(line : String, fields : Int32) : Int32
+    at = 0
+    fields.times do
+      found = line.index(':', at)
+      return line.bytesize if found.nil?
+      at = found + 1
+    end
+    at
+  end
+
   # The GECOS field's first comma-separated part.
   def self.first_gecos(gecos : String) : String
     comma = gecos.index(',')
     comma ? gecos[0, comma] : gecos
-  end
-
-  # Each line of the file at *path*; nothing when it cannot be read.
-  def self.each_line(path : String, & : String -> Nil) : Nil
-    text = read(path)
-    return if text.nil?
-    text.split('\n').each { |line| yield line }
   end
 
   # The bytes before the first NUL at *text*; `""` for a null pointer.

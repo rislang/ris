@@ -1172,32 +1172,32 @@ pub struct Png
   def self.read_text(name : String, p : String, body : Int32, len : Int32, kept : String::Builder) : PngText | PngError
     limit = body + len
     z = PngBytes.nul(p, body, limit)
-    return PngError.new("png: a #{name} keyword is not ended by a NUL") if z < 0
-    return PngError.new("png: a #{name} keyword is #{z - body} bytes; it is 1 to 79") if z == body || z - body > 79
+    return PngError.new(Png.keep("png: a #{name} keyword is not ended by a NUL", kept)) if z < 0
+    return PngError.new(Png.keep("png: a #{name} keyword is #{z - body} bytes; it is 1 to 79", kept)) if z == body || z - body > 79
     keyword = Png.keep(PngBytes.latin1(PngBytes.slice(p, body, z - body)), kept)
     case name
     when "tEXt"
       PngText.new(name, keyword, Png.keep(PngBytes.latin1(PngBytes.slice(p, z + 1, limit - z - 1)), kept))
     when "zTXt"
-      return PngError.new("png: zTXt #{keyword.inspect} holds no compression method") if z + 1 >= limit
-      return PngError.new("png: zTXt #{keyword.inspect}'s compression method is #{p[z + 1]}; only 0 is defined") if p[z + 1] != 0_u8
+      return PngError.new(Png.keep("png: zTXt #{keyword.inspect} holds no compression method", kept)) if z + 1 >= limit
+      return PngError.new(Png.keep("png: zTXt #{keyword.inspect}'s compression method is #{p[z + 1]}; only 0 is defined", kept)) if p[z + 1] != 0_u8
       text = Png.inflate_metadata(PngBytes.slice(p, z + 2, limit - z - 2), "zTXt")
-      return text if text.is_a?(PngError)
+      return PngError.new(Png.keep(text.message, kept)) if text.is_a?(PngError)
       PngText.new(name, keyword, Png.keep(PngBytes.latin1(text), kept))
     else
-      return PngError.new("png: iTXt #{keyword.inspect} is cut short before its text") if z + 3 > limit
+      return PngError.new(Png.keep("png: iTXt #{keyword.inspect} is cut short before its text", kept)) if z + 3 > limit
       flag = p[z + 1]
       method = p[z + 2]
-      return PngError.new("png: iTXt #{keyword.inspect}'s compression flag is #{flag}; it is 0 or 1") if flag > 1_u8
-      return PngError.new("png: iTXt #{keyword.inspect}'s compression method is #{method}; only 0 is defined") if flag == 1_u8 && method != 0_u8
+      return PngError.new(Png.keep("png: iTXt #{keyword.inspect}'s compression flag is #{flag}; it is 0 or 1", kept)) if flag > 1_u8
+      return PngError.new(Png.keep("png: iTXt #{keyword.inspect}'s compression method is #{method}; only 0 is defined", kept)) if flag == 1_u8 && method != 0_u8
       lz = PngBytes.nul(p, z + 3, limit)
-      return PngError.new("png: iTXt #{keyword.inspect}'s language tag is not ended by a NUL") if lz < 0
+      return PngError.new(Png.keep("png: iTXt #{keyword.inspect}'s language tag is not ended by a NUL", kept)) if lz < 0
       tz = PngBytes.nul(p, lz + 1, limit)
-      return PngError.new("png: iTXt #{keyword.inspect}'s translated keyword is not ended by a NUL") if tz < 0
+      return PngError.new(Png.keep("png: iTXt #{keyword.inspect}'s translated keyword is not ended by a NUL", kept)) if tz < 0
       raw = PngBytes.slice(p, tz + 1, limit - tz - 1)
       if flag == 1_u8
         inflated = Png.inflate_metadata(raw, "iTXt")
-        return inflated if inflated.is_a?(PngError)
+        return PngError.new(Png.keep(inflated.message, kept)) if inflated.is_a?(PngError)
         raw = inflated
       end
       PngText.new(name, keyword, Png.keep(raw, kept), PngBytes.slice(p, z + 3, lz - z - 3), PngBytes.slice(p, lz + 1, tz - lz - 1))

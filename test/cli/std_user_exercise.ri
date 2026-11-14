@@ -148,13 +148,23 @@ def user_by_id(id : String, system : Bool) : User?
 end
 
 def group_by_name(name : String, system : Bool) : Group?
-  return Group.find_by_name(name) if system
-  Group.parse(GROUPS).find { |group| group.name == name }
+  system ? Group.find_by_name(name) : parsed_group_by_name(name)
+end
+
+# The group views the members Group.parse made here: copied out.
+def parsed_group_by_name(name : String) : Group?
+  found = Group.parse(GROUPS).find { |group| group.name == name }
+  found ? found.copy_to(RisCurrentTape.new) : nil
 end
 
 def group_by_id(id : String, system : Bool) : Group?
-  return Group.find_by_id(id) if system
-  Group.parse(GROUPS).find { |group| group.id == id }
+  system ? Group.find_by_id(id) : parsed_group_by_id(id)
+end
+
+# The group views the members Group.parse made here: copied out.
+def parsed_group_by_id(id : String) : Group?
+  found = Group.parse(GROUPS).find { |group| group.id == id }
+  found ? found.copy_to(RisCurrentTape.new) : nil
 end
 
 def group_ids_of(user : User, system : Bool) : Array(String)
@@ -164,25 +174,26 @@ end
 # Each query and its answer, one a line, as the gate's Go program writes
 # them; a user found by name is followed by the groups it is in.
 def transcript(system : Bool) : String
-  lines = [] of String
+  text = ""
   QUERIES.each do |query|
     space = query.index(' ') || 0
     kind = query[0, space]
     value = query[space + 1, query.bytesize - space - 1]
+    text << query << " -> "
     case kind
     when "user-name"
       user = user_by_name(value, system)
-      lines << "#{query} -> #{show(user)}"
-      lines << "groups #{value} -> #{group_ids_of(user, system).join(",")}" if user
+      text << show(user) << '\n'
+      text << "groups " << value << " -> " << group_ids_of(user, system).join(",") << '\n' if user
     when "user-id"
-      lines << "#{query} -> #{show(user_by_id(value, system))}"
+      text << show(user_by_id(value, system)) << '\n'
     when "group-name"
-      lines << "#{query} -> #{show_group(group_by_name(value, system))}"
+      text << show_group(group_by_name(value, system)) << '\n'
     else
-      lines << "#{query} -> #{show_group(group_by_id(value, system))}"
+      text << show_group(group_by_id(value, system)) << '\n'
     end
   end
-  lines.join("\n") + "\n"
+  text
 end
 
 def fixture_checks(system : Bool) : Nil
@@ -308,43 +319,49 @@ if ENV["USER_FIXTURE_SYSTEM"]?
   puts "  every query answered as the parsers answer it"
 end
 
+# One line of USER_EXPECT, asked and compared. A def of its own, so what
+# a lookup answers stays in this def's scratch.
+def check_expected(line : String) : Nil
+  parts = line.split('\t')
+  kind = parts[0]
+  want = parts[2, parts.size - 2]
+  case kind
+  when "current"
+    me = User.current
+    assert_str want[0, 6].join("\t"), fields(me), "current is pwd.getpwuid(os.getuid())"
+    assert_str want[6], me.group_ids.join(","), "current's group_ids is os.getgrouplist"
+  when "current-fallback"
+    me = User.current
+    assert_str want[0, 6].join("\t"), fields(me), "current falls back to the kernel's ids, $USER and $HOME"
+    assert_str want[6], me.group_ids.join(","), "the fallback's group_ids is its gid"
+  when "user-name"
+    user = User.find_by_name(parts[1])
+    assert_str want[0, 6].join("\t"), fields(user), "find_by_name(#{parts[1].inspect}) is pwd.getpwnam"
+    assert_str want[6], found(user).group_ids.join(","), "group_ids of #{parts[1].inspect} is os.getgrouplist"
+  when "user-id"
+    assert_str want.join("\t"), fields(User.find_by_id(parts[1])), "find_by_id(#{parts[1].inspect}) is pwd.getpwuid"
+  when "group-name"
+    assert_str want.join("\t"), group_fields(Group.find_by_name(parts[1])), "Group.find_by_name(#{parts[1].inspect}) is grp.getgrnam"
+  when "group-id"
+    assert_str want.join("\t"), group_fields(Group.find_by_id(parts[1])), "Group.find_by_id(#{parts[1].inspect}) is grp.getgrgid"
+  when "missing-user-name"
+    assert_true User.find_by_name(parts[1]).nil?, "find_by_name(#{parts[1].inspect}) is nil, as pwd.getpwnam raises KeyError"
+  when "missing-user-id"
+    assert_true User.find_by_id(parts[1]).nil?, "find_by_id(#{parts[1].inspect}) is nil, as pwd.getpwuid raises KeyError"
+  when "missing-group-name"
+    assert_true Group.find_by_name(parts[1]).nil?, "Group.find_by_name(#{parts[1].inspect}) is nil, as grp.getgrnam raises KeyError"
+  else
+    assert_true Group.find_by_id(parts[1]).nil?, "Group.find_by_id(#{parts[1].inspect}) is nil, as grp.getgrgid raises KeyError"
+  end
+end
+
 expect = ENV["USER_EXPECT"]?
 puts "== another program agrees"
 if expect
   checked = 0
   File.read(expect).split('\n').each do |line|
     next if line.empty?
-    parts = line.split('\t')
-    kind = parts[0]
-    want = parts[2, parts.size - 2]
-    case kind
-    when "current"
-      me = User.current
-      assert_str want[0, 6].join("\t"), fields(me), "current is pwd.getpwuid(os.getuid())"
-      assert_str want[6], me.group_ids.join(","), "current's group_ids is os.getgrouplist"
-    when "current-fallback"
-      me = User.current
-      assert_str want[0, 6].join("\t"), fields(me), "current falls back to the kernel's ids, $USER and $HOME"
-      assert_str want[6], me.group_ids.join(","), "the fallback's group_ids is its gid"
-    when "user-name"
-      user = User.find_by_name(parts[1])
-      assert_str want[0, 6].join("\t"), fields(user), "find_by_name(#{parts[1].inspect}) is pwd.getpwnam"
-      assert_str want[6], found(user).group_ids.join(","), "group_ids of #{parts[1].inspect} is os.getgrouplist"
-    when "user-id"
-      assert_str want.join("\t"), fields(User.find_by_id(parts[1])), "find_by_id(#{parts[1].inspect}) is pwd.getpwuid"
-    when "group-name"
-      assert_str want.join("\t"), group_fields(Group.find_by_name(parts[1])), "Group.find_by_name(#{parts[1].inspect}) is grp.getgrnam"
-    when "group-id"
-      assert_str want.join("\t"), group_fields(Group.find_by_id(parts[1])), "Group.find_by_id(#{parts[1].inspect}) is grp.getgrgid"
-    when "missing-user-name"
-      assert_true User.find_by_name(parts[1]).nil?, "find_by_name(#{parts[1].inspect}) is nil, as pwd.getpwnam raises KeyError"
-    when "missing-user-id"
-      assert_true User.find_by_id(parts[1]).nil?, "find_by_id(#{parts[1].inspect}) is nil, as pwd.getpwuid raises KeyError"
-    when "missing-group-name"
-      assert_true Group.find_by_name(parts[1]).nil?, "Group.find_by_name(#{parts[1].inspect}) is nil, as grp.getgrnam raises KeyError"
-    else
-      assert_true Group.find_by_id(parts[1]).nil?, "Group.find_by_id(#{parts[1].inspect}) is nil, as grp.getgrgid raises KeyError"
-    end
+    check_expected(line)
     checked = checked + 1
   end
   assert_true checked > 0, "the expectations file holds lookups"

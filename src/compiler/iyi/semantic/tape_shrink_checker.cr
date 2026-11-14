@@ -2303,6 +2303,9 @@ class Iyi::TapeShrinkChecker
         next if @made_texts.includes?(source) && type && moved_type?(type.remove_typedef)
         # What the def yielded goes back to that def, which holds it.
         next if !node.is_a?(Def) && @yielded_roots.includes?(source)
+        # A struct a callee made here leaves as that callee's result did:
+        # moved down by RESULT. Only a store of it is checked.
+        next if @made_struct_calls.includes?(source)
         # A block's value made before the block (the def's builder that
         # its block appends to) is older than the block's scratch.
         next if !node.is_a?(Def) && blocks && !blocks.includes?(scope)
@@ -2495,6 +2498,27 @@ class Iyi::TapeShrinkChecker
     scan = YieldScan.new(self)
     target.body.accept scan
     @answers_made[id] = scan.answered || fresh_text?(target.body, scan.names)
+  end
+
+  # Whether a callee's answer holds text or storage it made itself, or
+  # is a copy onto the running tape (`copy_to(RisCurrentTape.new)`):
+  # either is made where the call runs. What it views of its inputs, a
+  # builder it was handed or program data is not.
+  @made_struct_calls = Set(UInt64).new
+
+  private def answers_made_struct?(summary : Summary, inputs : Array(Value)) : Bool
+    (summary.result.roots + summary.result.views.map(&.root)).any? do |root|
+      callee_made?(root, summary, inputs) ||
+        (current_copy?(root) && translate(root, summary, inputs).empty?)
+    end
+  end
+
+  # A tape struct, or a union of tape structs and Nil.
+  private def made_struct_type?(type : Type?) : Bool
+    type = type.try(&.remove_typedef)
+    return false unless type
+    members = type.is_a?(UnionType) ? type.union_types.reject(&.nil_type?) : [type]
+    !members.empty? && members.all? { |t| tape_struct?(t) }
   end
 
   private def tape_struct?(type : Type) : Bool
@@ -3377,9 +3401,15 @@ class Iyi::TapeShrinkChecker
           # another owner, `copy_to(Program.tape)`, answers no such thing.)
           # A tape struct (an @[OnTape] answer) holding what the callee
           # allocated is made here the same way.
+          # A tape struct a marked callee built from text it made answers
+          # no root its summary can name (its views were the callee's):
+          # the call's own root stands for it, made here (SPEC 1.5).
+          made_struct = !@tape_blocks.empty? && node.name != "copy_to" &&
+                        summary_marked?(target) && made_struct_type?(node.type?) &&
+                        answers_made_struct?(summary, actuals)
           if !@tape_blocks.empty? && node.name != "copy_to" && (@graph.fresh?(node) ||
              (node.type?.try { |t| TapeChecker.possible_string?(t) || tape_struct?(t) } &&
-              @graph.allocates?(node)) || made_union?(node))
+              @graph.allocates?(node)) || made_union?(node) || made_struct)
             @root_scopes[node.object_id] ||= @scopes.dup
             note_fresh(node.object_id) unless @root_tapes.has_key?(node.object_id)
           end
@@ -3473,6 +3503,12 @@ class Iyi::TapeShrinkChecker
             unless call_result.roots.includes?(node.object_id)
               call_result = merge(call_result, Value.new([node.object_id], [] of View))
             end
+          end
+          if made_struct && !call_result.roots.includes?(node.object_id)
+            @root_types[node.object_id] ||= node.type
+            @handed << node.object_id
+            @made_struct_calls << node.object_id
+            call_result = merge(call_result, Value.new([node.object_id], [] of View))
           end
         else
           incomplete_result = true

@@ -549,16 +549,16 @@ else
     return nil if fields.size < 7"
   # The shell cut at its first colon.
   prove_broken "the shell cut at a colon" "the shell is the rest of the line, colons and all" plain \
-    'shell = fields.size == 7 ? fields[6] : fields[6, fields.size - 6].join(":")' 'shell = fields[6]'
+    'fields[5], line[shell, line.bytesize - shell])' 'fields[5], UserFiles.field(line, 6))'
   # The home and the shell swapped.
   prove_broken "home and shell swapped" "the shell is the seventh field" plain \
-    'first_gecos(fields[4]), fields[5], shell)' 'first_gecos(fields[4]), shell, fields[5])'
+    'fields[5], line[shell, line.bytesize - shell])' 'line[shell, line.bytesize - shell], fields[5])'
   # An id past what uid_t holds cut to 32 bits, as a C cast would.
   prove_broken "a 33-bit uid cut to 32" "an id past 32 bits is nobody's" plain \
     'return nil if value > ID_MAX' 'value = value & ID_MAX if value > ID_MAX'
   # A group's empty member names kept.
   prove_broken "empty member names kept" "an empty member name is dropped" plain \
-    "list.split(',').reject(&.empty?)" "list.split(',')"
+    'members << line[at, comma - at] if comma > at' 'members << line[at, comma - at]'
   # A gid listed twice in group_ids.
   prove_broken "group_ids not held to one of each" "group_ids holds a gid once, primary first" plain \
     'ids << group.id if group.members.includes?(name) && !ids.includes?(group.id)' 'ids << group.id if group.members.includes?(name)'
@@ -570,27 +570,21 @@ else
   # find_by_id comparing the text it was handed, as Go does.
   prove_broken "an id compared as text" "an id is compared as a number" plain \
     "wanted = number.to_s
-        found = nil
-        UserFiles.each_line(UserFiles::PASSWD)" "wanted = id
-        found = nil
-        UserFiles.each_line(UserFiles::PASSWD)"
+        text = UserFiles.read(UserFiles::PASSWD)" "wanted = id
+        text = UserFiles.read(UserFiles::PASSWD)"
   # The last matching line kept, not the first.
   prove_broken "the last ada line kept" "the first ada line wins" fixture \
-    "UserFiles.each_line(UserFiles::PASSWD) do |line|
-          entry = parse_line(line)
+    "entry = parse_line(line)
           if entry && entry.name == name
             found = entry
-            break" "UserFiles.each_line(UserFiles::PASSWD) do |line|
-          entry = parse_line(line)
+            break" "entry = parse_line(line)
           if entry && entry.name == name
             found = entry"
   # A group lookup by id reading the passwd file.
   prove_broken "Group.find_by_id reading /etc/passwd" "the first group with an id wins" fixture \
     "wanted = number.to_s
-        found = nil
-        UserFiles.each_line(UserFiles::GROUP)" "wanted = number.to_s
-        found = nil
-        UserFiles.each_line(UserFiles::PASSWD)"
+        text = UserFiles.read(UserFiles::GROUP)" "wanted = number.to_s
+        text = UserFiles.read(UserFiles::PASSWD)"
   # group_ids reading the passwd file for the groups. A user in its primary
   # group alone - root in a container - has the same answer either way, so
   # there is nothing for the check to see.

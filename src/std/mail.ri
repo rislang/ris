@@ -1417,8 +1417,8 @@ pub class MailAddresses
       return fail("a group has no name") if words.empty?
       @scan.advance
       while true
-        problem = @scan.skip_cfws
-        return problem if problem
+        gap = @scan.skip_cfws
+        return gap if gap
         return fail("a group is not closed with a semicolon") if @scan.done?
         c = @scan.peek
         if c == 59_u8
@@ -1429,8 +1429,8 @@ pub class MailAddresses
         else
           item = entry(found, true)
           return item if item
-          problem = @scan.skip_cfws
-          return problem if problem
+          gap = @scan.skip_cfws
+          return gap if gap
           c = @scan.peek
           return fail("a group's member is followed by neither a comma nor a semicolon") unless c == 44_u8 || c == 59_u8
         end
@@ -1525,13 +1525,13 @@ pub class MailAddresses
       label = @scan.atom
       return fail("a domain has an empty label") if label.empty?
       domain << label
-      problem = @scan.skip_cfws
-      return problem if problem
+      gap = @scan.skip_cfws
+      return gap if gap
       if @scan.peek == 46_u8
         @scan.advance
         domain << "."
-        problem = @scan.skip_cfws
-        return problem if problem
+        gap = @scan.skip_cfws
+        return gap if gap
       else
         break
       end

@@ -1,0 +1,27 @@
+# copy_to(RisCurrentTape.new) copies to the tape the call runs on: called
+# in a block round, that is the round's scratch, and kept in a variable
+# from before the block it would dangle.
+@[OnTape]
+struct Account
+  getter name : String
+  getter id : String
+
+  def initialize(@name : String, @id : String)
+  end
+end
+
+def account(name : String, number : Int32) : Account
+  id = number.to_s
+  Account.new(name, id).copy_to(RisCurrentTape.new)
+end
+
+def first(names : Array(String)) : String
+  found = nil
+  names.each do |name|
+    found = account(name, 7)
+    break
+  end
+  found ? found.id : ""
+end
+
+puts first(["ada"])

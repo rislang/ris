@@ -94,6 +94,8 @@ for name in yield_owner_field yield_clone_attrs svcb_store \
 done
 expect yield_owner_field 'cannot return a value made in this block'
 expect block_item_downcase 'cannot store data made in this block'
+expect def_scratch_struct 'cannot store data made in this block'
+expect block_current_copy 'cannot store data made in this block'
 expect inline_view_concat 'cannot store data made in this def'
 expect inline_view_interp 'cannot store data made in this def'
 expect inline_view_call 'cannot store data made in this def'

@@ -1,0 +1,30 @@
+# A struct a def builds from text it made itself (`number.to_s`) is made
+# where the def runs: called in a block round, that is the round's
+# scratch, and kept in an Array from before the block it would dangle.
+# std/user's User.parse once kept parse_line's User so; every id read
+# back as the last line's.
+@[OnTape]
+struct Account
+  getter name : String
+  getter id : String
+
+  def initialize(@name : String, @id : String)
+  end
+end
+
+def account(name : String, number : Int32) : Account?
+  return nil if name.empty?
+  id = number.to_s
+  Account.new(name, id)
+end
+
+def all(names : Array(String)) : Int32
+  list = [] of Account
+  names.each do |name|
+    found = account(name, 1000 + list.size)
+    list << found if found
+  end
+  list.size
+end
+
+puts all(["ada", "bob"])
