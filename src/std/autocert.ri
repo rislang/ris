@@ -695,7 +695,7 @@ pub class AutocertIssuer
   @transport : HTTPClient? = nil
   # Each challenge's failure, refilled per order: an order's protocol calls
   # may reach `issue` again, so no growing local lives across them.
-  @failures = [] of String
+  @failures = String::Builder.new(256)
   # The one name an order is for, refilled per order as `@failures` is.
   @names = [] of String
 
@@ -712,10 +712,10 @@ pub class AutocertIssuer
     end
   end
 
-  private def client : AcmeClient | AutocertError
-    if made = @client
-      return made
-    end
+  # Sets @client up once: the account key read or made, the directory
+  # read and the account registered; or why it could not be.
+  private def open_client : AutocertError?
+    return nil if @client
     stored = @cache.get(ACCOUNT_KEY)
     return stored if stored.is_a?(AutocertError)
     key = nil.as(SigningKey?)
@@ -740,32 +740,38 @@ pub class AutocertIssuer
     transport = HTTPClient.new(idle: 0, tls: trust)
     @transport = transport
     session = AcmeClient.new(@config.directory_url, key, http: transport)
-    return AutocertError.new("the CA's directory: #{session.message}") if session.is_a?(AcmeError)
+    if problem = session.error
+      return AutocertError.new("the CA's directory: #{problem.message}")
+    end
     session.wait_ms = @config.wait_ms
     contact = @config.email.empty? ? [] of String : ["mailto:#{@config.email}"]
     account = session.register(contact, terms_agreed: @config.accept_terms)
     return AutocertError.new("the account: #{account.message}") if account.is_a?(AcmeError)
     @client = session
-    session
+    nil
   end
 
   # A new certificate for *name* from the CA, under a new key, put in the
   # cache: an order proved by each of `challenges` in turn - a fresh order
   # for the next only when the last one's authorization failed - and
   # finalized.
-  private def order(name : String, failures : Array(String)) : RisAutocertHeld | AutocertError
-    acme = client
-    return acme if acme.is_a?(AutocertError)
+  private def order(name : String, failures : String::Builder) : RisAutocertHeld | AutocertError
+    opened = open_client
+    return opened if opened
+    acme = @client.as(AcmeClient)
     @config.challenges.each do |kind|
       @names.clear
       @names << name
-      placed = acme.new_order(@names)
-      return AutocertError.new("the order for #{name}: #{placed.message}") if placed.is_a?(AcmeError)
+      made = acme.new_order(@names)
+      return AutocertError.new("the order for #{name}: #{made.message}") if made.is_a?(AcmeError)
+      # The order views the client's answer, which its next request reuses.
+      placed = made.copy_to(RisCurrentTape.new)
       proved = prove(acme, placed, name, kind)
       return finish_order(acme, placed, name) unless proved
-      failures << "#{kind}: #{proved.message}"
+      failures << "; " unless failures.empty?
+      failures << kind << ": " << proved.message
     end
-    AutocertError.new("no certificate for #{name}: #{failures.empty? ? "no challenges to offer" : failures.join("; ")}")
+    AutocertError.new("no certificate for #{name}: #{failures.empty? ? "no challenges to offer" : failures.finish}")
   end
 
   private def prove(acme : AcmeClient, placed : AcmeOrder, name : String, kind : String) : AutocertError?

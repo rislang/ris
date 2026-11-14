@@ -559,9 +559,9 @@ prove_broken "an encrypted key read as base64" "an encrypted key refused by name
 prove_broken "a fault in the CRT's first half" "does not check against its own public key, which a fault makes" \
   '    s1 = (c % @p).pow_mod_secret(@dp, @p)' '    s1 = (c % @p).pow_mod_secret(@dp, @p) + BigInt.new(1)'
 prove_broken "the blinding left on the signature" "does not check against its own public key, which a fault makes" \
-  '    s = ((s2 + h * @q) * r_inverse) % @n' '    s = (s2 + h * @q) % @n'
+  '    s = ((s2 + h * @q) * r_inverse) % n' '    s = (s2 + h * @q) % n'
 prove_broken "the blinding taken off by another number's inverse" "does not check against its own public key, which a fault makes" \
-  '        inverse = r.inverse_mod_secret(@n)' '        inverse = (r + BigInt.new(2)).inverse_mod_secret(@n)'
+  '        inverse = r.inverse_mod_secret(n)' '        inverse = (r + BigInt.new(2)).inverse_mod_secret(n)'
 prove_broken "the CRT's recombination by p's inverse" "does not check against its own public key, which a fault makes" \
   '    h = (@qi * (s1 - s2)) % @p' '    h = (s1 - s2) % @p'
 prove_broken "PKCS #1 v1.5 signed with a block type of 2" "PKCS #1 v1.5 over SHA256 as cryptography signs it" \

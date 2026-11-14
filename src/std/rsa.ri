@@ -353,8 +353,6 @@ end
 @[OnTape]
 pub struct RsaPrivateKey
   getter public_key : RsaPublicKey
-  @n : BigInt
-  @e : BigInt
   @p : BigInt
   @q : BigInt
   @dp : BigInt
@@ -399,8 +397,14 @@ pub struct RsaPrivateKey
   end
 
   def initialize(@public_key : RsaPublicKey, @p : BigInt, @q : BigInt, @dp : BigInt, @dq : BigInt, @qi : BigInt, @prf : Array(UInt8))
-    @n = @public_key.modulus
-    @e = @public_key.exponent
+  end
+
+  private def n : BigInt
+    @public_key.modulus
+  end
+
+  private def e : BigInt
+    @public_key.exponent
   end
 
   def copy_into_identity(store : S) : RsaPrivateKey forall S
@@ -518,8 +522,6 @@ pub struct RsaPrivateKey
     value = RsaPrivateKey.new(numbers[0], numbers[1], numbers[2], numbers[3],
       numbers[4], numbers[5], numbers[6], numbers[7]).or_panic
     @public_key = value.public_key
-    @n = value.@n
-    @e = value.@e
     @p = value.@p
     @q = value.@q
     @dp = value.@dp
@@ -580,18 +582,18 @@ pub struct RsaPrivateKey
   # which is odd.
   private def rsasp1(em : Array::View(UInt8)) : Array(UInt8)
     m = BigInt.from_bytes(em)
-    r_limbs = Array(UInt64).new(@n.limbs.size + 2)
-    inverse_limbs = Array(UInt64).new(@n.limbs.size + 2)
+    r_limbs = Array(UInt64).new(n.limbs.size + 2)
+    inverse_limbs = Array(UInt64).new(n.limbs.size + 2)
     blinding(em, r_limbs, inverse_limbs)
     r = BigInt.new(1, r_limbs)
     r_inverse = BigInt.new(1, inverse_limbs)
-    c = (m * r.pow_mod(@e, @n)) % @n
+    c = (m * r.pow_mod(e, n)) % n
     s1 = (c % @p).pow_mod_secret(@dp, @p)
     s2 = (c % @q).pow_mod_secret(@dq, @q)
     h = (@qi * (s1 - s2)) % @p
     h = h + @p if h.negative?
-    s = ((s2 + h * @q) * r_inverse) % @n
-    raise "rsa: a signature that does not check against its own public key, which a fault makes" unless s.pow_mod(@e, @n) == m
+    s = ((s2 + h * @q) * r_inverse) % n
+    raise "rsa: a signature that does not check against its own public key, which a fault makes" unless s.pow_mod(e, n) == m
     s.to_bytes(size) || raise "rsa: a signature wider than its modulus"
   end
 
@@ -608,9 +610,9 @@ pub struct RsaPrivateKey
         wide.concat(HMAC.digest(SHA256, @prf, [1_u8, counter, block] + em))
         block = block + 1_u8
       end
-      r = BigInt.from_bytes(wide) % @n
+      r = BigInt.from_bytes(wide) % n
       if r > BigInt.new(1)
-        inverse = r.inverse_mod_secret(@n)
+        inverse = r.inverse_mod_secret(n)
         if inverse
           r.limbs.each { |limb| r_limbs << limb }
           inverse.limbs.each { |limb| inverse_limbs << limb }

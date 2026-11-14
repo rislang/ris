@@ -644,7 +644,7 @@ class RisHttpOtherFactory
   end
 end
 
-import std/http::{HTTP, HTTPClient, Response, Incoming, Outgoing, Server, HTTPError, Multipart, MultipartBuilder, Part, TlsStream}
+import std/http::{HTTP, HTTPClient, Response, Incoming, Outgoing, Server, HTTPError, Multipart, MultipartBuilder, Part, TlsStream, Upgraded}
 import std/socket::{IyiSocket, SocketError}
 import std/uri::{Params}
 import std/compress::{Gzip, Zlib, Deflate}
@@ -2037,7 +2037,9 @@ group do |g|
     assert_true closed_on?(quick), "a kept connection idle past the limit is closed"
     quick.close
     # A connection handed over waits as its protocol likes.
-    up = HTTP.upgrade("http://127.0.0.1:#{slow_port}/chat", "echo").or_panic
+    up = Upgraded.new
+    up_problem = up.connect("http://127.0.0.1:#{slow_port}/chat", "echo")
+    raise up_problem.inspect if up_problem
     sleep(1300)
     up.socket.write("late").or_panic
     heard = up.leftover
@@ -2117,7 +2119,9 @@ group do |g|
     switched = read_to_close(raw)
     raw.close
     assert_true switched.starts_with?("HTTP/1.1 101 Switching Protocols\r\n") && switched.includes?("Connection: Upgrade\r\n") && !switched.includes?("keep-alive") && switched.ends_with?("\r\n\r\necho:ping"), "the 101, and the bytes sent after the request handed over: #{switched.inspect}"
-    up = HTTP.upgrade(up_base + "/chat", "echo").or_panic
+    up = Upgraded.new
+    up_problem = up.connect(up_base + "/chat", "echo")
+    raise up_problem.inspect if up_problem
     up.socket.write("pong").or_panic
     heard = up.leftover
     while heard.bytesize < 9
@@ -2127,11 +2131,14 @@ group do |g|
     end
     up.socket.close
     assert_true up.response.status == 101 && heard == "echo:pong", "HTTP.upgrade hands the socket over: #{heard.inspect}"
-    refused = HTTP.upgrade(up_base + "/chat", "other")
-    assert_true refused.is_a?(HTTPError) && refused.message == "HTTP: the server answered 426 Upgrade Required to an upgrade to other, not 101 Switching Protocols", "an answer that is not 101 is an HTTPError"
+    refused = Upgraded.new
+    refused_problem = refused.connect(up_base + "/chat", "other")
+    assert_true (r = refused_problem).is_a?(HTTPError) && r.message == "HTTP: the server answered 426 Upgrade Required to an upgrade to other, not 101 Switching Protocols", "an answer that is not 101 is an HTTPError"
     # A connection handed over and still open when the listener closes is
     # closed with it: `serve` waited for its client, three seconds here.
-    stays = HTTP.upgrade(up_base + "/chat", "echo").or_panic
+    stays = Upgraded.new
+    stays_problem = stays.connect(up_base + "/chat", "echo")
+    raise stays_problem.inspect if stays_problem
     raise "timing queue full" unless RisBoard.post(RisHttpUpStopped.new(__iyi_monotonic_ns))
     HTTP.get(up_base + "/stop").or_panic
     sleep(3000)
@@ -2206,7 +2213,7 @@ puts "  NO_PROXY and the choice of variable as Go's httpproxy has them: #{go_use
 ["https://p.test:3128", "socks5://127.0.0.1:1080"].each do |written|
   refused = HTTP.request("GET", "http://example.com/", proxy: written)
   scheme = written[0, written.index(':') || 0]
-  assert_true refused.is_a?(HTTPError) && refused.message == "HTTP: a proxy over #{scheme}://, which this client does not speak; only http:// proxies", "a proxy over #{scheme}:// is refused: #{refused.inspect}"
+  assert_true (r = refused_problem).is_a?(HTTPError) && r.message == "HTTP: a proxy over #{scheme}://, which this client does not speak; only http:// proxies", "a proxy over #{scheme}:// is refused: #{refused.inspect}"
 end
 
 # A proxy on a raw socket that answers what it read: an http:// request in
@@ -2275,11 +2282,13 @@ assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} answered 407 Proxy Authen
 refused = HTTP.request("GET", "https://[::1]:8443/x", {"Proxy-Authorization" => "Basic Z2F0ZTpzM2NyZXQ="}, proxy: "http://127.0.0.1:#{proxy_port}")
 assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} answered 403 Forbidden to CONNECT [::1]:8443", refused.is_a?(HTTPError) ? refused.message : refused.inspect, "a CONNECT to an IPv6 origin with the caller's credential, refused 403"
 refused = HTTP.request("GET", "https://secure.test/x", proxy: "127.0.0.1:#{proxy_port}")
-assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} sent 4 bytes after its 200 to CONNECT secure.test:443, before TLS began", refused.is_a?(HTTPError) ? refused.message : refused.inspect, "bytes after a CONNECT's 200 are refused"
+assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} sent 4 bytes after its 200 to CONNECT secure.test:443, before TLS began", (r = refused_problem).is_a?(HTTPError) ? r.message : r.inspect, "bytes after a CONNECT's 200 are refused"
 # An upgrade to a ws:// origin through the proxy: a CONNECT with the URL's
 # credential, then the handshake in origin form inside, with no
 # credential in it.
-inside = HTTP.upgrade("http://up.test/chat", "echo", {"Proxy-Authorization" => "Basic other"}, timeout_ms: 10000, proxy: proxy_url).or_panic
+inside = Upgraded.new
+inside_problem = inside.connect("http://up.test/chat", "echo", {"Proxy-Authorization" => "Basic other"}, timeout_ms: 10000, proxy: proxy_url)
+raise inside_problem.inspect if inside_problem
 heard = inside.leftover
 while !heard.ends_with?("\r\n\r\n")
   got = inside.socket.read(4096).or_panic
@@ -2289,8 +2298,9 @@ end
 inside.socket.close
 assert_true heard.starts_with?("GET /chat HTTP/1.1\r\nHost: up.test\r\n") && heard.includes?("\r\nUpgrade: echo\r\n") && heard.includes?("\r\nConnection: Upgrade\r\n"), "an upgrade to http:// through a proxy goes in origin form inside its CONNECT tunnel: #{heard.inspect}"
 assert_true !heard.includes?("Proxy-Authorization"), "and no credential inside the tunnel: #{heard.inspect}"
-refused = HTTP.upgrade("http://up.test/chat", "echo", timeout_ms: 10000, proxy: "127.0.0.1:#{proxy_port}")
-assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} sent 4 bytes after its 200 to CONNECT up.test:80, before the request began", refused.is_a?(HTTPError) ? refused.message : refused.inspect, "bytes after an upgrade's CONNECT 200 are refused"
+refused = Upgraded.new
+refused_problem = refused.connect("http://up.test/chat", "echo", timeout_ms: 10000, proxy: "127.0.0.1:#{proxy_port}")
+assert_str "HTTP: the proxy at 127.0.0.1:#{proxy_port} sent 4 bytes after its 200 to CONNECT up.test:80, before the request began", (r = refused_problem).is_a?(HTTPError) ? r.message : r.inspect, "bytes after an upgrade's CONNECT 200 are refused"
 proxy_server.join
 proxy_l.close
 puts "  an absolute-form request with the URL's credential, two origins on one kept proxy connection, CONNECT refused 407 and 403, bytes after a 200 refused, an upgrade to http:// through a tunnel"

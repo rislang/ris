@@ -36,7 +36,7 @@
 #                       Bytes are echoed as "echo:..."; a request ending
 #                       in a blank line is answered `HTTP/1.0 200 ok` and
 #                       what was agreed, then close_notify;
-#   config CHAIN KEY    TlsServerConfig.from_pem's answer.
+#   config CHAIN KEY    the identity read.
 
 import std/tls::{TlsClient, TlsConfig, TlsEarlyData, TlsEchConfig, TlsEchKey, TlsError, TlsHeldTicket, TlsIdentity, TlsIdentitySource, TlsKeySchedule, TlsMadeUnder, TlsRecordCipher, TlsReplayGuard, TlsServer, TlsServerConfig, TlsSession, TlsTicket, TlsTicketKeys, TlsVersion}
 import std/x509::{RisCertificateStore, Certificate}
@@ -188,12 +188,9 @@ TICKET_SCENARIOS = [
   {"ticket-bad", 0, "a NewSessionTicket cut short (decode_error)"},
 ]
 
-# A connection to the scripted server for *name*, through *session*, or
-# why there is none.
-def scripted(dir : String, name : String, config : TlsConfig, session : TlsSession, early : String? = nil) : TlsClient | TlsError
-  socket = IyiSocket.connect("127.0.0.1", File.read(dir + "/port").to_i)
-  return TlsError.new("no connection to the scripted server") unless socket.is_a?(IyiSocket)
-  TlsClient.over(socket, name + ".tls.test", config, 3000, session, early)
+# A socket to the scripted server in DIR.
+def scripted(dir : String) : IyiSocket
+  IyiSocket.connect("127.0.0.1", File.read(dir + "/port").to_i).as(IyiSocket)
 end
 
 # Early data to the scripted server: the scenario, what the second
@@ -383,7 +380,8 @@ impl TlsIdentitySource for FileSource
 end
 
 def sourced_identity(dir : String) : TlsIdentity
-  own = TlsIdentity.from_pem(File.read(dir + "/chain.pem"), File.read(dir + "/key.pem")).or_panic
+  own = TlsIdentity.new(File.read(dir + "/chain.pem"), File.read(dir + "/key.pem"))
+  raise own.error.to_s if own.error
   if File.file?(dir + "/staple.der")
     held = File.read(dir + "/staple.der")
     own.staple(Array(UInt8).new(held.bytesize) { |i| held[i] })
@@ -394,8 +392,14 @@ end
 # The server ECH is held to here: inner.test's identity, public.test's
 # beside it unless *public* is false, ALPN h2 and http/1.1, and *keys*.
 def ech_server(keys : Array(TlsEchKey), public : Bool = true) : TlsServerConfig
-  config = TlsServerConfig.from_pem(ECH_INNER_CERT_PEM + ECH_ROOT_PEM, ECH_INNER_KEY_PEM).or_panic
-  config.add_identity(TlsIdentity.from_pem(ECH_PUBLIC_CERT_PEM + ECH_ROOT_PEM, ECH_PUBLIC_KEY_PEM).or_panic) if public
+  config_identity = TlsIdentity.new(ECH_INNER_CERT_PEM + ECH_ROOT_PEM, ECH_INNER_KEY_PEM)
+  raise config_identity.error.to_s if config_identity.error
+  config = TlsServerConfig.new(config_identity)
+  if public
+    held_identity = TlsIdentity.new(ECH_PUBLIC_CERT_PEM + ECH_ROOT_PEM, ECH_PUBLIC_KEY_PEM)
+    raise held_identity.error.to_s if held_identity.error
+    config.add_identity(held_identity)
+  end
   config.alpn = ["h2", "http/1.1"]
   config.ech_keys = keys
   config
@@ -428,9 +432,11 @@ def ech_pair(server : TlsServerConfig, client : TlsConfig, host : String = "inne
   group do |g|
     g.spawn do
       socket = listener.accept.as(IyiSocket)
-      conn = TlsServer.over(socket, server, 5000)
-      if conn.is_a?(TlsError)
-        served = "refused: #{conn.message}"
+      listener.close unless on
+      conn = TlsServer.new(socket, server)
+      conn_error = conn.accept(5000)
+      if conn_error
+        served = "refused: #{conn_error.message}"
       else
         came = conn.read_early
         got = conn.read
@@ -442,10 +448,11 @@ def ech_pair(server : TlsServerConfig, client : TlsConfig, host : String = "inne
       0
     end
     socket = IyiSocket.connect("127.0.0.1", port).as(IyiSocket)
-    conn = TlsClient.over(socket, host, client, 5000, session, early)
-    if conn.is_a?(TlsError)
-      said = "refused: #{conn.message}"
-      retry = conn.retry_configs
+    conn = TlsClient.new(socket, host, client, session)
+    conn_error = conn.over(5000, early)
+    if conn_error
+      said = "refused: #{conn_error.message}"
+      retry = ((configs = conn_error.retry_configs) ? configs.bytes : nil)
     else
       conn.write("hello")
       said = "ech=#{conn.ech_accepted?} alpn=#{conn.alpn_protocol} group=#{conn.named_group} resumed=#{conn.resumed?} early=#{conn.early_data} got=#{drain(conn)}"
@@ -453,7 +460,6 @@ def ech_pair(server : TlsServerConfig, client : TlsConfig, host : String = "inne
     end
     0
   end
-  listener.close unless on
   {said, served, retry}
 end
 
@@ -484,15 +490,16 @@ def captured(client : TlsConfig, host : String, session : TlsSession? = nil, ear
   group do |g|
     g.spawn do
       socket = listener.accept.as(IyiSocket)
+      listener.close unless on
       socket.read_timeout_ms = 5000
       hello = record_of(socket)[1]
       socket.close
       0
     end
-    TlsClient.over(IyiSocket.connect("127.0.0.1", port).as(IyiSocket), host, client, 5000, session, early)
+    conn = TlsClient.new(IyiSocket.connect("127.0.0.1", port).as(IyiSocket), host, client, session)
+    conn.over(5000, early)
     0
   end
-  listener.close unless on
   hello
 end
 
@@ -546,8 +553,10 @@ end
 
 # A sealing context for *key*'s config: section 6.1's SetupBaseS, its info
 # "tls ech", a zero byte and the ECHConfig.
-def crafted_sender(key : TlsEchKey) : HpkeSender
-  CRAFTED_SUITE.sender(key.private_key.public_key, bytes_of("tls ech") + [0_u8] + key.config.raw, Random::Secure.random_bytes(32)).or_panic
+# *sender* set up so; the caller declares it (`HpkeSender.new`).
+def crafted_sender(sender : HpkeSender, key : TlsEchKey) : Nil
+  problem = sender.setup(CRAFTED_SUITE, key.private_key.public_key, bytes_of("tls ech") + [0_u8] + key.config.raw, Random::Secure.random_bytes(32))
+  raise problem.message if problem
 end
 
 # A ClientHelloOuter, its session id empty: *before*, then an
@@ -573,8 +582,9 @@ def crafted(server : TlsServerConfig, hellos : Array(Array(UInt8))) : {Array({In
   answers = [] of {Int32, Array(UInt8)}
   group do |g|
     g.spawn do
-      conn = TlsServer.over(listener.accept.as(IyiSocket), server, 5000)
-      said = conn.is_a?(TlsError) ? conn.message : "held"
+      conn = TlsServer.new(listener.accept.as(IyiSocket), server)
+      conn_error = conn.accept(5000)
+      said = conn_error ? conn_error.message : "held"
       0
     end
     socket = IyiSocket.connect("127.0.0.1", port).as(IyiSocket)
@@ -618,7 +628,8 @@ end
 # *session* when given; what answered it, and what the server said.
 def crafted_one(server : TlsServerConfig, key : TlsEchKey, before : Array(UInt8), extensions : Array(UInt8), padding : Array(UInt8)? = nil,
                 session : Array(UInt8) = [] of UInt8) : {String, String}
-  sender = crafted_sender(key)
+  sender = HpkeSender.new
+  crafted_sender(sender, key)
   encoded = encoded_inner(Random::Secure.random_bytes(32), extensions, padding, session)
   answers, said = crafted(server, [sealed_outer(sender, key.config.config_id, sender.enc, Random::Secure.random_bytes(32), before, encoded)])
   {answered(answers[0]), said}
@@ -635,7 +646,8 @@ end
 # server said.
 def retried(server : TlsServerConfig, key : TlsEchKey, variant : String, first_shared : Array(UInt8),
             second_shared : Array(UInt8)) : {String, String, Bool, Bool, String}
-  sender = crafted_sender(key)
+  sender = HpkeSender.new
+  crafted_sender(sender, key)
   random = Random::Secure.random_bytes(32)
   outer_random = Random::Secure.random_bytes(32)
   id = key.config.config_id
@@ -644,11 +656,13 @@ def retried(server : TlsServerConfig, key : TlsEchKey, variant : String, first_s
   encoded = encoded_inner(random, name + outer_refs([10, 13, 43, 51]) + marker)
   first = sealed_outer(sender, id, sender.enc, outer_random, server_name_ext("public.test") + first_shared, encoded)
   before = server_name_ext("public.test") + second_shared
+  fresh_sender = HpkeSender.new
+  crafted_sender(fresh_sender, key)
   second = case variant
            when "no ech"  then message(1, hello_body(outer_random, [] of UInt8, before))
            when "enc"     then sealed_outer(sender, id, sender.enc, outer_random, before, encoded)
            when "config"  then sealed_outer(sender, id ^ 1, [] of UInt8, outer_random, before, encoded)
-           when "context" then sealed_outer(crafted_sender(key), id, [] of UInt8, outer_random, before, encoded)
+           when "context" then sealed_outer(fresh_sender, id, [] of UInt8, outer_random, before, encoded)
            else                sealed_outer(sender, id, [] of UInt8, outer_random, before, encoded)
            end
   answers, said = crafted(server, [first, second])
@@ -732,6 +746,7 @@ def faked(client : TlsConfig, session : TlsSession?, kind : String, key : TlsEch
   group do |g|
     g.spawn do
       socket = listener.accept.as(IyiSocket)
+      listener.close unless on
       socket.read_timeout_ms = 5000
       hello = record_of(socket)[1]
       versions = ext(43, [3_u8, 4_u8])
@@ -757,11 +772,11 @@ def faked(client : TlsConfig, session : TlsSession?, kind : String, key : TlsEch
       socket.close
       0
     end
-    conn = TlsClient.over(IyiSocket.connect("127.0.0.1", port).as(IyiSocket), "inner.test", client, 5000, session)
-    said = conn.is_a?(TlsError) ? conn.message : "held"
+    conn = TlsClient.new(IyiSocket.connect("127.0.0.1", port).as(IyiSocket), "inner.test", client, session)
+    conn_error = conn.over(5000)
+    said = conn_error ? conn_error.message : "held"
     0
   end
-  listener.close unless on
   said
 end
 
@@ -774,7 +789,9 @@ if args.size > 0 && args[0] == "scenarios"
   config.roots = pem_certs(pem_store_2, File.read(args[1] + "/roots.pem"))
   config.alpn = ["h2", "http/1.1"]
   # Presented where a request names ed25519, and only there.
-  config.identity = TlsIdentity.from_pem(File.read(args[1] + "/client.pem"), File.read(args[1] + "/client.key")).or_panic
+  held_identity = TlsIdentity.new(File.read(args[1] + "/client.pem"), File.read(args[1] + "/client.key"))
+  raise held_identity.error.to_s if held_identity.error
+  config.identity = held_identity
   # The same, told to speak TLS 1.2: for the tls12-* scenarios alone, so
   # every other one meets the default.
   config12 = TlsConfig.new
@@ -795,10 +812,11 @@ if args.size > 0 && args[0] == "scenarios"
     check socket.is_a?(IyiSocket), "#{s[0]}: no connection to the scripted server"
     next unless socket.is_a?(IyiSocket)
     # Three seconds for a handshake: the slow server is cut off within it.
-    conn = TlsClient.over(socket, s[0] + ".tls.test", s[0].starts_with?("tls12-") ? config12 : config, 3000)
+    conn = TlsClient.new(socket, s[0] + ".tls.test", s[0].starts_with?("tls12-") ? config12 : config)
+    conn_error = conn.over(3000)
     if s[1]
-      check !conn.is_a?(TlsError), "#{s[0]}: refused: #{conn.is_a?(TlsError) ? conn.message : ""}"
-      next unless conn.is_a?(TlsClient)
+      check !conn_error, "#{s[0]}: refused: #{conn_error ? conn_error.message : ""}"
+      next unless !conn_error
       want = GROUPS[s[0]]? || "X25519"
       check conn.named_group == want, "#{s[0]}: the group agreed is #{conn.named_group.inspect}, not #{want}"
       if s[0] == "keyupdate"
@@ -850,9 +868,9 @@ if args.size > 0 && args[0] == "scenarios"
       end
       held = held + 1
     else
-      check conn.is_a?(TlsError), "#{s[0]}: expected a refusal, got a connection"
-      if conn.is_a?(TlsError)
-        check conn.message.includes?(s[2]), "#{s[0]}: refused with #{conn.message.inspect}, not #{s[2].inspect}"
+      check !conn_error.nil?, "#{s[0]}: expected a refusal, got a connection"
+      if conn_error
+        check conn_error.message.includes?(s[2]), "#{s[0]}: refused with #{conn_error.message.inspect}, not #{s[2].inspect}"
       end
       refused = refused + 1
     end
@@ -862,16 +880,18 @@ if args.size > 0 && args[0] == "scenarios"
   resumed = 0
   RESUMPTIONS.each do |r|
     session = TlsSession.new
-    first = scripted(args[1], r[0], config, session)
-    check first.is_a?(TlsClient), "#{r[0]}: the first connection: #{first.is_a?(TlsError) ? first.message : ""}"
-    next unless first.is_a?(TlsClient)
+    first = TlsClient.new(scripted(args[1]), r[0] + ".tls.test", config, session)
+    first_error = first.over(3000)
+    check !first_error, "#{r[0]}: the first connection: #{first_error ? first_error.message : ""}"
+    next unless !first_error
     first.write("hello")
     got = drain(first)
     check got == "echo:hello" && session.size == 1 && !first.resumed?, "#{r[0]}: the first connection read #{got.inspect}, #{session.size} tickets held"
-    second = scripted(args[1], r[0], config, session)
+    second = TlsClient.new(scripted(args[1]), r[0] + ".tls.test", config, session)
+    second_error = second.over(3000)
     if r[1] == "resumed" || r[1] == "full"
-      check second.is_a?(TlsClient), "#{r[0]}: refused: #{second.is_a?(TlsError) ? second.message : ""}"
-      next unless second.is_a?(TlsClient)
+      check !second_error, "#{r[0]}: refused: #{second_error ? second_error.message : ""}"
+      next unless !second_error
       check second.resumed? == (r[1] == "resumed"), "#{r[0]}: resumed? is #{second.resumed?}"
       # The server's certificate goes with the session, checked as the first
       # connection checked it.
@@ -880,15 +900,16 @@ if args.size > 0 && args[0] == "scenarios"
       got = drain(second)
       check got == "echo:again", "#{r[0]}: the second echo came back as #{got.inspect}"
     else
-      check second.is_a?(TlsError) && second.message.includes?(r[1]), "#{r[0]}: #{second.is_a?(TlsError) ? "refused with " + second.message.inspect : "held"}, not #{r[1].inspect}"
+      check !second_error.nil? && second_error.message.includes?(r[1]), "#{r[0]}: #{second_error ? "refused with " + second_error.message.inspect : "held"}, not #{r[1].inspect}"
     end
     resumed = resumed + 1
   end
   TICKET_SCENARIOS.each do |t|
     session = TlsSession.new
-    conn = scripted(args[1], t[0], config, session)
-    check conn.is_a?(TlsClient), "#{t[0]}: refused: #{conn.is_a?(TlsError) ? conn.message : ""}"
-    next unless conn.is_a?(TlsClient)
+    conn = TlsClient.new(scripted(args[1]), t[0] + ".tls.test", config, session)
+    conn_error = conn.over(3000)
+    check !conn_error, "#{t[0]}: refused: #{conn_error ? conn_error.message : ""}"
+    next unless !conn_error
     conn.write("hello")
     got = drain(conn)
     check (t[2].empty? ? got == "echo:hello" : got.includes?(t[2])), "#{t[0]}: read #{got[0, 120].inspect}"
@@ -902,18 +923,20 @@ if args.size > 0 && args[0] == "scenarios"
   early_held = 0
   EARLY_SCENARIOS.each do |e|
     session = TlsSession.new
-    first = scripted(args[1], e[0], config, session)
-    check first.is_a?(TlsClient), "#{e[0]}: the first connection: #{first.is_a?(TlsError) ? first.message : ""}"
-    next unless first.is_a?(TlsClient)
+    first = TlsClient.new(scripted(args[1]), e[0] + ".tls.test", config, session)
+    first_error = first.over(3000)
+    check !first_error, "#{e[0]}: the first connection: #{first_error ? first_error.message : ""}"
+    next unless !first_error
     first.write("hello")
     got = drain(first)
     check got == "echo:hello" && session.size == 1, "#{e[0]}: the first connection read #{got.inspect}, #{session.size} tickets held"
-    second = scripted(args[1], e[0], config, session, "hello")
+    second = TlsClient.new(scripted(args[1]), e[0] + ".tls.test", config, session)
+    second_error = second.over(3000, "hello")
     if e[1].starts_with?("refused: ")
-      check second.is_a?(TlsError) && second.message.includes?(e[1][9, e[1].size - 9]), "#{e[0]}: #{second.is_a?(TlsError) ? "refused with " + second.message.inspect : "held"}, not #{e[1].inspect}"
+      check !second_error.nil? && second_error.message.includes?(e[1][9, e[1].size - 9]), "#{e[0]}: #{second_error ? "refused with " + second_error.message.inspect : "held"}, not #{e[1].inspect}"
     else
-      check second.is_a?(TlsClient), "#{e[0]}: refused: #{second.is_a?(TlsError) ? second.message : ""}"
-      next unless second.is_a?(TlsClient)
+      check !second_error, "#{e[0]}: refused: #{second_error ? second_error.message : ""}"
+      next unless !second_error
       check second.early_data.to_s == e[1], "#{e[0]}: the early data came to #{second.early_data}, not #{e[1]}"
       second.write("again")
       got = drain(second)
@@ -930,7 +953,11 @@ if args.size > 0 && args[0] == "get"
   pem_store_3 = RisCertificateStore.new
   config.roots = pem_certs(pem_store_3, File.read(args[2]))
   config.alpn = [args[4]] if args.size > 4 && args[4] != "-"
-  config.identity = TlsIdentity.from_pem(File.read(args[5]), File.read(args[6])).or_panic if args.size > 6
+  if args.size > 6
+    held_identity = TlsIdentity.new(File.read(args[5]), File.read(args[6]))
+    raise held_identity.error.to_s if held_identity.error
+    config.identity = held_identity
+  end
   config.min_version = TlsVersion::TLS12 if ENV["TLS_MIN_VERSION"]? == "1.2"
   config.post_quantum = false if ENV["TLS_POST_QUANTUM"]? == "0"
   config.require_staple = true if ENV["TLS_REQUIRE_STAPLE"]? == "1"
@@ -939,9 +966,10 @@ if args.size > 0 && args[0] == "get"
     puts "no connection"
     exit 0
   end
-  conn = TlsClient.over(socket, args[3], config)
-  if conn.is_a?(TlsError)
-    puts "refused: #{conn.message}"
+  conn = TlsClient.new(socket, args[3], config)
+  conn_error = conn.over
+  if conn_error
+    puts "refused: #{conn_error.message}"
     exit 0
   end
   conn.write("GET / HTTP/1.0\r\n\r\n")
@@ -969,7 +997,9 @@ if args.size > 0 && args[0] == "renegotiate"
     puts "no connection"
     exit 0
   end
-  conn = TlsClient.over(socket, args[3], config).or_panic
+  conn = TlsClient.new(socket, args[3], config)
+  conn_error = conn.over
+  raise conn_error.message if conn_error
   conn.write("first\n")
   conn.read_timeout_ms = 3000
   first = conn.read
@@ -1003,9 +1033,10 @@ if args.size > 0 && args[0] == "resume"
       puts "#{i + 1}: no connection"
       next
     end
-    conn = TlsClient.over(socket, args[3], config, session: session, early_data: early)
-    if conn.is_a?(TlsError)
-      puts "#{i + 1}: refused: #{conn.message}"
+    conn = TlsClient.new(socket, args[3], config, session)
+    conn_error = conn.over(TlsClient::HANDSHAKE_TIMEOUT_MS, early)
+    if conn_error
+      puts "#{i + 1}: refused: #{conn_error.message}"
       next
     end
     if early && !early.starts_with?("GET")
@@ -1027,11 +1058,11 @@ if args.size > 0 && args[0] == "resume"
 end
 
 if args.size > 0 && args[0] == "config"
-  answer = TlsServerConfig.from_pem(File.read(args[1]), File.read(args[2]))
-  if answer.is_a?(TlsError)
-    puts "refused: #{answer.message}"
+  identity = TlsIdentity.new(File.read(args[1]), File.read(args[2]))
+  if error = identity.error
+    puts "refused: #{error.message}"
   else
-    puts "config: #{answer.chain.size} certificates, leaf #{answer.leaf.subject_name}"
+    puts "config: #{identity.chain.size} certificates, leaf #{identity.leaf.subject_name}"
   end
   exit 0
 end
@@ -1059,9 +1090,10 @@ def ech_serve(dir : String, count : Int32, group : String?) : Nil
       next
     end
     socket.read_timeout_ms = 5000
-    conn = TlsServer.over(socket, server, 5000)
-    if conn.is_a?(TlsError)
-      puts "refused: #{conn.message}"
+    conn = TlsServer.new(socket, server)
+    conn_error = conn.accept(5000)
+    if conn_error
+      puts "refused: #{conn_error.message}"
     else
       got = conn.read
       puts "held ech=#{conn.ech_accepted?} name=#{conn.server_name} outer=#{conn.outer_server_name} group=#{conn.named_group} alpn=#{conn.alpn_protocol} read=#{got.is_a?(TlsError) ? got.message : got}"
@@ -1087,8 +1119,9 @@ def ech_get(port : Int32, roots : Array(Certificate), configs : Array(UInt8)) : 
   config.ech_configs = configs
   socket = IyiSocket.connect("127.0.0.1", port)
   return {"no connection", nil} unless socket.is_a?(IyiSocket)
-  conn = TlsClient.over(socket, "inner.test", config, 5000)
-  return {"refused: #{conn.message}", conn.retry_configs} if conn.is_a?(TlsError)
+  conn = TlsClient.new(socket, "inner.test", config)
+  conn_error = conn.over(5000)
+  return {"refused: #{conn_error.message}", ((configs = conn_error.retry_configs) ? configs.bytes : nil)} if conn_error
   conn.write("hello")
   said = "ech=#{conn.ech_accepted?} group=#{conn.named_group} alpn=#{conn.alpn_protocol} got=#{drain(conn)}"
   conn.close
@@ -1145,8 +1178,9 @@ def ech_speed(count : Int32) : String
       server.tickets = 0
       raise "ech configs queue full" unless RisBoard.post(RisEchConfigs.new(TlsEchKey.config_list([key])))
       (count * 3).times do
-        served = TlsServer.over(listener.accept.as(IyiSocket), server, 5000)
-        served.abort unless served.is_a?(TlsError)
+        served = TlsServer.new(listener.accept.as(IyiSocket), server)
+        served_error = served.accept(5000)
+        served.abort unless served_error
       end
       0
     end
@@ -1157,9 +1191,10 @@ def ech_speed(count : Int32) : String
     count.times do
       3.times do |k|
         started = __iyi_monotonic_ns
-        conn = TlsClient.over(IyiSocket.connect("127.0.0.1", port).as(IyiSocket), "inner.test", clients[k], 5000)
+        conn = TlsClient.new(IyiSocket.connect("127.0.0.1", port).as(IyiSocket), "inner.test", clients[k])
+        conn_error = conn.over(5000)
         took = __iyi_monotonic_ns - started
-        raise "no handshake: #{conn.message}" if conn.is_a?(TlsError)
+        raise "no handshake: #{conn_error.message}" if conn_error
         raise "ECH not taken" if k == 2 && !conn.ech_accepted?
         samples[k] << took
         conn.abort
@@ -1235,14 +1270,18 @@ def serve_one(conn : TlsServer) : String
 end
 
 if args.size > 0 && args[0] == "serve"
-  config = TlsServerConfig.from_pem(File.read(args[1] + "/chain.pem"), File.read(args[1] + "/key.pem")).or_panic
+  config_identity = TlsIdentity.new(File.read(args[1] + "/chain.pem"), File.read(args[1] + "/key.pem"))
+  raise config_identity.error.to_s if config_identity.error
+  config = TlsServerConfig.new(config_identity)
   config.alpn = ["h2", "http/1.1"]
   config.min_version = TlsVersion::TLS12 if ENV["TLS_MIN_VERSION"]? == "1.2"
   # Early data taken, up to 16 KiB, unless DIR/no-early says not.
   config.max_early_data = 16384 unless File.file?(args[1] + "/no-early")
   # A second identity, for other.test, shown to a client that asks for it.
   if File.file?(args[1] + "/other-chain.pem")
-    config.add_identity(TlsIdentity.from_pem(File.read(args[1] + "/other-chain.pem"), File.read(args[1] + "/other-key.pem")).or_panic)
+    held_identity = TlsIdentity.new(File.read(args[1] + "/other-chain.pem"), File.read(args[1] + "/other-key.pem"))
+    raise held_identity.error.to_s if held_identity.error
+    config.add_identity(held_identity)
   end
   if File.file?(args[1] + "/client-roots.pem")
     pem_store_7 = RisCertificateStore.new
@@ -1255,7 +1294,8 @@ if args.size > 0 && args[0] == "serve"
   # stapled to that identity alone, not to the config's.
   sourced = nil.as(TlsIdentity?)
   if File.file?(args[1] + "/sourced")
-    own = TlsIdentity.from_pem(File.read(args[1] + "/chain.pem"), File.read(args[1] + "/key.pem")).or_panic
+    own = TlsIdentity.new(File.read(args[1] + "/chain.pem"), File.read(args[1] + "/key.pem"))
+    raise own.error.to_s if own.error
     sourced = own
     # Each ask builds the identity from the files, stapled as `own` is
     # below.
@@ -1287,9 +1327,10 @@ if args.size > 0 && args[0] == "serve"
     # disk. The gate now has Python read that library in before any
     # server here times it (test/cli/std_tls_exercise.sh says what was
     # measured).
-    conn = TlsServer.over(socket, config, 5000)
-    if conn.is_a?(TlsError)
-      puts "refused: #{conn.message}"
+    conn = TlsServer.new(socket, config)
+    conn_error = conn.accept(5000)
+    if conn_error
+      puts "refused: #{conn_error.message}"
     else
       puts serve_one(conn)
     end
@@ -1323,7 +1364,8 @@ check schedule.next_secret(b(S_AP)) != b(S_AP), "a KeyUpdate's next secret is an
 puts "  early, handshake and master secrets, both handshake and application traffic secrets, the exporter's, both Finished"
 
 puts "== the trace's records, sealed and opened"
-reader = TlsRecordCipher.new(0x1301, schedule, s_hs)
+reader = TlsRecordCipher.new
+reader.configure(0x1301, schedule, s_hs)
 check reader.key_iv == b(S_HS_IV), "the server's handshake iv"
 record = b(SERVER_FLIGHT_RECORD)
 opened = reader.open(record[0, 5], record[5, record.size - 5])
@@ -1333,11 +1375,15 @@ if opened.is_a?(Tuple(UInt8, Array(UInt8)))
 end
 tampered = record.dup
 tampered[record.size - 1] = tampered[record.size - 1] ^ 1_u8
-check TlsRecordCipher.new(0x1301, schedule, s_hs).open(tampered[0, 5], tampered[5, tampered.size - 5]).is_a?(TlsError), "a record one bit off refused"
-writer = TlsRecordCipher.new(0x1301, schedule, c_hs)
+tamper_reader = TlsRecordCipher.new
+tamper_reader.configure(0x1301, schedule, s_hs)
+check tamper_reader.open(tampered[0, 5], tampered[5, tampered.size - 5]).is_a?(TlsError), "a record one bit off refused"
+writer = TlsRecordCipher.new
+writer.configure(0x1301, schedule, c_hs)
 sealed = writer.seal(22_u8, [20_u8, 0_u8, 0_u8, 32_u8] + b(CLIENT_FINISHED))
 check sealed == b(CLIENT_FINISHED_RECORD), "the client's Finished sealed as the trace's record"
-server_app = TlsRecordCipher.new(0x1301, schedule, b(S_AP))
+server_app = TlsRecordCipher.new
+server_app.configure(0x1301, schedule, b(S_AP))
 ticket = b(TICKET_RECORD)
 opened = server_app.open(ticket[0, 5], ticket[5, ticket.size - 5])
 if opened.is_a?(Tuple(UInt8, Array(UInt8)))
@@ -1352,7 +1398,8 @@ if opened.is_a?(Tuple(UInt8, Array(UInt8)))
 else
   check false, "the server's data opened: #{opened.message}"
 end
-client_app = TlsRecordCipher.new(0x1301, schedule, b(C_AP))
+client_app = TlsRecordCipher.new
+client_app.configure(0x1301, schedule, b(C_AP))
 check client_app.seal(23_u8, b(CLIENT_DATA)) == b(CLIENT_DATA_RECORD), "the client's data sealed as the trace's record"
 puts "  the server's flight and data opened, the client's Finished and data sealed byte for byte"
 
@@ -1383,7 +1430,9 @@ check resumed_flight[resumed_flight.size - 32, 32] == b(PSK_SERVER_FINISHED), "t
 check schedule.derive_secret(psk_master, "c ap traffic", hellos + resumed_flight) == b(PSK_C_AP), "a resumption's client_application_traffic_secret_0"
 check schedule.derive_secret(psk_master, "s ap traffic", hellos + resumed_flight) == b(PSK_S_AP), "a resumption's server_application_traffic_secret_0"
 record = b(RESUMED_FLIGHT_RECORD)
-opened = TlsRecordCipher.new(0x1301, schedule, psk_s_hs).open(record[0, 5], record[5, record.size - 5])
+psk_reader = TlsRecordCipher.new
+psk_reader.configure(0x1301, schedule, psk_s_hs)
+opened = psk_reader.open(record[0, 5], record[5, record.size - 5])
 if opened.is_a?(Tuple(UInt8, Array(UInt8)))
   check opened[0] == 22_u8 && opened[1] == resumed_flight, "the resumed server's flight opened"
 else
@@ -1394,10 +1443,12 @@ puts "  the resumption master secret, the ticket's PSK, its early secret and bin
 puts "== RFC 8448's early data, through the key schedule and the records"
 early_traffic = schedule.early_traffic(psk, resumed_hello)
 check early_traffic == b(EARLY_TRAFFIC), "client_early_traffic_secret, over the ClientHello alone"
-early_writer = TlsRecordCipher.new(0x1301, schedule, early_traffic)
+early_writer = TlsRecordCipher.new
+early_writer.configure(0x1301, schedule, early_traffic)
 check early_writer.seal(23_u8, b("414243444546")) == b(EARLY_DATA_RECORD), "the early data sealed as the trace's record"
 check early_writer.seal(22_u8, [5_u8, 0_u8, 0_u8, 0_u8]) == b(EOED_RECORD), "EndOfEarlyData sealed as the trace's record, second under the early keys"
-early_reader = TlsRecordCipher.new(0x1301, schedule, early_traffic)
+early_reader = TlsRecordCipher.new
+early_reader.configure(0x1301, schedule, early_traffic)
 record = b(EARLY_DATA_RECORD)
 opened = early_reader.open(record[0, 5], record[5, record.size - 5])
 if opened.is_a?(Tuple(UInt8, Array(UInt8)))
@@ -1410,7 +1461,9 @@ psk_c_hs = schedule.derive_secret(psk_handshake, "c hs traffic", hellos)
 client_finished = schedule.finished(psk_c_hs, with_ended)
 check client_finished == b(PSK_CLIENT_FINISHED), "the client's Finished, over EndOfEarlyData too"
 finished_message = [20_u8, 0_u8, 0_u8, 32_u8] + client_finished
-check TlsRecordCipher.new(0x1301, schedule, psk_c_hs).seal(22_u8, finished_message) == b(PSK_CLIENT_FINISHED_RECORD), "the client's Finished sealed as the trace's record"
+psk_writer = TlsRecordCipher.new
+psk_writer.configure(0x1301, schedule, psk_c_hs)
+check psk_writer.seal(22_u8, finished_message) == b(PSK_CLIENT_FINISHED_RECORD), "the client's Finished sealed as the trace's record"
 check schedule.derive_secret(psk_master, "res master", with_ended + finished_message) == b(PSK_RES_MASTER), "the resumed handshake's resumption master secret"
 puts "  the client's early traffic secret, its data and EndOfEarlyData sealed and opened, the Finished after them"
 
@@ -1484,24 +1537,27 @@ check session.take("localhost", 443, TlsConfig.new, 10_i64).nil?, "a ticket is n
 # Each starts set, and is replaced by an equal one - roots and an
 # identity as new objects, which is all `TlsMadeUnder` tells apart.
 binding_root = Certificate.parse(b(BINDING_ROOT)).or_panic
-binding_identity = TlsIdentity.from_der([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED)).or_panic
-[
-  {"roots", ->(c : TlsConfig) { c.roots = [Certificate.parse(b(BINDING_ROOT)).or_panic]; nil }},
-  {"identity", ->(c : TlsConfig) { c.identity = TlsIdentity.from_der([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED)).or_panic; nil }},
-  {"now", ->(c : TlsConfig) { c.now = Time.utc(2030, 1, 1); nil }},
-  {"min_version", ->(c : TlsConfig) { c.min_version = TlsVersion::TLS12; nil }},
-  {"require_staple", ->(c : TlsConfig) { c.require_staple = true; nil }},
-].each do |part|
+binding_identity = TlsIdentity.new([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED))
+raise binding_identity.error.to_s if binding_identity.error
+binding_twin = TlsIdentity.new([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED))
+binding_root_twin = Certificate.parse(b(BINDING_ROOT)).or_panic
+["roots", "identity", "now", "min_version", "require_staple"].each do |name|
   changed = TlsConfig.new
   changed.roots = [binding_root]
   changed.identity = binding_identity
   changed.now = Time.utc(2026, 6, 1)
   bound = TlsSession.new
   bound.keep(held_for(443, TlsMadeUnder.new(changed)))
-  check !bound.take("localhost", 443, changed, 10_i64).nil?, "a ticket is offered under the configuration it came under, #{part[0]} unchanged"
+  check !bound.take("localhost", 443, changed, 10_i64).nil?, "a ticket is offered under the configuration it came under, #{name} unchanged"
   bound.keep(held_for(443, TlsMadeUnder.new(changed)))
-  part[1].call(changed)
-  check bound.take("localhost", 443, changed, 10_i64).nil?, "a ticket is not offered after #{part[0]} is assigned in place"
+  case name
+  when "roots"       then changed.roots = [binding_root_twin]
+  when "identity"    then changed.identity = binding_twin
+  when "now"         then changed.now = Time.utc(2030, 1, 1)
+  when "min_version" then changed.min_version = TlsVersion::TLS12
+  else                    changed.require_staple = true
+  end
+  check bound.take("localhost", 443, changed, 10_i64).nil?, "a ticket is not offered after #{name} is assigned in place"
 end
 # The server's certificate valid at the configuration's `now`: the
 # binding leaf is good until 2045-01-01.
@@ -1588,8 +1644,12 @@ struct RisBindingHeard
 end
 
 def binding_server : Int32
-  served = TlsServerConfig.from_der([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED)).or_panic
-  eager = TlsServerConfig.from_der([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED)).or_panic
+  served_identity = TlsIdentity.new([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED))
+  raise served_identity.error.to_s if served_identity.error
+  served = TlsServerConfig.new(served_identity)
+  eager_identity = TlsIdentity.new([b(BINDING_LEAF), b(BINDING_ROOT)], b(BINDING_SEED))
+  raise eager_identity.error.to_s if eager_identity.error
+  eager = TlsServerConfig.new(eager_identity)
   listeners = [IyiSocket.listen("127.0.0.1", 0), IyiSocket.listen("127.0.0.1", 0)]
   raise "binding ports queue full" unless RisBoard.post(RisBindingPorts.new(listeners[0].local_port, listeners[1].local_port))
   while true
@@ -1608,10 +1668,11 @@ end
 def binding_serve(listener : IyiSocket, served : TlsServerConfig) : String
   accepted = listener.accept
   if accepted.is_a?(IyiSocket)
-    conn = TlsServer.over(accepted, served, 5000)
-    if conn.is_a?(TlsError)
+    conn = TlsServer.new(accepted, served)
+    conn_error = conn.accept(5000)
+    if conn_error
       accepted.close
-      conn.message
+      conn_error.message
     else
       heard = ""
       refused = nil.as(String?)
@@ -1651,10 +1712,11 @@ def binding_round(port : Int32, listener : Int32, host : String, config : TlsCon
   said = begin
     socket = IyiSocket.connect("127.0.0.1", port)
     if socket.is_a?(IyiSocket)
-      conn = TlsClient.over(socket, host, config, 5000, session, early)
-      if conn.is_a?(TlsError)
+      conn = TlsClient.new(socket, host, config, session)
+      conn_error = conn.over(5000, early)
+      if conn_error
         socket.close
-        conn.message
+        conn_error.message
       else
         conn.write("hi")
         drain(conn)
@@ -1752,9 +1814,9 @@ config = read.as(Array(TlsEchConfig))[0]
 check config.config_id == 7 && config.kem_id == 0x20 && config.public_name == "public.test" && config.maximum_name_length == 64 &&
       config.suites == [{1, 1}, {1, 3}] && config.extensions.empty? && config.public_key == key.private_key.public_key.bytes, "an ECHConfig's fields read back as made"
 check list.size == 68 && list[0, 4] == [0_u8, 66_u8, 0xfe_u8, 0x0d_u8], "an ECHConfigList of one X25519 config is 68 bytes, of version 0xfe0d"
-loaded = TlsEchKey.from_bytes(config.raw, key.private_key.bytes)
+loaded = TlsEchKey.from_bytes(own(config.raw), key.private_key.bytes)
 check loaded.is_a?(TlsEchKey) && loaded.config.raw == config.raw, "a key read back from its config and private key"
-check TlsEchKey.from_bytes(config.raw, TlsEchKey.generate("public.test").or_panic.private_key.bytes).is_a?(TlsError), "a private key that is not the config's refused"
+check TlsEchKey.from_bytes(own(config.raw), TlsEchKey.generate("public.test").or_panic.private_key.bytes).is_a?(TlsError), "a private key that is not the config's refused"
 # The last: a config of another version whose length runs past the list.
 [b(""), b("0000"), b("0004fe0d0000"), own(list[0, list.size - 1]), list + [0_u8], b("0005fe0e000500")].each_with_index do |bad, i|
   got = TlsEchConfig.parse_list(bad)
@@ -1874,7 +1936,9 @@ asking = ech_server([key])
 pem_store_8 = RisCertificateStore.new
 asking.client_roots = pem_certs(pem_store_8, ECH_ROOT_PEM)
 mutual = ech_client(list)
-mutual.identity = TlsIdentity.from_pem(ECH_INNER_CERT_PEM + ECH_ROOT_PEM, ECH_INNER_KEY_PEM).or_panic
+held_identity = TlsIdentity.new(ECH_INNER_CERT_PEM + ECH_ROOT_PEM, ECH_INNER_KEY_PEM)
+raise held_identity.error.to_s if held_identity.error
+mutual.identity = held_identity
 said, served, _ = ech_pair(asking, mutual)
 check served.starts_with?("ech=true"), "a certificate asked for, ECH taken: the client's sent: #{served}"
 mutual.ech_configs = stale_list
@@ -1934,14 +1998,16 @@ marker = ext(0xfe0d, [1_u8])
 refs = outer_refs([10, 13, 43, 51])
 crafting = ech_server([key])
 inner_random = Random::Secure.random_bytes(32)
-sender = crafted_sender(key)
+sender = HpkeSender.new
+crafted_sender(sender, key)
 answers, said = crafted(crafting, [sealed_outer(sender, 7, sender.enc, Random::Secure.random_bytes(32), before, encoded_inner(inner_random, inner_name + refs + marker))])
 reply = answers[0][1]
 check answered(answers[0]) == "ServerHello", "a ClientHelloOuter written from the RFC's text is answered: #{answered(answers[0])}, #{said}"
 inner = message(1, hello_body(inner_random, [] of UInt8, inner_name + common + marker))
 check reply[30, 8] == ech_confirmation(inner_random, inner + random_zeroed(reply), false),
   "its ServerHello.random ends in section 7.2's accept_confirmation, over the ClientHelloInner section 5.1 rebuilds"
-sender = crafted_sender(key)
+sender = HpkeSender.new
+crafted_sender(sender, key)
 altered = sealed_outer(sender, 7, sender.enc, Random::Secure.random_bytes(32), before, encoded_inner(inner_random, inner_name + refs + marker))
 altered[10] = altered[10] ^ 1_u8
 answers, said = crafted(crafting, [altered])
@@ -1993,7 +2059,8 @@ check second == "ServerHello" && sh_confirmed, "the second inner, in the same HP
   _, second, _, _, said = retried(crafting, key, variant, first_shared, second_shared)
   check second == alert && said.includes?(phrase), "a second ClientHelloOuter (#{variant}): #{name} (section 7.1.1): #{second}, #{said}"
 end
-stale_sender = crafted_sender(stale)
+stale_sender = HpkeSender.new
+crafted_sender(stale_sender, stale)
 answers, _ = crafted(crafting, [sealed_outer(stale_sender, 7, stale_sender.enc, Random::Secure.random_bytes(32), public_name + first_shared,
   encoded_inner(Random::Secure.random_bytes(32), inner_name + refs + marker))])
 noise = extension_of(answers[0][1], 0xfe0d)

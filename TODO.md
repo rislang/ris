@@ -185,10 +185,44 @@ Unknown must be refused (SPEC 3.6).
   struct) and `fix printed its edit` (split.ri already clean).
 
 * Build each test/cli program, group refusals by message, fix per group.
-  2026-11-14 (third round): 112 of 130 programs pass
-  `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 18 fail (107
-  after the second round, 100 before the first). Names omit std_ and
-  _exercise where present; each failure appears once.
+  2026-11-14 (fourth round): 114 of 130 programs pass
+  `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 16 fail (112
+  after the third round, 107 after the second, 100 before the first).
+  Names omit std_ and _exercise where present; each failure appears once.
+
+  Fourth round (the TLS-owner group): benchmark and websocket build.
+  benchmark: bm and ips answer Nil, Tms and Entry are `@[OnTape]`
+  structs a job writes back by index. websocket: Raw reads into an
+  append-only String::Builder; `handshake` is a macro, so the request
+  and its fields are the caller's. RsaPrivateKey drops its @n and @e
+  copies (the TLS store's copy of an RSA key was refused at
+  tls.ri:4616 while they were fields). AutocertIssuer opens its
+  AcmeClient into @client (`open_client`) instead of returning it; its
+  dead `session.is_a?(AcmeError)` check now reads `session.error`, and
+  an order is copied before the next request reuses the answer it views.
+  websocket's program passes (its 101 no longer carries Connection in
+  the Outgoing: the expectations dropped it); its .sh still fails "runs
+  the same from its artifacts" (`utf8_scan` is exported and does not
+  say what `src` is) and `iyi doc src/std/websocket.ri`. rsa.sh: three
+  stale patch sites (a signature past the modulus, of any length,
+  rsaEncryption's parameters) and its artifacts build (a task captures
+  a Dir), as before this round.
+  Left, with their cause:
+  - tls: from_pem, TlsServer.over, TlsClient.over, TlsRecordCipher and
+    HpkeSuite#sender callers rewritten; left: a `group` task captures a
+    TlsServerConfig parameter (ech_pair, captured, crafted). Only
+    Strings and handed-off sockets cross into a joined task, and
+    copy_to(Program.tape) is no way in either: a checker question.
+  - acme, autocert: an AcmeClient that holds the caller's HTTPClient
+    counts as a live view of its resolver text
+    (`@http.@system.@own_text`), so its next use after a request is
+    refused as a read after a shrink: a checker question. autocert also
+    hits tls.ri:6626 and :7005, `TlsIdentitySource#identity_for`
+    returning an owner (an API question).
+  - http: HTTP.upgrade callers declare an Upgraded; left: 30
+    `server_reads` checks need `Server.parse_request` (see below).
+  - http_https_records: a task captures a UdpSocket; only IyiSocket and
+    pipes are exempt when handed off (checker).
 
   Third round: tar, compress, big, p256 and hpke build. Found on the
   way: `-7 >> 1` was -7 (BigInt's negative right shift dropped its
@@ -226,17 +260,10 @@ Unknown must be refused (SPEC 3.6).
     (ids read back as garbage); `.copy_to(RisCurrentTape.new)` there
     is accepted too and still dangles when called in a block round. A
     checker hole and an owner question: not applied.
-  - benchmark: `Job#report` keeps the block's proc in an Entry made in
-    the def; copy_to refuses procs (Procs outliving their tape).
   - compress: builds and passes; its .sh fails only "runs the same from
     its artifacts": with --use-rimod, Inflater#read is an opaque
     contract and the reader `z` itself counts as a live view at the
     next read (checker question).
-  - websocket: ~40 sites, TLS store (tls.ri:4606) and HttpHead
-    fields; acme: RsaPrivateKey.copy_into_identity is refused at
-    tls.ri:4606; autocert: `AutocertIssuer#client` returns an owner;
-    http: HTTP.upgrade callers; tls: from_pem owners;
-    http_https_records: a proc captures a UdpSocket. Not started.
   Second round: csv builds and its program passes (the header is asked
   after the rows; a tape-bytes drop no longer underflows); its .sh
   oracle and refusal programs still need owner declarations. toml and

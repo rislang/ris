@@ -1406,9 +1406,12 @@ def run_pebble(directory : String, minica : String, challtestsrv : String, folde
   if rsa_pems.empty?
     puts "  no RSA keys given, so RS256 and the rollover from it go unasked"
   else
+    # A client of the branch's own: its pool keeps what these sessions,
+    # which end with the branch, hand it.
+    rsa_http = HTTPClient.new(tls: trust)
     rsa_pem = File.read(rsa_pems[0])
     rsa_key = SigningKey.from_pem(rsa_pem).or_panic
-    rsa = AcmeClient.new(directory, rsa_key, http: http)
+    rsa = AcmeClient.new(directory, rsa_key, http: rsa_http)
     if problem = rsa.error
       raise problem.message
     end
@@ -1417,7 +1420,7 @@ def run_pebble(directory : String, minica : String, challtestsrv : String, folde
     rolled = rsa.roll_key(SigningKey.p256)
     check rolled.nil?, "the RS256 account's key rolled over to P-256 at Pebble: #{rolled}"
     obtain(rsa, "rollover.ri-acme.example", "dns-01", SigningKey.p256, responder, challtestsrv, roots, folder)
-    again = AcmeClient.new(directory, SigningKey.from_pem(File.read(rsa_pems[0])).or_panic, http: http)
+    again = AcmeClient.new(directory, SigningKey.from_pem(rsa_pem).or_panic, http: rsa_http)
     if problem = again.error
       raise problem.message
     end
@@ -1425,6 +1428,7 @@ def run_pebble(directory : String, minica : String, challtestsrv : String, folde
     check gone.is_a?(AcmeError) && gone.problem_type == "urn:ietf:params:acme:error:accountDoesNotExist", "after the rollover the old key finds no account: #{gone}"
     puts "  an RS256 account rolled over to P-256, and its old key refused: #{gone}"
     retries = retries + rsa.bad_nonce_retries + again.bad_nonce_retries
+    rsa_http.close
   end
 
   ed = AcmeClient.new(directory, ed_key, http: http)

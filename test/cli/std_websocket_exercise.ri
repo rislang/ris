@@ -287,7 +287,7 @@ def with_server_end(& : WebSocket -> String) : String
   b = pair_listener_1.accept.or_panic
   pair_listener_1.close
   socket = WebSocket.new(b, "", false)
-  yield socket
+  (yield socket).copy_to(Program.tape)
 end
 
 def bytes(list : Array(Int32)) : String
@@ -298,15 +298,16 @@ end
 
 # The bytes of *text* in hex, a space between them.
 def hex(text : String) : String
-  p = text
-  parts = [] of String
+  digits = "0123456789abcdef"
+  io = ""
   i = 0
   while i < text.bytesize
-    h = p.byte_at(i).to_i32.to_s(16)
-    parts << (h.bytesize == 1 ? "0" + h : h)
+    byte = text.byte_at(i).to_i32
+    io << " " if i > 0
+    io << digits[byte >> 4, 1] << digits[byte & 15, 1]
     i = i + 1
   end
-  parts.join(" ")
+  io
 end
 
 # *n* bytes that are not all the same: byte i is i * 7 + 3, mod 256.
@@ -429,14 +430,17 @@ end
 # are read with, and what hand-made frames are written with.
 class Raw
   getter sock : IyiSocket
-  @buf : String
-  @failure : String
+  # What came, kept whole: a read views it from @at on, and it only grows,
+  # so a frame read earlier still views its bytes.
+  @buf = String::Builder.new(1 << 20)
+  @at = 0
+  # Unmasked payloads, kept the same way.
+  @plain = String::Builder.new(1 << 20)
+  @failure = String::Builder.new(256)
 
   # A peer that should have written and did not fails the check after
   # five seconds rather than hang the exercise.
   def initialize(@sock : IyiSocket)
-    @buf = ""
-    @failure = ""
     @sock.read_timeout_ms = 5000
   end
 
@@ -447,44 +451,33 @@ class Raw
 
   # *n* bytes, or nil when they did not come, and `@failure` says why.
   def read_exact?(n : Int32) : String?
-    if @buf.bytesize < n
-      io = ""
-      io << @buf
-      have = @buf.bytesize
-      failed = ""
-      while have < n
-        chunk = @sock.read(65536)
-        unless chunk.is_a?(String)
-          failed = "#{n} bytes were expected and #{have} came: #{chunk.message}"
-          break
-        end
-        if chunk.bytesize == 0
-          failed = "the connection ended with #{have} of #{n} bytes"
-          break
-        end
-        io << chunk
-        have = have + chunk.bytesize
-      end
-      @buf = io.to_s
-      unless failed.empty?
-        @failure = failed
+    while @buf.bytesize - @at < n
+      have = @buf.bytesize - @at
+      chunk = @sock.read(65536)
+      unless chunk.is_a?(String)
+        @failure << n << " bytes were expected and " << have << " came: " << chunk.message
         return nil
       end
+      if chunk.bytesize == 0
+        @failure << "the connection ended with " << have << " of " << n << " bytes"
+        return nil
+      end
+      @buf << chunk
     end
-    got = @buf[0, n]
-    @buf = @buf[n, @buf.bytesize - n]
-    got
+    at = @at
+    @at = at + n
+    @buf.finish[at, n]
   end
 
   def read_exact(n : Int32) : String
     got = read_exact?(n)
-    raise "ASSERTION FAILED: #{@failure}" unless got
+    raise "ASSERTION FAILED: #{@failure.finish}" unless got
     got
   end
 
   # Whether the other end closed, with nothing left unread.
   def ended? : Bool
-    return false if @buf.bytesize > 0
+    return false if @buf.bytesize > @at
     @sock.read_timeout_ms = 10000
     got = @sock.read(1)
     got.is_a?(String) && got.bytesize == 0
@@ -492,7 +485,7 @@ class Raw
 
   def next_frame : RawFrame
     f = next_frame?
-    raise "ASSERTION FAILED: #{@failure}" unless f
+    raise "ASSERTION FAILED: #{@failure.finish}" unless f
     f
   end
 
@@ -522,16 +515,14 @@ class Raw
     payload = read_exact?(n.to_i32)
     return nil unless payload
     if key.bytesize == 4
-      k = key
-      src = payload
+      from = @plain.bytesize
       size = payload.bytesize
-      payload = String.from_bytes(size) do |p|
-        i = 0
-        while i < size
-          p[i] = src.byte_at(i) ^ k[i & 3]
-          i = i + 1
-        end
+      i = 0
+      while i < size
+        @plain.write_byte(payload.byte_at(i) ^ key.byte_at(i & 3))
+        i = i + 1
       end
+      payload = @plain.finish[from, size]
     end
     RawFrame.new(b0, b1, key, payload)
   end
@@ -610,7 +601,7 @@ def client_fault(wire : String, deflate : PerMessageDeflate? = nil) : String
       b.close
       seen
     end
-    got = said(ws.receive)
+    got = said(ws.receive).copy_to(Program.tape)
     answer = server.value
     answer.is_a?(String) ? answer : "the server task ended with #{answer.inspect}"
   end
@@ -660,32 +651,37 @@ def fake_server(lines : String, after : String = "", accept : String = "right", 
     case got
     in WebSocket
       agreed = got.deflate
-      result = "open #{got.protocol || "-"} " + (agreed ? "deflate(#{terms(agreed)}) " : "") + said(got.receive)
+      result = ("open #{got.protocol || "-"} " + (agreed ? "deflate(#{terms(agreed)}) " : "") + said(got.receive)).copy_to(Program.tape)
       got.close
     in HTTPError
-      result = got.message
+      result = got.message.copy_to(Program.tape)
     in WebSocketError
-      result = got.message
+      result = got.message.copy_to(Program.tape)
     in SocketError
-      result = got.message
+      result = got.message.copy_to(Program.tape)
     in Cancelled
       result = "cancelled"
     end
     head = server.value
-    heads << head if head.is_a?(String)
+    heads << head.copy_to(Program.tape) if head.is_a?(String)
     0
   end
   result
 end
 
-def handshake(extra : Hash(String, String) = {} of String => String, without : String = "", method : String = "GET", version : String = "HTTP/1.1") : Incoming
-  h = {"Host" => "x", "Upgrade" => "websocket", "Connection" => "keep-alive, Upgrade",
-       "Sec-WebSocket-Version" => "13", "Sec-WebSocket-Key" => "dGhlIHNhbXBsZSBub25jZQ=="}
-  h.delete(without)
-  extra.each { |k, v| h[k] = v }
-  fields = Array(Field).new(h.size)
-  h.each { |k, v| fields << Field.new(k, v) }
-  Incoming.new(method, "/chat", nil, fields, "", version)
+# A macro, so the request and its fields are the caller's.
+macro handshake(extra = nil, without = "", method = "GET", version = "HTTP/1.1")
+  begin
+    %fields = Array(Field).new(8)
+    [{"Host", "x"}, {"Upgrade", "websocket"}, {"Connection", "keep-alive, Upgrade"},
+     {"Sec-WebSocket-Version", "13"}, {"Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="}].each do |pair|
+      next if pair[0] == {{without}}
+      {% if extra %}next if {{extra}}.has_key?(pair[0]){% end %}
+      %fields << Field.new(pair[0], pair[1])
+    end
+    {% if extra %}{{extra}}.each { |k, v| %fields << Field.new(k, v) }{% end %}
+    Incoming.new({{method}}, "/chat", nil, %fields, "", {{version}})
+  end
 end
 
 # The status, the body and the headers named of `upgrade`'s answer.
@@ -696,7 +692,7 @@ def upgraded(req : Incoming, protocols : Array(String) = [] of String) : String
   text = "#{r.status} #{r.body.to_s.inspect}"
   ["Upgrade", "Connection", "Sec-WebSocket-Accept", "Sec-WebSocket-Protocol", "Sec-WebSocket-Version", "Sec-WebSocket-Extensions"].each do |name|
     if v = r.header(name)
-      text = text + " #{name}=#{v}"
+      text << " #{name}=#{v}"
     end
   end
   text
@@ -785,7 +781,7 @@ def tunnel(client : IyiSocket) : Nil
       client.close
       return
     end
-    head = head + piece
+    head << piece
   end
   line = head[0, head.index('\r') || 0]
   authorized = head.includes?("\r\nProxy-Authorization: Basic Z2F0ZTpzM2NyZXQ=\r\n")
@@ -875,8 +871,8 @@ end
 puts "== handshake"
 # RFC 6455 §1.3's own example.
 assert_str "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", WebSocket.accept("dGhlIHNhbXBsZSBub25jZQ=="), "the accept value of §1.3's key"
-assert_str "101 \"\" Upgrade=websocket Connection=Upgrade Sec-WebSocket-Accept=s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", upgraded(handshake), "a handshake is answered 101"
-assert_str "101 \"\" Upgrade=websocket Connection=Upgrade Sec-WebSocket-Accept=s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", upgraded(handshake({"Upgrade" => "WebSocket", "Connection" => "upgrade"})), "Upgrade and Connection in any case"
+assert_str "101 \"\" Upgrade=websocket Sec-WebSocket-Accept=s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", upgraded(handshake), "a handshake is answered 101"
+assert_str "101 \"\" Upgrade=websocket Sec-WebSocket-Accept=s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", upgraded(handshake({"Upgrade" => "WebSocket", "Connection" => "upgrade"})), "Upgrade and Connection in any case"
 assert_str "400 \"a WebSocket handshake is a GET, not POST\\n\"", upgraded(handshake(method: "POST")), "a POST"
 assert_str "400 \"a WebSocket handshake is HTTP/1.1, not HTTP/1.0\\n\"", upgraded(handshake(version: "HTTP/1.0")), "HTTP/1.0"
 assert_str "400 \"Upgrade does not name websocket\\n\"", upgraded(handshake(without: "Upgrade")), "no Upgrade"
@@ -1181,7 +1177,7 @@ def section_handshakes : Nil
   puts "\n== permessage-deflate: the handshake"
   # What the server accepts (RFC 7692 §7.1): the first offer it can keep,
   # its no_context_takeovers and server_max_window_bits named back.
-  assert_str "101 \"\" Upgrade=websocket Connection=Upgrade Sec-WebSocket-Accept=s3pPLMBiTxaQ9kYGzzhZRbK+xOo= Sec-WebSocket-Extensions=permessage-deflate", upgraded(handshake({"Sec-WebSocket-Extensions" => "permessage-deflate"})), "§7.1.3's simplest offer, accepted"
+  assert_str "101 \"\" Upgrade=websocket Sec-WebSocket-Accept=s3pPLMBiTxaQ9kYGzzhZRbK+xOo= Sec-WebSocket-Extensions=permessage-deflate", upgraded(handshake({"Sec-WebSocket-Extensions" => "permessage-deflate"})), "§7.1.3's simplest offer, accepted"
   assert_str "permessage-deflate", extension_answer("permessage-deflate; client_max_window_bits"), "a browser's offer"
   assert_str "permessage-deflate; server_no_context_takeover; client_no_context_takeover", extension_answer("permessage-deflate; client_no_context_takeover; server_no_context_takeover"), "both no_context_takeovers named back"
   assert_str "permessage-deflate; server_max_window_bits=10", extension_answer("permessage-deflate; client_max_window_bits; server_max_window_bits=10, permessage-deflate; client_max_window_bits"), "§7.1.3's offer and its fallback: the first taken"
@@ -1438,7 +1434,8 @@ def section_close_handshake : Nil
   raise "the peer's task ended with #{back12.inspect}" unless back12.is_a?(IyiSocket)
   peer12 = back12.as(IyiSocket)
   assert_true ws12.closed? && ws12.close_code == 4000, "the code the peer echoed"
-  assert_true Raw.new(peer12).ended?, "and the connection is ended"
+  ended_raw = Raw.new(peer12)
+  assert_true ended_raw.ended?, "and the connection is ended"
   assert_str "end", said(ws12.receive), "receive after close"
   assert_true ws12.close.nil?, "a second close does nothing"
   peer12.close
@@ -1476,7 +1473,7 @@ def section_close_handshake : Nil
       a14.close
       0
     end
-    unanswered = said(ws14.close)
+    unanswered = said(ws14.close).copy_to(Program.tape)
     0
   end
   assert_str "1006 WebSocket: the connection ended without a close frame", unanswered, "a close nobody answers"
@@ -1539,11 +1536,11 @@ group do |g|
     # (SPEC 5.1), so it sends and reads in turn.
     shared = noise(4096, 11)
     sent = [] of String
-    6.times { |k| sent << shared + noise(2097152, 20 + k) + shared + noise(512 * (k + 1), 40 + k) }
+    6.times { |k| sent << (shared + noise(2097152, 20 + k) + shared + noise(512 * (k + 1), 40 + k)).copy_to(Program.tape) }
     back = [] of String
     sent.each do |piece|
       ws.send_binary(piece).or_panic
-      back << message(ws.receive).data
+      back << message(ws.receive).data.copy_to(Program.tape)
     end
     assert_true back == sent, "six 2 MiB messages, each echoed whole"
     assert_true ws.close.nil? && ws.closed? && ws.close_code == 1000, "the client's close over std/http"
@@ -1606,7 +1603,7 @@ group do |g|
     rr.write("GET /echo HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n" + frame(1, "riding along"))
     head = ""
     while !head.ends_with?("\r\n\r\n")
-      head = head + rr.read_exact(1)
+      head << rr.read_exact(1)
     end
     assert_true head.starts_with?("HTTP/1.1 101 Switching Protocols\r\n") && head.includes?("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"), "a raw handshake's 101: #{head}"
     f = rr.next_frame

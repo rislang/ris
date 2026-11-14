@@ -20,7 +20,8 @@ import std/format::{sprintf, printf}
 
 pub class Benchmark
   module BM
-    class Tms
+    @[OnTape]
+    struct Tms
       getter real : Float64
       getter label : String
 
@@ -68,7 +69,9 @@ pub class Benchmark
   end
 
   module IPS
-    class Entry
+    # A struct the job keeps by value: a run writes it back by index.
+    @[OnTape]
+    struct Entry
       property label : String
       property action : ->
       property cycles : Int32 = 0
@@ -243,7 +246,8 @@ pub class Benchmark
       end
 
       private def run_warmup : Nil
-        @items.each do |item|
+        @items.size.times do |index|
+          item = @items[index]
           count = 0_u64
           t0 = Std::Time::Time.monotonic
           target = t0 + @warmup_time
@@ -253,11 +257,13 @@ pub class Benchmark
           end
           t1 = Std::Time::Time.monotonic
           item.set_cycles(t1 - t0, count)
+          @items[index] = item
         end
       end
 
       private def run_calculation : Nil
-        @items.each do |item|
+        @items.size.times do |index|
+          item = @items[index]
           measurements = [] of Float64
 
           t0 = Std::Time::Time.monotonic
@@ -274,39 +280,39 @@ pub class Benchmark
           end
 
           item.calculate_stats(measurements)
+          @items[index] = item
         end
       end
 
       private def run_comparison : Nil
-        ran = ran_items
-        return if ran.empty?
         fastest_mean = 0.0
-        ran.each do |it|
-          fastest_mean = it.mean if it.mean > fastest_mean
+        @items.each do |it|
+          fastest_mean = it.mean if it.ran? && it.mean > fastest_mean
         end
-        ran.each do |item|
+        @items.size.times do |index|
+          item = @items[index]
+          next unless item.ran?
           item.slower = item.mean > 0.0 ? (fastest_mean / item.mean) : 1.0
+          @items[index] = item
         end
       end
     end
   end
 
-  def self.bm(& : BM::Job -> Nil) : BM::Job
+  def self.bm(& : BM::Job -> Nil) : Nil
     report = BM::Job.new
     yield report
     report.execute
-    report
   end
 
-  def self.ips(calculation : Std::Time::Span = Std::Time::Span.seconds(5), warmup : Std::Time::Span = Std::Time::Span.seconds(2), interactive : Bool = false, & : IPS::Job -> Nil) : IPS::Job
+  def self.ips(calculation : Std::Time::Span = Std::Time::Span.seconds(5), warmup : Std::Time::Span = Std::Time::Span.seconds(2), interactive : Bool = false, & : IPS::Job -> Nil) : Nil
     job = IPS::Job.new(calculation, warmup, interactive)
     yield job
     job.execute
     job.report
-    job
   end
 
-  def self.ips(calculation : Int32 = 5, warmup : Int32 = 2, interactive : Bool = false, & : IPS::Job -> Nil) : IPS::Job
+  def self.ips(calculation : Int32 = 5, warmup : Int32 = 2, interactive : Bool = false, & : IPS::Job -> Nil) : Nil
     ips(Std::Time::Span.seconds(calculation.to_i64), Std::Time::Span.seconds(warmup.to_i64), !!interactive) { |job| yield job }
   end
 
