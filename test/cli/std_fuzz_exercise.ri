@@ -81,7 +81,7 @@ import std/random::{Random}
 import std/asn1::{Der, DerValue, DerClass, Asn1Error}
 import std/x509::{RisCertificateStore, Certificate, X509, X509Error, X509Purpose}
 import std/tls::{TlsClient, TlsConfig, TlsError, TlsIdentity, TlsKeySchedule, TlsRecordCipher, TlsServer, TlsServerConfig, TlsVersion}
-import std/http::{HTTP, HTTPError, HTTPClient, Server, Incoming, Outgoing, Response, Multipart, BodyReader}
+import std/http::{HTTP, HTTPError, HTTPClient, Server, Incoming, Outgoing, Response, Multipart, BodyReader, Field, ParsedHead, HeadError}
 import std/slice::{Bytes}
 import std/hpack::{Decoder, Encoder, HpackError, Huffman, Integer, HeaderField}
 import std/socket::{IyiSocket, SocketError}
@@ -962,28 +962,18 @@ end
 def run_http1(input : Array(UInt8)) : String
   t = text(input)
   verdict = ""
-  parsed = Server.parse_request(t)
-  if req = parsed.request
-    req.headers.size
-    req.cookies
-    req.form
-    if parts = req.multipart
-      while true
-        part = parts.next_part(slot)
-        break unless part.is_a?(Std::Http::Part)
-        part.name
-        part.filename
-        part.content_type
-        break unless part.read_all(1_000_000_i64).is_a?(String)
-      end
+  fields = Array(Field).new(16)
+  parsed = Server.parse_head(t, 0, true, fields)
+  if parsed.is_a?(ParsedHead)
+    parsed.each_field do |name, value|
+      HTTP.cookie_pairs(value) if name.compare("cookie", true) == 0
     end
-    verdict = "read #{req.method} #{req.path.bytesize}"
-  elsif why = parsed.error
-    verdict = "refused: #{parsed.status} #{why}"
+    verdict = "read #{parsed.method} #{parsed.target.bytesize}"
+  elsif parsed.is_a?(HeadError)
+    verdict = "refused: #{parsed.status} #{parsed.message}"
   else
     verdict = "more"
   end
-  Server.parse_head(t, 0, true)
   HTTP.parse_response_head(t)
   lines = HTTP.split_crlf(t)
   HTTP.status_line(lines[0]) unless lines.empty?

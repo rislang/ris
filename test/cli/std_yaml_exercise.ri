@@ -26,13 +26,22 @@ def refused(source : String, sentence : String) : Nil
   puts "  #{err}"
 end
 
+# An array of a derived type read and written inside a def: its views of
+# the parse are gone before the next parse reuses a parser's buffer.
+def check_spots : Nil
+  spots = YAML.from_yaml("- {x: 1, name: p}\n- {x: 2, name: q, note: r}\n", Array(Spot))
+  assert_true(spots.size == 2 && spots[1].note == "r", "YAML.from_yaml into an array of a derived type")
+  assert_str("- x: 1.0\n  name: p\n  note: null\n- x: 2.0\n  name: q\n  note: r\n", YAML.to_yaml(spots), "YAML.to_yaml of an array of a derived type")
+end
+
 # The sentence `action` panicked with, or what it answered when it did not.
 def panic_of(action : Proc(String)) : String
-  said = "unread"
+  said = ""
   group do |g|
     task = g.spawn { action.call }
     answer = task.value
-    said = answer.is_a?(Panicked) ? answer.message : answer
+    said << (answer.is_a?(Panicked) ? answer.message : answer)
+    nil
   end
   said
 end
@@ -483,9 +492,7 @@ assert_str("x: 0.5\nname: \"1st\"\nnote: \"=\"\n", Spot.from_yaml("{x: .5, name:
 merged_spot = Spot.from_yaml("base: &b {x: 2, name: m}\n<<: *b\nname: n\n")
 assert_true(merged_spot.x == 2.0 && merged_spot.name == "n", "a merged mapping fills a derived type's fields, its own key winning")
 assert_true(Spot.from_yaml("x: 1\nname: a\nnote:\n").note.nil?, "an empty value for a nilable field is nil")
-spots = YAML.from_yaml("- {x: 1, name: p}\n- {x: 2, name: q, note: r}\n", Array(Spot))
-assert_true(spots.size == 2 && spots[1].note == "r", "YAML.from_yaml into an array of a derived type")
-assert_str("- x: 1.0\n  name: p\n  note: null\n- x: 2.0\n  name: q\n  note: r\n", YAML.to_yaml(spots), "YAML.to_yaml of an array of a derived type")
+check_spots
 puts "  unknown keys passed over, nil fields, merges, quoting of what would read as something else"
 
 assert_str("port: 1\nhost: localhost\nname: x\n", Listener.from_yaml("name: x\nport: 1\n").to_yaml, "a nilable field keeps its default for a missing key")

@@ -145,8 +145,8 @@ if args[0] == "read"
       puts names.map { |h| (f = row[h]?) ? hex(f) : "-" }.join(" ")
     end.or_panic
   else
-    reader = CSVReader.new(input, separator: sep, quote: quote)
-    while row = reader.next_row.or_panic
+    plain = CSVReader.new(input, separator: sep, quote: quote)
+    while row = plain.next_row.or_panic
       puts row.map { |f| hex(f) }.join(" ")
     end
   end

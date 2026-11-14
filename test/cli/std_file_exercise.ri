@@ -26,6 +26,7 @@ impl Error for LockStop
 end
 
 import std/file::{File}
+import std/time::{Time}
 import std/dir::{Dir}
 # For TMPDIR, TEMP and TMP unset around `File.tempfile`'s GetTempPathW.
 import std/env::{ENV}
@@ -465,43 +466,67 @@ assert_true holder.try_flock_shared, "locks: shared locks are held together"
 assert_true !holder.try_flock_exclusive, "locks: an exclusive lock is refused while another file shares"
 holder.flock_unlock
 other.flock_unlock
-lock_order = [] of String
+# Each task opens its own file: a task's block keeps no open file of the
+# program's, and answers through its value rather than a shared local.
+lock_order = ""
 group do |g|
   g.spawn do
-    holder.flock_exclusive.or_panic
-    lock_order << "held"
+    mine = File.open(flock_path, "r+")
+    mine.flock_exclusive.or_panic
     sleep(100)
-    lock_order << "released"
-    holder.flock_unlock
+    mine.flock_unlock
+    mine.close
     0
   end
-  g.spawn do
+  second = g.spawn do
     sleep(10)
-    other.flock_exclusive.or_panic
-    lock_order << "taken"
-    other.flock_unlock
-    0
+    theirs = File.open(flock_path, "r+")
+    started = Time.monotonic
+    theirs.flock_exclusive.or_panic
+    waited = (Time.monotonic - started).total_milliseconds
+    theirs.flock_unlock
+    theirs.close
+    waited >= 50 ? "waited" : "taken after #{waited} ms"
   end
+  answer = second.value
+  lock_order << (answer.is_a?(String) ? answer : "panicked")
+  nil
 end
-assert_true lock_order == ["held", "released", "taken"], "locks: a lock another task holds is waited for, #{lock_order}"
+assert_true lock_order == "waited", "locks: a lock another task holds is waited for, #{lock_order}"
 holder.flock_exclusive.or_panic
 lock_outcome = ""
 group do |g|
-  g.spawn do
-    got = other.flock_exclusive
-    lock_outcome = got.is_a?(Cancelled) ? "cancelled" : "taken"
-    0
+  waiter = g.spawn do
+    theirs = File.open(flock_path, "r+")
+    got = theirs.flock_exclusive
+    theirs.close
+    got.is_a?(Cancelled) ? "cancelled" : "taken"
   end
   g.spawn do
     sleep(30)
     LockStop.new
   end
+  answer = waiter.value
+  lock_outcome << (answer.is_a?(String) ? answer : "stopped")
+  nil
 end
 assert_true lock_outcome == "cancelled", "locks: a wait whose task is cancelled answers Cancelled, not #{lock_outcome}"
 holder.close
 assert_true other.try_flock_exclusive, "locks: closing the file gave the lock back"
 other.flock_unlock
-assert_panics("inside the lock") { other.flock_exclusive { raise "inside the lock" } }
+# The panicking task opens its own file: it keeps none of the program's.
+lock_panic = ""
+group do |g|
+  locked = g.spawn do
+    locker = File.open(flock_path, "r+")
+    locker.flock_exclusive { raise "inside the lock" }
+    0
+  end
+  answer = locked.value
+  lock_panic << (answer.is_a?(Panicked) ? answer.message : "no panic")
+  nil
+end
+assert_true lock_panic.includes?("inside the lock"), "locks: a panic inside the lock is the task's, not #{lock_panic}"
 File.open(flock_path, "r+") { |probe| assert_true probe.try_flock_exclusive, "locks: a block that panics unlocks" }
 other.close
 File.delete(flock_path)

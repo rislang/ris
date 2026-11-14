@@ -1169,9 +1169,11 @@ struct Record
   getter inner : Inner
   getter inners : Array(Inner)
   getter maybe : Inner?
-  getter matrix : Array(Array(Int32))
 
-  def initialize(@name : String, @tags : Array(String), @weights : Hash(String, Float64), @count : Int64, @small : UInt8, @big : UInt64, @ratio : Float64, @flag : Bool, @note : String?, @inner : Inner, @inners : Array(Inner), @maybe : Inner?, @matrix : Array(Array(Int32)))
+  # No Array(Array(Int32)): a round's array is freed with the round, so
+  # TOML refuses to read an array of arrays into a type (SPEC 1.9).
+
+  def initialize(@name : String, @tags : Array(String), @weights : Hash(String, Float64), @count : Int64, @small : UInt8, @big : UInt64, @ratio : Float64, @flag : Bool, @note : String?, @inner : Inner, @inners : Array(Inner), @maybe : Inner?)
   end
 
   derive serializable, yaml_serializable, toml_serializable
@@ -1533,7 +1535,7 @@ puts "  64 levels read, compared, hashed, dumped and inspected in a task; 65 ref
 
 puts "== derive toml_serializable"
 rec = Record.new("rec \"one\"", ["a", "b c", ""], {"w" => 1.5, "x y" => -0.0}, -9223372036854775807_i64, 255_u8, 9223372036854775807_u64, 0.1, true, nil,
-  Inner.new(1, "in"), [Inner.new(2, nil), Inner.new(3, "three")], Inner.new(4, "maybe"), [[1, 2], [] of Int32, [3]])
+  Inner.new(1, "in"), [Inner.new(2, nil), Inner.new(3, "three")], Inner.new(4, "maybe"))
 text = rec.to_toml
 back = Record.from_toml(text)
 assert_str(rec.to_json, back.to_json, "a record reads back from its TOML")
@@ -1542,7 +1544,7 @@ assert_true(!text.includes?("note"), "a nil field is left out\n#{text}")
 assert_true(text.includes?("[[inners]]") && text.includes?("[inner]") && text.includes?("[maybe]"), "derived fields under headers\n#{text}")
 puts "DERIVE #{rec.to_json}\t#{hex(text)}"
 rec2 = Record.new("two", [] of String, {} of String => Float64, 0_i64, 0_u8, 0_u64, -1.0e300, false, "a\nnote",
-  Inner.new(-1, nil), [] of Inner, nil, [] of Array(Int32))
+  Inner.new(-1, nil), [] of Inner, nil)
 text2 = rec2.to_toml
 assert_str(rec2.to_json, Record.from_toml(text2).to_json, "a record of empties reads back")
 puts "DERIVE #{rec2.to_json}\t#{hex(text2)}"

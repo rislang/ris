@@ -610,9 +610,12 @@ pub struct TapeAny
 
   def dig?(key : String | String | Int32, *rest : String | String |
                                                   Int32) : TapeAny?
-    v = step?(key)
-    return nil if v.nil?
-    v.dig?(*rest)
+    TapeAny.dig_in?(step?(key), *rest)
+  end
+
+  # *v* dug into by *rest*: nil when a step finds nothing.
+  protected def self.dig_in?(v : TapeAny?, *rest : String | Int32) : TapeAny?
+    v.nil? ? nil : v.dig?(*rest)
   end
 
   def dig(key : String | String | Int32) : TapeAny
@@ -623,7 +626,7 @@ pub struct TapeAny
     step(key).dig(*rest)
   end
 
-  private def step?(key : String | String | Int32) : TapeAny?
+  protected def step?(key : String | String | Int32) : TapeAny?
     if key.is_a?(String)
       self[key]?
     else
@@ -2694,6 +2697,9 @@ pub struct TOML
   end
 
   def self.read_value(value : TapeAny, type : Array(T).class) : Array(T) forall T
+    {% if !T.union? && (T < ::Array || T < ::Hash) %}
+      {% raise "TOML cannot read " + T.stringify + " inside an Array: a round's collection is freed with the round (SPEC 1.9). Read TOML.parse(text) and walk it with as_a, or declare the outer arrays and copy_to(owner)" %}
+    {% end %}
     items = value.as_a
     Array(T).new(items.size) { |i| read_value(items[i], T) }
   end

@@ -952,8 +952,11 @@ pub class ZipEntryReader
     return "" if @done
     piece = next_piece(max)
     if piece.is_a?(ZipError)
-      @failed = ZipError.new(ZipReader.keep(piece.message, @errors))
-      return piece
+      # The kept copy is answered: the decoder's message is regrown by
+      # its next error while the caller may still hold this one.
+      kept = kept_error(piece.message)
+      @failed = kept
+      return kept
     end
     name = @entry.name.inspect
     if piece.bytesize.to_i64 > @entry.size - @got
@@ -964,8 +967,9 @@ pub class ZipEntryReader
     if piece.empty? || ended?
       fault = check_end
       if fault
-        @failed = ZipError.new(ZipReader.keep(fault.message, @errors))
-        return fault
+        kept = kept_error(fault.message)
+        @failed = kept
+        return kept
       end
       @done = true
     end
@@ -1004,9 +1008,18 @@ pub class ZipEntryReader
   end
 
   private def fail(message : String) : ZipError
-    fault = ZipError.new(ZipReader.keep(message, @errors))
+    fault = kept_error(message)
     @failed = fault
     fault
+  end
+
+  # *message* copied into the reader's own `@errors`: the error views
+  # only that, never a decoder's message, which its next error regrows.
+  private def kept_error(message : String) : ZipError
+    at = @errors.bytesize
+    n = message.bytesize
+    @errors << message
+    ZipError.new(@errors.finish[at, n])
   end
 
   private def check_end : ZipError | Nil

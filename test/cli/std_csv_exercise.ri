@@ -24,12 +24,12 @@ end
 
 # What `CSV.parse` panicked with, or "parsed" and the rows.
 def csv_refusal(doc : String) : String
-  said = "parsed"
+  said = ""
   group do |g|
     attempt = g.spawn { csv_rows(doc).inspect }
     outcome = attempt.value
-    said = outcome.is_a?(Panicked) ? outcome.message.to_s : "parsed #{outcome}"
-    0
+    said << (outcome.is_a?(Panicked) ? outcome.message.to_s : "parsed #{outcome}")
+    nil
   end
   said
 end
@@ -110,10 +110,10 @@ def random_rows(rng : Lcg, count : Int32) : Array(Array(String))
     row = [] of String
     (rng.below(6) + 1).times do
       f = ""
-      rng.below(7).times { f = f + PIECES[rng.below(PIECES.size)] }
-      row << f
+      rng.below(7).times { f << PIECES[rng.below(PIECES.size)]; nil }
+      row << f.copy_to(Program.tape)
     end
-    rows << row
+    rows << row.copy_to(Program.tape)
   end
   rows
 end
@@ -143,12 +143,12 @@ puts "  a byte order mark, read past and written as a field's"
 # A UTF-16 document (Windows PowerShell 5.1's `Out-File` and `>`) is
 # refused by its byte order mark; it read as fields with a NUL between
 # every two letters, and no error.
-said = "parsed"
+said = ""
 group do |g|
   attempt = g.spawn { csv_rows("\xFF\xFE\"\0N\0\"\0\r\0\n\0") }
   outcome = attempt.value
-  said = outcome.message.to_s if outcome.is_a?(Panicked)
-  0
+  said << outcome.message.to_s if outcome.is_a?(Panicked)
+  nil
 end
 assert_true said.includes?("UTF-16"), "a UTF-16 document is refused, not #{said.inspect}"
 puts "  a UTF-16 document is refused"
@@ -232,12 +232,14 @@ puts "  every malformed document an error value, at its line and column"
 
 puts "\n== header access"
 people = CSVReader.new("name,age,name2\r\n\r\nAda,36,x\nBob\n\nCy,7,y,extra\n", headers: true)
-assert_str "[\"name\", \"age\", \"name2\"]", headers_text(people), "the header row"
 seen = [] of String
-failed = people.each do |row|
-  seen << "#{row.line}:#{row["name"]}/#{row["age"]}/#{row["age"]?.inspect}/#{row["missing"]?.inspect}/#{row.size}"
-end
-assert_true failed.nil?, "each reads to the end"
+to_end = people.each do |row|
+  seen << "#{row.line}:#{row["name"]}/#{row["age"]}/#{row["age"]?.inspect}/#{row["missing"]?.inspect}/#{row.size}".copy_to(Program.tape)
+end.nil?
+assert_true to_end, "each reads to the end"
+# Asked after the rows: a view of the header taken before them would
+# be live while each row's bytes are cleared.
+assert_str "[\"name\", \"age\", \"name2\"]", headers_text(people), "the header row"
 assert_str "[\"3:Ada/36/\\\"36\\\"/nil/3\", \"4:Bob//nil/nil/1\", \"6:Cy/7/\\\"7\\\"/nil/4\"]", seen.inspect, "rows by header name, blank lines passed over"
 dup_reader = CSVReader.new("k,k\n1,2\n", headers: true)
 dup = dup_reader.next
@@ -264,15 +266,15 @@ puts "\n== written and read back"
 rng = Lcg.new(20261015_u64)
 [{',', '"', false}, {';', '\'', false}, {'\t', '"', true}].each do |dialect|
   sep, q, all = dialect
-  rows = random_rows(rng, 2000)
-  text = written(rows, quote_all: all, separator: sep, quote: q, line_end: "\r\n")
+  drows = random_rows(rng, 2000)
+  text = written(drows, quote_all: all, separator: sep, quote: q, line_end: "\r\n")
   reader_12 = CSVReader.new(text, separator: sep, quote: q)
-  assert_str rows.inspect, read_all(reader_12), "random rows round trip through a string (#{sep.inspect})"
+  assert_str drows.inspect, read_all(reader_12), "random rows round trip through a string (#{sep.inspect})"
   stream = Memory.new(text)
   stream_reader = CSVReader.new(stream, sep, q)
-  assert_str rows.inspect, read_all(stream_reader), "random rows round trip through a stream (#{sep.inspect})"
+  assert_str drows.inspect, read_all(stream_reader), "random rows round trip through a stream (#{sep.inspect})"
   reader_13 = CSVReader.new(text, separator: sep, quote: q, strip: true)
-  assert_str rows.inspect, read_all(reader_13), "written fields survive a strip reader (#{sep.inspect})"
+  assert_str drows.inspect, read_all(reader_13), "written fields survive a strip reader (#{sep.inspect})"
 end
 # A CRLF, a doubled quote and a character, each split across the
 # stream's 64 KiB chunks.
@@ -331,7 +333,9 @@ while got = reader.next_row.or_panic
   if count == 100_000
     per_row_before = RisRegion.tape_bytes(1_u64)
   elsif count == 110_000
-    per_row = (RisRegion.tape_bytes(1_u64) - per_row_before) // 10_000_u64
+    # The tape frees each round's rows, so it may end below where it began.
+    after = RisRegion.tape_bytes(1_u64)
+    per_row = after > per_row_before ? (after - per_row_before) // 10_000_u64 : 0_u64
     assert_true per_row < 1024_u64, "a row of six fields allocates #{per_row} bytes, under 1 KiB"
   end
 end

@@ -2967,6 +2967,9 @@ pub struct YAML
   end
 
   def self.read_value(value : TapeValue, type : Array(T).class) : Array(T) forall T
+    {% if !T.union? && (T < ::Array || T < ::Hash) %}
+      {% raise "YAML cannot read " + T.stringify + " inside an Array: a round's collection is freed with the round (SPEC 1.9). Read YAML.parse(text) and walk it with as_a, or declare the outer arrays and copy_to(owner)" %}
+    {% end %}
     items = value.as_a
     Array(T).new(items.size) { |i| read_value(items[i], T) }
   end

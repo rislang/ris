@@ -188,10 +188,34 @@ Unknown must be refused (SPEC 3.6).
   struct) and `fix printed its edit` (split.ri already clean).
 
 * Build each test/cli program, group refusals by message, fix per group.
-  2026-11-14, minitest: 106 of 130 programs pass
-  `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 24 fail (was
-  100 of 130 on this compiler before the round). Names omit std_ and
-  _exercise where present; each failure appears once.
+  2026-11-14 (second round): 107 of 130 programs pass
+  `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 23 fail (106
+  after the first round, 100 before it). Names omit std_ and _exercise
+  where present; each failure appears once.
+
+  Second round: csv builds and its program passes (the header is asked
+  after the rows; a tape-bytes drop no longer underflows); its .sh
+  oracle and refusal programs still need owner declarations. toml and
+  yaml refuse `Array(Array(T))` reads as json does, and toml's `dig?`
+  ends with a call. ZipEntryReader#read answers its kept error copy.
+  Left with their cause:
+  - toml, yaml: a derived struct read in an Array (`Array(Inner)`) is
+    made in the block's scratch through RisDecoded. Ending with
+    `T.new(value)` passed the checker but lost the Array fields of an
+    `@[OnTape]` struct at run time (spec 8.1: tags read back []): a
+    checker hole, not applied.
+  - zip: a ZipEntryReader still "views" its decoder's message after a
+    read; the shrink checker blames the reader (used at `r.finished?`)
+    even with the read in a def of its own: a checker question.
+  - router: tables are top-level locals (a constant of tuples is
+    refused as request tape data: checker), handlers capture no
+    String; left: `Pattern.parse` returns an owner (section 1) and the
+    handler call is an opaque callback (router.ri:594).
+  - file: tasks open their own files; left: `File.read_lines` returns
+    views of its own read (std file.7 needs a caller's text).
+  - fuzz: `Server.parse_head` replaces `parse_request`; left: TLS API
+    drift (TlsRecordCipher.new, TlsServerConfig.from_der, from_der
+    owners, Array::View pending bytes).
 
   Built this round: http2, http_latency, http_resume, http_stop, zstd
   and number. TLS callers declare TlsIdentity, TlsServerConfig,
@@ -220,8 +244,8 @@ Unknown must be refused (SPEC 3.6).
     constant of certificates are refused at time.ri's Zone#initialize;
     the same Time made in a def builds. x509's `cert(hex)` returns a
     Certificate viewing its def's bytes.
-  - Scratch results, 2: toml (dig?) and yaml (Array(T).new block).
-  - Reset/growth views, 2: csv and zip.
+  - Scratch results, 2: toml and yaml (see above).
+  - Reset/growth views, 1: zip (see above).
   - Retained def data, 1: acme.
   - API drift, 1: fuzz.
   - Opaque callback, 1: iterator's to_a (a loop without the block trades

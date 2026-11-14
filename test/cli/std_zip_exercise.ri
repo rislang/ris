@@ -53,15 +53,21 @@ def content(zip : ZipReader, e : ZipEntry, label : String) : String
   got
 end
 
+# One read of *max* appended to *all*; false once the stream is done.
+# A def of its own, so no view of the reader's pieces outlives the read.
+def drain_one(r : ZipEntryReader, max : Int32, label : String, all : String::Builder) : Bool
+  piece = r.read(max)
+  raise "ASSERTION FAILED: #{label}: refused with #{piece.message.inspect}" if piece.is_a?(ZipError)
+  assert_true piece.bytesize <= max, "#{label}: a read of #{max} answered #{piece.bytesize} bytes"
+  return false if piece.empty?
+  all << piece
+  true
+end
+
 # Every byte of a stream read *max* at a time.
 def drain(r : ZipEntryReader, max : Int32, label : String) : String
   all = ""
-  while true
-    piece = r.read(max)
-    raise "ASSERTION FAILED: #{label}: refused with #{piece.message.inspect}" if piece.is_a?(ZipError)
-    assert_true piece.bytesize <= max, "#{label}: a read of #{max} answered #{piece.bytesize} bytes"
-    break if piece.empty?
-    all << piece
+  while drain_one(r, max, label, all)
   end
   assert_true r.finished?, "#{label}: a stream that answered \"\" is finished"
   all.to_s
