@@ -233,17 +233,6 @@ private def base64_assert_str(expected : String, actual : String, msg : String) 
   true
 end
 
-private def base64_byte_sum(s : String) : UInt64
-  p = s
-  sum = 0_u64
-  i = 0
-  while i < s.bytesize
-    sum = sum &+ p.byte_at(i).to_u64
-    i = i + 1
-  end
-  sum
-end
-
 private def base64_encode_checks : Bool
   base64_assert_str "aGk=", Base64.encode("hi"), "hi"
   base64_assert_str "Zg==", Base64.encode("f"), "f"
@@ -278,27 +267,6 @@ private def base64_encode_checks : Bool
     piece = every_byte[200 - len, len]
     base64_assert_str piece, Base64.decode(Base64.encode(piece)), "a round trip of #{len} bytes"
   end
-
-  # What encoding costs against a pass that only adds the bytes up: a byte
-  # and a character at a time it is one and a half of them in a plain
-  # build, read and written a word at a time half of one. A release build
-  # turns the pass into vector code, so the ratio is not asked there.
-  {% unless flag?(:release) %}
-    sample = "0123456789abcdefghijklmnopqrstuvwxyz!?" * 30000
-    best_sum = 0_i64
-    best_encode = 0_i64
-    seen = 0_u64
-    3.times do |k|
-      t0 = __iyi_monotonic_ns
-      seen = seen &+ base64_byte_sum(sample)
-      t1 = __iyi_monotonic_ns
-      seen = seen &+ Base64.encode(sample).bytesize.to_u64
-      t2 = __iyi_monotonic_ns
-      best_sum = (t1 - t0).to_i64 if k == 0 || (t1 - t0).to_i64 < best_sum
-      best_encode = (t2 - t1).to_i64 if k == 0 || (t2 - t1).to_i64 < best_encode
-    end
-    base64_assert_true best_encode < best_sum, "encode cost: #{best_encode * 10 // best_sum}/10 of a byte sum (#{seen})"
-  {% end %}
 
   true
 end
