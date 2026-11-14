@@ -308,6 +308,10 @@ pub struct Certificate
   getter ocsp_nocheck : Bool
   # Critical extensions this does not understand, by OID.
   getter unhandled_critical : Array::View(String)
+  # The store this certificate was copied into (its object_id), 0 for
+  # none: the same bytes parsed into another store are another root to
+  # std/tls (`TlsMadeUnder#same?`).
+  getter store_id : UInt64 = 0_u64
   @signature_parameters : DerValue?
 
   # keyUsage bits (RFC 5280 section 4.2.1.3), counted from the first.
@@ -379,6 +383,7 @@ pub struct Certificate
     @key_usage = source.@key_usage
     @other_constraints = source.@other_constraints
     @ocsp_nocheck = source.@ocsp_nocheck
+    @store_id = store.object_id
     @raw = store.certificate_bytes(source.@raw)
     @tbs = store.certificate_bytes(source.@tbs)
     @serial = store.certificate_bytes(source.@serial)

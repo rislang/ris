@@ -1,0 +1,12 @@
+# A String an item's own method makes in a block round (`s.downcase`) is
+# that round's scratch: kept in an Array from before the block, it would
+# dangle. std/http's HTTP/2 request once sent "x-test" so, overwritten.
+def names(list : Array(String)) : Int32
+  kept = [":a"]
+  list.each do |s|
+    kept << s.downcase
+  end
+  kept.size
+end
+
+puts names(["X-Test", "Accept"])
