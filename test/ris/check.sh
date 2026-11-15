@@ -409,6 +409,14 @@ else
   echo "FAILED   patched std lowering: $out"; status=1
 fi
 
+# An imported name beats a module named only by a file path.
+out=$(RIS="$RIS" bash test/cli/import_beats_module_name.sh 2>&1)
+if [ "$?" -eq 0 ]; then
+  printf '%s\n' "$out"
+else
+  echo "FAILED   import beats module name: $out"; status=1
+fi
+
 # Runtime storage has no application API.
 expect message_storage_private 'undefined constant RisMessagePool'
 
