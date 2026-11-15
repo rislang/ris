@@ -620,7 +620,16 @@ class IyiFiber
   # 256 KiB of stack and one guard page under it, so running off the end
   # is a fault at a page rather than a quiet corruption of a neighbour's
   # chunk: every frame probes its pages top down (`iyi_probe_stack`).
-  STACK_BYTES = 262144_u64
+  # A debug build gets 2 MiB: at -O0 every local of every inlined block
+  # keeps its own slot, so one def with nested yields can be a 230 KiB
+  # frame that a release build folds into registers (test/cli/
+  # task_stack.ri). The pages are committed only as the fiber touches
+  # them, so the larger mapping costs address space, not memory.
+  {% if flag?(:release) %}
+    STACK_BYTES = 262144_u64
+  {% else %}
+    STACK_BYTES = 2097152_u64
+  {% end %}
   PAGE        =   4096_u64
 
   {% if flag?(:win32) %}

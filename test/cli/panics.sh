@@ -847,9 +847,9 @@ end
       if IyiScheduler.current_stack_top != base + IyiFiber::STACK_BYTES
         puts "the task ran on a stack other than the floored one"
       else
-        # Five such frames are about 64 KiB past a 256 KiB stack: inside
-        # the floor.
-        puts "the dive came back: #{plunge(4)}"
+        # One such frame more than the stack holds is about 64 KiB past
+        # its end: inside the floor.
+        puts "the dive came back: #{plunge((IyiFiber::STACK_BYTES // 65536_u64).to_i32)}"
       end
     end
   end

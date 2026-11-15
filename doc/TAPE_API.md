@@ -282,7 +282,9 @@ Each worker caches at most 64 released initial-size tape mappings and
 64 reserved side mappings, retaining at most 1 MiB warm in each.
 Each group permits at most 2^31 - 1 live tasks (`IyiGroup::MAX_LIVE`).
 There is no global task cap; metadata and stacks consume memory.
-`IyiFiber::STACK_BYTES` is 262,144 bytes, plus a 4,096-byte guard page.
+`IyiFiber::STACK_BYTES` is 262,144 bytes in a release build and
+2,097,152 in a debug one (-O0 frames are larger), plus a 4,096-byte
+guard page.
 Main's stack limit is set by the OS; recursion has no fixed cap.
 POSIX fault handlers use a 65,536-byte alternate stack. Exhaustion is fatal.
 `RIS_TAPE_STATS=1` prints these limits from the runtime constants.

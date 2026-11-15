@@ -2872,12 +2872,13 @@ if [ "$?" -eq 0 ] && doc=doc/TAPE_API.md &&
     grep -qF 'ris tape limits: side reservation 134217728, cached regions per kind 64' <<<"$out" &&
     grep -qF 'ris tape limits: region count has no fixed cap' <<<"$out" &&
     grep -qF 'ris tape limits: live tasks per group 2147483647' <<<"$out" &&
-    grep -qF 'ris tape limits: fiber stack 262144 bytes; main stack is OS-limited' <<<"$out" &&
+    grep -qF 'ris tape limits: fiber stack 2097152 bytes; main stack is OS-limited' <<<"$out" &&
     grep -qF 'are at most 2^31 - 1' "$doc" &&
     grep -qF '128 MiB (`SIDE_RESERVE`' "$doc" &&
     grep -qF 'no fixed count cap' "$doc" &&
     grep -qF 'at most 2^31 - 1 live tasks' "$doc" &&
-    grep -qF '`IyiFiber::STACK_BYTES` is 262,144 bytes' "$doc" &&
+    grep -qF '`IyiFiber::STACK_BYTES` is 262,144 bytes in a release build' "$doc" &&
+    grep -qF '2,097,152 in a debug one' "$doc" &&
     grep -qF "Main's stack limit is set by the OS" "$doc"; then
   echo "runs     tape_limits (limits published)"
 else
@@ -3707,8 +3708,10 @@ fi
 # and http2: an HTTP/2 request's header name made in a block round was
 # freed before HPACK sent it (PROTOCOL_ERROR); an upgrade over HTTP/2
 # was answered 501, not reset with HTTP_1_1_REQUIRED. resume: roots
-# assigned anew resumed the old session.
+# assigned anew resumed the old session. task_stack: a debug build's
+# deep inlined frame overran a task's stack.
 for pair in 'number_exercise|all number checks passed' \
+    'task_stack|task stack: deep inlined frame fits' \
     'std_http_resume|ALL CHECKS PASSED'; do
   name=${pair%%|*} want=${pair#*|}
   bin=$(mktemp -d)/$name

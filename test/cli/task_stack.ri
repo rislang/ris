@@ -1,0 +1,35 @@
+# A task runs what the main program runs. A debug build (-O0) gives
+# every local of every inlined block its own stack slot and reuses none,
+# so nested yielding defs make one frame of hundreds of KiB that a
+# release build folds into registers. Such a frame fit the main stack
+# but overran a task's 256 KiB (a spec block runs in a task) and
+# panicked "stack overflow". Here 2^11 inlined copies of a block, each
+# with a few locals, run in main, then in a task: both print the sum.
+module task_stack
+
+def twice(&)
+  yield 1
+  yield 2
+end
+
+def wide : Int32
+  sum = 0
+  twice { |a| twice { |b| twice { |c| twice { |d| twice { |e|
+    twice { |f| twice { |g| twice { |h| twice { |i| twice { |j|
+      twice { |k|
+        s = "#{a}#{b}#{c}#{d}#{e}#{f}#{g}#{h}#{i}#{j}#{k}"
+        t = s.size > 0 ? s : nil
+        sum += t ? t.size : 0
+      }
+    } } } } }
+  } } } } }
+  sum
+end
+
+puts "main #{wide}"
+group do |g|
+  task = g.spawn { puts "task #{wide}"; 0 }
+  task.value
+  0
+end
+puts "task stack: deep inlined frame fits"
