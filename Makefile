@@ -42,6 +42,10 @@ deref_symlinks     ?= ## Dereference symbolic links for `make install`
 sequential_codegen ?= $(if $(filter 0,$(supports_mt)),true,)## Enforce sequential codegen in compiler builds.
 
 O            := .build
+# ris: the compiler built here has String as a struct and cannot build the
+# compiler again, so the rules that build a compiler skip it and use the
+# bootstrap Crystal (test/cli/stale_bootstrap.sh).
+BOOTSTRAP    := CRYSTAL_SKIP_BUILT=1 ./bin/crystal
 # iyi: the two version files are compiled in with `read_file`, so a build that
 # does not depend on them says the old number after the number changes.
 SOURCES      := $(shell find src -name '*.cr') src/VERSION src/IYI_VERSION
@@ -489,7 +493,7 @@ $(O)/cli_test$(EXE): $(O)/$(CRYSTAL_BIN) $(O)/$(IYI_DAEMON_BIN) $(DEPS) $(SOURCE
 $(O)/$(CRYSTAL_BIN): $(DEPS) $(SOURCES)
 	$(call check_llvm_config)
 	@mkdir -p $(O)
-	$(EXPORTS) $(EXPORTS_BUILD) ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) -o $(if $(WINDOWS),$(O)/crystal-next.exe,$@) src/compiler/crystal.cr
+	$(EXPORTS) $(EXPORTS_BUILD) $(BOOTSTRAP) build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) -o $(if $(WINDOWS),$(O)/crystal-next.exe,$@) src/compiler/crystal.cr
 	@# NOTE: on MSYS2 it is not possible to overwrite a running program, so the compiler must be first built with
 	@# a different filename and then moved to the final destination.
 	$(if $(WINDOWS),mv $(O)/crystal-next.exe $@)
@@ -505,7 +509,7 @@ $(O)/ris$(EXE): $(DEPS) $(SOURCES)
 	$(call check_llvm_config)
 	@mkdir -p $(O)
 	$(EXPORTS) $(EXPORTS_BUILD) IYI_CONFIG_PATH='$$ORIGIN/../share/ris/src:$$ORIGIN/../share/ris/crystal:$$ORIGIN/../src' \
-	  ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) $(SELF_RPATH) -o $@ src/compiler/iyi.cr
+	  $(BOOTSTRAP) build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) $(SELF_RPATH) -o $@ src/compiler/iyi.cr
 	@echo "built $@ — run it as ./bin/ris"
 
 # iyi: the same compiler, single-threaded, which is what lets it fork.
@@ -518,7 +522,7 @@ $(O)/$(IYI_DAEMON_BIN): $(DEPS) $(SOURCES)
 	$(call check_llvm_config)
 	@mkdir -p $(O)
 	$(EXPORTS) $(EXPORTS_BUILD) IYI_CONFIG_PATH='$$ORIGIN/../share/ris/src:$$ORIGIN/../share/ris/crystal:$$ORIGIN/../src' \
-	  ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) $(SELF_RPATH) -Dwithout_mt -o $@ src/compiler/iyi.cr
+	  $(BOOTSTRAP) build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) $(SELF_RPATH) -Dwithout_mt -o $@ src/compiler/iyi.cr
 	@echo "built $@ — \`ris daemon start\` finds it beside ris"
 
 # iyi: the front end on its own. Linking libLLVM costs 26 ms of load-time
@@ -533,12 +537,12 @@ $(O)/crystal-front$(EXE): $(DEPS) $(SOURCES) $(O)/$(CRYSTAL_BIN)
 	$(EXPORTS) $(EXPORTS_BUILD) \
 	  IYI_CONFIG_TARGET="$$($(O)/$(CRYSTAL_BIN) --version | sed -n 's/^Default target: //p')" \
 	  IYI_CONFIG_LLVM_VERSION="$$($(O)/$(CRYSTAL_BIN) --version | sed -n 's/^LLVM: //p')" \
-	  ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) -Dwithout_llvm -o $@ src/compiler/crystal_front.cr
+	  $(BOOTSTRAP) build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) -Dwithout_llvm -o $@ src/compiler/crystal_front.cr
 
 $(O)/$(CRYSTAL_DAEMON_BIN): $(DEPS) $(SOURCES)
 	$(call check_llvm_config)
 	@mkdir -p $(O)
-	$(EXPORTS) $(EXPORTS_BUILD) ./bin/crystal build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) -Dwithout_mt -o $@ src/compiler/crystal.cr
+	$(EXPORTS) $(EXPORTS_BUILD) $(BOOTSTRAP) build $(FLAGS) $(COMPILER_FLAGS) $(BINARY_GC_FLAGS) -Dwithout_mt -o $@ src/compiler/crystal.cr
 
 ifneq ($(DEPS),)
 $(LLVM_EXT_OBJ): $(LLVM_EXT_DIR)/llvm_ext.cc
