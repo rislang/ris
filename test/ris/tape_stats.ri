@@ -1,0 +1,74 @@
+# spec: 6.6@ca5f6a2f
+# RIS_TAPE_STATS on every way out: one line per owner field by name,
+# pool waste, and the totals on normal end, exit, panic, cancel and
+# exhaustion. The mode is the first argument.
+module test/ris/tape_stats
+
+pub class Log
+  getter items : Array(Int64)
+  getter names : Array(String)
+
+  def initialize(@items : Array(Int64), @names : Array(String))
+  end
+end
+
+pub class Keep
+  @@log : Log? = nil
+
+  def self.make : Nil
+    tape do
+      items = Array(Int64).new(8)
+      5.times { |i| items << i.to_i64 }
+      names = Array(String).new(2)
+      names << "a"
+      @@log = Log.new(items, names).copy_to(Program.tape)
+    end
+  end
+
+  def self.grow : Nil
+    log = @@log
+    log.items << 9_i64 if log
+  end
+end
+
+@[PointerUnsafe("test reserved side exhaustion before state mutation")]
+def exhaust
+  side = 0_u64
+  start = RisRegion.tape_bytes(8_u64)
+  RisRegion.tape_bytes(8_u64)
+  start = RisRegion.tape_resize(start, start + 8_u64, 0_u64,
+    16_u64, pointerof(side))
+  RisRegion.tape_resize(start, start + 16_u64, 0_u64,
+    RisRegion::SIDE_RESERVE + 1_u64, pointerof(side))
+end
+
+Keep.make
+Keep.grow
+tape do
+  pool = SlicePool(Int64).new(8)
+  a = pool.alloc_slice(4)
+  b = pool.alloc_slice(3)
+  pool.free_slice(a)
+  pool.free_slice(b)
+  pool.alloc_slice(2)
+  nil
+end
+
+mode = Program.arguments.empty? ? "" : Program.arguments[0]
+case mode
+when "exit"
+  exit 3
+when "panic"
+  raise "stats panic"
+when "cancel"
+  group do |g|
+    task = g.spawn do
+      IyiScheduler.cancel(IyiScheduler.current)
+      IyiScheduler.stop_current
+    end
+    task.value
+  end
+when "exhaust"
+  exhaust
+end
+puts "end #{mode}"

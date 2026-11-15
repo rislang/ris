@@ -3175,6 +3175,7 @@ class IyiScheduler
 
     body = fiber.proc
     if body.is_a?(Nil) && fiber.task_run.is_a?(Nil)
+      RisRegion.report_stats
       RisHeap.report
       __iyi_flush_std
       __iyi_exit(1)

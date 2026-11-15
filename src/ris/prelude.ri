@@ -2248,6 +2248,7 @@ end
   # `__iyi_flush_std` is).
   def exit(status : Int32 = 0) : NoReturn
     IyiDefers.drain
+    RisRegion.report_stats
     RisHeap.report
     __iyi_flush_std
     __iyi_exit(status)

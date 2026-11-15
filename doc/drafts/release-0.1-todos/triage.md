@@ -75,20 +75,14 @@ block that runs or names those programs, plus `ris spec ack`.
 | 6.5 | DONE | src/ris/region.ri:200, heap_io.ri | S: Pool holds no |
 | | | | resource (classes/IO refused as elements); compile- |
 | | | | fail program "SlicePool(File)" with its message |
-| 6.6 | PART | stable_growth.ri (check.sh:2676), | kept: stats for |
-| | | src/ris/region.ri:48-183 | regions, side moves, |
-| | | | growth. Missing: owner paths, pool waste, moved- |
-| | | | down results counters; exit-path stats tests |
-| | | | QUESTION (stopped 2026-11-15): "owner paths" in |
-| | | | 6.6 is not settled: (a) one stats line per owner |
-| | | | field path (compiler emits names like |
-| | | | `Log.items`) with reserved/committed bytes, or |
-| | | | (b) a count of owner field spaces only? Also |
-| | | | "pool waste": freed-slot bytes or reserved minus |
-| | | | used? Results moved down already print; stats |
-| | | | print on normal end and exit, not on panic or |
-| | | | fatal exhaustion. Recommend (a) and freed-slot |
-| | | | bytes. |
+| 6.6 | DONE | tape_stats.ri, pending_result.ri | proved: one |
+| | | (check.sh), src/ris/region.ri | line per owner |
+| | | | field by name (`Log.items`: objects, reserved, |
+| | | | used bytes; names expanded by the compiler in |
+| | | | Tape.note_owner), pool waste (freed slot bytes |
+| | | | not yet reused), results moved down; stats on |
+| | | | normal end, exit, panic, cancel, exhaustion; |
+| | | | 2026-11-15 |
 | 7.2 | DONE | stable_growth.ri, hash_api.ri, tree tests, | S: no-move |
 | | | string_api.ri | assert after growth; Hash order |
 | 7.3 | DONE | text_grow.ri, check.sh:2633 text_plain_builder | S: `t = s; |

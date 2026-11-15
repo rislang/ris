@@ -31,6 +31,7 @@ class RisHeap
     text("ris: mapping failed: ")
     number(size)
     text(" bytes\n")
+    RisRegion.report_stats
     __iyi_exit(1)
   end
 
