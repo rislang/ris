@@ -1,9 +1,14 @@
-# ris language specification
-ris is iyi plus Goose's tape memory, and this file is its specification:
-what the compiler must do for every ris program. ris uses static data,
-scoped tapes and typed pools, no GC or general heap. The tape name is half
+# Ris language specification
+Ris programming language is iyi/crystal plus Goose's memory without GC, and this file is its specification:
+what the compiler must do for every ris program. 
+
+Ris uses static data, scoped tapes and typed pools, no GC or 
+general heap. 
+
+By the way, the tape memory name is half
 a joke, after old cassettes: picture one only while recording. Reading
 needs no picture; rewinding happens on its own.
+
 iyi's rules, cited as [iyi](doc/reference/iyi/source/SPEC.md) and a
 section (v0.19.1), apply as written; only what ris adds or changes is
 stated here. iyi's own draft is archived in doc/archive/iyi/SPEC.md and
@@ -13,6 +18,7 @@ Goose's data stack. Reuse iyi before designing anew. This is the target
 contract; what the code does not meet yet is in TODO.md. Cite a rule by
 its number (SPEC 2.3). Numbers never change: a new rule goes last in its
 section; a removed one leaves its number unused.
+
 ## 1. Storage and lifetimes
 * 1.1 Main and each fiber own an implicit tape. Every def, loop round and
   block frees its scratch when it ends, always: no proof decides it and no
