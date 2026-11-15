@@ -3514,9 +3514,24 @@ fi
 # was answered 501, not reset with HTTP_1_1_REQUIRED. resume: roots
 # assigned anew resumed the old session.
 for pair in 'number_exercise|all number checks passed' \
-    'std_http_stop|ALL CHECKS PASSED' \
     'std_http_resume|ALL CHECKS PASSED' \
     'http2_exercise|ALL CHECKS PASSED'; do
+  name=${pair%%|*} want=${pair#*|}
+  bin=$(mktemp -d)/$name
+  if ! out=$("$RIS" build -o "$bin" "test/cli/$name.ri" 2>&1); then
+    echo "FAILED   cli $name: build: $(tail -5 <<<"$out")"; status=1
+  elif out=$(RIS_H2_POOL_PENDING=1 timeout 180 "$bin" 2>&1) &&
+       grep -qxF -- "$want" <<<"$out" && ! grep -q '^FAIL' <<<"$out"; then
+    echo "runs     cli $name"
+  else
+    echo "FAILED   cli $name: $(tail -5 <<<"$out")"; status=1
+  fi
+  rm -rf "$(dirname "$bin")"
+done
+
+# std_http_stop serves many connections at once: macOS skips it
+# (RIS_CHECK_SKIP), as it serves one (SPEC 7.1).
+for pair in 'std_http_stop|ALL CHECKS PASSED'; do
   name=${pair%%|*} want=${pair#*|}
   bin=$(mktemp -d)/$name
   if ! out=$("$RIS" build -o "$bin" "test/cli/$name.ri" 2>&1); then

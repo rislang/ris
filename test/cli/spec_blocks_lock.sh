@@ -104,7 +104,7 @@ case "$long" in
   "spec 1.2  # A post's slug is its title in lower case,"*"…") ;;
   *) fail "(e) 1.2 label not cut with …: $long" ;;
 esac
-[ "$(printf '%s' "$long" | wc -m)" -le 80 ] || fail "(e) label over 80 columns"
+[ "$(printf '%s' "$long" | LC_ALL=C.UTF-8 wc -m)" -le 80 ] || fail "(e) label over 80 columns"
 "$RIS" check spec > e2.out 2>&1 || { fail "(e) check after --fix"; cat e2.out; }
 sed -i 's/^spec 1.1  # .*/spec 1.1  # A post needs nothing./' src/post.ri
 "$RIS" check spec > e3.out 2>&1

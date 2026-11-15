@@ -67,7 +67,9 @@ jobs:
           RIS_CHECK_SHARD: ${{ matrix.shard }}
           RIS_CHECK_TIMEOUT: "300"
           # These read /proc: Linux's, not the behavior (TODO.md, macOS arm64).
-          RIS_CHECK_SKIP: 'scope_frees\.ri|file_copy_to\.ri|fibers/spares\.ri|tls_session_tickets\.ri'
+          # The rest serve two connections at once; macOS serves one (7.1).
+          RIS_CHECK_SKIP: >-
+            scope_frees\.ri|file_copy_to\.ri|fibers/spares\.ri|tls_session_tickets\.ri|test/ris/answer_compress\.ri|test/ris/answer_tls\.ri|test/ris/answer_upgrade\.ri|test/ris/http_open\.ri|test/ris/sse_open\.ri|'std_http_stop\|ALL
       - uses: actions/upload-artifact@v5
         if: always() && matrix.shard != 'smoke'
         with:
