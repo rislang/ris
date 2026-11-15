@@ -80,6 +80,9 @@ check('private, protected, lib, @[Ffi]', {
                 '  protected def b\n  end\nend\n',
     'src/l.ri': 'lib LibX\n  fun x : Int32\nend\n',
     'src/f.ri': '@[Ffi]\nclass F\n  def raw\n  end\nend\n'}, True)
+check('@[Ffi] type below the file top',
+      {'src/g.ri': 'class G\n  private def a\n  end\nend\n\n'
+                   '@[Ffi]\nclass H\n  def raw\n  end\nend\n'}, True)
 check('covered on an assertion line',
       {'src/post.ri': POST + block(['Post.slugify("a") == "a"'])}, True)
 check('todo cover',

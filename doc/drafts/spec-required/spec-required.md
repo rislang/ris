@@ -38,7 +38,7 @@ when `ris.mod` exists):
 A PATH argument still skips the part, as today.
 
 R2 (D2). A def is public unless it is `private` or `protected`, a
-`lib` fun, or in an `@[Ffi]` module. No path condition. Generated
+`lib` fun, or in an `@[Ffi]` file or type. No path condition. Generated
 defs (macro expansions, `property` and kin) are exempt: the written
 line is a macro call; a project macro making API is a known hole.
 
@@ -66,7 +66,11 @@ module it covers the public defs the module has when the mark is
 written and `ris spec ack --nospec MODULE` records their names in
 .spec.lock. A public def added later still fails (a ratchet). An
 empty reason fails: "NoSpec needs a reason". It lifts no safety
-rule, so `ris unsafe` does not list it; `ris spec todo` lists each
+rule, so `ris unsafe` does not list it. A mark as the file's first
+code line, followed by a blank line or by no def, is the module's;
+right above a def it is the def's. A module mark not yet acked fails:
+"run `ris spec ack --nospec PATH`". Defs below the first spec block
+are test helpers and are not checked; `ris spec todo` lists each
 mark with its reason and count.
 
 ## 3. Rollout

@@ -1206,8 +1206,9 @@ class Iyi::Command
     end
     first_block = lines.index { |line| spec_block_head(line) } || lines.size
     skip_until = nil
-    owners = [] of {Int32, String}
+    owners = [] of {Int32, String, Bool}
     pending = nil
+    ffi = false
     lines.each_with_index do |line, index|
       break if index >= first_block
       if skip_until
@@ -1229,11 +1230,13 @@ class Iyi::Command
         owners.pop
       end
       if owner = line.match(SPEC_OWNER)
-        owners << {indent, owner[2]}
+        owners << {indent, owner[2], ffi}
         pending = nil
+        ffi = false
         next
       end
       if stripped.starts_with?("@[")
+        ffi = true if stripped.starts_with?("@[Ffi]")
         if stripped.starts_with?("@[NoSpec") && index + 1 != scan.module_mark
           reason = spec_mark_reason(stripped)
           if reason.nil? || reason.blank?
@@ -1246,8 +1249,11 @@ class Iyi::Command
       end
       mark = pending
       pending = nil
+      ffi = false
       match = line.match(SPEC_DEF) || next
       next if match[2]?
+      # An `@[Ffi]` type's defs are the OS's API (R2).
+      next if owners.any?(&.[2])
       name = match[4]
       next if name.includes?('{') || name.includes?('%')
       found = SpecDef.new(index + 1, name, owners.last?.try(&.[1]), indent == 0 && owners.empty?)
