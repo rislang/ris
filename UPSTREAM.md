@@ -202,6 +202,9 @@ back.
 * std/option_parser without blocks: `on` answers a `RisFlag`,
   `parse(args, found)` fills a `RisOptions`, `record_errors` replaces
   `invalid_option` and `missing_option`; commands are gone.
+* Makefile `BOOTSTRAP`: a built ris compiler has String as a struct and
+  cannot build the compiler, so compiler rules skip `.build/crystal`
+  (test/cli/stale_bootstrap.sh).
 
 * Generic macro reflection: preserve access to private types already bound
   as generic arguments when interpolation emits their canonical names.
