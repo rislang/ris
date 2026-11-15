@@ -1,5 +1,5 @@
 # Ris language specification
-Ris programming languga is iyi/crystal plus Goose's memory without GC, and this file is its specification:
+Ris programming language is iyi/crystal plus Goose's memory without GC, and this file is its specification:
 what the compiler must do for every ris program. 
 
 Ris uses static data, scoped tapes and typed pools, no GC or 
