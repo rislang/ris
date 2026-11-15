@@ -41,7 +41,7 @@ class Iyi::TapeOwnerChecker
       return false if type.to_s.starts_with?("Array::View(") ||
                       type.to_s.starts_with?("RisTree::View(") ||
                       type.to_s.starts_with?("SlicePool::Run(")
-      return true if {"Array", "RisTree", "SlicePool"}.includes?(type.generic_type.name)
+      return true if {"Array", "RisTree", "SlicePool", "Pool"}.includes?(type.generic_type.name)
     end
     case type
     when UnionType

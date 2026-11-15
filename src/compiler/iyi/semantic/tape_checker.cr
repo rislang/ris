@@ -70,6 +70,8 @@ class Iyi::TapeChecker
       # at finish and onto the reader's tape at `value`: the handle holds
       # no tape of the spawner's.
       return nil if type.generic_type.name == "IyiTask"
+      # A Pool handle is an index and a generation: T only types it.
+      return nil if type.generic_type.full_name == "Pool::Handle"
       type.type_vars.each_value do |type_var|
         if type_var.is_a?(Var) && (var_type = type_var.type?)
           tape_in(program, var_type, visiting).try { |found| return found }
@@ -132,7 +134,7 @@ class Iyi::TapeChecker
       return false if type.to_s.starts_with?("Array::View(") ||
                       type.to_s.starts_with?("RisTree::View(") ||
                       type.to_s.starts_with?("SlicePool::Run(")
-      return true if {"Array", "RisTree", "SlicePool"}.includes?(type.generic_type.name)
+      return true if {"Array", "RisTree", "SlicePool", "Pool"}.includes?(type.generic_type.name)
     end
     # A class field is a fixed-size reference, including an owner alias.
     return false if TapeChecker.class_instance?(@program, type)

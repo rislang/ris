@@ -2549,7 +2549,8 @@ class Iyi::TapeShrinkChecker
   private def owner_argument?(type : Type?) : Bool
     return false unless type = type.try(&.remove_typedef)
     name = type_name(type)
-    return true if name == "String::Builder" || name.starts_with?("SlicePool(")
+    return true if name == "String::Builder" || name.starts_with?("SlicePool(") ||
+                   name.starts_with?("Pool(")
     return false if name.starts_with?("Array(") || name.starts_with?("Hash(")
     class_instance?(type)
   end

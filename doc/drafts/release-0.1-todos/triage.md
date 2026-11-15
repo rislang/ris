@@ -59,8 +59,11 @@ block that runs or names those programs, plus `ris spec ack`.
 | | | (board_recursive, board_class_post, not_flat) | calling existing |
 | | | | board programs; large clause, many sub-proofs; |
 | | | | macOS N=1 refusal not tested here |
-| 6.1 | NOT | src/ris/tape_core.ri:557 (SlicePool only) | no Pool(T), |
-| | | | no free/replacement, no generations or handles |
+| 6.1 | DONE | pool.ri, pool_errors.ri, pool_waste.ri, | proved: |
+| | | refused/pool_*.ri (check.sh); src/ris/tape.ri | typed slot |
+| | | | reuse, typed replacement, handle generations |
+| | | | (odd live), double free and stale handles panic; |
+| | | | 2026-11-15 (doc/drafts/pool-t) |
 | 6.2 | DONE | pool_free_relocate.ri, slice_pool.ri, | proved: free |
 | | | refused/shrink_pool_run*.ri, slice_pool_links.ri | keeps |
 | | | | slots; realloc_slice is the explicit move, holders |
@@ -72,9 +75,10 @@ block that runs or names those programs, plus `ris spec ack`.
 | | | load_span_no_text, flat.ri (check.sh) | length, links |
 | | | | and spans checked before publish; foreign links |
 | | | | refused; no unions in flat types; 2026-11-15 |
-| 6.5 | DONE | src/ris/region.ri:200, heap_io.ri | S: Pool holds no |
-| | | | resource (classes/IO refused as elements); compile- |
-| | | | fail program "SlicePool(File)" with its message |
+| 6.5 | DONE | refused/pool_file.ri, slice_pool_file.ri, | proved: a |
+| | | class_finalize.ri; src/compiler/.../call.cr | Pool or |
+| | | | SlicePool element holding a class is refused at |
+| | | | `new`; 2026-11-15 (doc/drafts/pool-t) |
 | 6.6 | DONE | tape_stats.ri, pending_result.ri | proved: one |
 | | | (check.sh), src/ris/region.ri | line per owner |
 | | | | field by name (`Log.items`: objects, reserved, |

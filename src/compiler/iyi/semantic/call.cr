@@ -696,7 +696,55 @@ class Iyi::Call
     end
   end
 
+  # The class (a reference: a resource or an object) a pool element holds
+  # inline, through unions, tuples and struct fields.
+  private def pool_class_in(type : Type, seen = Set(Type).new) : Type?
+    type = type.remove_alias.remove_typedef.remove_alias
+    return nil unless seen.add?(type)
+    case type
+    when UnionType
+      type.union_types.each { |t| pool_class_in(t, seen).try { |c| return c } }
+      return nil
+    when TupleInstanceType
+      type.tuple_types.each { |t| pool_class_in(t, seen).try { |c| return c } }
+      return nil
+    when NamedTupleInstanceType
+      type.entries.each { |e| pool_class_in(e.type, seen).try { |c| return c } }
+      return nil
+    end
+    base = type.is_a?(VirtualType) ? type.base_type : type
+    return nil if base.nil_type? || base == program.string ||
+                  base.is_a?(PrimitiveType)
+    if (base.is_a?(ClassType) || base.is_a?(GenericClassInstanceType)) &&
+       !base.struct?
+      return base
+    end
+    if base.struct? && base.is_a?(InstanceVarContainer) &&
+       !base.is_a?(PointerInstanceType)
+      base.instance_vars.each_value do |field|
+        field.type?.try { |t| pool_class_in(t, seen).try { |c| return c } }
+      end
+    end
+    nil
+  end
+
   def instantiate(signature, matches, owner, self_type, with_autocast)
+    # SPEC 6.5: a pool's free never closes a resource, so a pool made
+    # outside the runtime holds no class (the runtime's Array keeps its
+    # class elements' runs in a SlicePool).
+    if name == "new" && (pool = owner.instance_type).is_a?(GenericClassInstanceType) &&
+       {"Pool", "SlicePool"}.includes?(pool.generic_type.full_name) &&
+       !location.try { |loc| TapeRules.runtime?(program, loc) }
+      pool.type_vars.each_value do |var|
+        next unless var.is_a?(Var) && (element = var.type?)
+        next unless held = pool_class_in(element)
+        kind = pool.generic_type.full_name
+        raise "#{kind}(#{element}) holds the class #{held}; a pool holds " \
+              "values and its free never closes a resource: keep the " \
+              "#{held} outside, store an index and close it explicitly " \
+              "(SPEC 6.5)"
+      end
+    end
     if name == "check_copy" && owner.to_s == "Tape:Module"
       task = args[2]?.try(&.type.instance_type.to_s) == "RisTaskCopy"
       check_tape_copy(args.first.type.instance_type, Set(Type).new, task)

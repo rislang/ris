@@ -1,0 +1,13 @@
+# spec: 6.1@a1b985de, 6.6@ca5f6a2f
+# Pool waste in RIS_TAPE_STATS is the bytes of freed slots not yet
+# reused: free two Int64 slots (16 bytes), then reuse one (8 bytes).
+tape do
+  pool = Pool(Int64).new(4)
+  a = pool.alloc(1_i64)
+  b = pool.alloc(2_i64)
+  pool.alloc(3_i64)
+  pool.free(a)
+  pool.free(b)
+  pool.alloc(4_i64) if Program.arguments[0] == "reused"
+  nil
+end

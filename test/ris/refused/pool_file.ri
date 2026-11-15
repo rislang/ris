@@ -1,0 +1,6 @@
+# spec: 6.1@a1b985de, 6.5@3293e333
+# A pool holds values; its free never closes a resource.
+tape do
+  pool = Pool(File).new
+  pool.size
+end

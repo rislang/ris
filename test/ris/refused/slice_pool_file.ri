@@ -1,0 +1,13 @@
+# spec: 6.5@3293e333
+# SlicePool holds values too: a resource inside an element is refused.
+struct Opened
+  getter file : File
+
+  def initialize(@file : File)
+  end
+end
+
+tape do
+  pool = SlicePool(Opened).new
+  pool.size
+end

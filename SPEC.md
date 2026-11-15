@@ -232,8 +232,9 @@ section; a removed one leaves its number unused.
   stay in one task using OS facilities on the poller; board IO copies data.
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
-  views see typed replacements; generations only guard checked handles.
-  <!-- todo: Needs typed pool replacement and generation proofs -->
+  views see typed replacements; generations only guard checked handles. A
+  Pool::Handle(T) carries its slot's generation (odd live, even free); using
+  a stale one fails, as does freeing a free slot. Pool has no push or realloc.
 * 6.2 Free keeps memory; reset obeys shrink rules. Run relocation is explicit:
   holders keep offsets and re-read; old views stay unchanged. Runs holding
   self-relative links are never relocated (Goose §5.4).

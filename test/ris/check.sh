@@ -765,6 +765,71 @@ if [[ "$out" == *FAILED* ]]; then status=1; fi
 printf '%s\n' "$out"
 
 expect slice_pool_links 'realloc_slice refuses self-relative links'
+# SPEC 6.1: Pool(T) reuses typed slots; handles check generations.
+out=$("$RIS" run test/ris/pool.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: Pool' ]; then
+  echo "runs     pool"
+else
+  echo "FAILED   pool: $out"; status=1
+fi
+
+# SPEC 6.1: Pool index, double free and stale handles fail before mutation.
+out=$(
+  exe=$(mktemp)
+  stale='ris: stale Pool handle; check pool.live?(h) or use pool.get?(h): '
+  if "$RIS" build test/ris/pool_errors.ri -o "$exe"; then
+    for mode in bounds negative negative_free double_free stale_read \
+      stale_write stale_free zero_handle negative_handle; do
+      result=$("$exe" "$mode" 2>&1)
+      code=$?
+      case "$mode" in
+        bounds) expected='ris: Pool index out of bounds: 2' ;;
+        negative) expected='ris: Pool index out of bounds: -1' ;;
+        negative_free) expected='ris: Pool index out of bounds: -3' ;;
+        double_free) expected='ris: Pool slot already free: 0' ;;
+        stale_read|stale_write|stale_free) expected="${stale}1" ;;
+        zero_handle) expected="${stale}0" ;;
+        negative_handle) expected="${stale}-1" ;;
+      esac
+      if [ "$code" -eq 1 ] && [ "$result" = "$expected" ]; then
+        echo "fatal    pool_$mode"
+      else
+        echo "FAILED   pool_$mode: $result"
+      fi
+    done
+  else
+    echo "FAILED   pool_errors build"
+  fi
+  rm -f "$exe"
+)
+if [[ "$out" == *FAILED* ]]; then status=1; fi
+printf '%s\n' "$out"
+
+# SPEC 6.1, 6.6: pool waste counts freed Pool slots until reused.
+for mode in freed:16 reused:8; do
+  out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/pool_waste.ri -- \
+    "${mode%%:*}" 2>&1)
+  want="ris tape pool waste: ${mode#*:} bytes in freed slots not yet reused"
+  if grep -qxF "$want" <<<"$out"; then
+    echo "runs     pool_waste ${mode%%:*}"
+  else
+    echo "FAILED   pool_waste ${mode%%:*}: $out"; status=1
+  fi
+done
+expect pool_push \
+  'Error: Pool has no push; use pool.alloc(value): it reuses freed slots'
+expect pool_shovel \
+  'Error: Pool has no <<; use pool.alloc(value): it reuses freed slots'
+expect pool_realloc \
+  'Error: a Pool slot never moves (SPEC 6.2); use SlicePool(T) for runs'
+# SPEC 6.5: a pool holds no class; its free never closes a resource.
+for case in pool_file:Pool:File slice_pool_file:SlicePool:Opened; do
+  IFS=: read -r name pool element <<<"$case"
+  values='a pool holds values and its free never closes a resource: keep'
+  values="$values the File outside, store an index and close it"
+  expect "$name" "Error: $pool($element) holds the class File; $values \
+explicitly (SPEC 6.5)"
+done
 expect ffi_proc_value 'a Proc passed to C must be written in the call'
 # SPEC 6.2: reset of a pool run's storage obeys the shrink rules.
 expect shrink_pool_run 'live view of Array(Int32) while shrinking'

@@ -1,0 +1,82 @@
+# spec: 6.1@a1b985de
+# Pool(T): typed slots reuse freed indices, free keeps values valid, a
+# stale index reads the typed replacement, handles check generations.
+import std/int
+
+@[OnTape]
+struct Item
+  getter name : String
+  getter n : Int32
+
+  def initialize(@name : String, @n : Int32)
+  end
+end
+
+@[Tape::Flat]
+struct Holder
+  getter a : Pool::Handle(Item)
+  getter b : Pool::Handle(Item)
+
+  def initialize(@a : Pool::Handle(Item), @b : Pool::Handle(Item))
+  end
+end
+
+def check(ok : Bool, what : String) : Nil
+  return if ok
+  puts "FAILED: #{what}"
+  exit 1
+end
+
+tape do
+  pool = Pool(Item).new(2)
+  a = pool.alloc(Item.new("a", 1))
+  b = pool.alloc(Item.new("b", 2))
+  check(pool.size == 2 && pool[a].name == "a" && pool[b].n == 2, "alloc")
+  pool[b] = Item.new("bb", 3)
+  check(pool[b].name == "bb", "write")
+  # Free keeps the value valid; alloc reuses the freed slot.
+  pool.free(a)
+  check(pool[a].name == "a", "free keeps the value")
+  c = pool.alloc(Item.new("c", 4))
+  check(c == a && pool.size == 2, "reuse")
+  # The stale index a reads the typed replacement, a valid String.
+  check(pool[a].name == "c" && pool[a].n == 4, "typed replacement")
+
+  # Handles: live, then stale after free; a zero handle is stale.
+  h = pool.alloc_handle(Item.new("h", 5))
+  check(pool.live?(h) && pool[h].n == 5, "handle live")
+  check(h.generation & 1_u32 == 1_u32, "live generation odd")
+  pool[h] = Item.new("h2", 6)
+  got = pool.get?(h)
+  check(!got.nil? && got.n == 6, "handle write")
+  pool.free(h)
+  check(!pool.live?(h) && pool.get?(h).nil?, "handle stale after free")
+  h2 = pool.alloc_handle(Item.new("n", 7))
+  check(h2.index == h.index && !pool.live?(h) && pool.live?(h2), "reused")
+  check(!pool.live?(Pool::Handle(Item).new(0, 0_u32)), "zero handle")
+  check(!pool.live?(Pool::Handle(Item).new(-1, 1_u32)), "negative handle")
+  # Free by index bumps the generation too.
+  pool.free(h2.index)
+  check(!pool.live?(h2), "index free makes handle stale")
+
+  # Generation wrap skips 0 and keeps parity.
+  check(Pool.next_gen(0_u32) == 1_u32, "first live generation")
+  check(Pool.next_gen(1_u32) == 2_u32, "free is even")
+  check(Pool.next_gen(0xFFFFFFFF_u32) == 2_u32, "wrap skips 0")
+
+  # Handles are flat: they round-trip through a byte image.
+  x = pool.alloc_handle(Item.new("x", 8))
+  held = Array(Holder).new(1)
+  held.push(Holder.new(x, Pool::Handle(Item).new(x.index, (x.generation.to_u64 &+ 2_u64).to_u32)))
+  back = Array(Holder).load(held.bytes)
+  check(pool[back[0].a].name == "x", "loaded handle used")
+  check(!pool.live?(back[0].b), "forged handle refused at use")
+
+  # A copy keeps indices and handles: a typed replacement on purpose.
+  copy = pool.copy_to(Program.tape)
+  pool.free(x)
+  check(!pool.live?(x) && copy.live?(x), "copy diverges")
+  y = pool.alloc(Item.new("y", 9))
+  check(y == x.index && copy[x].name == "x", "copy keeps its value")
+end
+puts "PASS: Pool"

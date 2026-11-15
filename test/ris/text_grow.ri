@@ -182,10 +182,11 @@ owned = OwnedGrowingField.new
 raise "owner field" unless owned.text == "owner!!!!!"
 check_count(before, 5_u64)
 
-# Pool handles keep object fields on the same owner as other tape data.
-pool = SlicePool(GrowingField).new
+# Array slots keep object fields on the same owner as other tape data
+# (a pool holds no class: SPEC 6.5).
+run = Array(GrowingField).new
 seed = GrowingField.new
-run = pool.alloc_slice(1, seed)
+run << seed
 before = copies
 5.times { run[0].append("p") }
 raise "pool field" unless run[0].text == "oddppppp"

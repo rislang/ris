@@ -45,7 +45,9 @@ ris is iyi plus Goose's tape memory. These rules are for every agent.
   `todo "reason"`, or a SPEC.md todo marker when no module keeps it.
   `ris check spec` fails on unreviewed clauses, stale labels (`ris check
   --fix` writes them) and clauses with no proof.
-  Old `# spec: N.M@VERSION` tags under test/ still count. A std clause
+  Old `# spec: N.M@VERSION` tags under test/ still count; a runtime
+  clause (chapter 6) is proven that way, by test/ris/ files check.sh runs.
+  A std clause
   sits as a `# json.3` comment above its block in its module.
 * A rule lives in one clause; other clauses refer to it by number.
 

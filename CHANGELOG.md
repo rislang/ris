@@ -57,6 +57,18 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.
 
+### 2026-11-15 · 6.1@a1b985de
+
+* New: `Pool(T)`, typed single slots: `alloc` reuses the last freed slot,
+  a freed slot stays a valid T, and a stale index reads the typed
+  replacement. `Pool::Handle(T)` (8 bytes, flat) carries its slot's
+  generation, odd while live and even while free; using a stale handle
+  or freeing a free slot panics. Pool has no `push`, `<<` or `realloc`:
+  each is refused, naming `alloc` or SlicePool. 6.1 was the last todo
+  clause before 0.1.0. A `Pool` or `SlicePool` whose element holds a
+  class is now refused at its `new` (6.5 was claimed, not built).
+  Draft and review: doc/drafts/pool-t.
+
 ### 2026-11-15 · 6.8@4c97b775
 
 * `ris check spec` fails on an entry from today on naming a draft

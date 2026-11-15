@@ -6,6 +6,11 @@ ris, take it to iyi with `git cherry-pick`; strike entries once merged.
 A Ris* type goes to iyi as Iyi*; ris renames it when the merge brings it
 back.
 
+Exceptions to the Ris* rule: `Pool(T)` and `SlicePool(T)` (with their
+`Pool::Handle`, `SlicePool::Run` and `SlicePool::List`) keep the names
+SPEC 6.1 and 7.1 give them. They are tape types iyi will not take, and
+a rename after 0.1.0 would break callers (doc/drafts/pool-t, Q5).
+
 ## To take to iyi
 
 * Formatter macro fragments retain their enclosing def and local-variable

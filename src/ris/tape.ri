@@ -3940,6 +3940,167 @@ private struct RisArrayPool(T)
   end
 end
 
+# Typed slots (SPEC 6.1). A freed slot stays an initialized T until the
+# pool's tape ends; a plain index to it reads the next owner's value. Each
+# slot has a generation: odd while live, even while free, 0 never live.
+# A Pool::Handle(T) carries the generation, and its use checks it.
+@[OnTape]
+struct Pool(T)
+  @data : Array(T)
+  @gens : Array(UInt32)
+  @free : Array(Int32)
+
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def initialize(capacity : Int32 | Int64 = 4)
+    @data = Array(T).new(capacity, storage: RisPoolStorage.new)
+    @gens = Array(UInt32).new(capacity, storage: RisPoolStorage.new)
+    @free = Array(Int32).new
+  end
+
+  # The generation after *g*: alloc makes it odd, free even; a wrap skips
+  # 0, so 2^31 alloc/free cycles of one slot reuse a generation.
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def self.next_gen(g : UInt32) : UInt32
+    n = bits(g) &+ 1
+    n == 0 ? 2_u32 : unbits(n)
+  end
+
+  # The prelude does no UInt32 arithmetic (iyi primitives): work on the
+  # same 32 bits as an Int32.
+  protected def self.bits(g : UInt32) : Int32
+    pointerof(g).as(Pointer(Int32)).value
+  end
+
+  protected def self.unbits(n : Int32) : UInt32
+    pointerof(n).as(Pointer(UInt32)).value
+  end
+
+  # Slots ever made, live or free.
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def size : Int32
+    @data.size
+  end
+
+  # A slot holding *value*: the last freed one, else a new one.
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def alloc(value : T) : Int32
+    if at = @free.pop?
+      @data[at] = value
+      RisRegion.pool_reused(sizeof(T).to_u64)
+    else
+      at = @data.size
+      Tape.storage(at.to_i64 + 1_i64, sizeof(T).to_u64)
+      @data << value
+      @gens << 0_u32
+    end
+    @gens[at] = Pool.next_gen(@gens[at])
+    at
+  end
+
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def alloc_handle(value : T) : Handle(T)
+    at = alloc(value)
+    Handle(T).new(at, @gens[at])
+  end
+
+  # Frees slot *i*; its value stays readable until the slot is reused.
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def free(i : Int32) : Nil
+    at = checked(i)
+    if Pool.bits(@gens[at]) & 1 == 0
+      RisRegion.size_error("ris: Pool slot already free: ", at.to_u64)
+    end
+    @gens[at] = Pool.next_gen(@gens[at])
+    @free << at
+    RisRegion.pool_freed(sizeof(T).to_u64)
+  end
+
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def free(h : Handle(T)) : Nil
+    free(live(h))
+  end
+
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def [](i : Int32) : T
+    @data[checked(i)]
+  end
+
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def []=(i : Int32, value : T) : T
+    @data[checked(i)] = value
+  end
+
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def [](h : Handle(T)) : T
+    @data[live(h)]
+  end
+
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def []=(h : Handle(T), value : T) : T
+    @data[live(h)] = value
+  end
+
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def get?(h : Handle(T)) : T?
+    live?(h) ? @data[h.index] : nil
+  end
+
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def live?(h : Handle(T)) : Bool
+    h.index >= 0 && h.index < size && Pool.bits(h.generation) & 1 == 1 &&
+      @gens[h.index] == h.generation
+  end
+
+  def push(value)
+    {% raise "Pool has no push; use pool.alloc(value): it reuses freed slots" %}
+  end
+
+  def <<(value)
+    {% raise "Pool has no <<; use pool.alloc(value): it reuses freed slots" %}
+  end
+
+  @[NoSpec("SPEC 6.1: proven by test/ris/refused/pool_realloc.ri")]
+  def realloc(*args)
+    {% raise "a Pool slot never moves (SPEC 6.2); use SlicePool(T) for runs" %}
+  end
+
+  private def checked(i : Int32) : Int32
+    if i < 0
+      RisRegion.size_error("ris: Pool index out of bounds: -",
+        (0_i64 - i.to_i64).to_u64)
+    end
+    if i >= size
+      RisRegion.size_error("ris: Pool index out of bounds: ", i.to_u64)
+    end
+    i
+  end
+
+  private def live(h : Handle(T)) : Int32
+    unless live?(h)
+      at = h.index
+      RisRegion.size_error(at < 0 ? "ris: stale Pool handle; check " \
+                                    "pool.live?(h) or use pool.get?(h): -" \
+                                     : "ris: stale Pool handle; check " \
+                                       "pool.live?(h) or use pool.get?(h): ",
+        at < 0 ? (0_i64 - at.to_i64).to_u64 : at.to_u64)
+    end
+    h.index
+  end
+end
+
+# A checked slot of a Pool(T): its index and the generation it was given.
+# Flat, 8 bytes: it may live in any struct, array or byte image. Its use
+# is checked, so a forged or zeroed handle fails there, not at load.
+@[Tape::Flat]
+struct Pool::Handle(T)
+  getter index : Int32
+  getter generation : UInt32
+
+  @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  def initialize(@index : Int32, @generation : UInt32)
+  end
+end
+
 # Runtime-only marker for a pool's already placed slots.
 private struct RisPoolStorage
 end

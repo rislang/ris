@@ -1,0 +1,33 @@
+# spec: 6.1@a1b985de
+# Pool(T) failures are fatal checked errors, before any mutation: a bad
+# index, a double free and a stale or forged handle.
+tape do
+  pool = Pool(Int32).new(2)
+  a = pool.alloc(1)
+  h = pool.alloc_handle(2)
+  case Program.arguments[0]
+  when "bounds"
+    pool[2]
+  when "negative"
+    pool[-1] = 5
+  when "negative_free"
+    pool.free(-3)
+  when "double_free"
+    pool.free(a)
+    pool.free(a)
+  when "stale_read"
+    pool.free(h)
+    pool[h]
+  when "stale_write"
+    pool.free(h.index)
+    pool[h] = 3
+  when "stale_free"
+    pool.free(h)
+    pool.free(h)
+  when "zero_handle"
+    pool[Pool::Handle(Int32).new(0, 0_u32)]
+  when "negative_handle"
+    pool[Pool::Handle(Int32).new(-1, 1_u32)]
+  end
+  nil
+end

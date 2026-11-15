@@ -1,0 +1,5 @@
+# spec: 6.1@a1b985de
+tape do
+  pool = Pool(Int32).new
+  pool.push(1)
+end
