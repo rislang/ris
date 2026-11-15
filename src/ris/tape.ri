@@ -3326,7 +3326,25 @@ end
 module Tape
   def self.owner_copy(value : T, owner) : T forall T
     check_copy(T, Tuple())
-    copy_owned(value, owner)
+    result = copy_owned(value, owner)
+    note_owner(result) if owner.is_a?(Program::TapeOwner)
+    result
+  end
+
+  # A program-owned object's growing fields, by name, for
+  # RIS_TAPE_STATS (SPEC 6.6). The compiler expands the names here.
+  @[NoSpec("runtime hook; test/ris/tape_stats.ri proves it (SPEC 6.6)")]
+  def self.note_owner(object : T) : Nil forall T
+    {% if T < Reference && !T.abstract? %}
+      {% for field in T.instance_vars %}
+        {% if field.type < ::Array %}
+          RisRegion.owner_field(
+            pointerof(object.@{{field.name.id}}).address,
+            {{"#{T.name.stringify.split("::").last.id}.#{field.name}"}},
+            sizeof({{field.type.type_vars[0]}}).to_u64)
+        {% end %}
+      {% end %}
+    {% end %}
   end
 
   def self.task_copy(value : T, owner) : T forall T
@@ -3567,6 +3585,7 @@ struct SlicePool(T)
         extend_to(stop, fill)
         take = (count < span.size ? count : span.size)
         @free[i] = String::Span.new(span.start + take, span.size - take)
+        RisRegion.pool_reused(take.to_u64 &* sizeof(T).to_u64)
         defaults(span.start, take, fill)
         return run(span.start, count)
       end
@@ -3581,6 +3600,7 @@ struct SlicePool(T)
   def free_slice(s : Run(T)) : Nil
     validate(s)
     return if s.size == 0
+    RisRegion.pool_freed(s.size.to_u64 &* sizeof(T).to_u64)
     start = s.offset
     stop = start + s.size
     # Compact all touching spans, then insert in sorted order.
@@ -3677,6 +3697,7 @@ struct SlicePool(T)
         extend_to(stop, fill)
         take = (count - s.size < span.size ? count - s.size : span.size)
         @free[i] = String::Span.new(span.start + take, span.size - take)
+        RisRegion.pool_reused(take.to_u64 &* sizeof(T).to_u64)
         defaults(old_stop, take, fill)
         return run(s.offset, count)
       end

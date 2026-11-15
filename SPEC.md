@@ -248,7 +248,6 @@ section; a removed one leaves its number unused.
 * 6.6 RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste,
   copies, and results moved down to a caller's boundary.
   check.sh tests exit, panic, cancel, exhaustion.
-  <!-- todo: Needs RIS_TAPE_STATS accounting and exit-path proofs -->
 * 6.7 `ris spec` links clauses to their proofs. Root clauses are
   `* N.M text` under `## N. Title` in SPEC.md or spec/*.md (both is an
   error). The root is the nearest directory holding ris.mod, else

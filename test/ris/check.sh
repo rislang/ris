@@ -82,9 +82,29 @@ expect byte_char_equal 'A String index is a UInt8 byte'
 # Yielded holders retain the provenance of their borrowed owner fields.
 for name in yield_owner_field yield_clone_attrs svcb_store \
   rsa_pem_lifetime current_copy_result time_location_kept decoded_maps \
-  reader_read_str sse_reconnect_id rsa_string_message \
-  response_owner typed_group_results multipart_owner enumerable_results \
-  const_folded_size zstd_whole_result big_shift_right owner_reference client_open_block udp_handoff joined_task_borrow; do
+  reader_read_str; do
+  out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
+  if [ "$code" -eq 0 ] && [ -z "$out" ]; then
+    echo "runs     $name"
+  else
+    echo "FAILED   $name: $out"; status=1
+  fi
+done
+# Split in three parallel blocks: one held them all for 107 s alone,
+# near the 300 s job deadline under load (check_parallel.py).
+for name in sse_reconnect_id rsa_string_message response_owner \
+  typed_group_results multipart_owner enumerable_results \
+  const_folded_size zstd_whole_result; do
+  out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
+  if [ "$code" -eq 0 ] && [ -z "$out" ]; then
+    echo "runs     $name"
+  else
+    echo "FAILED   $name: $out"; status=1
+  fi
+done
+# client_open_block compiles std/http's client: about 45 s on its own.
+for name in big_shift_right owner_reference client_open_block \
+  udp_handoff joined_task_borrow; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
   if [ "$code" -eq 0 ] && [ -z "$out" ]; then
     echo "runs     $name"
@@ -2758,6 +2778,26 @@ if [ "$?" -eq 1 ] &&
 else
   echo "FAILED   side_overflow: $out"; status=1
 fi
+
+# SPEC 6.6: RIS_TAPE_STATS on every way out (normal, exit, panic,
+# cancel, exhaustion): owner fields by name, pool waste, results.
+for mode in normal exit panic cancel exhaust; do
+  out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/tape_stats.ri -- "$mode" 2>&1)
+  code=$?
+  case $mode in
+    normal|cancel) want=0 ;; exit) want=3 ;; *) want=1 ;;
+  esac
+  if [ "$code" -eq "$want" ] &&
+      grep -qF 'ris tape owner Log.items: 1 objects, 80 bytes reserved, 48 used' <<<"$out" &&
+      grep -qF 'ris tape owner Log.names: 1 objects, 16 bytes reserved, 16 used' <<<"$out" &&
+      grep -qF 'ris tape pool waste: 40 bytes in freed slots not yet reused' <<<"$out" &&
+      grep -qF 'ris tape results: ' <<<"$out" &&
+      [ "$(grep -c '^ris tape: ' <<<"$out")" -eq 1 ]; then
+    echo "runs     tape_stats $mode (stats on this way out)"
+  else
+    echo "FAILED   tape_stats $mode: $out"; status=1
+  fi
+done
 
 # SPEC 4.2: the limits for tape bytes, regions, tasks and native stack
 # are published by RIS_TAPE_STATS and doc/TAPE_API.md, with one value.
