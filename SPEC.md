@@ -29,19 +29,16 @@ section; a removed one leaves its number unused.
   @[OnTape]
   structs and class instances; all obey the root rules. Dispatch and union
   payloads never box.
-  <!-- todo: Needs tape-type, root and unboxed-dispatch proofs -->
 * 1.3 Classes stay: new allocates the instance on the active tape, checked
   before initialize; a reference is a root like a view. Instances are fixed size
   and never move; finalize is refused (resources have explicit cleanup); class
   instances are not Share. Long-lived ones are built on their owner's tape
   (Program.tape) or copied there with copy_to.
-  <!-- todo: Needs class allocation and reference-lifetime proofs -->
 * 1.4 Array, RisTree and builders are handles to shared state: assignment and
   arguments alias data, length and capacity, so growth through b shows through
   a; String and views alias their bytes. copy_to and checked boundary copies
   (4.1, 5.1-5.3, 5.6) copy; Goose's implicit value copies (§4.1) do not
   apply. String is read-only.
-  <!-- todo: Needs shared-handle aliasing proofs -->
 * 1.5 A def builds its tape result in its caller's destination (Goose §7,
   C.3): a body that is one call hands the destination on; a local grown in
   place is returned where it is; a fresh flat value (String, Array of
@@ -50,7 +47,6 @@ section; a removed one leaves its number unused.
   borrow caller input; nested tape blocks share the tape.
 * 1.6 Text literals are static String views; interpolation builds a
   String on the active tape. Text parameters borrow, never copy.
-  <!-- todo: Needs static literal and borrowed-text proofs -->
 * 1.7 Build retained data on its destination (writers, in-place append), else
   copy_to(owner) deep-copies String bytes, Array/RisTree/@[OnTape] fields and
   class instances, splitting all sharing and extending no borrows. It keeps
@@ -59,10 +55,8 @@ section; a removed one leaves its number unused.
   collections, unions or subclasses): build those on the destination with Array
   nodes and indices. Publish only complete results; discard partial destination
   storage on failure; deep chains never overflow the stack.
-  <!-- todo: Needs deep-copy destination and failure proofs -->
 * 1.8 Program data initializes in iyi III.5's module order, once, never
   suspending or seeing incomplete values; stores obey owner provenance.
-  <!-- todo: Needs module initialization order and provenance proofs -->
 * 1.9 No result is staged and copied back implicitly. A result that would
   have to leave a def's scratch by copy (it links into that scratch) is
   refused, naming the forms that replace it: end the def with the call
@@ -93,7 +87,6 @@ section; a removed one leaves its number unused.
 ## 3. Roots (Goose §9.1-9.2)
 * 3.1 Track (owner, field path) through aliases, branches, holders, calls and
   results; joins keep every alternative; inexact roots bound lifetime only.
-  <!-- todo: Needs transitive root and branch-join proofs -->
 * 3.2 Every source root outlives every possible destination; inexact stores
   check each read-back candidate, caller storage behind parameters included.
   Branch-local and temporary storage cannot escape; loops see earlier rounds.
@@ -134,14 +127,12 @@ section; a removed one leaves its number unused.
   released after the defers; panic data and copyable task results survive
   on retained result storage and are copied to each reader's tape (5.6).
   A panic in cleanup is fatal.
-  <!-- todo: Needs cleanup ordering and retained-result proofs -->
 * 4.2 Exhaustion and bad sizes are checked before mutation, with overflow-safe
   arithmetic; they end as iyi's panic print (allocation-free), no fallback.
   Limits for tape bytes, regions, tasks and native stack are published.
   <!-- todo: Needs exhaustion, overflow and published-limit proofs -->
 * 4.3 Fatal errors skip user cleanup. Signals are std/signal's: the handler sets
   a flag and wakes a pipe; work runs in a task.
-  <!-- todo: Needs fatal-exit cleanup and signal-handler proofs -->
 ## 5. Concurrency and boundaries (iyi III.4; Goose §11.2)
 * 5.1 Tasks start in an iyi group and never outlive it (III.4.1); work that
   outlives its caller runs in a longer group, such as main's. ris adds:
@@ -242,7 +233,6 @@ section; a removed one leaves its number unused.
   gives a SO_REUSEPORT port's connections to one listener; more is refused.
   Pipe and socket race IO
   stay in one task using OS facilities on the poller; board IO copies data.
-  <!-- todo: Needs grouped-fiber and board transport proofs -->
 ## 6. Pools, validation, tooling (Goose §5.4, §9.3-9.4)
 * 6.1 Pool(T)/SlicePool(T): typed slots/runs; free keeps values valid, stale
   views see typed replacements; generations only guard checked handles.
@@ -254,14 +244,12 @@ section; a removed one leaves its number unused.
 * 6.3 Validate bounds, overflow and aligned membership before mutation; foreign
   storage is refused statically or at runtime. No uninitialized slots;
   self-relative links stay in one region.
-  <!-- todo: Needs pool bounds, overflow and membership proofs -->
 * 6.4 External byte images (.load(bytes)) check lengths, alignment, union tags,
   spans and links (each to an element start in the image) before any value is
   published; invalid input yields none, never part. This is safety, not
   integrity: a checksum is the caller's (Goose §9.4).
   <!-- todo: Needs external byte-image validation proofs -->
 * 6.5 Pool free never closes a resource: resources have explicit cleanup.
-  <!-- todo: Needs proof that pool free never closes resources -->
 * 6.6 RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste,
   copies, and results moved down to a caller's boundary.
   check.sh tests exit, panic, cancel, exhaustion.
@@ -345,7 +333,6 @@ section; a removed one leaves its number unused.
   tape. Array is grow-only in its own reservation, never moving. Hash is
   open addressing in place, in insertion order. RisTree is a tree in one array
   with index links.
-  <!-- todo: Needs tape data-type and stable-growth proofs -->
 * 7.3 Ruby's and Crystal's syntax stays as written; the compiler places
   memory. A String local or field that gets `<<` reserves growing storage
   at its first append, copying its current text once; later appends grow
@@ -356,21 +343,17 @@ section; a removed one leaves its number unused.
   Bang methods rebind. A String::Builder that a program only appends to
   and reads back is refused, naming `text = ""`; one passed to a call or
   used for bytes stays.
-  <!-- todo: Needs implicit storage and String-append proofs -->
 * 7.4 Nested containers (`Array(Array(T))`, `Hash(K, Array(V))`) hold
   their inner arrays as runs of a SlicePool they own; `outer[i]` answers a
   handle to its run, so a change through it shows in the container. No
   view into a run outlives its next growth.
-  <!-- todo: Needs nested-container lifetime and growth proofs -->
 * 7.5 A long-lived container (a constant, a class variable, a field of a
   program-owned object) owns a SlicePool for what it holds. A store copies
   the value into a run of that pool; delete, clear and overwrite give the
   run back. Only this store copies implicitly.
-  <!-- todo: Needs long-lived container retention proofs -->
 * 7.6 Any other store of a tape value into something that outlives it is
   a compile error naming the forms that work: `copy_to(owner)` or a
   long-lived container (1.x, 3.x).
-  <!-- todo: Needs escaping tape-store refusal proofs -->
 
 ## 8. Library
 

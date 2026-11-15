@@ -18,6 +18,10 @@ What CHANGELOG's 0.1.0 promises must work; the items stay in their
 sections below and are listed here in order:
 
 * Benches build (section 7), including `HTTP.tls_config=` callers.
+* SPEC todos all proved (decided 2026-11-15,
+  doc/drafts/release-0.1-todos/triage.md), in order: 2.3, 4.2, 6.6,
+  6.4, capsule.8, 5.4, 6.2, then 6.1 Pool(T) after an EGM draft.
+* `Pointer#==` on one address gave false in box.3's proof: test, fix.
 * Release: Linux tarball and its job, `install_ris.sh`, tag ris-v0.1.0;
   `ris --version` prints 0.1.0.
 

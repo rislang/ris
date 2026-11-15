@@ -316,7 +316,8 @@ end
 #   4648 validation.
 spec base64.4
   base64_assert_str "A", Base64.decode("QQ="), "partial padding"
-  todo "Needs proof"
+  base64_assert_str "A", Base64.decode("QR=="), "nonzero unused bits"
+  base64_assert_str "A", Base64.decode("QR"), "missing padding"
 end
 
 # base64.5 Results are new binary Strings under SPEC 1.5. Writer overloads

@@ -1,3 +1,4 @@
+# spec: 7.6@ae052fb8
 @[Ffi]
 module test/ris/refused/return_escape
 import std/int

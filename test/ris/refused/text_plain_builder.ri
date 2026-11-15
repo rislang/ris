@@ -1,3 +1,4 @@
+# spec: 7.3@1ce159dc
 # A builder that only appends and is read back is a String local.
 tape do
   text = String::Builder.new(64)

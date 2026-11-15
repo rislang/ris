@@ -1,3 +1,4 @@
+# spec: 1.7@1e464b38
 # Fault injection after a real leaf copy: the public copy_to must discard
 # both the completed leaf and the rest of the partially built destination.
 # The leaf is a struct, not String: Array(String) copies its bytes into its

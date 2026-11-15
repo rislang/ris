@@ -1087,7 +1087,7 @@ else
   status=1
 fi
 
-heap_trap text_literal_heap refused 4 \
+heap_trap text_literal_heap refused 5 \
   'cannot store request tape data on the program tape'
 
 heap_trap borrowed_text runs
@@ -1098,6 +1098,10 @@ expect class_share 'ClassShareValue is a tape type'
 expect class_finalize "tape class instances cannot finalize"
 expect class_inherited_finalize "tape class instances cannot finalize"
 expect class_escape "is a variable of the code around this tape block"
+# Roots follow branches and joins into stores (SPEC 3.1).
+for name in root_branch_escape root_store_join; do
+  expect "$name" 'cannot store a view beyond its owner scope'
+done
 expect round_class_outer_store "Copy it with .copy_to(owner)"
 expect struct_field  'Use an @[OnTape] struct for request data'
 expect class_var     "copy it with .copy_to(Program.tape)"
@@ -2753,6 +2757,20 @@ if [ "$?" -eq 0 ] && grep -qF '42' <<<"$out" &&
 else
   echo "FAILED   heap_class: $out"
   status=1
+fi
+# Dispatch and union payloads never box (SPEC 1.2).
+out=$(RIS_HEAP_STATS=1 "$RIS" run test/ris/heap_dispatch.ri 2>&1)
+if [ "$?" -eq 0 ] && grep -qx '30' <<<"$out" &&
+    grep -qF 'ris heap: 0 allocations, 0 bytes' <<<"$out"; then
+  echo "runs     heap_dispatch (no GC)"
+else
+  echo "FAILED   heap_dispatch: $out"; status=1
+fi
+out=$("$RIS" run test/ris/handle_alias.ri 2>&1)
+if [ "$out" = 'PASS: handles alias' ]; then
+  echo "runs     handle_alias"
+else
+  echo "FAILED   handle_alias: $out"; status=1
 fi
 # heap_allocator traps again when the bump allocator goes (TODO.md).
 # Exercise read boundaries over the full keep-alive workload.

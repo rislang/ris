@@ -61,5 +61,8 @@ end
 #   pointer is valid only while the tape-owned box is alive; the caller must
 #   supply a live pointer to the matching Box(T).
 spec box.3
-  todo "Needs proof"
+  box = Box(Array(Int32)).new([1, 2])
+  pointer = box.to_unsafe
+  Box(Array(Int32)).unbox(pointer) << 3
+  pointer.address == box.to_unsafe.address && box.object.size == 3
 end

@@ -1,1 +1,2 @@
+# spec: 1.7@1e464b38
 Array::Link(Int32, UInt32).new(0).copy_to(Program.tape)

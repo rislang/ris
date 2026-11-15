@@ -1182,7 +1182,7 @@ end
 #   encoded bytes and result arrays follow SPEC 1.5. A caller retaining decoded
 #   views must retain the source under SPEC 3.2.
 spec capsule.8
-  todo "Needs proof"
+  todo "decode copies the value into a new Bytes; it does not view the input"
 end
 
 private def capsule_assert_true(cond : Bool, msg : String) : Bool

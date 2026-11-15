@@ -1,3 +1,4 @@
+# spec: 1.6@ab909135
 TEXT   = ("constant")
 TYPED : String = ("typed")
 USERS = {42 => "alice"}

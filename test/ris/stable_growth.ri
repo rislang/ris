@@ -1,3 +1,4 @@
+# spec: 7.2@d367aea4
 # Inspect storage only to verify the runtime's address stability.
 module test/ris/stable_growth
 

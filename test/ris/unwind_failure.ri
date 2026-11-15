@@ -1,3 +1,4 @@
+# spec: 4.1@06dec80c, 4.3@85d5df52
 module test/ris/unwind_failure
 
 defer puts "must not run"

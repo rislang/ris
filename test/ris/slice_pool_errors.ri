@@ -1,3 +1,4 @@
+# spec: 6.3@4ddcbf0b
 tape do
   pool = SlicePool(Int32).new(4)
   run = pool.alloc_slice(2)

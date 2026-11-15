@@ -1,3 +1,4 @@
+# spec: 1.2@08914ecc
 # Writer#write_bytes and Writer#shift, and String::Scanner: views of the
 # text, offsets in bytes, strings, characters and counts as patterns.
 module tape_primitives

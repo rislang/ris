@@ -1,3 +1,4 @@
+# spec: 1.7@1e464b38
 # Structural tree nesting is a flat stream; preserve every subtree stop.
 tape do
   tree = RisTree(String).new(100_001)

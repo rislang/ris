@@ -99,17 +99,18 @@ block that runs or names those programs, plus `ris spec ack`.
 | | | | unused bits) gives "A"; drop the todo |
 | box.3 | DONE | src/std/box.ri:18 | S: `Box.unbox(b.to_unsafe)` is the |
 | | | | same object (`same?`); address equals across calls |
-| capsule.8 | DONE | src/std/capsule.ri:1184 | S: decoded payload |
-| | | | `.to_unsafe`-free check: slice offsets inside input |
-| | | | (byte compare + RIS_TAPE_STATS copies 0) |
+| capsule.8 | PART | src/std/capsule.ri:371 | kept: encoded bytes and |
+| | | | result arrays (SPEC 1.5). Missing: decode copies |
+| | | | the value into a new Bytes, so payloads do not view |
+| | | | the input |
 
 ## Totals
 
 | verdict | count | clauses |
 |---|---|---|
-| DONE | 20 | 1.2 1.3 1.4 1.6 1.7 1.8 3.1 4.1 4.3 5.6 6.3 6.5 |
-| | | 7.2 7.3 7.4 7.5 7.6, base64.4 box.3 capsule.8 |
-| PART | 6 | 2.3 4.2 5.4 6.2 6.4 6.6 |
+| DONE | 19 | 1.2 1.3 1.4 1.6 1.7 1.8 3.1 4.1 4.3 5.6 6.3 6.5 |
+| | | 7.2 7.3 7.4 7.5 7.6, base64.4 box.3 |
+| PART | 7 | 2.3 4.2 5.4 6.2 6.4 6.6, capsule.8 |
 | NOT | 1 | 6.1 |
 
 Total 27 (24 root, 3 std).

@@ -1,3 +1,4 @@
+# spec: 1.4@6085c194
 module test/ris/array_api
 
 a = [1, 2, 1, 3]

@@ -1,3 +1,4 @@
+# spec: 4.3@85d5df52
 @[Ffi]
 module test/ris/signal_flags
 import std/signal::{Signal}

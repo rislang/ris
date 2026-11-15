@@ -1,3 +1,4 @@
+# spec: 4.1@06dec80c
 # A typed group (`group do` ending in a spawn) joins, then reads each
 # task's value: the result regions must outlive that join. They were
 # freed by it, so a task whose own group ended in between read another

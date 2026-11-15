@@ -1,3 +1,4 @@
+# spec: 1.8@2ae483dc
 class State
   @@text : String? = nil
 

@@ -1,3 +1,4 @@
+# spec: 1.7@1e464b38
 class Node
   getter children : Array(Node)
 

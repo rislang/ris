@@ -1,3 +1,4 @@
+# spec: 1.2@08914ecc
 module test/ris/std_generic_tape
 
 import std/heap::{Heap}

@@ -1,3 +1,4 @@
+# spec: 5.6@b5b47fbd
 @[OnTape]
 struct BoardRecursive
   @children : Array(BoardRecursive)

@@ -1,3 +1,4 @@
+# spec: 1.7@1e464b38
 @[PointerUnsafe("test a raw pointer copy refusal")]
 def copy_pointer
   Pointer(Int32).new(0_u64).copy_to(Program.tape)

@@ -1,3 +1,4 @@
+# spec: 7.6@ae052fb8
 module test/ris/refused/yield_escape
 import std/int
 

@@ -1,3 +1,4 @@
+# spec: 3.1@7e5647c9
 class BranchOwner
   getter bytes = String::Builder.new
 end

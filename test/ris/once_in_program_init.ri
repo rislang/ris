@@ -1,3 +1,4 @@
+# spec: 1.8@2ae483dc
 # A constant's initializer runs on the program tape. The first time it
 # reads a lazily made class variable, that variable's `copy_to(Program.tape)`
 # must survive the constant's own defs returning: here the case-insensitive

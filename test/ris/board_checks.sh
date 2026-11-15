@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# spec: 5.6@b5b47fbd
 # Every invocation below starts with fresh process-wide mail and limits.
 set -uo pipefail
 cd "$(dirname "$0")/../.."

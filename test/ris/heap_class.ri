@@ -1,3 +1,4 @@
+# spec: 1.2@08914ecc, 1.3@04f780a4
 module test/ris/heap_class
 
 class Kept

@@ -1,3 +1,4 @@
+# spec: 1.8@2ae483dc
 # Program initialization finishes before threads read its storage.
 module thread_program_initializers
 
