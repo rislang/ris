@@ -351,8 +351,9 @@ if mode.empty?
       end
       check("a std/tls client's request", asked(waiting), "HTTP/1.1 200 OK", seen)
       up_tls = Upgraded.new
-      unless up_tls.connect(secure_base + "/upgrade", "hold", client: over_h1).nil?
-        raise "up_tls: the upgrade failed"
+      up_err = up_tls.connect(secure_base + "/upgrade", "hold", client: over_h1)
+      unless up_err.nil?
+        raise "up_tls: the upgrade failed: #{up_err.is_a?(Cancelled) ? "cancelled" : up_err.message}"
       end
       up_plain = Upgraded.new
       unless up_plain.connect(plain_base + "/upgrade", "hold").nil?
