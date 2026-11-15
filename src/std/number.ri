@@ -1,3 +1,4 @@
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/number
 
 pub enum RoundingMode

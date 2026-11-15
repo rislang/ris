@@ -22,6 +22,7 @@
 # There are no kernel timeouts and no non-blocking flag: a wait that must
 # end is `poll_read(ms)` followed by `receive_from?`.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/udp
 
 import std/socket::{IPv4Address, IPv6Address, IyiSocket, SocketError}

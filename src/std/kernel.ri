@@ -10,6 +10,8 @@
 # it says so itself: `sleep 2.0` is refused with "`sleep` takes
 # milliseconds, an `Int32`".
 
+@[NoSpec("std API predates spec-required; proofs follow")]
+
 module std/kernel
 
 # Inspects object to standard output followed by newline. Returns object.

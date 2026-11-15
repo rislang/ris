@@ -57,6 +57,18 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.
 
+### 2026-11-15 · 6.8@023f849f
+
+* Breaking: `ris check spec` fails on a project with no spec (it was
+  skipped) and on a public def no spec block in its own file proves.
+  An agent follows errors, not prose: both gaps let it write code with
+  no clause. `@[NoSpec("reason")]` exempts a def, or a module's defs as
+  `ris spec ack --nospec MODULE` records them in .spec.lock. ris's
+  test/ and doc/drafts/ are .ris-fixtures trees. Draft and review:
+  doc/drafts/spec-required.
+* rispacks and other projects: run `ris check spec` and add blocks,
+  `todo` blocks or NoSpec marks before taking this ris.
+
 ### 2026-11-14 · 5.1@b5c69786
 
 * New: a local task may borrow one value of its spawner's scope that is

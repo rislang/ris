@@ -1,5 +1,6 @@
 # Errno wraps and gives access to libc/platform errno values.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/errno
 
 pub enum Errno

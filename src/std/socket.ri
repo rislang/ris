@@ -79,6 +79,7 @@
 # here, applied to the file that broke the library ceiling with them
 # (iyi SPEC III.9).
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/socket
 
 import std/static_array::{StaticArray}

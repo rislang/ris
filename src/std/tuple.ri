@@ -3,6 +3,7 @@
 # Heterogeneous tuples cannot implement Indexable (one Elem). This module
 # adds what the compiler does not: size, empty?, first/last, ==, each, to_s.
 #
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/tuple
 
 struct ::Tuple

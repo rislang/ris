@@ -12,6 +12,7 @@
 # It is also the second test of II.6's claim, after `Enumerable` itself: one
 # `each`, and the trait supplies the rest.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/list
 
 import std/enumerable::{Enumerable}

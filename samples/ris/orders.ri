@@ -9,6 +9,7 @@
 # total, and the order's total, with a head that says its length. Prints
 # the request count, the bytes answered and a checksum.
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/orders
 
 import std/int

@@ -9,6 +9,7 @@
 # process writes its output to two files beside `tmp` through `/bin/sh`.
 # No port and no protocol here: those belong to a package's spec module.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/ris_spec
 
 import std/process::{Process, ChildProcess, ProcessStatus, Redirect}

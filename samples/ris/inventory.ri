@@ -9,6 +9,7 @@
 # grows only when a program in this repository needs something (iyi SPEC 0.1.0
 # item 3), and these are the calls the second program makes that the first
 # did not.
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/inventory
 
 struct Item

@@ -37,6 +37,7 @@
 #   floats: fractional decimal places, exact and rounded half to even.
 #   strings: maximum characters to include (truncated if longer).
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/format
 
 # ris: `UInt16#to_u64` and the other widths are `std/int`'s.

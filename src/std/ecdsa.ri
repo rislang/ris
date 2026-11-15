@@ -53,6 +53,7 @@
 #
 # Pure computation: std/big's arithmetic, std/digest's hashes.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/ecdsa
 
 import std/int

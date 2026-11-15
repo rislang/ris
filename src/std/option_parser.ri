@@ -36,6 +36,7 @@
 # There are no commands: list them with `separator` and dispatch on
 # `rest[0]`.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/option_parser
 
 # A flag registered with `OptionParser#on`, read from `RisOptions`.

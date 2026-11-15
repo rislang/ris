@@ -1,3 +1,4 @@
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/ris/owned_cache
 
 # One named program owner, borrowed by each request handler.

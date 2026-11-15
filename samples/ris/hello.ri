@@ -6,6 +6,7 @@
 # fiber's tape inside `tape`, and its owning scope releases the storage
 # together when it ends. Everything else is iyi as it is - and so, underneath,
 # Crystal.
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/hello
 
 import shop/order::*

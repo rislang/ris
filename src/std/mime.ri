@@ -21,6 +21,7 @@
 # file. Extensions are looked up by the last dot of the base name only,
 # so `a.tar.gz` is `application/gzip`, as every server answers it.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/mime
 
 import std/tuple

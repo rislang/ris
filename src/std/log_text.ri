@@ -1,5 +1,6 @@
 # Synchronous log text, written into the caller's builder. The timestamp
 # is supplied by the caller; this module has no clock or backend state.
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/log_text
 
 @[OnTape]

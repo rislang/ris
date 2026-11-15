@@ -296,6 +296,8 @@ module Iyi
       text.lchop('\uFEFF').each_line do |line|
         line = line.strip
         next if line.empty? || line.starts_with?('#') || line == "@[Ffi]"
+        # ris: a module's `@[NoSpec("reason")]` stands above its header.
+        next if line.starts_with?("@[NoSpec(") && line.ends_with?(")]")
         return nil unless line.starts_with?("module ")
         module_path = line.lchop("module ").strip
         return nil if module_path.empty? || module_path.includes?(' ')

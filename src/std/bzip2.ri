@@ -78,6 +78,7 @@
 # Strings are the byte type here, as everywhere in `src/std`. Left out:
 # randomised blocks (refused by name), and a streaming compressor.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/bzip2
 
 import std/static_array::{StaticArray}

@@ -1,6 +1,7 @@
 # NamedTuple methods the prelude does not carry: dynamic key access,
 # merge, clone, and conversion to Array/Hash.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/named_tuple
 
 import std/tuple

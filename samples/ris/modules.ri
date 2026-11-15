@@ -5,6 +5,7 @@
 # Everything below compiles and runs today. `hello.ri` covers traits and
 # `impl` in a single file; this one covers the part a single file cannot show.
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/modules
 
 # R-1: `import` names a module and loads it at most once, so the import graph

@@ -19,6 +19,7 @@
 # There is no `~`: the prelude gives integers no complement, so an enum
 # has none to build on.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/enum
 
 # An enum may be numbered in any integer, and the prelude gives arithmetic

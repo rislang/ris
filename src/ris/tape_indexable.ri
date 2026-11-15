@@ -1,4 +1,5 @@
 # Indexed operations on tape arrays.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 struct Array(T)
   def insert(index : Int32, value : T) : self
     index += size + 1 if index < 0

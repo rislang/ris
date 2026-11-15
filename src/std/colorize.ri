@@ -24,6 +24,7 @@
 # `42.colorize.yellow` can take. That reopen is the only thing this
 # module puts outside its own namespace.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/colorize
 
 pub struct Colorize

@@ -2,6 +2,7 @@
 #
 # Internally stored as 64-bit unsigned integers. Zero external C library dependencies.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/bit_array
 
 import std/int

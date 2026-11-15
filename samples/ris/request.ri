@@ -7,6 +7,7 @@
 # This parser example has no listener or spawned task. Its users table
 # stays on the caller's tape.
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/request
 
 import std/http::{Server, ParsedHead, Field}

@@ -8,6 +8,7 @@
 #   ./serve answer    # the same (kept for existing workload commands)
 #   /usr/bin/time -f '%e s %M KB' env RIS_TAPE_STATS=1 ./serve answer
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/serve
 
 import std/socket::{IyiSocket}

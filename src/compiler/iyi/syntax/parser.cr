@@ -1011,6 +1011,17 @@ module Iyi
         nodes = Expressions.from(expressions)
       end
 
+      # ris: `@[NoSpec("reason")]` as the file's first statement marks the
+      # module for `ris check spec` (SPEC 6.8); no node of the file takes it.
+      # A def directly under it takes it; a blank line between makes it
+      # the module's.
+      if (mark = expressions[0]?).is_a?(Annotation) && mark.path.names == ["NoSpec"] &&
+         (!(after = expressions[1]?).is_a?(Def | Annotation | VisibilityModifier) ||
+         ((at = after.location) && (ends = mark.end_location) && at.line_number > ends.line_number + 1))
+        expressions = expressions[1..]
+        nodes = expressions.empty? ? Nop.new : Expressions.from(expressions)
+      end
+
       # iyi: one file, one module (R-1, IV.6). A second header was accepted and
       # quietly wrong: the file emitted a single artifact under the first
       # module's name carrying *both* modules' exports, so the second module's
@@ -2736,6 +2747,15 @@ module Iyi
 
       ann = Annotation.new(name, args, named_args).at(location).at_end(end_location)
       ann.doc = doc
+      # ris: `@[NoSpec("reason")]` (SPEC 6.8) is read by `ris check spec`;
+      # the compiler only refuses one with no reason.
+      if name.names == ["NoSpec"]
+        reason = args.first?
+        unless args.size == 1 && named_args.nil? &&
+               reason.is_a?(StringLiteral) && !reason.value.blank?
+          raise "NoSpec needs a reason: write `@[NoSpec(\"why no proof\")]`", location
+        end
+      end
       ann
     end
 

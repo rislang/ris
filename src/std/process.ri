@@ -82,6 +82,7 @@
 # `Process.executable` is this program's own path, which is how a program
 # starts another copy of itself, and `Process.pid` its process id.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/process
 
 # `::Bool` throughout: beside `import std/bool` a bare `Bool` here named

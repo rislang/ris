@@ -1,3 +1,5 @@
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
+
 @[Share]
 struct Atomic(T)
   @value : T

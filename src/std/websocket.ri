@@ -149,6 +149,7 @@
 # halves against each other, against hand-made frames, and against
 # Python and Node peers, compressed and not.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/websocket
 
 import std/int

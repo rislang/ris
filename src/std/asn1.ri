@@ -63,6 +63,7 @@
 # Pure computation over the bytes given: no platform, no clock, no
 # randomness. std/time is imported for its `Time` alone.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/asn1
 
 import std/int

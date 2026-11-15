@@ -101,6 +101,7 @@
 # writer streams), writing `.tar.xz` (std/xz decompresses only), and
 # devices made on extraction.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/tar
 
 import std/int

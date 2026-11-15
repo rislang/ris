@@ -29,6 +29,7 @@
 # index past the end (`index 5 out of range for 3 elements`), a negative
 # count (`negative count: -1`), a negative size or capacity.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/deque
 
 import std/indexable::{Indexable, IndexableMutable}

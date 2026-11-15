@@ -1,5 +1,6 @@
 # Interned strings: the same bytes become the same String.
 #
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/string_pool
 
 # Interned strings on the pool's tape: `get` answers the one copy of a

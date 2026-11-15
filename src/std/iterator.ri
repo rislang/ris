@@ -69,6 +69,7 @@
 # * `cons_pair`: redundant with `each_cons(2)`.
 # * `in_slices_of`, `chunks`: require structural constraints on tuples or pairs.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/iterator
 
 import std/traits::{Comparable, Num}

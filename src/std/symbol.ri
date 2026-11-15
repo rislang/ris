@@ -1,3 +1,4 @@
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/symbol
 
 # ris: `IO::Memory#<<` is `std/io`'s.

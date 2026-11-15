@@ -83,6 +83,7 @@
 # Pure computation: std/big's arithmetic, std/digest's hashes, std/crypto's
 # HMAC, std/base64 for PEM.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/rsa
 
 import std/int

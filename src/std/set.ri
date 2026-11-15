@@ -23,6 +23,7 @@
 # `max`, `to_a` and the rest. This module imports it, so a caller of
 # std/set gets both.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/set
 
 import std/enumerable::{Enumerable}

@@ -23,6 +23,7 @@
 # sentence below, rather than answering zeros or failing on a name the
 # other heap does not have.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/gc
 
 {% if flag?(:gc_none) %}

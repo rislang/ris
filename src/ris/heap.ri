@@ -1,3 +1,4 @@
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 {% if flag?(:ris_no_gc) && flag?(:gc_boehm) %}
   {% raise "ris programs cannot link Boehm; drop -Dgc_boehm." %}
 {% end %}

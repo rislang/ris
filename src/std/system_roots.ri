@@ -41,6 +41,7 @@
 # std/x509 itself is pure computation, and a program that brings its own
 # roots does not link crypt32 or Security.framework.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/system_roots
 
 import std/static_array::{StaticArray}

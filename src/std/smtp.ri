@@ -66,6 +66,7 @@
 # test/cli/std_smtp_exercise.sh holds it to a server written in Python for
 # the purpose, over plain TCP, STARTTLS and TLS.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/smtp
 
 import std/text

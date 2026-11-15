@@ -1,3 +1,4 @@
+@[NoSpec("sample program; its defs are shown, not promised")]
 module calc/ast
 
 # What an evaluated program can go wrong with. Both are ordinary members of the

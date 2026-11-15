@@ -10,6 +10,7 @@
 # Moving a tape value out of its block is refused by the compiler:
 # `kept = hits` inside the block, with `kept` from outside, does not build.
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/report
 
 # One log line, "GET /users/1 200 12": method, path, status, milliseconds.

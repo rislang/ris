@@ -15,6 +15,7 @@
 #     installs one beside the resolver. A stripped program prints its
 #     frames as addresses.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/debug
 
 {% if flag?(:darwin) %}

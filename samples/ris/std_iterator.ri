@@ -6,6 +6,7 @@
 # Unlike `Enumerable`, which processes sequences eagerly and creates intermediate
 # arrays at each step, `Iterator` transforms elements on demand when pulled.
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/std_iterator
 
 import std/traits::{Comparable, Num}

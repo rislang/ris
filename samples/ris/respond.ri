@@ -12,6 +12,7 @@
 # github.com/rislang/ris-bench, which keeps a copy of this file as
 # ris/respond.ri: a change here is copied there in the same go.
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/respond
 
 import std/int

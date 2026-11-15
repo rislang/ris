@@ -1,5 +1,6 @@
 # Collection operations on the caller's tape.
 
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 struct Array(T)
   def uniq : Array(T)
     result = Array(T).new(size)

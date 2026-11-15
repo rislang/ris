@@ -54,6 +54,7 @@
 # decoder loads words of the stream with one unaligned little-endian
 # load, which every target iyi builds for is.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/zstd
 
 import std/static_array::{StaticArray}

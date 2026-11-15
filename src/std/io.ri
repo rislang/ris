@@ -32,6 +32,7 @@
 # a closed stream, writing a reader, reading a writer, malformed UTF-8 in
 # `read_char`, and a decode that runs out of bytes.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/io
 
 class ::IyiIO

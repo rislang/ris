@@ -11,6 +11,7 @@
 #   `router.cr:270` carries a workaround for them — "may have been cleared
 #   between tests" — and a clean sheet is the moment to stop. Registration
 #   returns a value instead.
+@[NoSpec("sample program; its defs are shown, not promised")]
 module kemal/router
 
 pub struct Context

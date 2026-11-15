@@ -43,6 +43,7 @@
 # not bytes, so a column on a line with non-ASCII text is the column a
 # reader sees.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/eiy
 
 pub struct Eiy

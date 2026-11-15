@@ -48,6 +48,7 @@
 # `csv` module reads what it writes, and it reads what Python's writes;
 # `test/cli/std_csv_exercise.sh` holds both directions on a generated corpus.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/csv
 
 pub struct CSV

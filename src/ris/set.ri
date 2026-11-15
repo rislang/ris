@@ -8,6 +8,8 @@
 # it (`samples/ris/visited.ri`) walks a graph with a cycle in it, and
 # `add` answering whether the element was new is the one bit that walk
 # needs.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
+
 @[OnTape]
 struct Set(T)
   @entries : Hash(T, Bool)

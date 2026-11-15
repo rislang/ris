@@ -90,11 +90,8 @@ class Iyi::Command
         "no ris.mod here"
       end
     when "spec"
-      if !paths.empty?
-        "a PATH was given"
-      elsif !(root = spec_root) || !spec_present?(root)
-        "no SPEC.md"
-      end
+      # ris: no spec fails (SPEC 6.8); only a PATH skips the part.
+      "a PATH was given" unless paths.empty?
     when "types"
       "nothing to check" if affected.empty? && ok_targets(paths).empty?
     when "unused"

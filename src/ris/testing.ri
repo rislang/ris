@@ -17,6 +17,8 @@
 
 # The panic every assertion here ends in: a headline naming the assertion
 # and the caller's own words, then the evidence, at the caller's site.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
+
 def __iyi_assert_fail(assertion : String, message : String, evidence : String, file : String, line : Int32) : NoReturn
   headline = assertion + " failed"
   headline = headline + ": " + message unless message.empty?

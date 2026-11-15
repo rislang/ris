@@ -54,6 +54,7 @@
 # asked to (`use_https_records`): to the endpoint they name, under the ECH
 # configuration (RFC 9848) they carry.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/dns
 
 import std/static_array::{StaticArray}

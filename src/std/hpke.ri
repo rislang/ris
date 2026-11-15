@@ -127,6 +127,7 @@
 # secrets and context keys live in the collected heap, and nothing wipes
 # them.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/hpke
 
 import std/int

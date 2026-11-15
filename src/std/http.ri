@@ -139,6 +139,7 @@
 # refused by name; and a streamed answer in zstd, std/zstd's compressor
 # taking its input whole.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/http
 
 import std/indexable

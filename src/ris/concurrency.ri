@@ -58,6 +58,8 @@
 # very stack pointer being saved; `@[NoInline]` because an optimised build
 # otherwise inlines the body and the push/ret discipline corrupts the
 # caller — measured, not feared: the release build faulted until it said so.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
+
 @[NoInline]
 @[Naked]
 fun __iyi_ctx_swap(current : Pointer(UInt64), target : Pointer(UInt64)) : Nil

@@ -7,6 +7,8 @@
 #
 # A program's `{k => v}` and `{} of K => V` are a Hash (the compiler's
 # literal expander); std and the runtime keep Hash until they migrate.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
+
 @[OnTape]
 struct Hash(K, V)
   @keys : Array(K)

@@ -2,6 +2,7 @@
 # Accept the CA's terms before passing accept-terms. Use ports 443/80
 # for public validation, or forward those ports to the chosen listeners.
 # Config is built independently on the manager and server tasks.
+@[NoSpec("sample program; its defs are shown, not promised")]
 import std/autocert::{Autocert, AutocertConfig, AutocertView}
 import std/http::{Server, Incoming, Outgoing}
 import std/tls::{TlsServerConfig}

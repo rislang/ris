@@ -7,6 +7,7 @@
 # WARNING: `ReferenceStorage` is for manual memory management, such as
 # allocating an instance on the stack or with a custom arena allocator.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/reference_storage
 
 class ::Reference

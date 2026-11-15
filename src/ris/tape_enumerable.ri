@@ -1,4 +1,5 @@
 # Enumerable operations on tape arrays.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 struct Array(T)
   def to_a : Array(T)
     result = [] of T

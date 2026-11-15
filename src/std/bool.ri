@@ -11,6 +11,7 @@
 # a convention some languages adopt and nothing in the prelude records.
 # A program that wants to sort by a Bool sorts by `to_unsafe`.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/bool
 
 struct ::Bool

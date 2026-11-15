@@ -18,6 +18,7 @@
 # metadata never orders (`1.0.0+a` and `1.0.0+b` compare equal) but does
 # distinguish (`==` and `hash` read it), so a set of versions keeps both.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/semantic_version
 
 import std/traits::{Comparable}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# spec: 6.7@436841dc, 6.8@82707d6b, 8.2@ddd1640f
+# spec: 6.7@436841dc, 6.8@023f849f, 8.2@ddd1640f
 # Module clauses: discovery, ownership, reasons, review and labels.
 set -euo pipefail
 cd "$(dirname "$0")/../.."

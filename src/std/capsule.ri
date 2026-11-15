@@ -37,6 +37,7 @@
 # 5. Capsule-Protocol Header (RFC 9297 Section 3.3):
 #    Item Structured Field `Capsule-Protocol: ?1` enabling capsule framing.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/capsule
 
 import std/slice::{Slice, Bytes}

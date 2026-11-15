@@ -1427,6 +1427,9 @@ module Iyi
       # ris: `@[PointerUnsafe("reason")]` on a def lets its body use raw
       # pointers without calling C (`Iyi::FfiBoundaryChecker`).
       types["PointerUnsafe"] = AnnotationType.new self, self, "PointerUnsafe"
+      # ris: `@[NoSpec("reason")]` on a def or module: `ris check spec`
+      # asks it no proof (SPEC 6.8). It lifts no safety rule.
+      types["NoSpec"] = AnnotationType.new self, self, "NoSpec"
 
       # iyi: the marker that makes a union member an error member (iyi SPEC
       # III.1.1). Created here rather than declared in the prelude because the

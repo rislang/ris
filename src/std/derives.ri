@@ -5,6 +5,7 @@
 # the type it was written as. It never sees a type it was not given, and it
 # never runs in the consumer.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/derives
 
 pub trait Show

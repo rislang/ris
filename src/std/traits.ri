@@ -15,6 +15,7 @@
 # Each named, though `std/float` imports `std/int` itself: an integer's hash
 # is not a thing to reach through a float, and a rule that holds only while
 # somebody else's import survives is not held.
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/traits
 
 import std/int

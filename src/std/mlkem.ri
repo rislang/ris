@@ -90,6 +90,7 @@
 # with no early exit and keeps K or K-bar by masks; its conditional jumps
 # compare loop counters, constants and pointer ranges.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/mlkem
 
 import std/int

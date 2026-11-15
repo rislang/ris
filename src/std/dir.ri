@@ -4,6 +4,7 @@
 # Provides opening, reading entries, creating, deleting, traversing,
 # changing current working directory, and globbing without external C libraries.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/dir
 
 import std/path::{Path}

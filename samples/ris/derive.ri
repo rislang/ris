@@ -14,6 +14,7 @@
 # cannot enumerate a type it was not given, which is what keeps a derive
 # bounded and cacheable.
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/derive
 
 import std/derives::*

@@ -2,6 +2,7 @@
 #
 # A fixed-size array on the stack: `StaticArray(T, N)`.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/static_array
 
 # ris: `Int32#<=>` is `std/traits`'s.

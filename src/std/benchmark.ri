@@ -9,6 +9,7 @@
 # 0B/op for a block that builds an array. They are not printed now, and
 # `Tms` and `IPS::Entry` have no field for them.
 #
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/benchmark
 
 pub import std/time

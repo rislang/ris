@@ -42,6 +42,7 @@
 #     here too: `?` is the nilable one, the plain name raises. Dropping `!`
 #     made the library *more* consistent, not less.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/enumerable
 
 import std/traits::{Comparable, Num, Hashable}

@@ -1,3 +1,4 @@
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/math
 
 # std/int for the small integers' comparisons and negation in gcd; std/float

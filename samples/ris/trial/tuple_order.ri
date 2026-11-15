@@ -1,4 +1,5 @@
 # Tuple keys order counts descending, then names ascending.
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/trial/tuple_order
 
 import std/tuple

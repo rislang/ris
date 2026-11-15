@@ -34,6 +34,7 @@
 # `index 5 out of range for 3 elements`, naming the index as it was written;
 # `first`/`last` on an empty collection panic, `first?`/`last?` answer nil.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/indexable
 
 import std/enumerable::{Enumerable}

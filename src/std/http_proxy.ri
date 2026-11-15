@@ -34,6 +34,7 @@
 #
 # What it reaches: std/http's reach, and the process environment.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/http_proxy
 
 import std/env::{ENV}

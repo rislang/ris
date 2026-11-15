@@ -1,6 +1,7 @@
 # A worker pool and a typed pair of tasks (iyi SPEC III.4).
 #
 #   ./bin/ris run samples/ris/workers.ri
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/workers
 
 # 1. Work and quit share one nominal queue; results use another.

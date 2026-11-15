@@ -58,6 +58,8 @@ class Iyi::Command
   @spec_lock = {} of String => String
   @spec_owners = {} of String => {String, Int32}
   @spec_markers = {} of String => {String, Int32, String}
+  # `nospec PATH NAME...` lines of .spec.lock (SPEC 6.8, R5).
+  @spec_nospec = {} of String => Set(String)
 
   private def spec_command
     case options.first?
@@ -116,8 +118,8 @@ class Iyi::Command
 
   # --- loading -------------------------------------------------------------
 
-  private def spec_load_or_abort : {String, Array(SpecClause), Array(SpecTest)}
-    root = spec_root || abort!("spec: no SPEC.md here: none in the root (the nearest directory with ris.mod or " \
+  private def spec_load_or_abort(root : String? = nil) : {String, Array(SpecClause), Array(SpecTest)}
+    root ||= spec_root || abort!("spec: no SPEC.md here: none in the root (the nearest directory with ris.mod or " \
                                "ris.mod) nor in the current directory", :USAGE_ERROR)
     begin
       @spec_blocks = spec_blocks_of(root)
@@ -491,9 +493,14 @@ class Iyi::Command
     lock = {} of String => String
     file = File.join(root, ".spec.lock")
     return lock unless File.file?(file)
+    @spec_nospec.clear
     File.read_lines(file).each_with_index do |line, index|
       next if line.blank?
       parts = line.split
+      if parts.first? == "nospec" && parts.size >= 2
+        @spec_nospec[parts[1]] = parts[2..].to_set
+        next
+      end
       unless parts.size == 2 && spec_number?(parts[0], chapter_ok: false) && parts[1].size == 8
         raise SpecError.new(".spec.lock:#{index + 1}: a line is `N.M HASH`, not '#{line}'; " \
                             "`#{Command.program_name} spec ack N.M` writes it")
@@ -511,7 +518,11 @@ class Iyi::Command
     lines = lock.select { |number, _| known.includes?(number) }.to_a.sort_by! do |number, _|
       spec_sort_key(number)
     end
-    File.write(File.join(root, ".spec.lock"), lines.map { |number, hash| "#{number} #{hash}\n" }.join)
+    text = lines.map { |number, hash| "#{number} #{hash}\n" }.join
+    @spec_nospec.to_a.sort_by!(&.[0]).each do |path, names|
+      text += (["nospec", path] + names.to_a.sort!).join(" ") + "\n"
+    end
+    File.write(File.join(root, ".spec.lock"), text)
   end
 
   # The indexes of the leading comment block: after a `#!` line and blank
@@ -857,6 +868,9 @@ class Iyi::Command
   # match it, so a project moves from tags to .spec.lock.
   private def spec_ack : NoReturn
     target = options.shift?
+    if target == "--nospec"
+      spec_ack_nospec
+    end
     if target == "--from-tags" && options.empty?
       root, clauses, tests = spec_load_or_abort
       lock = @spec_lock.dup
@@ -947,8 +961,20 @@ class Iyi::Command
   # then the counts. Unversioned and untagged files are reported only.
   private def spec_check(fix = false) : NoReturn
     name = Command.program_name
-    root, clauses, tests = spec_load_or_abort
+    root, clauses, tests = spec_load_or_abort(spec_root || Dir.current)
+    if clauses.empty?
+      STDERR.puts <<-FORM
+        no spec: write SPEC.md with a clause
+          * 1.1 TEXT
+        and prove it at the end of the root module
+          spec 1.1
+            EXPR == VALUE
+          end
+        FORM
+      exit 1
+    end
     spec_fix_labels(root, clauses) if fix
+    proofless = spec_proofless(root)
     by_number = clauses.to_h { |clause| {clause.number, clause} }
     recorded = spec_changelog(root).flat_map(&.versions).to_set
     failures = [] of {String, String}
@@ -1037,10 +1063,11 @@ class Iyi::Command
       puts failure
       puts "  next: #{step}"
     end
+    proofless.each { |text| STDERR.puts text }
     counts = SPEC_STATUSES.to_h { |status| {status, clauses.count { |clause| spec_status(clause, tests)[0] == status }} }
     tagged = tests.count { |test| !test.items.empty? || test.none }
     puts spec_summary(clauses.size, counts, tagged, tests.size - tagged)
-    exit failures.empty? ? 0 : 1
+    exit failures.empty? && proofless.empty? ? 0 : 1
   end
 
   # `ris spec todo`: the promises not kept yet, one todo test a line.
@@ -1050,7 +1077,7 @@ class Iyi::Command
       abort! "spec todo takes only --json, not '#{option}'", :USAGE_ERROR unless option == "--json"
       json = true
     end
-    _root, clauses, tests = spec_load_or_abort
+    root, clauses, tests = spec_load_or_abort
     todos = tests.select(&.todo)
     blocks = @spec_blocks.reject(&.reasons.empty?)
     markers = clauses.select { |clause| @spec_markers.has_key?(clause.number) }
@@ -1104,7 +1131,252 @@ class Iyi::Command
       end
       total = todos.size + markers.size + blocks.sum(&.reasons.size)
       puts "#{total} todo test#{total == 1 ? "" : "s"}"
+      marks = spec_scan_defs(root).flat_map do |scan|
+        whole = scan.module_mark.try do |line|
+          SpecMark.new(scan.path, line, scan.module_reason, true, @spec_nospec[scan.path]?.try(&.size) || 0)
+        end
+        whole ? [whole] + scan.marks : scan.marks
+      end
+      marks.each do |mark|
+        puts "#{mark.path}:#{mark.line} NoSpec #{mark.whole ? "module" : "def"}, " \
+             "#{mark.count} def#{mark.count == 1 ? "" : "s"}: #{mark.reason}"
+      end
+      count = marks.sum(&.count)
+      puts "#{marks.size} NoSpec mark#{marks.size == 1 ? "" : "s"} over #{count} def#{count == 1 ? "" : "s"}" unless marks.empty?
     end
+    exit
+  end
+
+  # --- public defs need a proof (SPEC 6.8, doc/drafts/spec-required) -----
+
+  # A def's name, where it is, the type around it (for the hint) and
+  # whether it is a file's top-level def.
+  private record SpecDef, line : Int32, name : String, owner : String?, top : Bool
+
+  # A `@[NoSpec("reason")]` mark: on a module (*whole*) or a def.
+  private record SpecMark, path : String, line : Int32, reason : String,
+    whole : Bool, count : Int32
+
+  # One scanned `.ri` file: its public defs, its spec blocks' lines
+  # (assertion lines and todo-block lines), its marks and module mark.
+  private class SpecDefFile
+    getter path : String
+    getter defs = [] of SpecDef
+    getter proof = [] of String
+    getter marks = [] of SpecMark
+    getter marked = [] of SpecDef
+    getter bad = [] of Int32
+    property module_mark : Int32? = nil
+    property module_reason = ""
+
+    def initialize(@path : String)
+    end
+  end
+
+  private SPEC_DEF = /^(\s*)((?:private|protected)\s+)?(?:(?:pub|abstract)\s+)*def\s+(self\.)?([^\s(:]+)/
+  private SPEC_OWNER = /^(\s*)(?:(?:private|pub|abstract)\s+)*(?:class|struct|module)\s+([A-Z][\w:]*)/
+
+  private def spec_scan_defs(root : String) : Array(SpecDefFile)
+    files = [] of String
+    project_walk(root, files, &.downcase.ends_with?(".ri"))
+    files.sort!.compact_map do |file|
+      lines = begin
+        File.read_lines(file)
+      rescue IO::Error
+        next
+      end
+      spec_scan_file(::Path[file].relative_to(root).to_s, lines)
+    end
+  end
+
+  private def spec_scan_file(path : String, lines : Array(String)) : SpecDefFile?
+    scan = SpecDefFile.new(path)
+    code = lines.each_index.find { |i| !(lines[i].blank? || lines[i].lstrip.starts_with?('#')) }
+    if code && lines[code].starts_with?("@[Ffi]")
+      return nil
+    end
+    if code && lines[code].starts_with?("@[NoSpec")
+      after = (code + 1...lines.size).find { |i| !(lines[i].blank? || lines[i].lstrip.starts_with?('#')) }
+      # A blank line after it makes it the module's even above a def.
+      unless after && after == code + 1 && (lines[after] =~ SPEC_DEF || lines[after].lstrip.starts_with?("@["))
+        scan.module_mark = code + 1
+        scan.module_reason = spec_mark_reason(lines[code]) || ""
+        scan.bad << code + 1 if scan.module_reason.blank?
+      end
+    end
+    first_block = lines.index { |line| spec_block_head(line) } || lines.size
+    skip_until = nil
+    owners = [] of {Int32, String}
+    pending = nil
+    lines.each_with_index do |line, index|
+      break if index >= first_block
+      if skip_until
+        skip_until = nil if line.rstrip == skip_until || line.strip == skip_until
+        next
+      end
+      if heredoc = line.match(/<<[-~]([A-Z_]+)/)
+        skip_until = heredoc[1]
+        next
+      end
+      if opener = line.match(/^(\s*)(?:(?:pub|private)\s+)?macro\s/)
+        skip_until = "#{opener[1]}end"
+        next
+      end
+      stripped = line.lstrip
+      next if line.blank? || stripped.starts_with?('#')
+      indent = line.size - stripped.size
+      while (last = owners.last?) && last[0] >= indent
+        owners.pop
+      end
+      if owner = line.match(SPEC_OWNER)
+        owners << {indent, owner[2]}
+        pending = nil
+        next
+      end
+      if stripped.starts_with?("@[")
+        if stripped.starts_with?("@[NoSpec") && index + 1 != scan.module_mark
+          reason = spec_mark_reason(stripped)
+          if reason.nil? || reason.blank?
+            scan.bad << index + 1
+          else
+            pending = {index + 1, reason}
+          end
+        end
+        next
+      end
+      mark = pending
+      pending = nil
+      match = line.match(SPEC_DEF) || next
+      next if match[2]?
+      name = match[4]
+      next if name.includes?('{') || name.includes?('%')
+      found = SpecDef.new(index + 1, name, owners.last?.try(&.[1]), indent == 0 && owners.empty?)
+      if mark
+        scan.marks << SpecMark.new(path, mark[0], mark[1], false, 1)
+        scan.marked << found
+      else
+        scan.defs << found
+      end
+    end
+    spec_proof_lines(lines, first_block, scan.proof)
+    scan
+  end
+
+  # The lines of *lines*' spec blocks that can cover a def (R3): a
+  # block's top-level lines that assign nothing, or every line of a block
+  # that holds `todo`.
+  private def spec_proof_lines(lines : Array(String), from : Int32, into : Array(String)) : Nil
+    index = from
+    while index < lines.size
+      unless spec_block_head(lines[index])
+        index += 1
+        next
+      end
+      body = [] of String
+      index += 1
+      while index < lines.size && lines[index].rstrip != "end"
+        body << lines[index]
+        index += 1
+      end
+      if body.any? { |line| spec_todo_reason(line) }
+        into.concat(body)
+      else
+        base = body.find { |line| !line.blank? }.try { |line| line.size - line.lstrip.size }
+        body.each do |line|
+          next if line.blank? || line.size - line.lstrip.size != base
+          next if line.lstrip.matches?(/^[a-z_][\w, ]*\s*[-+*\/|&]?=(?![=~])/)
+          into << line
+        end
+      end
+    end
+  end
+
+  # The text a NoSpec mark's string holds; nil when it holds no string.
+  private def spec_mark_reason(line : String) : String?
+    open = line.index('"') || return nil
+    close = line.rindex('"') || return nil
+    return nil unless close > open
+    line[open + 1...close]
+  end
+
+  # R3: does a proof line name *found*?
+  private def spec_covers?(found : SpecDef, line : String) : Bool
+    name = found.name
+    return !!(line =~ /\.new(?![\w?!])/) if name == "initialize"
+    if name[0].ascii_letter? || name[0] == '_'
+      base = Regex.escape(name.rchop('='))
+      return true if line =~ /\.#{base}(?![\w?!])/
+      return true if found.top && line =~ /(?<![\w.])#{base}\(/
+      false
+    elsif name.starts_with?("[]")
+      line.includes?('[')
+    else
+      op = name.rchop('@')
+      line.includes?(" #{op} ") || line.includes?(".#{op}(") || line.includes?("#{op}(")
+    end
+  end
+
+  # R4 and R5: the failures, each the text to print.
+  private def spec_proofless(root : String) : Array(String)
+    out = [] of String
+    seen = Set(String).new
+    spec_scan_defs(root).each do |scan|
+      seen << scan.path if scan.module_mark
+      scan.bad.each do |line|
+        out << "#{scan.path}:#{line}: NoSpec needs a reason: " \
+               "write `@[NoSpec(\"why no proof\")]`"
+      end
+      recorded = @spec_nospec[scan.path]?
+      if scan.module_mark && recorded.nil?
+        out << "#{scan.path}:#{scan.module_mark}: the module's NoSpec mark is " \
+               "not recorded; run `#{Command.program_name} spec ack --nospec #{scan.path}`"
+        next
+      end
+      scan.defs.each do |found|
+        next if scan.proof.any? { |line| spec_covers?(found, line) }
+        next if recorded && scan.module_mark && recorded.includes?(found.name)
+        call = found.top ? "#{found.name}(\"...\")" : "#{found.owner || "Module"}.#{found.name}(\"...\")"
+        call = "#{found.owner || "Type"}.new(\"...\")" if found.name == "initialize"
+        later = scan.module_mark ? " (added after the module's NoSpec)" : ""
+        out << "#{scan.path}:#{found.line}: public def #{found.name} has no proof#{later}; add at the end\n" \
+               "  spec N.M\n" \
+               "    #{call} == \"...\"\n" \
+               "  end\n" \
+               "or `todo \"reason\"` inside it, `@[NoSpec(\"reason\")]`, or private"
+      end
+    end
+    @spec_nospec.each_key do |path|
+      next if seen.includes?(path)
+      out << ".spec.lock: nospec #{path} names no module with a NoSpec mark; " \
+             "run `#{Command.program_name} spec ack --nospec #{path}`"
+    end
+    out
+  end
+
+  # `ris spec ack --nospec MODULE...`: .spec.lock records the public defs
+  # each marked module has now (R5); an unmarked module's line goes.
+  private def spec_ack_nospec : NoReturn
+    if options.empty?
+      abort! "spec ack --nospec takes the module files: " \
+             "`#{Command.program_name} spec ack --nospec src/post.ri`", :USAGE_ERROR
+    end
+    root, clauses, _tests = spec_load_or_abort(spec_root || Dir.current)
+    scans = spec_scan_defs(root).to_h { |scan| {scan.path, scan} }
+    while option = options.shift?
+      path = File.file?(option) ? ::Path[File.expand_path(option)].relative_to(root).to_s : option
+      scan = scans[path]?
+      if scan && scan.module_mark
+        names = scan.defs.map(&.name).to_set
+        @spec_nospec[path] = names
+        puts ".spec.lock: nospec #{path} (#{names.size} def#{names.size == 1 ? "" : "s"})"
+      elsif @spec_nospec.delete(path)
+        puts ".spec.lock: removed nospec #{path}"
+      else
+        abort! "spec ack --nospec: #{option} is no module with a NoSpec mark; " \
+               "put `@[NoSpec(\"reason\")]` first in it", :USAGE_ERROR
+      end
+    end
+    spec_lock_write(root, @spec_lock.dup, clauses)
     exit
   end
 
@@ -1113,6 +1385,7 @@ class Iyi::Command
     <<-USAGE
       Usage: #{name} spec [N | N.M | MODULE | MODULE.N] [--json]
              #{name} spec ack N[.M] | MODULE[.N] | --from-tags
+             #{name} spec ack --nospec FILE...
              #{name} spec todo [--json]
 
       Link the spec's clauses (SPEC.md or spec/*.md at the root) to their
@@ -1135,8 +1408,11 @@ class Iyi::Command
 
       `#{name} check spec` fails on an unreviewed clause, a tag, block or
       lock line naming no clause, a root version no CHANGELOG.md entry
-      records, a clause with no proof and a stale block label
-      (`#{name} check --fix` writes labels).
+      records, a clause with no proof, a stale block label (`#{name}
+      check --fix` writes labels), no spec at all, and a public def no
+      block in its file proves. `@[NoSpec("reason")]` on a def exempts
+      it; first in a module it exempts the defs `ack --nospec MODULE`
+      records in .spec.lock.
       USAGE
   end
 end

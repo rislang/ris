@@ -1,5 +1,6 @@
 # standard: WHATWG URL query encoding
 # Query fields borrow input bytes or decoded bytes on the caller's tape.
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/query
 
 # A query's parameters read on the caller's tape, as `Params.parse` reads

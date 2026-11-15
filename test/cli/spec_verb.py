@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# spec: 6.7@436841dc, 6.8@82707d6b, 6.9@1e0b6a98
+# spec: 6.7@436841dc, 6.8@023f849f, 6.9@1e0b6a98
 """`ris spec`: the spec's clauses linked to the tests that name them.
 
     RIS=./bin/ris python3 test/cli/spec_verb.py
@@ -284,9 +284,9 @@ def part_c():
     lines = [ln.split()[0] for ln in r.stdout.splitlines()
              if ln.split()[:1] and ln.split()[0] in
              ("format", "deps", "spec", "types", "unused", "test")]
-    step("ris check: spec after deps, skipped without SPEC.md",
-         lines[:3] == ["format", "deps", "spec"] and
-         "skip (no SPEC.md)" in r.stdout, r.stdout + r.stderr)
+    step("ris check: spec after deps, fails without a spec",
+         lines[:3] == ["format", "deps", "spec"] and r.returncode == 1 and
+         "no spec: write SPEC.md" in r.stdout, r.stdout + r.stderr)
     r = run("check", "spec", "blog.ri", cwd=root)
     step("a PATH skips spec", r.returncode == 0 and
          "a PATH was given" in r.stdout, r.stdout + r.stderr)

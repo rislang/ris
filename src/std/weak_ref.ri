@@ -23,6 +23,7 @@
 # and has no lifetime of its own to watch, so `WeakRef(Int32)` is refused
 # when it is compiled.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/weak_ref
 
 pub class WeakRef(T)

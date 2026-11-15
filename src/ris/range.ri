@@ -5,6 +5,7 @@
 # methods, `(1..10).each` was refused with "wrong number of arguments for
 # 'Range(B, E).new'", a constructor nobody wrote. A range here counts up by
 # one and stops: no `Enumerable`, no `step`, no reverse iteration.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 struct Range(B, E)
   getter begin : B
   getter end : E

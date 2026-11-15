@@ -19,6 +19,7 @@
 # enum that calls it, so `@type` is that enum and `@type.constants` are its
 # members. Nothing walks a table at run time and nothing is allocated to answer
 # a name: `to_s` is a `case` over integers the compiler folds.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 struct Enum
   # Equality is the value's, which is what makes every other name work: `!=`
   # and `===` are `Object`'s and both read this, `case` lowers to `===`, and

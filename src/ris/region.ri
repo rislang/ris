@@ -1,6 +1,7 @@
 # Ordinary tapes start at 64 MiB; Linux growing payloads reserve separately.
 # Sizes are checked before state changes.
 # Fatal size errors write literals and stack-buffer numbers, then exit.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 class RisRegion
   OFF_CURSOR =  0_u64
   OFF_LIMIT  =  8_u64

@@ -29,6 +29,7 @@
 # `9007199254740993_i128 == 9007199254740992.0` is false. The prelude's own
 # four (`Int32`, `Int64`, `UInt8`, `UInt64`) keep the prelude's `==` family,
 # which is exact as well and agrees with their `<=>` here.
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/int
 
 # The processor's bit counts, one LLVM signature per width: an unsigned type

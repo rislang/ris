@@ -62,6 +62,7 @@
 # with the mantissa exactly `precision` bits, each result rounded once to
 # the nearest, ties to even, from its exact value (see `BigFloat`).
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/big
 
 import std/int

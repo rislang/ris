@@ -115,6 +115,7 @@
 # with it. As in std/yaml, every test of the union goes through
 # `TapeAny#kind`, which tests the reference types first.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/toml
 
 # What is wrong with a document, and where: `line` and `column` count from

@@ -26,6 +26,7 @@
 #     * Integer encodings that overflow UInt64 or Int32 indexes are HpackError
 #     * Never-indexed representation honoured on re-encode
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/hpack
 
 import std/static_array::{StaticArray}

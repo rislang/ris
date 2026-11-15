@@ -83,6 +83,7 @@
 # `to_xml` writes no DOCTYPE, and entity references come out as the text
 # they stood for.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/xml
 
 pub enum NodeType

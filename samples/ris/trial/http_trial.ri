@@ -1,4 +1,5 @@
 # A plain HTTP server with two routes and a client request against it.
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/trial/http_trial
 
 import std/socket::{IyiSocket}

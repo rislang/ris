@@ -67,6 +67,7 @@
 # the ancillary chunks (skipped, named), and writing a 1-, 2- or 4-bit
 # grayscale file.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/png
 
 import std/int

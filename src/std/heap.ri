@@ -5,6 +5,7 @@
 # `pop of an empty heap` and `peek of an empty heap`. The order is
 # the trait's `<=>`, the same three-way `Enumerable#sorted` reads.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/heap
 
 import std/traits::{Comparable}

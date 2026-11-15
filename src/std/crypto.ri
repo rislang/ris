@@ -27,6 +27,7 @@
 # `==` stops at the first byte that differs, and how long it took says
 # where; compare a MAC an attacker sent with `Subtle.constant_time_compare`.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/crypto
 
 import std/int

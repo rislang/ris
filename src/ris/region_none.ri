@@ -1,4 +1,5 @@
 # mmap tape support without collector roots or marking.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 {% if flag?(:gc_none) && flag?(:darwin) %}
   # macOS: libSystem, as the prelude's darwin arm. Apple's arm64 pages are
   # 16 KiB. MADV_FREE lets the kernel take them back; they read as zero or

@@ -388,6 +388,7 @@
 # what it stands on, with what it found and fixed; it is not that audit
 # either.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/tls
 
 import std/static_array::{StaticArray}

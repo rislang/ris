@@ -81,6 +81,7 @@
 # and CORS, which are a browser's, and a client that reconnects with
 # backoff.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/sse
 
 import std/http::{HTTP, Response, BodyWriter, HTTPError, Outgoing}

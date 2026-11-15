@@ -19,6 +19,7 @@
 # than Crystal's, and the reason is measured there.
 
 # First, so no other error hides it (SPEC 7.1).
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 {% if flag?(:ris_no_gc) && !((flag?(:linux) &&
         (flag?(:x86_64) || flag?(:aarch64))) ||
         (flag?(:darwin) && flag?(:aarch64))) %}

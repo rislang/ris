@@ -2,6 +2,8 @@
 # streams, files, pipes and sockets - one read path and one write path,
 # shared by `puts`, `print` and `File`.
 
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
+
 @[OnTape]
 class IyiIO
   @fd : Int64

@@ -79,6 +79,7 @@
 # table (21 patterns) routed 200,000 requests in 165 ms, under a
 # microsecond each.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/router
 
 import std/http::{HTTP, Incoming, Outgoing}

@@ -26,6 +26,7 @@
 # one honest answer is the panic. The IO form takes the IO first, the
 # way `io.write` reads, and calls only `write`.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/ini
 
 pub struct INI

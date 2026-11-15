@@ -83,6 +83,7 @@
 # cycle carrying the resolver's growing answers). Both transports connect
 # by `IyiSocket.connect_address` for the same reason.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/secure_dns
 
 import std/indexable

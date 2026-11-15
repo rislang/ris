@@ -31,6 +31,7 @@
 # eleven exercises. The fix belongs in overload resolution, where the
 # compiler knows both types; until then `UInt16` being in the cross is what
 # the library's own callers needed, and this paragraph is the rest of the truth.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 class Object
   @[Primitive(:class)]
   def class

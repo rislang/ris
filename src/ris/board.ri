@@ -1,6 +1,7 @@
 # Runtime-private board storage. Mutations require the
 # scheduler lock; unpublished copies may write their own bytes unlocked.
 # release returns unpublished storage on rollback as well as after use.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 private struct RisMessageRecord
   property free_next : Int32 = -1
   property recycled : Bool = false

@@ -7,6 +7,7 @@
 # rendered. The params and the view are on the request's tape; `create`
 # is the one place anything is copied to the program owner.
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module Chat
   # Users, the room and its posted messages live on the program tape.
   @[OnTape]

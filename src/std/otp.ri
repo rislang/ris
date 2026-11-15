@@ -72,6 +72,7 @@
 # format gives a colon no escape). Refused as an `OTPError`, because a URI
 # is data: anything else `parse` cannot read, each naming what.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/otp
 
 import std/digest::{SHA1, SHA256, SHA512}

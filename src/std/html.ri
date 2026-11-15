@@ -11,6 +11,7 @@
 # coverage for standard web documents and prose while remaining within the SPEC III
 # footprint floor.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/html
 
 import std/text

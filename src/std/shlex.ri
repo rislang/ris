@@ -51,6 +51,7 @@
 # and checks `/bin/sh` reading `join`'s output as `printf` arguments
 # gives the arguments back.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/shlex
 
 # Why a text does not split: an unclosed quote or a final backslash.

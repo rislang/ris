@@ -10,6 +10,7 @@
 # Each worker receives its own copy of the users table. The startup
 # line follows listener readiness; INT or TERM cancels the server group.
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/web
 
 import std/socket::{IyiSocket}

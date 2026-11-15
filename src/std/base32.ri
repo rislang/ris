@@ -40,6 +40,7 @@
 #
 # Pure computation: no platform, no clock, no randomness.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/base32
 
 # What `decode` answers for a text that is not base32.

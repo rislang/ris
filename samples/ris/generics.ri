@@ -2,6 +2,7 @@
 #
 #   ./bin/ris run samples/ris/generics.ri
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/generics
 
 pub trait Show

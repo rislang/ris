@@ -13,6 +13,7 @@
 # back, or the 32 digits with no hyphens, and panics on a length, hyphen
 # or hex digit that is not one.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/uuid
 
 import std/int

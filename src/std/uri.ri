@@ -22,6 +22,7 @@
 # DNS looks up and an HTTP `Host` header carries, an internationalized
 # name in its `xn--` labels by `std/idna`.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/uri
 
 pub import std/query

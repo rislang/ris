@@ -12,6 +12,7 @@
 # as a path. Like the six programs before it, this documents no rule: it
 # is here because the prelude grows only when a program asks (iyi SPEC
 # 0.1.0 item 3), and the seventh program asks for a set.
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/visited
 
 # Who links to whom. `docs` links back to `home`, which is the cycle a

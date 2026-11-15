@@ -33,6 +33,7 @@
 # `HOME`, or from `USERPROFILE` on Windows, which is where that platform
 # keeps it.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/path
 
 # ris: the Windows arm's `UInt16#+` is `std/int`'s.

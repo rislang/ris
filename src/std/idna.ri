@@ -60,6 +60,7 @@
 # Pure computation: no platform, no clock, no randomness; `std/uri` builds
 # `URI.ascii_host` on it.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/idna
 
 import std/unicode::{Unicode}

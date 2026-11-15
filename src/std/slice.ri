@@ -8,6 +8,7 @@
 # `Bytes` is an alias for `Slice(UInt8)`, the currency of IO, sockets, and
 # binary protocols.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/slice
 
 import std/enumerable::{Enumerable}

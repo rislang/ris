@@ -1,6 +1,7 @@
 # Files: `read`/`write` whole, `open` as an `IyiIO`. Paths get the NUL
 # the kernel wants; errors panic with the path.
 
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 class File
   # Crystal's mode strings: "r", "w", "a", each with a "+" that adds the
   # other direction, and a "b" anywhere after the letter that changes

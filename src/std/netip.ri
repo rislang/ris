@@ -90,6 +90,7 @@
 # count that is neither 4 nor 16, a subnet length shorter than the prefix
 # or a supernet length longer.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/netip
 
 import std/int

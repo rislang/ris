@@ -73,6 +73,7 @@
 # Pure computation over the bytes given: no platform, no clock unless
 # *now* is left out, no randomness (a request's nonce is the caller's).
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/ocsp
 
 import std/asn1::{Der, DerValue, DerTag, Asn1Error}

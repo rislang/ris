@@ -6,6 +6,7 @@
 # already exist and already carry a type id. What makes a member an *error*
 # member is that its type implements `Error`, a trait the compiler owns.
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/errors
 
 pub struct IOError

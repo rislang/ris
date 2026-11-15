@@ -26,6 +26,7 @@
 # the low half of: `checksum(data, seed)`, or `update` in pieces and a
 # `digest` that can be asked midway.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/digest
 
 import std/int

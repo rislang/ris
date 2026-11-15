@@ -30,6 +30,7 @@
 # A module of its own beside std/http, since it reads files and the
 # clock and std/http reaches the network alone.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/fileserver
 
 import std/http::{HTTP, Incoming, Outgoing}

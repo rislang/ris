@@ -85,6 +85,7 @@
 # Unicode - but for the operating system's entropy (std/random's
 # `Secure`), which a new key and a serial left to this module draw.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/x509
 
 import std/int

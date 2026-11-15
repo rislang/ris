@@ -36,6 +36,7 @@
 # `Any` implements it, and so do the prelude's scalars, arrays and hashes
 # through `write_value`.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/json
 
 # A growable byte buffer for the text a string or a document is assembled in.

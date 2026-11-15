@@ -40,6 +40,7 @@
 # Left out: `peek_behind`, `rewind`, `current_char`, `previous_byte` and
 # `beginning_of_line?`, which read `string` and `offset` in a line each.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/string_scanner
 
 import std/regex::{Regex}

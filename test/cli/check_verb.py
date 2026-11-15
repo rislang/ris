@@ -199,14 +199,14 @@ def main():
          and set(verdict) >= {"ok", "steps", "failed", "output", "next"},
          proc.stdout)
 
-    # No manifest: deps skips.
+    # No manifest: deps skips; no spec fails (SPEC 6.8).
     bare = tempfile.mkdtemp(prefix="ris-check-bare")
     write(os.path.join(bare, "app.ri"), "puts 1\n")
     proc = run("check", cwd=bare)
     deps = [ln for ln in part_lines(proc.stdout) if ln.startswith("deps")]
-    step("no manifest: deps skips, the rest is green",
-         proc.returncode == 0 and order(proc.stdout) == PARTS
-         and deps and "skip" in deps[0], proc.stdout)
+    step("no manifest: deps skips, no spec fails",
+         proc.returncode == 1 and deps and "skip" in deps[0]
+         and "no spec: write SPEC.md" in proc.stdout, proc.stdout)
     proc = run("check", "deps", cwd=bare)
     step("a named part with nothing to do says skip, exit 0",
          proc.returncode == 0 and "skip" in proc.stdout, proc.stdout)
@@ -216,7 +216,7 @@ def main():
         fixme = new_project("fixme")
         src = os.path.join(fixme, "fixme.ri")
         # init's spec 1.1 stays proved, so only format and ris.sum fail.
-        write(src, "module fixme\n\ndef  f( a )\na\nend\n"
+        write(src, "module fixme\n\nprivate def  f( a )\na\nend\n"
               "puts \"hello from #{f(\"fixme\")}\"\n\n"
               "spec 1.1\n  fixme == \"hello from fixme\\n\"\nend\n")
         sum_path = os.path.join(fixme, "ris.sum")
@@ -228,14 +228,14 @@ def main():
         proc = run("check", flag, cwd=fixme)
         step(f"check {flag} fixes format and ris.sum, then passes",
              proc.returncode == 0
-             and "def f(a)" in open(src).read()
+             and "private def f(a)" in open(src).read()
              and "example.com/gone" not in open(sum_path).read(),
              proc.stdout + proc.stderr)
 
     # types --fix applies a suggested edit.
     typo = new_project("typo")
     src = os.path.join(typo, "typo.ri")
-    write(src, "module typo\n\ndef greet : String\n  \"hi\"\nend\n\n"
+    write(src, "module typo\n\nprivate def greet : String\n  \"hi\"\nend\n\n"
                "puts gret\n\nspec 1.1\n  todo \"prints hello\"\nend\n")
     proc = run("check", "--json", cwd=typo)
     verdict = json.loads(proc.stdout or "{}")

@@ -39,6 +39,7 @@
 #
 # `Log.setup_from_env` sets the root's level from `LOG_LEVEL`.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/log
 
 import std/time::{Time}

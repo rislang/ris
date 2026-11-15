@@ -2,6 +2,7 @@
 # usual calls answer tape values and need no heap. Every result is built
 # on the current tape; names follow Crystal's String and Array.
 
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 struct String
   def split(separator : String) : Array(String)
     pieces = Array(String).new

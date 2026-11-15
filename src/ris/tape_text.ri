@@ -1,5 +1,6 @@
 # Text operations build on the caller's tape or return input views.
 
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
 struct Char
   def ascii_letter? : Bool
     (self >= 'a' && self <= 'z') || (self >= 'A' && self <= 'Z')

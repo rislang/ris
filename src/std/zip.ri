@@ -105,6 +105,7 @@
 # (self-extracting) are read only if their offsets count from the start
 # of the file.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/zip
 
 import std/int

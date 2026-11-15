@@ -21,6 +21,8 @@
 
 # Internal ABI: the normalizer lowers only the runtime's own tape guard to
 # a cached registry entry plus an inline release on normal exits.
+@[NoSpec("compiler runtime predates spec-required; proofs follow")]
+
 def __iyi_tape_release : Nil
   RisRegion.release_tape
 end

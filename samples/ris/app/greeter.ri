@@ -4,6 +4,7 @@
 # resolved from the project root, never relative to whoever imports it. That
 # is what makes `app/greeter` mean the same module in every file that writes
 # it. The file lives at `app/greeter.ri` because the path says so.
+@[NoSpec("sample program; its defs are shown, not promised")]
 module app/greeter
 
 pub trait Greet

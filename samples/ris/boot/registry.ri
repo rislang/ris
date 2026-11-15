@@ -1,5 +1,7 @@
 # A module whose `import` is deliberately NOT the first thing in the file.
 # See `../init_order.ri`.
+@[NoSpec("sample program; its defs are shown, not promised")]
+
 module boot/registry
 
 # This statement belongs to `boot/registry`'s initialiser, and `boot/registry`

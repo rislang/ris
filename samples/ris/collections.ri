@@ -11,6 +11,7 @@
 # gets the same 57 default methods from one `each`. That is the claim II.6
 # makes, running.
 
+@[NoSpec("sample program; its defs are shown, not promised")]
 module samples/collections
 
 import std/enumerable::{Enumerable}

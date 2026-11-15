@@ -2,6 +2,7 @@
 #
 # Provides edit distance calculation and fuzzy string matching.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/levenshtein
 
 import std/text

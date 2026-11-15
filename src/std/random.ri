@@ -37,6 +37,7 @@
 # `sample(n)` in std/indexable make the same choices for a `Deque` or a
 # `Slice`.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/random
 
 import std/int

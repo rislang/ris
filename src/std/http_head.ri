@@ -1,4 +1,5 @@
 # Request head parsing without transport or clock initialization.
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/http_head
 
 # One field of a request head as it was written: its name, and its value

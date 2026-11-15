@@ -75,6 +75,7 @@
 # selection inlined, branches on counters alone (a jump table on the digit
 # loop's counter picks the limb) and the allocator's slow path.
 
+@[NoSpec("std API predates spec-required; proofs follow")]
 module std/p384
 
 import std/int
