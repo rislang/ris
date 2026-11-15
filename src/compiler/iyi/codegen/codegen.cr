@@ -316,6 +316,8 @@ module Iyi
     @fun_types : Hash({LLVM::Module, String}, LLVM::Type)
     @sret_value : LLVM::Value?
     @cant_pass_closure_to_c_exception_call : Call?
+    @ris_foreign_calls : Hash(String, Call)?
+    @ris_foreign_leave = false
     @main_llvm_context : LLVM::Context
     @main_llvm_typer : LLVMTyper
     @main_module_info : ModuleInfo
@@ -1244,6 +1246,13 @@ module Iyi
     def codegen_return(type : Type)
       return if @builder.end
 
+      # ris: a proc literal C calls counts itself off its fiber (SPEC 5.4).
+      if @ris_foreign_leave
+        result = @last
+        accept ris_foreign_call("__ris_foreign_leave")
+        @last = result
+      end
+
       method_type = context.return_type.not_nil!
       if method_type.void?
         ret
@@ -2011,6 +2020,15 @@ module Iyi
       end
 
       false
+    end
+
+    # ris: a call to the runtime's foreign-entry def *name* (SPEC 5.4).
+    def ris_foreign_call(name : String) : Call
+      (@ris_foreign_calls ||= {} of String => Call)[name] ||= begin
+        call = Call.new(name, global: true).at(UNKNOWN_LOCATION)
+        @program.visit_main call
+        call
+      end
     end
 
     def cant_pass_closure_to_c_exception_call

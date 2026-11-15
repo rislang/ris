@@ -633,6 +633,7 @@ module Iyi
         if target_defs.size == 1
           if target_defs[0].is_a?(External)
             check_args_are_not_closure node, "can't send closure to C function"
+            ris_mark_foreign_entries node
           elsif obj_type && obj_type.extern? && node.name.ends_with?('=')
             check_args_are_not_closure node, "can't set closure as C #{obj_type.type_desc} member"
           end
@@ -1780,6 +1781,22 @@ module Iyi
 
       def visit(node : ASTNode) : Bool
         !@found
+      end
+    end
+
+    # ris: SPEC 5.4. A proc literal passed to a C function is a foreign
+    # entry: codegen attaches a foreign thread before its body runs and
+    # stops an exception at its frame, never unwinding through C. A Proc
+    # value it cannot see is refused in an @[Ffi] module.
+    def ris_mark_foreign_entries(node : Call) : Nil
+      node.args.each do |arg|
+        next unless arg.type?.try(&.proc?)
+        if arg.is_a?(ProcLiteral)
+          arg.def.ris_foreign_entry = true
+        elsif (file = node.location.try(&.original_filename)) &&
+              @program.ffi_files.includes?(File.expand_path(file))
+          arg.raise "a Proc passed to C must be written in the call, as `->(x : Int32) { ... }`: ris guards a literal so a foreign thread attaches first and an exception stops at the foreign frame (SPEC 5.4)"
+        end
       end
     end
 

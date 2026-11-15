@@ -1,3 +1,4 @@
+# spec: 5.4@49240f11
 # A def that takes a pointer and calls no C says why; a String it reads
 # through `byte_at`, which checks its bounds.
 @[PointerUnsafe("reads the first byte in place")]

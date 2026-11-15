@@ -939,3 +939,34 @@ class RisRegion
     {% end %}
   end
 end
+
+# SPEC 5.4: what a proc literal passed to C runs first. A thread C made
+# is attached before any ris code runs on it: its scheduler state and
+# main fiber, on its own stack, are made here (a no-op once made). The
+# fiber counts the callback, so a panic in it stops at the C frame.
+@[NoSpec("compiler hook; test/ris/ffi_callback.ri proves it (SPEC 5.4)")]
+def __ris_foreign_enter : Nil
+  fiber = IyiScheduler.current
+  fiber.foreign_depth = fiber.foreign_depth + 1
+  nil
+end
+
+# SPEC 5.4: what a proc literal passed to C runs as it returns to C.
+@[NoSpec("compiler hook; test/ris/ffi_callback.ri proves it (SPEC 5.4)")]
+def __ris_foreign_leave : Nil
+  fiber = IyiScheduler.current
+  fiber.foreign_depth = fiber.foreign_depth - 1
+  nil
+end
+
+# SPEC 5.4: a panic inside a C callback. Running the defers and leaving
+# for the task's boundary would jump over the C frames below, so the
+# process ends here, saying where.
+@[NoSpec("compiler hook; test/ris/ffi_callback.ri proves it (SPEC 5.4)")]
+@[NoInline]
+def __ris_foreign_panic(message : String) : NoReturn
+  RisHeap.text("ris: panic in a C callback: ")
+  RisHeap.text(message)
+  RisHeap.text("\nA panic cannot cross the C frames below a callback: return an error value from the proc instead (SPEC 5.4)\n")
+  __iyi_exit(1)
+end

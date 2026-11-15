@@ -1,0 +1,47 @@
+# spec: 5.4@49240f11
+# A proc literal passed to C is guarded: a thread C made attaches before
+# the proc runs, and an exception the proc does not rescue stops the
+# program at the C frame instead of unwinding through it.
+@[Ffi]
+module test/ris/ffi_callback
+
+lib LibCb
+  fun qsort(base : UInt8*, count : UInt64, width : UInt64,
+            compare : Void*, Void* -> Int32) : Void
+  fun thrd_create(thread : UInt64*, start : Void* -> Int32,
+                  arg : Void*) : Int32
+  fun thrd_join(thread : UInt64, result : Int32*) : Int32
+end
+
+mode = Program.args[0]? || "sort"
+numbers = String.new("312")
+case mode
+when "sort"
+  LibCb.qsort(numbers.to_unsafe, 3, 1, ->(a : Void*, b : Void*) {
+    a.as(UInt8*).value.to_i32 - b.as(UInt8*).value.to_i32
+  })
+  puts numbers
+when "raise"
+  LibCb.qsort(numbers.to_unsafe, 3, 1, ->(a : Void*, b : Void*) {
+    raise "comparator failed" if a.as(UInt8*).value == 51_u8
+    0
+  })
+  puts "unwound through C"
+when "after"
+  LibCb.qsort(numbers.to_unsafe, 3, 1, ->(a : Void*, b : Void*) {
+    return 0 if a.as(UInt8*).value == b.as(UInt8*).value
+    a.as(UInt8*).value.to_i32 - b.as(UInt8*).value.to_i32
+  })
+  raise "after #{numbers}"
+when "thread"
+  thread = 0_u64
+  LibCb.thrd_create(pointerof(thread), ->(arg : Void*) {
+    tape do
+      words = ["attached", "on", "a", "C", "thread"]
+      puts words.join(' ')
+    end
+    0
+  }, nil)
+  LibCb.thrd_join(thread, nil)
+  puts "joined"
+end

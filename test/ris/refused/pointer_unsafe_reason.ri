@@ -1,3 +1,4 @@
+# spec: 5.4@49240f11
 @[PointerUnsafe]
 def first(text : String) : UInt8
   text.to_unsafe[0]

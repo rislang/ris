@@ -1,3 +1,4 @@
+# spec: 5.4@49240f11
 @[PointerUnsafe("calling C is @[Ffi]'s")]
 def pid : Int32
   LibC4.getpid

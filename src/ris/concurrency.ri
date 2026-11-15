@@ -418,6 +418,9 @@ class IyiFiber
   # path drains; the flag and message a boundary reads after the join.
   property defers : IyiDefer?
   property unwinding : Bool = false
+  # ris (SPEC 5.4): how many C callbacks this fiber is inside; a panic
+  # there ends the process rather than jump over the C frames.
+  property foreign_depth : Int32 = 0
   # ris: one non-capturing cleanup, reused by sequential outer tape scopes.
   property tape_cleanup : IyiDeferNode?
   property panicked : Bool

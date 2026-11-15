@@ -190,7 +190,6 @@ section; a removed one leaves its number unused.
   has an owner and cleanup. Never unwind across foreign frames; foreign
   threads attach first.
   Safety exceptions are marks with reasons, never a global switch.
-  <!-- todo: Needs public API and foreign-boundary lifetime proofs -->
 * 5.6 ris uses grouped iyi fibers (5.1), not detached Goose threads; a waiting
   take parks its fiber. At one consume commit, cancellation wins, then data,
   then timeout, including poll and already-cancelled entry. Cancelled consumes
@@ -238,7 +237,6 @@ section; a removed one leaves its number unused.
 * 6.2 Free keeps memory; reset obeys shrink rules. Run relocation is explicit:
   holders keep offsets and re-read; old views stay unchanged. Runs holding
   self-relative links are never relocated (Goose §5.4).
-  <!-- todo: Needs pool reset and explicit-relocation proofs -->
 * 6.3 Validate bounds, overflow and aligned membership before mutation; foreign
   storage is refused statically or at runtime. No uninitialized slots;
   self-relative links stay in one region.

@@ -1,0 +1,42 @@
+# spec: 6.2@f3b9d15b
+# Free keeps memory; relocation is explicit: a holder keeps the run as
+# offset and size and re-reads it; an old view stays unchanged.
+@[OnTape]
+struct Holder
+  property offset : Int32
+  property size : Int32
+
+  def initialize(@offset : Int32, @size : Int32)
+  end
+end
+
+tape do
+  pool = SlicePool(Int32).new(8)
+  a = pool.alloc_slice(3)
+  a[0] = 1
+  a[1] = 2
+  a[2] = 3
+  b = pool.alloc_slice(2)
+  b[0] = 9
+  before = pool.size
+  pool.free_slice(a)
+  raise "free gave memory back" unless pool.size == before
+  raise "free cleared the run" unless a[0] == 1 && a[2] == 3
+  again = pool.alloc_slice(3)
+  raise "free did not keep the slots" unless again.offset == a.offset
+  raise "pool grew on reuse" unless pool.size == before
+
+  holder = Holder.new(again.offset, again.size)
+  again[0] = 7
+  moved = pool.realloc_slice(pool.run_at(holder.offset, holder.size), 6)
+  raise "relocation was not explicit" if moved.offset == holder.offset
+  stale = pool.run_at(holder.offset, holder.size)
+  raise "holder offset changed by itself" unless stale.offset == again.offset
+  raise "old view changed" unless again[0] == 7 && stale[0] == 7
+  holder.offset = moved.offset
+  holder.size = moved.size
+  fresh = pool.run_at(holder.offset, holder.size)
+  raise "re-read" unless fresh[0] == 7 && fresh.size == 6 && fresh[5] == 0
+  raise "other run moved" unless b[0] == 9
+end
+puts "PASS: pool free and relocation"

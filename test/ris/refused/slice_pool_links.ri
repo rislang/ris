@@ -1,3 +1,4 @@
+# spec: 6.2@f3b9d15b
 @[OnTape]
 struct PoolLinked
   getter links : Tuple(Array::Link(Int32, UInt32), Int32)?

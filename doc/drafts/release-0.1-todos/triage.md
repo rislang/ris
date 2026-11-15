@@ -51,20 +51,20 @@ block that runs or names those programs, plus `ris spec ack`.
 | 4.3 | DONE | signal_flags.ri (check.sh:2567), | S: signal flag |
 | | | unwind_failure.ri (check.sh:2611) | test; fatal exit |
 | | | | skips a defer (assert output lacks it) |
-| 5.4 | PART | ffi_marked.ri, refused/ffi_*.ri, raw_pointer.ri, | kept: no |
-| | | pointer_unsafe_*.ri | raw pointers in APIs, marks. |
-| | | | Missing: no unwind across foreign frames and foreign |
-| | | | thread attach are not checked or tested |
+| 5.4 | DONE | ffi_marked.ri, ffi_callback.ri, refused/ffi_*.ri, | proved: |
+| | | raw_pointer.ri, pointer_unsafe_*.ri | a proc literal |
+| | | | passed to C attaches a C thread first; a panic in it |
+| | | | stops at the C frame; a Proc value refused; 2026-11-15 |
 | 5.6 | DONE | board_*.ri, board_checks.sh, refused/board_* | M: spec block |
 | | | (board_recursive, board_class_post, not_flat) | calling existing |
 | | | | board programs; large clause, many sub-proofs; |
 | | | | macOS N=1 refusal not tested here |
 | 6.1 | NOT | src/ris/tape_core.ri:557 (SlicePool only) | no Pool(T), |
 | | | | no free/replacement, no generations or handles |
-| 6.2 | PART | slice_pool.ri, refused/shrink_pool_run*.ri, | kept: reset |
-| | | refused/slice_pool_links.ri | obeys shrink, linked |
-| | | | runs refused. Missing: free and explicit run |
-| | | | relocation do not exist |
+| 6.2 | DONE | pool_free_relocate.ri, slice_pool.ri, | proved: free |
+| | | refused/shrink_pool_run*.ri, slice_pool_links.ri | keeps |
+| | | | slots; realloc_slice is the explicit move, holders |
+| | | | re-read, old views unchanged; 2026-11-15 |
 | 6.3 | DONE | slice_pool_errors.ri (check.sh:701), | S: bounds / |
 | | | le_offset_overflow.ri, side_overflow.ri | overflow panics |
 | | | | before mutation; membership test may need M |
@@ -118,10 +118,10 @@ block that runs or names those programs, plus `ris spec ack`.
 
 | verdict | count | clauses |
 |---|---|---|
-| DONE | 23 | 1.2 1.3 1.4 1.6 1.7 1.8 2.3 3.1 4.1 4.2 4.3 5.6 |
-| | | 6.3 6.4 6.5 7.2 7.3 7.4 7.5 7.6, base64.4 box.3 |
-| | | capsule.8 |
-| PART | 3 | 5.4 6.2 6.6 |
+| DONE | 25 | 1.2 1.3 1.4 1.6 1.7 1.8 2.3 3.1 4.1 4.2 4.3 5.4 |
+| | | 5.6 6.2 6.3 6.4 6.5 7.2 7.3 7.4 7.5 7.6, base64.4 |
+| | | box.3 capsule.8 |
+| PART | 1 | 6.6 |
 | NOT | 1 | 6.1 |
 
 Total 27 (24 root, 3 std).

@@ -1,3 +1,4 @@
+# spec: 5.4@49240f11
 # @[PointerUnsafe] does not open a String: its pointer reads past its bytes.
 @[PointerUnsafe("reads the first byte in place")]
 def first(text : String) : UInt8

@@ -1,0 +1,10 @@
+# spec: 5.4@49240f11
+@[Ffi]
+module test/ris/refused/ffi_proc_value
+
+lib LibCbv
+  fun atexit(callback : -> Void) : Int32
+end
+
+callback = -> { puts "bye" }
+LibCbv.atexit(callback)

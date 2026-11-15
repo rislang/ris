@@ -1,3 +1,4 @@
+# spec: 5.4@49240f11
 @[PointerUnsafe("a mark on no def")]
 x = 1
 puts x

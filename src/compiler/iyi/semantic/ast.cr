@@ -148,6 +148,9 @@ module Iyi
     property block_nest = 0
     property? raises = false
     property? closure = false
+    # ris: a proc literal handed to a C function (SPEC 5.4): its code
+    # attaches a foreign thread first and stops an exception at its frame.
+    property? ris_foreign_entry = false
     property? self_closured = false
     property? captured_block = false
 

@@ -243,6 +243,8 @@ class Iyi::CodeGenVisitor
     old_alloca_block = @alloca_block
     old_ensure_exception_handlers = @ensure_exception_handlers
     old_rescue_block = @rescue_block
+    old_ris_foreign_leave = @ris_foreign_leave
+    @ris_foreign_leave = false
     old_catch_pad = @catch_pad
     old_llvm_mod = @llvm_mod
     old_llvm_context = @llvm_context
@@ -486,6 +488,13 @@ class Iyi::CodeGenVisitor
 
           codegen_primitive(nil, body, target_def, primitive_params)
         else
+          # ris: SPEC 5.4, a proc literal C calls. Attach a foreign thread
+          # and count the callback on its fiber first; every return counts
+          # it off (`codegen_return`), and a panic inside stops at C.
+          if is_fun_literal && target_def.ris_foreign_entry?
+            accept ris_foreign_call("__ris_foreign_enter")
+            @ris_foreign_leave = true
+          end
           accept target_def.body
         end
 
@@ -504,6 +513,7 @@ class Iyi::CodeGenVisitor
 
       @ensure_exception_handlers = old_ensure_exception_handlers
       @rescue_block = old_rescue_block
+      @ris_foreign_leave = old_ris_foreign_leave
       @catch_pad = old_catch_pad
       @entry_block = old_entry_block
       @alloca_block = old_alloca_block

@@ -1,3 +1,4 @@
+# spec: 5.4@49240f11
 # A String's pointer outside the library: it reads past the string's
 # bytes as readily as within them.
 @[Ffi]

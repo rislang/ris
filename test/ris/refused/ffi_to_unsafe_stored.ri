@@ -1,3 +1,4 @@
+# spec: 5.4@49240f11
 # In an @[Ffi] module a String's pointer goes straight to the lib fun.
 @[Ffi]
 module test/ris/refused/ffi_to_unsafe_stored

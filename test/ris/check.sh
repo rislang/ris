@@ -695,6 +695,14 @@ else
   echo "FAILED   slice_pool: $out"; status=1
 fi
 
+# SPEC 6.2: free keeps memory; relocation is explicit, old views stay.
+out=$("$RIS" run test/ris/pool_free_relocate.ri 2>&1)
+if [ "$?" -eq 0 ] && [ "$out" = 'PASS: pool free and relocation' ]; then
+  echo "runs     pool_free_relocate"
+else
+  echo "FAILED   pool_free_relocate: $out"; status=1
+fi
+
 # SlicePool failures are fatal checked errors, including without the GC.
 out=$(
   exe=$(mktemp)
@@ -729,6 +737,11 @@ if [[ "$out" == *FAILED* ]]; then status=1; fi
 printf '%s\n' "$out"
 
 expect slice_pool_links 'realloc_slice refuses self-relative links'
+expect ffi_proc_value 'a Proc passed to C must be written in the call'
+# SPEC 6.2: reset of a pool run's storage obeys the shrink rules.
+expect shrink_pool_run 'live view of Array(Int32) while shrinking'
+expect shrink_pool_run_helper 'live view of Array(Int32) while shrinking'
+expect shrink_pool_run_pop 'via tape block -> pop: copy the view first'
 expect nested_links 'a nested Array cannot hold self-relative links'
 # Nested arrays are pooled handles, including hash values.
 for name in nested_containers long_lived_containers static_array_copy \
@@ -1251,6 +1264,17 @@ else
 fi
 out=$("$RIS" run test/ris/ffi_marked.ri 2>&1)
 if [ "$out" = $'4\n111' ]; then echo "runs     ffi_marked"; else echo "FAILED   ffi_marked: $out"; status=1; fi
+# SPEC 5.4: a C callback attaches a C thread first; a panic in it stops
+# at the C frame; the count is undone on return, so later panics are plain.
+for spec in 'sort|123' \
+    'raise|ris: panic in a C callback: comparator failed' \
+    'after|ris: panic: after 123' \
+    'thread|attached on a C thread'; do
+  mode=${spec%%|*} want=${spec#*|}
+  out=$("$RIS" run test/ris/ffi_callback.ri -- "$mode" 2>&1)
+  if grep -qxF -- "$want" <<<"$out"; then echo "runs     ffi_callback $mode"
+  else echo "FAILED   ffi_callback $mode: $out"; status=1; fi
+done
 
 # An `until` round frees its scratch: its rounds reuse one mapping.
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/until_round.ri 2>&1)

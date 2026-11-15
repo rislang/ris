@@ -1,3 +1,4 @@
+# spec: 5.4@49240f11
 # A module at a C library's edge may hold pointers.
 @[Ffi]
 module test/ris/ffi_marked

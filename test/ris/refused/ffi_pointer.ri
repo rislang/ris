@@ -1,3 +1,4 @@
+# spec: 5.4@49240f11
 # A raw pointer made in application code.
 bytes = Pointer(UInt8).malloc(4)
 puts bytes[0]
