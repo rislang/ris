@@ -172,3 +172,7 @@ printf '@[NoSpec("old")]\nmodule app/greet\n\npub def hi : String\n  "hi"\nend\n
 ./bin/ris doc "$work/p/app/greet.ri" > "$work/out" 2>&1 &&
   grep -qF 'module app/greet' "$work/out" || { cat "$work/out"; exit 1; }
 echo "ok   a marked module keeps its header for doc"
+# The formatter keeps a module's mark: `ris check format` passes on it.
+(cd "$work/p" && "$OLDPWD/bin/ris" check format app/greet.ri) \
+  > "$work/out" 2>&1 || { cat "$work/out"; exit 1; }
+echo "ok   format keeps a module's NoSpec mark"

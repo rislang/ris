@@ -10,7 +10,6 @@
 # names, and the program says which ones it wants unqualified. See
 # `webapp.ri`.
 @[NoSpec("sample program; its defs are shown, not promised")]
-
 module kemal/dsl
 
 import kemal/router::{Router, Context, IntoBody}

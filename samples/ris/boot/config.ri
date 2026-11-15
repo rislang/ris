@@ -1,6 +1,5 @@
 # The module `boot/registry` depends on. See `../init_order.ri`.
 @[NoSpec("sample program; its defs are shown, not promised")]
-
 module boot/config
 
 # A module's top-level expressions ARE its initialiser — there is no `init`

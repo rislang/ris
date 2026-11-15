@@ -1,6 +1,5 @@
 # Counts the words of a file: total, distinct, and the most common three.
 @[NoSpec("sample program; its defs are shown, not promised")]
-
 module samples/trial/wc
 
 import std/int

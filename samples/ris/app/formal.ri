@@ -1,6 +1,5 @@
 # A second module, exporting a `title` of its own. See `../modules.ri`.
 @[NoSpec("sample program; its defs are shown, not promised")]
-
 module app/formal
 
 pub def title : String

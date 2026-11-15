@@ -15,7 +15,6 @@
 # asked for them, which is the rule the prelude grows by (iyi SPEC "0.1.0",
 # item 3). Nothing else was missing.
 @[NoSpec("sample program; its defs are shown, not promised")]
-
 module samples/calc
 
 import calc/lexer::{scan, BadCharacter}

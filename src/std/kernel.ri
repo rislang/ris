@@ -11,7 +11,6 @@
 # milliseconds, an `Int32`".
 
 @[NoSpec("std API predates spec-required; proofs follow")]
-
 module std/kernel
 
 # Inspects object to standard output followed by newline. Returns object.

@@ -2528,6 +2528,8 @@ module Iyi
     # ris: the `@[Ffi]` written above the header, which lets the module's
     # code use raw pointers and `lib` blocks (`Iyi::FfiBoundaryChecker`).
     property ffi : Annotation?
+    # ris: `@[NoSpec("reason")]` above the header (SPEC 6.8), kept for the formatter.
+    property nospec : Annotation?
 
     def initialize(@path)
     end
@@ -2537,7 +2539,7 @@ module Iyi
     end
 
     def clone_without_location
-      ModuleHeader.new(@path.dup).tap(&.ffi=(@ffi.clone))
+      ModuleHeader.new(@path.dup).tap { |copy| copy.ffi = @ffi.clone; copy.nospec = @nospec.clone }
     end
 
     def_equals_and_hash @path

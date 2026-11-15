@@ -1018,8 +1018,13 @@ module Iyi
       if (mark = expressions[0]?).is_a?(Annotation) && mark.path.names == ["NoSpec"] &&
          (!(after = expressions[1]?).is_a?(Def | Annotation | VisibilityModifier) ||
          ((at = after.location) && (ends = mark.end_location) && at.line_number > ends.line_number + 1))
-        expressions = expressions[1..]
-        nodes = expressions.empty? ? Nop.new : Expressions.from(expressions)
+        # Above a header the header keeps it; in a headerless file (the
+        # compiler's runtime) only the formatter's parse keeps the node.
+        expressions[1]?.as?(ModuleHeader).try(&.nospec=(mark))
+        unless @ris_keep_spec && !expressions[1]?.is_a?(ModuleHeader)
+          expressions = expressions[1..]
+          nodes = expressions.empty? ? Nop.new : Expressions.from(expressions)
+        end
       end
 
       # iyi: one file, one module (R-1, IV.6). A second header was accepted and
