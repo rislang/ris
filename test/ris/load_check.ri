@@ -1,0 +1,40 @@
+# spec: 6.4@5ba1ad49
+# A byte image is checked whole before load publishes it: a bad link, a
+# span outside its text or a short length panics and publishes nothing.
+# Each mode runs separately: a bad image ends the process.
+@[Tape::Flat]
+struct Cell
+  getter value : Int32
+  getter name : String::Span
+  getter next : Array::Link(Cell, UInt8)
+
+  def initialize(@value, @name, @next)
+  end
+end
+
+tape do
+  arguments = Program.arguments
+  mode = arguments.empty? ? String.new("good") : arguments[0]
+  text = "abcdef"
+  good = Array(Cell).new(2)
+  good.push(Cell.new(1, String::Span.new(0, 3), Array::Link(Cell, UInt8).new(1)))
+  good.push(Cell.new(2, String::Span.new(3, 3), Array::Link(Cell, UInt8).none))
+  image = good.bytes
+  bad = Array(Cell).new(2)
+  bad.push(Cell.new(1, String::Span.new(0, 3), Array::Link(Cell, UInt8).new(1)))
+  case mode
+  when "link"
+    bad.push(Cell.new(2, String::Span.new(3, 3), Array::Link(Cell, UInt8).new(9)))
+    image = bad.bytes
+  when "span"
+    bad.push(Cell.new(2, String::Span.new(4, 3), Array::Link(Cell, UInt8).none))
+    image = bad.bytes
+  when "length"
+    image = image[0, 5]
+  when "unaligned"
+    # An image at an odd address loads into aligned space.
+    image = (" " + image)[1, image.bytesize]
+  end
+  cells = Array(Cell).load(image, text)
+  puts "#{mode}: #{cells.size} loaded, #{text[cells[0].name]} #{text[cells[cells[0].next].name]}"
+end

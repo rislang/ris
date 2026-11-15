@@ -1,6 +1,6 @@
 # Flat data, Goose's way: a binary search tree in one grow-only array,
 # linked by 2-byte typed links, its names as spans of one string; written
-# out as bytes and loaded back, every link checked when followed.
+# out as bytes and loaded back, each link and span checked on load.
 @[Tape::Flat]
 struct Node
   getter key : Int32
@@ -67,7 +67,7 @@ tape do
   end
   puts "#{sizeof(Node)} bytes a node"
   saved = nodes.bytes
-  loaded = Array(Node).load(saved)
+  loaded = Array(Node).load(saved, names)
   walk(loaded, names, loaded.link(0, UInt16))
   puts nodes.map { |node| node.key }.sum
 end

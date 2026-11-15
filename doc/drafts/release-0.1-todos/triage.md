@@ -68,10 +68,10 @@ block that runs or names those programs, plus `ris spec ack`.
 | 6.3 | DONE | slice_pool_errors.ri (check.sh:701), | S: bounds / |
 | | | le_offset_overflow.ri, side_overflow.ri | overflow panics |
 | | | | before mutation; membership test may need M |
-| 6.4 | PART | src/ris/tape.ri:1889 load, link_check.ri | kept: length |
-| | | (check.sh:1412) | and flat-type check. Missing: links |
-| | | | checked when followed, not before publish; no union |
-| | | | tags, alignment or span validation up front |
+| 6.4 | DONE | load_check.ri, refused/load_foreign_link, | proved: |
+| | | load_span_no_text, flat.ri (check.sh) | length, links |
+| | | | and spans checked before publish; foreign links |
+| | | | refused; no unions in flat types; 2026-11-15 |
 | 6.5 | DONE | src/ris/region.ri:200, heap_io.ri | S: Pool holds no |
 | | | | resource (classes/IO refused as elements); compile- |
 | | | | fail program "SlicePool(File)" with its message |
@@ -110,18 +110,18 @@ block that runs or names those programs, plus `ris spec ack`.
 | | | | unused bits) gives "A"; drop the todo |
 | box.3 | DONE | src/std/box.ri:18 | S: `Box.unbox(b.to_unsafe)` is the |
 | | | | same object (`same?`); address equals across calls |
-| capsule.8 | PART | src/std/capsule.ri:371 | kept: encoded bytes and |
-| | | | result arrays (SPEC 1.5). Missing: decode copies |
-| | | | the value into a new Bytes, so payloads do not view |
-| | | | the input |
+| capsule.8 | DONE | src/std/capsule.ri spec capsule.8 | proved: |
+| | | | decode and decode? values and datagram payloads |
+| | | | are subslices of the input (same?); 2026-11-15 |
 
 ## Totals
 
 | verdict | count | clauses |
 |---|---|---|
-| DONE | 21 | 1.2 1.3 1.4 1.6 1.7 1.8 2.3 3.1 4.1 4.2 4.3 5.6 |
-| | | 6.3 6.5 7.2 7.3 7.4 7.5 7.6, base64.4 box.3 |
-| PART | 5 | 5.4 6.2 6.4 6.6, capsule.8 |
+| DONE | 23 | 1.2 1.3 1.4 1.6 1.7 1.8 2.3 3.1 4.1 4.2 4.3 5.6 |
+| | | 6.3 6.4 6.5 7.2 7.3 7.4 7.5 7.6, base64.4 box.3 |
+| | | capsule.8 |
+| PART | 3 | 5.4 6.2 6.6 |
 | NOT | 1 | 6.1 |
 
 Total 27 (24 root, 3 std).

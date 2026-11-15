@@ -1,0 +1,13 @@
+# spec: 6.4@5ba1ad49
+@[Tape::Flat]
+struct Edge
+  getter to : Array::Link(Int32, UInt16)
+
+  def initialize(@to)
+  end
+end
+
+tape do
+  # A link into another array cannot be checked by load.
+  Array(Edge).load("")
+end

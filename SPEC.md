@@ -246,7 +246,6 @@ section; a removed one leaves its number unused.
   spans and links (each to an element start in the image) before any value is
   published; invalid input yields none, never part. This is safety, not
   integrity: a checksum is the caller's (Goose §9.4).
-  <!-- todo: Needs external byte-image validation proofs -->
 * 6.5 Pool free never closes a resource: resources have explicit cleanup.
 * 6.6 RIS_TAPE_STATS: owner paths, regions, committed peaks, pool waste,
   copies, and results moved down to a caller's boundary.

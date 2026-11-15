@@ -265,14 +265,8 @@ pub struct HttpDatagram
     payload_size = bytes.size - payload_offset
     return nil if payload_size < 0
 
-    payload = Bytes.new(payload_size)
-    k = 0
-    while k < payload_size
-      payload[k] = bytes[payload_offset + k]
-      k = k + 1
-    end
-
-    {new(qid, payload), bytes.size - offset}
+    # capsule.8: the payload views the input, nothing copied.
+    {new(qid, bytes[payload_offset, payload_size]), bytes.size - offset}
   end
 
   # Decodes an HTTP Datagram from a byte slice, raising on truncation or on
@@ -389,12 +383,8 @@ pub struct Capsule
     return nil if capsule_len_u64 > remaining.to_u64
 
     capsule_len = capsule_len_u64.to_i32
-    val = Bytes.new(capsule_len)
-    i = 0
-    while i < capsule_len
-      val[i] = bytes[val_offset + i]
-      i = i + 1
-    end
+    # capsule.8: the value views the input, nothing copied.
+    val = bytes[val_offset, capsule_len]
 
     {new(capsule_type, val), hdr_len + capsule_len}
   end
@@ -422,12 +412,8 @@ pub struct Capsule
     end
 
     capsule_len = capsule_len_u64.to_i32
-    val = Bytes.new(capsule_len)
-    i = 0
-    while i < capsule_len
-      val[i] = bytes[val_offset + i]
-      i = i + 1
-    end
+    # capsule.8: the value views the input, nothing copied.
+    val = bytes[val_offset, capsule_len]
 
     {new(capsule_type, val), hdr_len + capsule_len}
   end
@@ -1182,7 +1168,25 @@ end
 #   encoded bytes and result arrays follow SPEC 1.5. A caller retaining decoded
 #   views must retain the source under SPEC 3.2.
 spec capsule.8
-  todo "decode copies the value into a new Bytes; it does not view the input"
+  input = Bytes.new(6)
+  input[0] = 0x00_u8 # DATAGRAM
+  input[1] = 0x03_u8 # length 3
+  input[2] = 0x04_u8
+  input[3] = 0x05_u8
+  input[4] = 0x06_u8
+  input[5] = 0x07_u8
+  checked = Capsule.decode(input)[0]
+  capsule_assert_i32 3, checked.value.size, "value has its length"
+  capsule_assert_true checked.value.same?(input[2, 3]), "decode's value views the input"
+  maybe = Capsule.decode?(input) || raise "decode? reads the capsule"
+  capsule_assert_true maybe[0].value.same?(input[2, 3]), "decode?'s value views the input"
+  input[2] = 0x2a_u8
+  capsule_assert_i32 0x2a, checked.value[0].to_i32, "a change to the input shows in the view"
+  dg = HttpDatagram.decode(input, 1)[0]
+  capsule_assert_true dg.payload.same?(input[2, 4]), "datagram payload views the input"
+  capsule_assert_i32 4, dg.payload.size, "payload runs to the end"
+  # Encoded bytes and result arrays follow SPEC 1.5: one call makes them.
+  capsule_assert_i32 5, checked.encode.size, "encode makes the whole capsule"
 end
 
 private def capsule_assert_true(cond : Bool, msg : String) : Bool

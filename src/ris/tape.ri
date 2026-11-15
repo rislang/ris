@@ -1884,13 +1884,34 @@ struct Array(T)
       RisRegion.size_mul(size.to_u64, sizeof(T).to_u64)).to_i32)
   end
 
-  # The elements *bytes* holds, copied onto the tape: the length must be
-  # whole elements, and each link is checked when it is followed.
+  # The elements *bytes* holds, copied onto the tape (SPEC 6.4). Before
+  # the array is published the length must be whole elements, each link
+  # must be none or name an element of the image, and each span must lie
+  # in *text*: a bad image raises and publishes nothing. The copy lands
+  # in fresh, aligned space, so *bytes* may sit at any address. A flat
+  # type holds no union, so there is no tag to check.
+  def self.load(bytes : String, text : String) : self
+    load(bytes, text.bytesize)
+  end
+
+  # As `load(bytes, text)`, for an element with no `String::Span`.
   def self.load(bytes : String) : self
+    {% for t in [T] + T.instance_vars.map(&.type) %}
+      {% if t == ::String::Span %}
+        {% raise T.stringify + " holds a String::Span: pass load the text, as in Array(Node).load(bytes, text), so each span is checked against the text it views" %}
+      {% end %}
+    {% end %}
+    load(bytes, -1)
+  end
+
+  private def self.load(bytes : String, text_size : Int32) : self
     {% begin %}
       {% for t in [T] + T.instance_vars.map(&.type) %}
         {% unless t < ::Number || t.name.starts_with?("Array::Link(") || t == ::String::Span || t.annotation(::Tape::Flat) %}
           {% raise "#{T} is not flat: #{t} in it is not a number, an Array::Link, a String::Span or an @[Tape::Flat] struct" %}
+        {% end %}
+        {% if t.name.starts_with?("Array::Link(") && t.type_vars[0] != T %}
+          {% raise T.stringify + " links to another array (" + t.stringify + "): load cannot check it. Store the index as an Int32 and read it through target.values_at(indexes)" %}
         {% end %}
       {% end %}
     {% end %}
@@ -1899,6 +1920,24 @@ struct Array(T)
     count = bytes.bytesize // width
     array = new(count)
     Pointer(UInt8).new(array.@state.value).copy_from(bytes.to_unsafe, bytes.bytesize)
+    i = 0
+    while i < count
+      element = array.unchecked(i)
+      {% for ivar in T.instance_vars %}
+        {% if ivar.type.name.starts_with?("Array::Link(") %}
+          link = element.@{{ivar.id}}
+          unless link.none? || link.index < count
+            raise "element #{i}: link #{link.index} is not one of #{count} elements"
+          end
+        {% elsif ivar.type == ::String::Span %}
+          span = element.@{{ivar.id}}
+          if span.start < 0 || span.size < 0 || span.start > text_size - span.size
+            raise "element #{i}: span #{span.start}+#{span.size} is not in #{text_size} bytes of text"
+          end
+        {% end %}
+      {% end %}
+      i += 1
+    end
     (array.@state + 1_i64).value = count.to_u64
     array
   end

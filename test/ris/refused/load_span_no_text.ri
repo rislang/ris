@@ -1,0 +1,13 @@
+# spec: 6.4@5ba1ad49
+@[Tape::Flat]
+struct Word
+  getter name : String::Span
+
+  def initialize(@name)
+  end
+end
+
+tape do
+  # A span is checked against its text: pass the text to load.
+  Array(Word).load("")
+end

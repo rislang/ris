@@ -1026,6 +1026,9 @@ expect owner_byte_image 'Copy it into fresh space with `copy = x.copy_to(owner)`
 expect owner_raw_copy 'Copy it into fresh space with `copy = x.copy_to(owner)`'
 expect owner_raw_equality 'it has no byte image, raw copy or raw equality'
 expect owner_ffi_layout 'declare a lib struct with the fields C reads'
+# SPEC 6.4: load refuses what it cannot check before publishing.
+expect load_foreign_link 'read it through target.values_at(indexes)'
+expect load_span_no_text 'Array(Node).load(bytes, text)'
 # A lazy class variable first read by a constant keeps its value.
 out=$("$RIS" run test/ris/once_in_program_init.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: once in program init' ]; then
@@ -1421,6 +1424,17 @@ out=$("$RIS" run test/ris/flat.ri 2>&1)
 if [ "$out" = $'16 bytes a node\n1 one\n2 two\n5 five\n8 eight\n9 nine\n25' ]; then echo "runs     flat"; else echo "FAILED   flat: $out"; status=1; fi
 out=$("$RIS" run test/ris/link_check.ri 2>&1)
 if grep -qF $'7' <<<"$out" && grep -qF "index 200 out of range for 1 elements" <<<"$out"; then echo "runs     link_check"; else echo "FAILED   link_check: $out"; status=1; fi
+# SPEC 6.4: links, spans and length are checked before load publishes.
+for spec in 'good|good: 2 loaded, abc def' \
+    'link|element 1: link 9 is not one of 2 elements' \
+    'span|element 1: span 4+3 is not in 6 bytes of text' \
+    'length|5 bytes are not whole 16-byte elements' \
+    'unaligned|unaligned: 2 loaded, abc def'; do
+  mode=${spec%%|*} want=${spec#*|}
+  out=$("$RIS" run test/ris/load_check.ri -- "$mode" 2>&1)
+  if grep -qF -- "$want" <<<"$out"; then echo "runs     load_check $mode"
+  else echo "FAILED   load_check $mode: $out"; status=1; fi
+done
 out=$("$RIS" run test/ris/loop_bounds.ri 2>&1)
 if grep -qF '1 11 21 300 3' <<<"$out" && grep -qF "index -1 out of range for 3 elements" <<<"$out"; then echo "runs     loop_bounds"; else echo "FAILED   loop_bounds: $out"; status=1; fi
 # Shrinking directly, through an argument/holder, or in the condition
