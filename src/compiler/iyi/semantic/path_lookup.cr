@@ -141,6 +141,19 @@ module Iyi
           end
         end
 
+        # iyi: a name a selective import wrote out beats a module unit that
+        # only got the name from a file path. `module blog` with `store.ri`
+        # beside it has `Blog::Store`, the module; `import store::{Store}`
+        # in blog.ri asked for the class, and `Store.new` met "undefined
+        # method 'new' for Blog::Store:Module".
+        if lookup_in_namespace && type.iyi_unit? && (used = using_modules?)
+          explicit = used.select { |using_module| using_module.names.try(&.includes?(name)) }
+          unless explicit.empty?
+            imported = lookup_using_path_item(explicit, name, location)
+            return imported if imported && !program.iyi_walled_unit?(location, imported)
+          end
+        end
+
         if lookup_in_namespace && program.iyi_walled_unit?(location, type)
           walled = type
         else
