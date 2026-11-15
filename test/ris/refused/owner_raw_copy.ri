@@ -1,0 +1,10 @@
+# spec: 2.3@91ca936c
+class Log
+  getter items = Array(Int32).new
+end
+
+log = Log.new
+log.items << 1
+# A raw copy shares the growing space: copy_to(owner) is the copy.
+copy = log.dup
+puts copy.items.size

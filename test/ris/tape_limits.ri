@@ -1,0 +1,6 @@
+# spec: 4.2@4385229b
+# RIS_TAPE_STATS publishes the limits for tape bytes, regions, tasks and
+# native stack; doc/TAPE_API.md states the same numbers.
+xs = [1, 2, 3]
+xs << 4
+puts xs.size

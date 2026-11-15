@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# spec: 4.2@4385229b
 """Exact fatal diagnostics under the allocation trap, in fresh processes."""
 import os
 from pathlib import Path

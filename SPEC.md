@@ -83,7 +83,6 @@ section; a removed one leaves its number unused.
   construction, via helpers or aliases (Goose §4.2-4.3).
 * 2.3 No owner byte image, raw copy/equality, FFI layout or transfer;
   copy_to(owner) deep-copies an owner into fresh space (1.7).
-  <!-- todo: Needs owner image/layout refusal and deep-copy proofs -->
 ## 3. Roots (Goose §9.1-9.2)
 * 3.1 Track (owner, field path) through aliases, branches, holders, calls and
   results; joins keep every alternative; inexact roots bound lifetime only.
@@ -130,7 +129,6 @@ section; a removed one leaves its number unused.
 * 4.2 Exhaustion and bad sizes are checked before mutation, with overflow-safe
   arithmetic; they end as iyi's panic print (allocation-free), no fallback.
   Limits for tape bytes, regions, tasks and native stack are published.
-  <!-- todo: Needs exhaustion, overflow and published-limit proofs -->
 * 4.3 Fatal errors skip user cleanup. Signals are std/signal's: the handler sets
   a flag and wakes a pipe; work runs in a task.
 ## 5. Concurrency and boundaries (iyi III.4; Goose §11.2)

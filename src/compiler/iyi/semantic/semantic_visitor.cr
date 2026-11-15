@@ -2175,6 +2175,11 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         msg << "only primitive types, pointers, structs, unions, enums and tuples are allowed in lib declarations, not #{type}"
         msg << " (did you mean LibC::Int?)" if type == @program.int
         msg << " (did you mean LibC::Float?)" if type == @program.float
+        # ris: a class, an owner included, has no FFI layout (SPEC 2.3).
+        if type.is_a?(ClassType) && !type.struct?
+          msg << "\n\nA class, an owner included, has no FFI layout (SPEC 2.3): " \
+                 "declare a lib struct with the fields C reads and copy them in"
+        end
       end
       node.raise msg
     end

@@ -1,0 +1,12 @@
+# spec: 2.3@91ca936c
+# An owner handed to C by its layout: C gets a lib struct instead.
+@[Ffi]
+module OwnerFfi
+  class Log
+    getter items = Array(Int32).new
+  end
+
+  lib LibLog
+    fun log_size(log : Log) : Int32
+  end
+end

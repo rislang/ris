@@ -35,18 +35,19 @@ block that runs or names those programs, plus `ris spec ack`.
 | 1.8 | DONE | once_in_program_init.ri (check.sh:1024), | S: init order |
 | | | thread_program_initializers.ri, program_*.ri, | prints; |
 | | | refused/program_copy_forged.ri | forged-owner refusal |
-| 2.3 | PART | refused/owner_*.ri, class_copy.ri | kept: copy_to deep- |
-| | | | copies owners. Missing: explicit refusal tests for |
-| | | | owner byte image / raw equality / FFI layout |
+| 2.3 | DONE | refused/owner_byte_image, owner_raw_copy, | proved: |
+| | | owner_raw_equality, owner_ffi_layout, | refusals name |
+| | | class_copy.ri, board_owner.ri | copy_to(owner) or |
+| | | | a lib struct; acked 2026-11-15 |
 | 3.1 | DONE | refused/root_branch_escape, root_store_join, | S: name the |
 | | | roots_holders.ri (check.sh:836) | refusals and run |
 | 4.1 | DONE | cleanup_order.ri (check.sh:1174), | S: expected output |
 | | | cleanup_*.ri, typed_group_results.ri | + panic result |
 | | | | copied; unwind_failure fatal |
-| 4.2 | PART | size_failure.py (check.sh:2707), | kept: checked sizes, |
-| | | src/ris/region.ri:490, board_bounds_*.ri | exhaustion panic. |
-| | | | Missing: limits for tape bytes, regions, tasks, |
-| | | | native stack are not published anywhere |
+| 4.2 | DONE | size_failure.py, tape_limits.ri (check.sh), | proved: |
+| | | doc/TAPE_API.md limits | RIS_TAPE_STATS and |
+| | | | TAPE_API.md publish one set of limits; acked |
+| | | | 2026-11-15 |
 | 4.3 | DONE | signal_flags.ri (check.sh:2567), | S: signal flag |
 | | | unwind_failure.ri (check.sh:2611) | test; fatal exit |
 | | | | skips a defer (assert output lacks it) |
@@ -78,6 +79,16 @@ block that runs or names those programs, plus `ris spec ack`.
 | | | src/ris/region.ri:48-183 | regions, side moves, |
 | | | | growth. Missing: owner paths, pool waste, moved- |
 | | | | down results counters; exit-path stats tests |
+| | | | QUESTION (stopped 2026-11-15): "owner paths" in |
+| | | | 6.6 is not settled: (a) one stats line per owner |
+| | | | field path (compiler emits names like |
+| | | | `Log.items`) with reserved/committed bytes, or |
+| | | | (b) a count of owner field spaces only? Also |
+| | | | "pool waste": freed-slot bytes or reserved minus |
+| | | | used? Results moved down already print; stats |
+| | | | print on normal end and exit, not on panic or |
+| | | | fatal exhaustion. Recommend (a) and freed-slot |
+| | | | bytes. |
 | 7.2 | DONE | stable_growth.ri, hash_api.ri, tree tests, | S: no-move |
 | | | string_api.ri | assert after growth; Hash order |
 | 7.3 | DONE | text_grow.ri, check.sh:2633 text_plain_builder | S: `t = s; |
@@ -108,9 +119,9 @@ block that runs or names those programs, plus `ris spec ack`.
 
 | verdict | count | clauses |
 |---|---|---|
-| DONE | 19 | 1.2 1.3 1.4 1.6 1.7 1.8 3.1 4.1 4.3 5.6 6.3 6.5 |
-| | | 7.2 7.3 7.4 7.5 7.6, base64.4 box.3 |
-| PART | 7 | 2.3 4.2 5.4 6.2 6.4 6.6, capsule.8 |
+| DONE | 21 | 1.2 1.3 1.4 1.6 1.7 1.8 2.3 3.1 4.1 4.2 4.3 5.6 |
+| | | 6.3 6.5 7.2 7.3 7.4 7.5 7.6, base64.4 box.3 |
+| PART | 5 | 5.4 6.2 6.4 6.6, capsule.8 |
 | NOT | 1 | 6.1 |
 
 Total 27 (24 root, 3 std).

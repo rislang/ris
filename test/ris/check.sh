@@ -1020,6 +1020,12 @@ else
   echo "FAILED   class_copy: $out"
   status=1
 fi
+# SPEC 2.3: an owner has no byte image, raw copy/equality or FFI layout;
+# each refusal names copy_to(owner) or a lib struct.
+expect owner_byte_image 'Copy it into fresh space with `copy = x.copy_to(owner)`'
+expect owner_raw_copy 'Copy it into fresh space with `copy = x.copy_to(owner)`'
+expect owner_raw_equality 'it has no byte image, raw copy or raw equality'
+expect owner_ffi_layout 'declare a lib struct with the fields C reads'
 # A lazy class variable first read by a constant keeps its value.
 out=$("$RIS" run test/ris/once_in_program_init.ri 2>&1)
 if [ "$?" -eq 0 ] && [ "$out" = 'PASS: once in program init' ]; then
@@ -2705,6 +2711,26 @@ if [ "$?" -eq 1 ] &&
   echo "fatal    side_overflow (no GC)"
 else
   echo "FAILED   side_overflow: $out"; status=1
+fi
+
+# SPEC 4.2: the limits for tape bytes, regions, tasks and native stack
+# are published by RIS_TAPE_STATS and doc/TAPE_API.md, with one value.
+out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/tape_limits.ri 2>&1)
+if [ "$?" -eq 0 ] && doc=doc/TAPE_API.md &&
+    grep -qF 'ris tape limits: start 67108864, grain 65536, max elements 2147483647' <<<"$out" &&
+    grep -qF 'ris tape limits: side reservation 134217728, cached regions per kind 64' <<<"$out" &&
+    grep -qF 'ris tape limits: region count has no fixed cap' <<<"$out" &&
+    grep -qF 'ris tape limits: live tasks per group 2147483647' <<<"$out" &&
+    grep -qF 'ris tape limits: fiber stack 262144 bytes; main stack is OS-limited' <<<"$out" &&
+    grep -qF 'are at most 2^31 - 1' "$doc" &&
+    grep -qF '128 MiB (`SIDE_RESERVE`' "$doc" &&
+    grep -qF 'no fixed count cap' "$doc" &&
+    grep -qF 'at most 2^31 - 1 live tasks' "$doc" &&
+    grep -qF '`IyiFiber::STACK_BYTES` is 262,144 bytes' "$doc" &&
+    grep -qF "Main's stack limit is set by the OS" "$doc"; then
+  echo "runs     tape_limits (limits published)"
+else
+  echo "FAILED   tape_limits: $out"; status=1
 fi
 
 # Fatal size errors exit directly, with exact diagnostics and no heap.

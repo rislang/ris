@@ -1,0 +1,10 @@
+# spec: 2.3@91ca936c
+class Log
+  getter items = Array(Int32).new
+end
+
+log = Log.new
+log.items << 1
+other = Log.new
+# Raw equality of two owners: compare their fields.
+puts log.same?(other)

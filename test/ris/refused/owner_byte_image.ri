@@ -1,0 +1,9 @@
+# spec: 2.3@91ca936c
+class Log
+  getter items = Array(Int32).new
+end
+
+log = Log.new
+log.items << 1
+# A byte image of an owner: read its fields instead.
+puts log.unsafe_as(UInt64)

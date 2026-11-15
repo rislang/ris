@@ -1649,6 +1649,14 @@ class Iyi::Call
       if !obj && !similar_name && (arrival = Iyi::IYI_ARRIVAL_CALL_HINTS[def_name]?)
         msg << '\n' << arrival
       end
+      # ris: an owner has no byte image, raw copy or raw equality (SPEC
+      # 2.3); copy_to(owner) is its one copy.
+      if obj && {"dup", "clone", "same?", "unsafe_as", "to_slice", "bytes"}.includes?(def_name) &&
+         TapeOwnerChecker.owner?(program, owner)
+        msg << '\n' << "#{owner} is an owner (SPEC 2.1): it has no byte image, " \
+                       "raw copy or raw equality (SPEC 2.3). Copy it into fresh " \
+                       "space with `copy = x.copy_to(owner)`, and compare its fields."
+      end
       # A type that shadows another of its name comes first: every note
       # below is about the receiver the call reached, which is the wrong one.
       if shadowing = iyi_shadowing_type_hint(def_name, owner)

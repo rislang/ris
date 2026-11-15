@@ -1,3 +1,4 @@
+# spec: 2.3@91ca936c
 class Leaf
   property n : Int32
 
