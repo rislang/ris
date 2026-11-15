@@ -287,7 +287,9 @@ section; a removed one leaves its number unused.
   parse, a tag or block naming no clause, a clause with proofs whose
   version .spec.lock lacks, a lock line for no clause, a root clause
   version no CHANGELOG.md entry records (`## DATE` or, under a release,
-  `### DATE`), a clause with no proof, and a stale proof block label.
+  `### DATE`), a clause with no proof, a stale proof block label, and
+  an entry dated 2026-11-15 or later naming a doc/drafts/ folder with
+  no `*_DRIFT_REPORT.md` in it.
   A left-over SPEC_CHANGELOG.md or spec.lock fails. Module clause
   versions need no CHANGELOG.md entry: git and .spec.lock record them.
   An owning comment with no block directly after its unbroken comment

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# spec: 6.7@436841dc, 6.8@023f849f, 6.9@1e0b6a98
+# spec: 6.7@436841dc, 6.8@4c97b775, 6.9@1e0b6a98
 """`ris spec`: the spec's clauses linked to the tests that name them.
 
     RIS=./bin/ris python3 test/cli/spec_verb.py

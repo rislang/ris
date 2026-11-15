@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# spec: 6.8@4c97b775
 """`ris check`: one verdict over format, deps, types, unused and test.
 
     RIS=./bin/ris python3 test/cli/check_verb.py

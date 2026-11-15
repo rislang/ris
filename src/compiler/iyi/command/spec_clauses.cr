@@ -986,6 +986,7 @@ class Iyi::Command
       failures << {"SPEC_CHANGELOG.md is the old name: the spec's changes are the changelog",
                    "move its entries into CHANGELOG.md (`###` under a release heading), then delete it"}
     end
+    spec_drift_failures(root, failures)
     tests.each do |test|
       next unless test.tagged
       test.items.each do |number, _|
@@ -1145,6 +1146,32 @@ class Iyi::Command
       puts "#{marks.size} NoSpec mark#{marks.size == 1 ? "" : "s"} over #{count} def#{count == 1 ? "" : "s"}" unless marks.empty?
     end
     exit
+  end
+
+  # A SPEC change's CHANGELOG entry (2026-11-15 on) names its draft
+  # folder, which must hold the drift report (AGENTS.md: EGM is required).
+  private SPEC_DRIFT_SINCE = "2026-11-15"
+
+  private def spec_drift_failures(root : String, failures : Array({String, String})) : Nil
+    file = File.join(root, "CHANGELOG.md")
+    return unless File.file?(file)
+    date = nil
+    seen = Set(String).new
+    File.each_line(file) do |line|
+      if heading = line.match(/^\#{2,3} (\d{4}-\d\d-\d\d)/)
+        date = heading[1]
+        next
+      end
+      next unless date && date >= SPEC_DRIFT_SINCE
+      line.scan(/doc\/drafts\/([\w-]+)/) do |found|
+        folder = "doc/drafts/#{found[1]}"
+        next unless seen.add?(folder)
+        dir = File.join(root, folder)
+        next if Dir.exists?(dir) && Dir.children(dir).any?(&.ends_with?("_DRIFT_REPORT.md"))
+        failures << {"CHANGELOG.md (#{date}) names #{folder}, which has no drift report",
+                     "run the EGM drift check and keep it as #{folder}/DATE_DRIFT_REPORT.md"}
+      end
+    end
   end
 
   # --- public defs need a proof (SPEC 6.8, doc/drafts/spec-required) -----

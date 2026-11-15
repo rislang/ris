@@ -43,3 +43,8 @@ R1-R5 and the S2 fixture list match the build. The test runs the real
 
 S3 (mark count in the commit body, rispacks note in CHANGELOG) was not
 checked against the commit.
+
+## R6 (2026-11-15, lead check)
+
+Built as written: spec_drift_failures in spec_clauses.cr; two
+fixtures in test/cli/spec_required.sh. No drift.

@@ -73,6 +73,11 @@ right above a def it is the def's. A module mark not yet acked fails:
 are test helpers and are not checked; `ris spec todo` lists each
 mark with its reason and count.
 
+R6 (added 2026-11-15 after the drift report was skipped once). A
+CHANGELOG.md entry dated 2026-11-15 or later that names a
+doc/drafts/ folder fails `ris check spec` until that folder holds a
+`*_DRIFT_REPORT.md`; older entries are left as they are.
+
 ## 3. Rollout
 
 S1. SPEC 6.8 gains R1-R5; CHANGELOG entry names this folder and

@@ -57,6 +57,12 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.
 
+### 2026-11-15 · 6.8@4c97b775
+
+* `ris check spec` fails on an entry from today on naming a draft
+  folder with no drift report: the EGM drift step was skipped once and
+  only a question found it. Draft: doc/drafts/spec-required (R6).
+
 ### 2026-11-15 · 6.8@023f849f
 
 * Breaking: `ris check spec` fails on a project with no spec (it was

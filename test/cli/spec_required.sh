@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# spec: 6.8@023f849f
+# spec: 6.8@4c97b775
 # A project always has a spec and a public def a proof
 # (doc/drafts/spec-required, S2): the built `ris check spec` on fixtures.
 set -euo pipefail
@@ -22,6 +22,8 @@ def project(files, spec=True):
     if spec:
         base['SPEC.md'] = SPEC
         base['src/root.ri'] = CLAUSE
+    files = dict(files)
+    log = files.pop('_log', '')
     base.update(files)
     for name, text in base.items():
         path = root / name
@@ -30,7 +32,7 @@ def project(files, spec=True):
     if spec:
         head = subprocess.run([ris, 'spec', '1.1'], cwd=root, text=True,
                               capture_output=True).stdout.split()[0]
-        (root / 'CHANGELOG.md').write_text(f'# C\n\n## 2026-11-15 · {head}\n')
+        (root / 'CHANGELOG.md').write_text(f'# C\n\n## 2026-11-15 · {head}\n{log}')
         subprocess.run([ris, 'spec', 'ack', '1.1'], cwd=root, check=True,
                        stdout=subprocess.DEVNULL)
     return tmp, root
@@ -48,7 +50,7 @@ def check(title, files, ok, err=(), spec=True, before=None):
         assert (p.returncode == 0) == ok, (title, p.returncode, p.stderr,
                                            p.stdout)
         for want in err:
-            assert want in p.stderr, (title, want, p.stderr)
+            assert want in p.stderr + p.stdout, (title, want, p.stderr, p.stdout)
         if ok:
             assert 'has no proof' not in p.stderr, (title, p.stderr)
         print(f'ok   {title}')
@@ -134,6 +136,12 @@ with tmp:
                           capture_output=True).stdout
     assert 'src/post.ri:1 NoSpec module, 1 def: old API' in todo, todo
     print('ok   def added later fails; spec todo lists the mark')
+check('a new entry draft lacks its drift report',
+      {'_log': 'Draft: doc/drafts/x.\n', 'doc/drafts/x/x.md': 'd\n'},
+      False, err=['names doc/drafts/x, which has no drift report'])
+check('a new entry draft has its drift report',
+      {'_log': 'Draft: doc/drafts/x.\n', 'doc/drafts/x/x.md': 'd\n',
+       'doc/drafts/x/2026-11-15_DRIFT_REPORT.md': 'r\n'}, True)
 check('property', {'src/q.ri': 'class Q\n  property name = ""\nend\n'},
       True)
 tmp, root = project({'src/post.ri': POST})
