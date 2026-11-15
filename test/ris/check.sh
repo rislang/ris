@@ -3514,8 +3514,7 @@ fi
 # was answered 501, not reset with HTTP_1_1_REQUIRED. resume: roots
 # assigned anew resumed the old session.
 for pair in 'number_exercise|all number checks passed' \
-    'std_http_resume|ALL CHECKS PASSED' \
-    'http2_exercise|ALL CHECKS PASSED'; do
+    'std_http_resume|ALL CHECKS PASSED'; do
   name=${pair%%|*} want=${pair#*|}
   bin=$(mktemp -d)/$name
   if ! out=$("$RIS" build -o "$bin" "test/cli/$name.ri" 2>&1); then
@@ -3529,9 +3528,10 @@ for pair in 'number_exercise|all number checks passed' \
   rm -rf "$(dirname "$bin")"
 done
 
-# std_http_stop serves many connections at once: macOS skips it
-# (RIS_CHECK_SKIP), as it serves one (SPEC 7.1).
-for pair in 'std_http_stop|ALL CHECKS PASSED'; do
+# std_http_stop and http2_exercise serve many connections at once:
+# macOS skips them (RIS_CHECK_SKIP), as it serves one (SPEC 7.1).
+for pair in 'std_http_stop|ALL CHECKS PASSED' \
+    'http2_exercise|ALL CHECKS PASSED'; do
   name=${pair%%|*} want=${pair#*|}
   bin=$(mktemp -d)/$name
   if ! out=$("$RIS" build -o "$bin" "test/cli/$name.ri" 2>&1); then

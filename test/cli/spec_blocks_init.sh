@@ -14,6 +14,7 @@ set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 RIS="${RIS:-$REPO/bin/ris}"
+case "$RIS" in /*) ;; *) RIS="$PWD/$RIS" ;; esac
 mkdir -p "$REPO/test/cli/.work"
 WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
