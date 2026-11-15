@@ -1,0 +1,123 @@
+# Todo clause triage for 0.1.0
+
+Source: `./bin/ris spec todo` on dev4 (17e707bde), 2026-11-15. 27
+clauses (24 root, 3 std); NoSpec lines and the xml `todo(...)` calls
+in test/cli/std_xml_exercise.ri (TapeNode has no path) are left out.
+
+Verdicts: DONE = built, only a `spec N.M` block is missing; PART =
+partly built; NOT = not built, planned after 0.1.0. Evidence paths
+are under test/ris/ unless named; "check.sh" is test/ris/check.sh.
+Size: S = one block reusing existing programs (< 30 lines), M = a
+few new programs, L = new compiler or runtime work first.
+
+Most DONE rows already have a check.sh case; the proof is a spec
+block that runs or names those programs, plus `ris spec ack`.
+
+## Root clauses (SPEC.md)
+
+| clause | verdict | evidence | proof plan / missing part |
+|---|---|---|---|
+| 1.2 | DONE | tape_primitives.ri, std_generic_tape.ri | S: assert each tape |
+| | | | type lives on the tape; unboxed dispatch: heap_check.py |
+| | | | shows 0 boxes for a union/dispatch program |
+| 1.3 | DONE | check.sh:1098 class_finalize, heap_class.ri, | S: refused |
+| | | class_share.ri, src/ris/region.ri:200 | finalize + Share; |
+| | | | heap_class runs with 0 heap; class_escape refused |
+| 1.4 | DONE | array_api.ri, owner_reference.ri | S: `b = a; b << 1` |
+| | | | then `a.size` grew; `t = s` keeps text |
+| 1.6 | DONE | check.sh:1090-1093 text_literal_heap, | S: literal has no |
+| | | borrowed_text.ri, refused/text_lend_literal.ri | tape bytes; param |
+| | | | borrow: heap_trap borrowed_text |
+| 1.7 | DONE | copy_deep.ri, copy_rollback.ri (check.sh:1050), | M: split |
+| | | refused/copy_pointer, copy_link, copy_*_cycle | sharing, no init |
+| | | | run, rollback; "deep chains never overflow" needs one |
+| | | | deep-chain program |
+| 1.8 | DONE | once_in_program_init.ri (check.sh:1024), | S: init order |
+| | | thread_program_initializers.ri, program_*.ri, | prints; |
+| | | refused/program_copy_forged.ri | forged-owner refusal |
+| 2.3 | PART | refused/owner_*.ri, class_copy.ri | kept: copy_to deep- |
+| | | | copies owners. Missing: explicit refusal tests for |
+| | | | owner byte image / raw equality / FFI layout |
+| 3.1 | DONE | refused/root_branch_escape, root_store_join, | S: name the |
+| | | roots_holders.ri (check.sh:836) | refusals and run |
+| 4.1 | DONE | cleanup_order.ri (check.sh:1174), | S: expected output |
+| | | cleanup_*.ri, typed_group_results.ri | + panic result |
+| | | | copied; unwind_failure fatal |
+| 4.2 | PART | size_failure.py (check.sh:2707), | kept: checked sizes, |
+| | | src/ris/region.ri:490, board_bounds_*.ri | exhaustion panic. |
+| | | | Missing: limits for tape bytes, regions, tasks, |
+| | | | native stack are not published anywhere |
+| 4.3 | DONE | signal_flags.ri (check.sh:2567), | S: signal flag |
+| | | unwind_failure.ri (check.sh:2611) | test; fatal exit |
+| | | | skips a defer (assert output lacks it) |
+| 5.4 | PART | ffi_marked.ri, refused/ffi_*.ri, raw_pointer.ri, | kept: no |
+| | | pointer_unsafe_*.ri | raw pointers in APIs, marks. |
+| | | | Missing: no unwind across foreign frames and foreign |
+| | | | thread attach are not checked or tested |
+| 5.6 | DONE | board_*.ri, board_checks.sh, refused/board_* | M: spec block |
+| | | (board_recursive, board_class_post, not_flat) | calling existing |
+| | | | board programs; large clause, many sub-proofs; |
+| | | | macOS N=1 refusal not tested here |
+| 6.1 | NOT | src/ris/tape_core.ri:557 (SlicePool only) | no Pool(T), |
+| | | | no free/replacement, no generations or handles |
+| 6.2 | PART | slice_pool.ri, refused/shrink_pool_run*.ri, | kept: reset |
+| | | refused/slice_pool_links.ri | obeys shrink, linked |
+| | | | runs refused. Missing: free and explicit run |
+| | | | relocation do not exist |
+| 6.3 | DONE | slice_pool_errors.ri (check.sh:701), | S: bounds / |
+| | | le_offset_overflow.ri, side_overflow.ri | overflow panics |
+| | | | before mutation; membership test may need M |
+| 6.4 | PART | src/ris/tape.ri:1889 load, link_check.ri | kept: length |
+| | | (check.sh:1412) | and flat-type check. Missing: links |
+| | | | checked when followed, not before publish; no union |
+| | | | tags, alignment or span validation up front |
+| 6.5 | DONE | src/ris/region.ri:200, heap_io.ri | S: Pool holds no |
+| | | | resource (classes/IO refused as elements); compile- |
+| | | | fail program "SlicePool(File)" with its message |
+| 6.6 | PART | stable_growth.ri (check.sh:2676), | kept: stats for |
+| | | src/ris/region.ri:48-183 | regions, side moves, |
+| | | | growth. Missing: owner paths, pool waste, moved- |
+| | | | down results counters; exit-path stats tests |
+| 7.2 | DONE | stable_growth.ri, hash_api.ri, tree tests, | S: no-move |
+| | | string_api.ri | assert after growth; Hash order |
+| 7.3 | DONE | text_grow.ri, check.sh:2633 text_plain_builder | S: `t = s; |
+| | | refused/text_*_field.ri | s << x` keeps t; refusal |
+| | | | message `text = ""` |
+| 7.4 | DONE | nested_containers.ri (check.sh:734), | S: change via |
+| | | refused/nested_run_*view.ri | outer[i] shows; view |
+| | | | after growth refused |
+| 7.5 | DONE | long_lived_containers.ri (check.sh:734) | S: store copies, |
+| | | | delete returns run (stats) |
+| 7.6 | DONE | check.sh:266 tape_block_program_store, | S: refusals name |
+| | | refused/yield_escape, return_escape | copy_to(owner) |
+
+## Std module clauses
+
+| clause | verdict | evidence | proof plan / missing part |
+|---|---|---|---|
+| base64.4 | DONE | src/std/base64.ri:317 | S: decode "QR==" (nonzero |
+| | | | unused bits) gives "A"; drop the todo |
+| box.3 | DONE | src/std/box.ri:18 | S: `Box.unbox(b.to_unsafe)` is the |
+| | | | same object (`same?`); address equals across calls |
+| capsule.8 | DONE | src/std/capsule.ri:1184 | S: decoded payload |
+| | | | `.to_unsafe`-free check: slice offsets inside input |
+| | | | (byte compare + RIS_TAPE_STATS copies 0) |
+
+## Totals
+
+| verdict | count | clauses |
+|---|---|---|
+| DONE | 20 | 1.2 1.3 1.4 1.6 1.7 1.8 3.1 4.1 4.3 5.6 6.3 6.5 |
+| | | 7.2 7.3 7.4 7.5 7.6, base64.4 box.3 capsule.8 |
+| PART | 6 | 2.3 4.2 5.4 6.2 6.4 6.6 |
+| NOT | 1 | 6.1 |
+
+Total 27 (24 root, 3 std).
+
+Suggested 0.1.0 cut: write the 20 DONE proofs (mostly S); for PART,
+narrow the clause to the kept part with a todo for the rest or move
+the missing part to a later version; mark 6.1 planned (Pool(T)).
+
+Verdicts were judged from file names, check.sh cases and a short read
+of the code; no new programs were run. Verify each while writing its
+proof.
