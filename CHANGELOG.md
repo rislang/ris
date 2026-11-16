@@ -57,6 +57,30 @@ lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal
   Build with LLVM 23 or newer (LLVM.md).
 * `ris --version` prints the ris, iyi and Crystal versions.
 
+### 2026-11-15 · 5.6@10d17e95
+
+* New: an HTTP serving task waiting for a next request's head, with
+  nothing of it buffered and every earlier request answered, ends that
+  connection when its listener holds a new one that has sent data, and
+  serves the new one. It ends it as the server ends any: GOAWAY over
+  HTTP/2, close_notify over TLS, a lingering close. A request crossing
+  that close is not served (RFC 9112 §9.3); any other connection is
+  never ended so.
+  Why: Linux gives a new connection to a SO_REUSEPORT listener by a hash
+  blind to whether its task is busy; one that met a task holding an idle
+  keep-alive connection waited until that ended, and a TLS client's
+  handshake timed out first. Logged on minitest: in a failing run of
+  test/cli/std_http_stop.ri the new connection sat in the queue of the
+  one listener (of 64) whose task held the idle TLS connection. About 40
+  of 400 stressed runs failed so. On macOS (N = 1) every second client
+  waited. Draft and EGM review: doc/drafts/http-idle-yield/. The review
+  made "between requests" an explicit flag (`Conn#awaiting_head`), not
+  membership of `IdleConns`, and added the last look before the close
+  so a bare connect never ends a connection. Decided: the task waits up
+  to 100 ms for the new connection's first byte; no TCP_DEFER_ACCEPT (a
+  peer it holds back gets no close at stop); no minimum idle time before
+  a yield.
+
 ### 2026-11-15 · 6.1@a1b985de
 
 * New: `Pool(T)`, typed single slots: `alloc` reuses the last freed slot,

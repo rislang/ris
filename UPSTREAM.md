@@ -81,6 +81,11 @@ a rename after 0.1.0 would break callers (doc/drafts/pool-t, Q5).
   descriptors and lets servers distinguish setup failure from a panic.
   Task-owned socket state and copied HTTP configuration stay in ris.
 
+* std/socket and std/tls for std/http's idle yield (SPEC 5.6), none of it
+  tape: `IyiSocket.watcher`, `watch`, `readable_now?` and `await_either` (a wait
+  on two descriptors through an epoll or kqueue of the task's), `release_fd`
+  and `adopt`, and `TlsConnection#pending?`.
+
 * macOS arm64: the connect race on kqueue, a kevent change on the stack (no
   storage per wait), UDP's SO_SNDBUF for datagrams over 9 KiB, `pthread_self`
   in thread's bindings. HTTP's one-listener limit there is ris's prefork.

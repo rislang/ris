@@ -1,4 +1,4 @@
-# spec: 5.6@b5b47fbd
+# spec: 5.6@10d17e95
 struct BoardWake
   getter number : Int32
 

@@ -1,0 +1,466 @@
+# spec: 5.6@10d17e95
+# A connection between requests yields to a new one (SPEC 5.6).
+#
+#   ./bin/ris run test/cli/std_http_idle_yield.ri
+#
+# Servers with one serving task (`max_connections: 1`), so one listener
+# and no hash decides which task a connection meets: each step is
+# deterministic. *timeout_ms* is 30 s, far from the 2 s a yield must take.
+# A and B are raw sockets (TLS: std/tls clients; HTTP/2 framed by hand).
+#
+# 1. In the clear and over TLS: A asks once and waits; B asks. B is
+#    answered within 2 s, and A reads the end (over TLS close_notify).
+# 2. HTTP/2: A's stream 1 answered, A waits; B asks. B is answered, and
+#    A reads GOAWAY naming stream 1, then the end.
+# 3. A partial head: A sends half a request line, B asks, A finishes.
+#    A is answered first, then B.
+# 4. An HTTP/2 stream open: A's handler waits on a board message; B asks.
+#    A is answered once the message is posted, then B.
+# 5. Upgraded: A holds an upgrade; B asks. B is answered once A ends it.
+# 6. Connect only: B connects and sends nothing for 1 s. A's next
+#    request is answered on A's connection.
+# 7. Stop: the server is stopped while it waits on A and its listener;
+#    `serve` returns and A reads the end.
+#
+# Each check prints its line; a wrong one is followed by "FAIL <check>:
+# <found>, not <wanted>". The run ends "ALL CHECKS PASSED" or exits 1.
+
+module bench/std_http_idle_yield
+
+import std/http::{Incoming, Outgoing, Server, TlsStream}
+import std/socket::{IyiSocket, SocketError}
+import std/tls::{TlsIdentity, TlsClient, TlsConfig, TlsError, TlsServerConfig}
+import std/x509::{RisCertificateStore, Certificate}
+
+module RisYieldServer
+  struct RisReady(H)
+  end
+
+  struct RisStop(H)
+  end
+
+  struct RisStopped(H)
+  end
+
+  def self.port : Int32
+    probe = IyiSocket.listen("127.0.0.1", 0)
+    port = probe.local_port
+    probe.close
+    port
+  end
+
+  def self.ready(handler : H.class) : Nil forall H
+    raise "ready queue full" unless RisBoard.post(RisReady(H).new)
+  end
+
+  def self.wait(handler : H.class) : Nil forall H
+    ready = RisBoard.take(RisReady(H), 10000_i64)
+    raise "cancelled before listening" if ready.is_a?(Cancelled)
+    raise "server did not listen within 10 s" unless ready[1]
+  end
+
+  def self.stop(handler : H.class) : Nil forall H
+    raise "stop queue full" unless RisBoard.post(RisStop(H).new)
+  end
+
+  # Whether the server stopped within 10 s of `stop`.
+  def self.stopped?(handler : H.class) : Bool forall H
+    result = RisBoard.take(RisStopped(H), 10000_i64)
+    !result.is_a?(Cancelled) && result[1]
+  end
+
+  # One serving task until `stop`.
+  def self.answer(port : Int32, handler : H.class) : Nil forall H
+    group do |pool|
+      pool.spawn do
+        Server.answer("127.0.0.1", port, 0, handler, timeout_ms: 30000,
+          max_connections: 1)
+        0
+      end
+      pool.spawn do
+        unless RisBoard.take(RisStop(H)).is_a?(Cancelled)
+          pool.cancel_children
+        end
+        0
+      end
+      0
+    end
+    raise "stopped queue full" unless RisBoard.post(RisStopped(H).new)
+  end
+end
+
+# What step 4's handler waits for.
+struct RisGo
+end
+
+# The answer: the request's version, "HTTP/1.1" or "HTTP/2". /wait waits
+# for `RisGo` first; /upgrade hands the connection over until it ends.
+def answer(req : Incoming, res : Outgoing) : Nil
+  if req.path == "/upgrade"
+    res.header("Upgrade", "hold")
+    res.upgrade
+    return
+  end
+  RisBoard.take(RisGo, 10000_i64) if req.path == "/wait"
+  res.body << req.version
+end
+
+# The upgraded connection, read until its client ends it.
+def hold(socket : IyiSocket | TlsStream) : Nil
+  while true
+    got = socket.read(4096)
+    break unless got.is_a?(String) && !got.empty?
+  end
+end
+
+class RisClearHandler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisYieldServer.ready(RisClearHandler)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    answer(req, res)
+  end
+
+  def take_over(socket : IyiSocket | TlsStream, leftover : String, res : Outgoing) : Nil
+    hold(socket)
+  end
+end
+
+class RisStopHandler
+  def initialize(config)
+  end
+
+  def listening(port : Int32) : Nil
+    RisYieldServer.ready(RisStopHandler)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    answer(req, res)
+  end
+end
+
+class RisTlsHandler
+  @tls : TlsServerConfig
+  @identity : TlsIdentity
+
+  def initialize(config)
+    identity = TlsIdentity.new(LEAF_PEM + ROOT_PEM, KEY_PEM)
+    @identity = identity
+    raise identity.error.to_s if identity.error
+    server_config = TlsServerConfig.new(identity)
+    @tls = server_config
+    @tls.alpn << "http/1.1"
+  end
+
+  def listening(port : Int32) : Nil
+    RisYieldServer.ready(RisTlsHandler)
+  end
+
+  def tls_config : TlsServerConfig
+    @tls
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    answer(req, res)
+  end
+end
+
+# The test PKI of std_http_stop.ri: a root and a leaf for localhost it
+# signed, Ed25519, valid to 9999. The key guards nothing but tests.
+LEAF_PEM = "-----BEGIN CERTIFICATE-----\n" \
+           "MIIBQzCB9qADAgECAgEDMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
+           "dDAgFw0yNTAxMDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1OVowFDESMBAGA1UEAwwJ\n" \
+           "bG9jYWxob3N0MCowBQYDK2VwAyEAOeskudtTVi76JObK6QHqJy6M7PaEu/aLlC5H\n" \
+           "B5OLks+jZjBkMBQGA1UdEQQNMAuCCWxvY2FsaG9zdDAMBgNVHRMBAf8EAjAAMB0G\n" \
+           "A1UdDgQWBBQN8ZJay/U7zf07disj78hKukvGAjAfBgNVHSMEGDAWgBSNjkTWVhBs\n" \
+           "a874Ao2cPFX4w4saajAFBgMrZXADQQAcAgj9qe58GnzceRkYfxyfNHxmqWOgDJkn\n" \
+           "b3rO1pz+8OCRioO1P+BhFa1FR/FMHSH9bOFEKfXfy3Nwr+y+GkMM\n" \
+           "-----END CERTIFICATE-----\n"
+ROOT_PEM = "-----BEGIN CERTIFICATE-----\n" \
+           "MIIBJDCB16ADAgECAgEBMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
+           "dDAgFw0yNTAxMDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1OVowGTEXMBUGA1UEAwwO\n" \
+           "aXlpIGJlbmNoIHJvb3QwKjAFBgMrZXADIQCQIEeX9suXr4DL8DiLdBUfoWaJU+Hv\n" \
+           "7JhN3IpqspsuOqNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYw\n" \
+           "HQYDVR0OBBYEFI2ORNZWEGxrzvgCjZw8VfjDixpqMAUGAytlcANBAFEfpUf437+b\n" \
+           "PwJvPGD/gB0zIegp6+3cJzF42Tx6Hj8tIJgdtXVKA58EXmitGetqb788+xoJ49My\n" \
+           "4Wc3L1uxxAI=\n" \
+           "-----END CERTIFICATE-----\n"
+KEY_PEM = "-----BEGIN PRIVATE KEY-----\n" \
+          "MC4CAQAwBQYDK2VwBCIEIOYKs3OzEJYJ/j+ZQYLoAU929MQeanF9kupAR9HpeHJ8\n" \
+          "-----END PRIVATE KEY-----\n"
+
+GET = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
+
+def check(label : String, got : String, wanted : String, failures : Array(String)) : Nil
+  puts "#{label}: #{got}"
+  return if got == wanted
+  puts "FAIL #{label}: #{got}, not #{wanted}"
+  failures << label
+end
+
+def dial(port : Int32) : IyiSocket
+  socket = IyiSocket.connect("127.0.0.1", port, 2000)
+  raise "cannot connect to #{port}" unless socket.is_a?(IyiSocket)
+  socket
+end
+
+# An HTTP/1.1 answer read whole - its body is "HTTP/1.1" - within *ms*:
+# its status line, or what came instead.
+def answered(socket : IyiSocket, ms : Int32) : String
+  socket.read_timeout_ms = ms
+  heard = ""
+  until heard.ends_with?("\r\n\r\nHTTP/1.1")
+    got = socket.read(4096)
+    return "timed out" if got.is_a?(SocketError) && got.timed_out?
+    return "an error: #{got.operation}" if got.is_a?(SocketError)
+    return "cancelled" if got.is_a?(Cancelled)
+    return "the end" if got.empty?
+    heard << got
+  end
+  heard.split("\r\n").first
+end
+
+# What the next read finds within *ms*: "the end" (0), "timed out",
+# bytes, or an error (a reset among them).
+def next_read(socket : IyiSocket, ms : Int32) : String
+  socket.read_timeout_ms = ms
+  got = socket.read(4096)
+  return "timed out" if got.is_a?(SocketError) && got.timed_out?
+  return "an error: #{got.operation} (#{got.code})" if got.is_a?(SocketError)
+  return "cancelled" if got.is_a?(Cancelled)
+  got.empty? ? "the end" : "#{got.bytesize} bytes"
+end
+
+def tls_asked(tls : TlsClient) : String
+  tls.write(GET)
+  heard = ""
+  until heard.ends_with?("\r\n\r\nHTTP/1.1")
+    got = tls.read
+    return "no answer: #{got.message}" if got.is_a?(TlsError)
+    return "the end" if got.empty?
+    heard << got
+  end
+  heard.split("\r\n").first
+end
+
+# -- HTTP/2 by hand: frames of the bytes given.
+
+def frame(type : Int32, flags : Int32, stream : Int32, payload : String) : String
+  size = payload.bytesize
+  head = String.build(9) do |w|
+    w.push(((size >> 16) & 0xFF).to_u8)
+    w.push(((size >> 8) & 0xFF).to_u8)
+    w.push((size & 0xFF).to_u8)
+    w.push(type.to_u8)
+    w.push(flags.to_u8)
+    w.push(((stream >> 24) & 0x7F).to_u8)
+    w.push(((stream >> 16) & 0xFF).to_u8)
+    w.push(((stream >> 8) & 0xFF).to_u8)
+    w.push((stream & 0xFF).to_u8)
+    nil
+  end
+  head + payload
+end
+
+# A field as a literal without indexing, its name the static table's
+# *index*, so every byte is below 128.
+def field(index : Int32, value : String) : String
+  String.build(2 + value.bytesize) do |w|
+    w.push(index.to_u8)
+    w.push(value.bytesize.to_u8)
+    w << value
+    nil
+  end
+end
+
+# The preface, an empty SETTINGS, and a GET of *path* on *stream*.
+def h2_open(path : String, stream : Int32) : String
+  "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" + frame(4, 0, 0, "") + h2_get(path, stream)
+end
+
+def h2_get(path : String, stream : Int32) : String
+  block = field(2, "GET") + field(6, "http") + field(4, path) + field(1, "localhost")
+  frame(1, 5, stream, block)
+end
+
+# Frames read until stream *stream* ends (DATA or HEADERS with
+# END_STREAM): "answered", or what came instead; a GOAWAY ends the wait
+# as "GOAWAY <last stream id>". *held* keeps what was read, *at* (one
+# number) how far frames were taken.
+def h2_answered(socket : IyiSocket, held : String::Builder, at : Array(Int32), stream : Int32, ms : Int32) : String
+  socket.read_timeout_ms = ms
+  while true
+    bytes = held.to_s
+    while bytes.bytesize - at[0] >= 9
+      from = at[0]
+      size = (bytes.byte_at(from).to_i32 << 16) | (bytes.byte_at(from + 1).to_i32 << 8) | bytes.byte_at(from + 2).to_i32
+      break if bytes.bytesize - from < 9 + size
+      type = bytes.byte_at(from + 3).to_i32
+      flags = bytes.byte_at(from + 4).to_i32
+      id = ((bytes.byte_at(from + 5).to_i32 & 0x7F) << 24) | (bytes.byte_at(from + 6).to_i32 << 16) | (bytes.byte_at(from + 7).to_i32 << 8) | bytes.byte_at(from + 8).to_i32
+      at[0] = from + 9 + size
+      if type == 7
+        last = ((bytes.byte_at(from + 9).to_i32 & 0x7F) << 24) | (bytes.byte_at(from + 10).to_i32 << 16) | (bytes.byte_at(from + 11).to_i32 << 8) | bytes.byte_at(from + 12).to_i32
+        return "GOAWAY #{last}"
+      end
+      return "answered" if id == stream && (type == 0 || type == 1) && (flags & 1) == 1
+    end
+    got = socket.read(4096)
+    return "timed out" if got.is_a?(SocketError) && got.timed_out?
+    return "an error: #{got.operation}" if got.is_a?(SocketError)
+    return "cancelled" if got.is_a?(Cancelled)
+    return "the end" if got.empty?
+    held << got
+  end
+  ""
+end
+
+failures = [] of String
+clear = RisYieldServer.port
+secure = RisYieldServer.port
+stopping = RisYieldServer.port
+
+group do |g|
+  g.spawn do
+    RisYieldServer.answer(clear, RisClearHandler)
+    0
+  end
+  RisYieldServer.wait(RisClearHandler)
+  g.spawn do
+    RisYieldServer.answer(secure, RisTlsHandler)
+    0
+  end
+  RisYieldServer.wait(RisTlsHandler)
+
+  # 1, in the clear.
+  a = dial(clear)
+  a.write(GET)
+  check("1 clear: A's first", answered(a, 2000), "HTTP/1.1 200 OK", failures)
+  b = dial(clear)
+  b.write(GET)
+  check("1 clear: B, within 2 s", answered(b, 2000), "HTTP/1.1 200 OK", failures)
+  check("1 clear: A then reads", next_read(a, 2000), "the end", failures)
+  a.close
+  b.close
+
+  # 1, over TLS.
+  store = RisCertificateStore.new
+  if problem = store.read_pem(ROOT_PEM)
+    raise problem.message
+  end
+  config = TlsConfig.new
+  config.roots = store.kept_certificates
+  config.alpn << "http/1.1"
+  ta = TlsClient.new("localhost", config)
+  if problem = ta.connect(secure, 2000)
+    raise problem.message
+  end
+  check("1 TLS: A's first", tls_asked(ta), "HTTP/1.1 200 OK", failures)
+  tb = TlsClient.new("localhost", config)
+  if problem = tb.connect(secure, 2000)
+    check("1 TLS: B's handshake, within 2 s", problem.message, "done", failures)
+  else
+    check("1 TLS: B, within 2 s", tls_asked(tb), "HTTP/1.1 200 OK", failures)
+  end
+  ended = ta.read
+  check("1 TLS: A then reads", ended.is_a?(TlsError) ? ended.message : (ended.empty? ? "close_notify" : "#{ended.bytesize} bytes"), "close_notify", failures)
+  ta.close
+  tb.close
+
+  # 2, HTTP/2.
+  a = dial(clear)
+  a.write(h2_open("/", 1))
+  held = String::Builder.new(256)
+  at = [0]
+  check("2 h2: A's stream 1", h2_answered(a, held, at, 1, 2000), "answered", failures)
+  b = dial(clear)
+  b.write(GET)
+  check("2 h2: B, within 2 s", answered(b, 2000), "HTTP/1.1 200 OK", failures)
+  check("2 h2: A reads", h2_answered(a, held, at, 3, 2000), "GOAWAY 1", failures)
+  check("2 h2: A then reads", held.bytesize > at[0] ? "#{held.bytesize - at[0]} bytes" : next_read(a, 2000), "the end", failures)
+  a.close
+  b.close
+
+  # 3, a partial head.
+  a = dial(clear)
+  a.write(GET)
+  check("3 partial: A's first", answered(a, 2000), "HTTP/1.1 200 OK", failures)
+  a.write("GET / HT")
+  sleep(100)
+  b = dial(clear)
+  b.write(GET)
+  check("3 partial: B, while A's head is partial", next_read(b, 500), "timed out", failures)
+  a.write("TP/1.1\r\nHost: localhost\r\n\r\n")
+  check("3 partial: A's second", answered(a, 2000), "HTTP/1.1 200 OK", failures)
+  check("3 partial: B, after A's answer", answered(b, 2000), "HTTP/1.1 200 OK", failures)
+  a.close
+  b.close
+
+  # 4, an HTTP/2 stream open.
+  a = dial(clear)
+  a.write(h2_open("/", 1))
+  held = String::Builder.new(256)
+  at = [0]
+  check("4 h2 open: A's stream 1", h2_answered(a, held, at, 1, 2000), "answered", failures)
+  a.write(h2_get("/wait", 3))
+  sleep(100)
+  b = dial(clear)
+  b.write(GET)
+  check("4 h2 open: B, while A's stream is open", next_read(b, 500), "timed out", failures)
+  raise "go queue full" unless RisBoard.post(RisGo.new)
+  check("4 h2 open: A's stream 3", h2_answered(a, held, at, 3, 2000), "answered", failures)
+  check("4 h2 open: B, after A's answer", answered(b, 2000), "HTTP/1.1 200 OK", failures)
+  a.close
+  b.close
+
+  # 5, upgraded.
+  a = dial(clear)
+  a.write("GET /upgrade HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: hold\r\n\r\n")
+  a.read_timeout_ms = 2000
+  up = a.read(4096)
+  check("5 upgraded: A", up.is_a?(String) ? up.split("\r\n").first : "no answer", "HTTP/1.1 101 Switching Protocols", failures)
+  b = dial(clear)
+  b.write(GET)
+  check("5 upgraded: B, while A holds it", next_read(b, 500), "timed out", failures)
+  a.close
+  check("5 upgraded: B, after A ends it", answered(b, 2000), "HTTP/1.1 200 OK", failures)
+  b.close
+
+  # 6, connect only.
+  a = dial(clear)
+  a.write(GET)
+  check("6 connect only: A's first", answered(a, 2000), "HTTP/1.1 200 OK", failures)
+  b = dial(clear)
+  sleep(1000)
+  a.write(GET)
+  check("6 connect only: A's second", answered(a, 2000), "HTTP/1.1 200 OK", failures)
+  a.close
+  b.close
+
+  RisYieldServer.stop(RisClearHandler)
+  RisYieldServer.stop(RisTlsHandler)
+  check("the servers stop", "#{RisYieldServer.stopped?(RisClearHandler)}, #{RisYieldServer.stopped?(RisTlsHandler)}", "true, true", failures)
+
+  # 7, the stop.
+  g.spawn do
+    RisYieldServer.answer(stopping, RisStopHandler)
+    0
+  end
+  RisYieldServer.wait(RisStopHandler)
+  a = dial(stopping)
+  a.write(GET)
+  check("7 stop: A's first", answered(a, 2000), "HTTP/1.1 200 OK", failures)
+  sleep(100)
+  RisYieldServer.stop(RisStopHandler)
+  check("7 stop: serve returns", RisYieldServer.stopped?(RisStopHandler).to_s, "true", failures)
+  check("7 stop: A then reads", next_read(a, 2000), "the end", failures)
+  a.close
+end
+
+exit 1 unless failures.empty?
+puts "ALL CHECKS PASSED"
+exit 0

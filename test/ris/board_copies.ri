@@ -1,4 +1,4 @@
-# spec: 5.6@b5b47fbd
+# spec: 5.6@10d17e95
 @[PointerUnsafe("gate reads container capacity without exposing a new API")]
 def board_capacity(value : T) : UInt64 forall T
   state = pointerof(value.@state).value

@@ -30,7 +30,9 @@
 # read), and interim 1xx answers are read past.
 #
 # **The server.** `Server.answer(host, port, config, Handler)`: N
-# serving tasks open independent SO_REUSEPORT listeners.
+# serving tasks open independent SO_REUSEPORT listeners; each serves one
+# connection at a time, and one idle between requests yields to a new
+# connection queued at its listener (SPEC 5.6).
 # Handler.new(config) is built from a checked config copy on each task.
 # Its #call(req : Incoming, res : Outgoing) reads the request - method,
 # path (an absolute-form target's own), query, fields, body, viewing the
@@ -214,7 +216,10 @@ end
 # Under `serve`, *listener* and *idle*: no read starts once the listener
 # is closed, and every read waits with the connection in *idle*, for
 # `serve` to end (`close_for_stop`) when the listener closes - one partway
-# through a request as much as one between requests.
+# through a request as much as one between requests. Being in *idle* is
+# "may be closed at stop", not "between requests": that state, in which
+# a connection yields to a new one (SPEC 5.6), is `Conn#awaiting_head`.
+# *idle* also holds the serving task's watcher for that yield.
 @[OnTape]
 struct IdleConns
   # Connections are linked by their state's address, a scalar: marking a
@@ -223,6 +228,11 @@ struct IdleConns
   @[OnTape]
   struct Head
     property first : UInt64 = 0_u64
+    # The serving task's watcher (`IyiSocket.watcher`), its listener an
+    # interest, -1 for none; and a connection accepted while
+    # yielding (SPEC 5.6), to be served next, -1 for none.
+    property poll : Int32 = -1
+    property handoff : Int32 = -1
   end
 
   @head : Pointer(Head)
@@ -255,6 +265,47 @@ struct IdleConns
       previous = current
       current = following
     end
+  end
+
+  # The idle yield's watcher over *listener* (SPEC 5.6), where the target
+  # has one; `close_poll` ends it.
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def open_poll(listener : IyiSocket) : Nil
+    poll = IyiSocket.watcher
+    return if poll < 0
+    unless IyiSocket.watch(poll, listener.fd)
+      IyiSocket.__sys_close(poll)
+      return
+    end
+    @head.value.poll = poll
+  end
+
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def close_poll : Nil
+    poll = @head.value.poll
+    @head.value.poll = -1
+    IyiSocket.__sys_close(poll) if poll >= 0
+    handoff = @head.value.handoff
+    @head.value.handoff = -1
+    IyiSocket.__sys_close(handoff) if handoff >= 0
+  end
+
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def poll : Int32
+    @head.value.poll
+  end
+
+  # The connection accepted while yielding, taken: -1 for none.
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def take_handoff : Int32
+    fd = @head.value.handoff
+    @head.value.handoff = -1
+    fd
+  end
+
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def handoff=(fd : Int32) : Int32
+    @head.value.handoff = fd
   end
 
   def each_value(& : Conn ->) : Nil
@@ -308,6 +359,14 @@ struct Conn
     property idle : IdleConns?
     # Handed to an upgrade's protocol (`held`), which writes when it likes.
     property handed_over : Bool = false
+    # Between requests (SPEC 5.6): answered at least once, every answer
+    # written, and waiting for the next request's head. Set by the serving
+    # loops just before that wait and cleared after it.
+    property awaiting_head : Bool = false
+    # The socket is an interest of the task's watcher (`IdleConns#poll`).
+    property watched : Bool = false
+    # The connection was ended to let a new one in (`fill`).
+    property yielded : Bool = false
     # When what is being read must have arrived by (monotonic ns, 0 for no
     # such time) and what it is, and how long one read may wait otherwise.
     property deadline : Int64 = 0_i64
@@ -416,6 +475,9 @@ struct Conn
     @state.value.ended = false
     @state.value.failure_kind = 0
     @state.value.handed_over = false
+    @state.value.awaiting_head = false
+    @state.value.watched = false
+    @state.value.yielded = false
     @state.value.deadline = 0_i64
     @state.value.deadline_whole = false
     @state.value.gap = nil
@@ -442,6 +504,11 @@ struct Conn
     if (stream = @state.value.stream) && !@state.value.handed_over && !@state.value.socket.closed?
       @state.value.socket.write_timeout_ms = STOP_WRITE_MS
       stream.close_write
+    end
+    # A head wait parks on the task's watcher, not on the socket, so a
+    # close alone would not wake it: a shut read end makes it readable.
+    if @state.value.watched && !@state.value.socket.closed?
+      IyiSocket.__sys_shutdown_read(@state.value.socket.fd)
     end
     @state.value.socket.close
   end
@@ -547,9 +614,81 @@ struct Conn
     take(available)
   end
 
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def awaiting_head=(value : Bool) : Bool
+    @state.value.awaiting_head = value
+  end
+
+  # Whether the connection was ended to let a new one in (SPEC 5.6).
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def yielded? : Bool
+    @state.value.yielded
+  end
+
+  # How long a new connection may take to send its first byte before
+  # the yield is called off: a bare connect must not end a client's
+  # connection (SPEC 5.6).
+  YIELD_FIRST_BYTE_MS = 100
+
+  # Whether nothing of the next request has come: the buffer empty and,
+  # over TLS, nothing decrypted or partly received; with *peek*, nothing
+  # readable on the socket either.
+  private def quiet?(peek : Bool) : Bool
+    return false if available > 0
+    if stream = @state.value.stream
+      return false if stream.pending?
+    end
+    !(peek && IyiSocket.readable_now?(@state.value.socket.fd))
+  end
+
+  # The head wait of a connection between requests (SPEC 5.6), on both
+  # the socket and the listener: true when the socket turned readable,
+  # false when the connection yields to a new one that sent data, nil on
+  # a failure (kept), the deadline or a cancellation.
+  private def wait_or_yield(poll : Int32, listener : IyiSocket, idle : IdleConns) : Bool?
+    socket = @state.value.socket
+    unless @state.value.watched
+      return true unless IyiSocket.watch(poll, socket.fd)
+      @state.value.watched = true
+    end
+    while true
+      return true unless quiet?(false)
+      ready = IyiSocket.await_either(poll, socket.fd, listener.fd, IyiSocket.bound(socket.read_timeout_ms))
+      if ready.is_a?(Cancelled)
+        keep_failure(ready)
+        return nil
+      end
+      if ready == 0
+        keep_failure(SocketError.timed_out("read a request's head"))
+        return nil
+      end
+      return true if ready == socket.fd || socket.closed?
+      return true if listener.closed?
+      # The new connection is taken here and kept only if its first
+      # byte comes soon; else it is closed and this one served on. No
+      # TCP_DEFER_ACCEPT: a peer it held back would get no close at stop.
+      fresh = listener.accept_ready
+      next unless fresh.is_a?(IyiSocket)
+      first = IyiSocket.await_readable(fresh.fd, YIELD_FIRST_BYTE_MS)
+      if first.is_a?(Cancelled)
+        fresh.close
+        keep_failure(first)
+        return nil
+      end
+      unless first && quiet?(true)
+        fresh.close
+        next
+      end
+      idle.handoff = fresh.release_fd
+      @state.value.yielded = true
+      return false
+    end
+  end
+
   # One read appended to what has arrived. False at the other end's close,
-  # on a failure (kept in `failure`), and under `serve` once the listener
-  # is closed.
+  # on a failure (kept in `failure`), under `serve` once the listener is
+  # closed, and when a connection between requests yields to a new one
+  # (`yielded?`, SPEC 5.6).
   def fill : Bool
     return false if @state.value.ended || @state.value.failure_kind != 0
     if listener = @state.value.listener
@@ -568,8 +707,15 @@ struct Conn
       end
       @state.value.socket.read_timeout_ms = left.to_i32
     end
+    # In *idle* before any wait, the yield's too, so stop ends it.
     if idle = @state.value.idle
       idle[@state.value.socket.object_id] = self
+    end
+    if @state.value.awaiting_head && (idle = @state.value.idle) && (listener = @state.value.listener) && idle.poll >= 0 && !@state.value.handed_over
+      unless wait_or_yield(idle.poll, listener, idle)
+        idle.delete(@state.value.socket.object_id)
+        return false
+      end
     end
     stream = @state.value.stream
     got = stream ? stream.read(data_bytes + @state.value.stop.to_i64, @state.value.capacity - @state.value.stop) : @state.value.socket.read(data_bytes + @state.value.stop.to_i64, @state.value.capacity - @state.value.stop)
@@ -940,6 +1086,12 @@ pub class TlsStream
     sent = @tls.write(text)
     return SocketError.layered("write to #{@tls.place}", sent.message) if sent.is_a?(TlsError)
     sent
+  end
+
+  # Whether a read answers without waiting (`TlsConnection#pending?`).
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def pending? : Bool
+    @tls.pending?
   end
 
   # close_notify, the sending half shut, and what the peer still sends
@@ -2415,8 +2567,11 @@ pub struct Server
   # maximum number of connections served simultaneously. It must be
   # positive. Each listener has a kernel queue; SO_REUSEPORT assigns
   # connections to listeners, without a promise of even distribution. A
-  # busy worker keeps its own queue waiting while it serves its current
-  # connection, including all keep-alive requests.
+  # task in a request or an upgrade keeps its own queue waiting; one
+  # between requests on a keep-alive connection yields: when a new
+  # connection that has sent data is queued at its listener, the idle one
+  # is ended as the server ends any (GOAWAY, close_notify, a lingering
+  # close) and the new one served (SPEC 5.6).
   #
   # TLS: implement Handler#tls_config to construct task-local TLS state
   # (std/tls's `TlsServerConfig`, 1.3 or 1.2), read once per worker. The
@@ -2475,6 +2630,7 @@ pub struct Server
       return
     end
     conn.no_deadline
+    answered = false
     while true
       going = false
       # One request's head, parse and answer are its own scratch, freed
@@ -2482,7 +2638,15 @@ pub struct Server
       tape do
         started = Time.monotonic_nanoseconds.to_i64
         conn.deadline_at(until_head(started, timeout_ms, until_whole(started, request_timeout_ms)))
-        return unless conn.available > 0 || conn.fill
+        # Between requests a new connection may take this one's place.
+        conn.awaiting_head = answered
+        filled = conn.available > 0 || conn.fill
+        conn.awaiting_head = false
+        unless filled
+          # Ended to let a new one in: this side wrote last.
+          conn.close if conn.yielded?
+          return
+        end
         result = nil.as(Int32 | Bool | Nil)
         loop do
           tape do
@@ -2502,12 +2666,15 @@ pub struct Server
           end
           conn.consume(result)
           going = true
+          answered = true
         in Bool
           return
         in Nil
           # Not the fast path's: read as serve_h1 reads a request.
           case h1_request(conn, handler, false, false, remote, timeout_ms, request_timeout_ms)
-          when 0 then going = true
+          when 0
+            going = true
+            answered = true
           when 1 then return
           else        return
           end
@@ -2822,6 +2989,8 @@ pub struct Server
     host, port, config = settings
     # Build state on this task, never in the supervisor.
     handler = F.new(config)
+    # On Linux the listener turns readable only for a peer that sent
+    # bytes, so the idle yield never ends a connection for a bare connect.
     listener = IyiSocket.listen_result(host, port, reuse_port: true, task_owned: true)
     if listener.is_a?(SocketError)
       return RisHttpStartFailure.new(listener)
@@ -2829,6 +2998,9 @@ pub struct Server
     defer listener.close
     handler.listening(port) if handler.responds_to?(:listening)
     idle = IdleConns.new
+    # A connection between requests yields to a new one (SPEC 5.6).
+    idle.open_poll(listener)
+    defer idle.close_poll
     tls = handler.responds_to?(:tls_config) ? handler.tls_config : nil
     # The fast path reads requests where they lie; TLS, compression and
     # streamed bodies take the full connection path.
@@ -2837,7 +3009,8 @@ pub struct Server
     while !IyiScheduler.current.cancelled
       stopped = false
       tape do
-        case client = listener.accept
+        handoff = idle.take_handoff
+        case client = (handoff >= 0 ? listener.adopt(handoff) : listener.accept)
         in Cancelled
           stopped = true
         in SocketError
@@ -2925,6 +3098,7 @@ pub struct Server
   # HTTP/1.1's requests on *conn*, one after another: whether this side
   # wrote last - an answer or a refusal - when they end.
   private def self.serve_h1(conn : Conn, handler, stream_bodies : Bool, compress : Bool, remote : String?, timeout_ms : Int32, request_timeout_ms : Int32) : Bool
+    answered = false
     while true
       # One request's head, parse and answer are its own scratch,
       # freed when it ends: the connection's tape stays flat however
@@ -2932,9 +3106,10 @@ pub struct Server
       outcome = 0
       tape do
         outcome = h1_request(conn, handler, stream_bodies, compress, remote,
-          timeout_ms, request_timeout_ms)
+          timeout_ms, request_timeout_ms, answered)
       end
       return outcome == 1 if outcome != 0
+      answered = true
     end
   end
 
@@ -2946,15 +3121,21 @@ pub struct Server
   private def self.h1_request(conn : Conn, handler, stream_bodies : Bool,
                               compress : Bool, remote : String?,
                               timeout_ms : Int32,
-                              request_timeout_ms : Int32) : Int32
+                              request_timeout_ms : Int32,
+                              between : Bool = false) : Int32
     started = Time.monotonic_nanoseconds.to_i64
     whole = until_whole(started, request_timeout_ms)
     conn.deadline_at(until_head(started, timeout_ms, whole))
+    # *between*: an earlier request was answered, so a new connection may
+    # take this one's place while no byte of the head has come (SPEC 5.6).
+    conn.awaiting_head = between
     got = conn.read_head(MAX_HEAD, "request", true)
+    conn.awaiting_head = false
     conn.no_deadline
     case got
     in Nil
-      return 2
+      # Ended to let a new one in: this side wrote last.
+      return conn.yielded? ? 1 : 2
     in HTTPError
       refuse(conn.transport, got)
       return 1
@@ -3066,7 +3247,9 @@ pub struct Server
   private def self.serve_h2(conn : Conn, handler, stream_bodies : Bool, compress : Bool, remote : String?, peer : Array(Certificate), timeout_ms : Int32, request_timeout_ms : Int32) : Bool
     h2 = H2Connection.new(conn, true, MAX_BODY.to_i64)
     return true unless h2.start
-    while serve_h2_request(conn, h2, handler, stream_bodies, compress, remote, peer, timeout_ms, request_timeout_ms)
+    answered = false
+    while serve_h2_request(conn, h2, handler, stream_bodies, compress, remote, peer, timeout_ms, request_timeout_ms, answered)
+      answered = true
     end
     h2.goaway
     true
@@ -3078,12 +3261,13 @@ pub struct Server
                                     compress : Bool, remote : String?,
                                     peer : Array(Certificate),
                                     timeout_ms : Int32,
-                                    request_timeout_ms : Int32) : Bool
+                                    request_timeout_ms : Int32,
+                                    between : Bool = false) : Bool
     tape do
       started = Time.monotonic_nanoseconds.to_i64
       whole = until_whole(started, request_timeout_ms)
       conn.deadline_at(until_head(started, timeout_ms, whole))
-      id = h2.next_request
+      id = h2.next_request(between)
       conn.no_deadline
       return false unless id
       fields = Array(Field).new(16)
@@ -7586,8 +7770,11 @@ class H2Connection
   # -- a server's side
 
   # The next stream whose request's head has come: frames are read until
-  # one has. Nil at the connection's end.
-  def next_request : Int32?
+  # one has. Nil at the connection's end. *between*: an earlier request
+  # was answered, so while no stream is open and no header block or frame
+  # is partly read, a new connection may take this one's place (SPEC 5.6;
+  # `Conn#fill` checks the buffer).
+  def next_request(between : Bool = false) : Int32?
     while true
       while id = @ready.shift?
         s = @streams[id]?
@@ -7597,7 +7784,10 @@ class H2Connection
         end
         drop_stream(id)
       end
-      return nil unless read_frame
+      @conn.awaiting_head = between && @block_stream == 0 && @streams.empty?
+      read = read_frame
+      @conn.awaiting_head = false
+      return nil unless read
     end
   end
 

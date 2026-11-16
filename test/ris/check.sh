@@ -3709,10 +3709,12 @@ fi
 # freed before HPACK sent it (PROTOCOL_ERROR); an upgrade over HTTP/2
 # was answered 501, not reset with HTTP_1_1_REQUIRED. resume: roots
 # assigned anew resumed the old session. task_stack: a debug build's
-# deep inlined frame overran a task's stack.
+# deep inlined frame overran a task's stack. idle_yield: a new connection
+# waited behind its task's idle keep-alive one until that ended (SPEC 5.6).
 for pair in 'number_exercise|all number checks passed' \
     'task_stack|task stack: deep inlined frame fits' \
-    'std_http_resume|ALL CHECKS PASSED'; do
+    'std_http_resume|ALL CHECKS PASSED' \
+    'std_http_idle_yield|ALL CHECKS PASSED'; do
   name=${pair%%|*} want=${pair#*|}
   bin=$(mktemp -d)/$name
   if ! out=$("$RIS" build -o "$bin" "test/cli/$name.ri" 2>&1); then

@@ -1818,6 +1818,15 @@ module RisTlsConnectionState
     @closed || @socket.closed?
   end
 
+  # Whether a read would answer without waiting on the socket: content of
+  # an opened record left, bytes of a record in the inbox, or the peer's
+  # close_notify taken. std/http's server asks before it ends a connection
+  # between requests (SPEC 5.6).
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def pending? : Bool
+    @plain_left > 0 || @inbox_end > @inbox_at || @eof
+  end
+
   # How long a read or a write of the connection under it may wait.
   def read_timeout_ms=(ms : Int32?) : Int32?
     @socket.read_timeout_ms = ms

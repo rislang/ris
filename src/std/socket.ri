@@ -1273,6 +1273,13 @@ pub struct IyiSocket
     (fd = accept_fd) >= 0 ? IyiSocket.new(fd.to_i32, @state.value.family, task_owned: @state.value.task_owned) : IyiSocket.refusal(fd, "accept a connection")
   end
 
+  # A connection this listener accepted and `release_fd` gave up, a
+  # socket again, as `accept` makes one.
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def adopt(fd : Int32) : IyiSocket
+    IyiSocket.new(fd, @state.value.family, task_owned: @state.value.task_owned)
+  end
+
   # `accept` that does not wait: nil when no connection is queued. Tasks
   # sharing a listener all wake for one connection, and those that lose it
   # go back to what they were watching.
@@ -1580,6 +1587,78 @@ pub struct IyiSocket
     end
   {% end %}
 
+  # A wait on two descriptors (SPEC 5.6): std/http's serving task watches
+  # a connection between requests and its listener. *poll* is the task's
+  # own epoll (Linux) or kqueue (darwin) instance (`watcher`), the two
+  # descriptors its interests (`watch`); the task parks on it as on any
+  # descriptor, so the wait is on the task's poller. -1 on other targets,
+  # where the caller waits on the one descriptor as before.
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def self.watcher : Int32
+    {% if flag?(:darwin) %}
+      poll = LibC.kqueue
+      LibC.fcntl(poll, 2, 1) if poll >= 0 # F_SETFD, FD_CLOEXEC
+      poll
+    {% elsif flag?(:linux) %}
+      poll = __iyi_conc_syscall6(IYI_SYS_EPOLL_CREATE1, 0x80000_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64).to_i32
+      poll < 0 ? -1 : poll
+    {% else %}
+      -1
+    {% end %}
+  end
+
+  # *fd* an interest of *poll* while readable, until *fd* closes: false
+  # when it cannot be.
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def self.watch(poll : Int32, fd : Int32) : ::Bool
+    {% if flag?(:darwin) %}
+      # EVFILT_READ (-1) with EV_ADD: level-triggered, off when fd closes.
+      storage = uninitialized UInt64[4]
+      words = pointerof(storage).as(Pointer(UInt64))
+      words.value = fd.to_u64
+      (words + 1_i64).value = 0x0001FFFF_u64
+      (words + 2_i64).value = 0_u64
+      (words + 3_i64).value = 0_u64
+      LibC.kevent(poll, pointerof(storage).as(Void*), 1, Pointer(Void).new(0_u64), 0, Pointer(Void).new(0_u64)) >= 0
+    {% elsif flag?(:linux) %}
+      # EPOLLIN (1), level-triggered; a closed fd leaves the set by itself.
+      storage = uninitialized UInt64[2]
+      event = pointerof(storage).as(Pointer(UInt8))
+      event.as(Pointer(UInt32)).value = 1_u32
+      Pointer(UInt64).new(event.address + IYI_POLL_DATA_OFFSET).value = fd.to_u64
+      __iyi_conc_syscall6(IYI_SYS_EPOLL_CTL, poll.to_i64, 1_i64, fd.to_i64, event.address.to_i64, 0_i64, 0_i64) >= 0
+    {% else %}
+      false
+    {% end %}
+  end
+
+  # Whether *fd* is readable now, no wait.
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def self.readable_now?(fd : Int32) : ::Bool
+    __sys_poll(fd, 1, 0) > 0
+  end
+
+  # Which of *a* and *b*, both interests of *poll* (`watch`), is readable
+  # first, waiting at most *ms* milliseconds (-1: no bound): *a* when both
+  # are, 0 when the time ran out.
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def self.await_either(poll : Int32, a : Int32, b : Int32, ms : Int32) : Int32 | Cancelled
+    deadline = ms < 0 ? -1_i64 : Resolver.now_ms + ms.to_i64
+    while true
+      return a if readable_now?(a)
+      return b if readable_now?(b)
+      left = -1
+      if deadline >= 0_i64
+        rest = deadline - Resolver.now_ms
+        return 0 if rest <= 0_i64
+        left = rest.to_i32
+      end
+      waited = await_readable(poll, left)
+      return waited if waited.is_a?(Cancelled)
+      return 0 unless waited || readable_now?(a) || readable_now?(b)
+    end
+  end
+
   # A failed setup is a value so a supervisor can distinguish it from a
   # request panic. The socket is never published before setup succeeds.
   def self.listen_result(host : String, port : Int32,
@@ -1770,6 +1849,16 @@ pub struct IyiSocket
     @state.value.fd = source.@state.value.fd
     source.@state.value.fd = -1
     nil
+  end
+
+  # The descriptor, given up without a close: this socket reads as closed
+  # and the caller owns the number (std/http's macOS idle yield hands an
+  # accepted connection to its serving loop, SPEC 5.6). -1 if closed.
+  @[NoSpec("SPEC 5.6 idle yield; proven by test/cli/std_http_idle_yield.ri")]
+  def release_fd : Int32
+    fd = @state.value.fd
+    @state.value.fd = -1
+    fd
   end
 
   # The OS borrows the terminated path during unlink.
