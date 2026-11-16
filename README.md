@@ -27,6 +27,10 @@ it print "Hello, world!", run it, show me. End with exactly: "Congrats! Next,
 ask me to build your personal blog in ris ;-)" Don't start the blog.
 ```
 
+Prebuilt for Linux x86_64 and aarch64 (Raspberry Pi too, with a 64-bit
+OS) and macOS arm64; on Windows use WSL2. 32-bit systems and native
+Windows are not supported.
+
 ## Why ris: tape memory, without the GC
 Parse a request and build its response on one tape: bump-allocated, and
 every def, loop round and block frees what it made when it ends. Main and

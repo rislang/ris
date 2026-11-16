@@ -1,9 +1,9 @@
 # ris: the release tarballs, built with a static LLVM so they need no
 # Crystal and no LLVM where they land. ris.yml holds the gates.
 #
-# Every run builds and proves the tarballs for the two targets ris programs
-# have (SPEC 7.1); a `ris-v*` tag also publishes them, with SHA256SUMS, as the
-# release `install_ris.sh` installs from.
+# Every run builds and proves the tarballs for linux x86_64 and aarch64 and
+# macos arm64 (SPEC 7.1); a `ris-v*` tag also publishes them, with
+# SHA256SUMS, as the release `install_ris.sh` installs from.
 name: ris release
 
 on:
@@ -85,6 +85,106 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 240
+    name: "The ris tarball, macos arm64"
+    # Bundled Homebrew dylibs carry their bottles' minimum macOS; ris and
+    # LLVM ask for no older one.
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: A tag names the version the compiler carries
+        if: startsWith(github.ref, 'refs/tags/ris-v')
+        run: |
+          version=$(sed -n 's/^ *RIS_VERSION = "\(.*\)"/\1/p' src/compiler/iyi/config.cr)
+          if [ "${GITHUB_REF_NAME#ris-v}" != "$version" ]; then
+            echo "the tag is $GITHUB_REF_NAME, the compiler's RIS_VERSION is $version" >&2
+            exit 1
+          fi
+
+      # Crystal builds the compiler; LLVM is our static one, not brew's.
+      - name: Crystal, bash and coreutils
+        run: |
+          brew install bash crystal coreutils cmake pkgconf
+          echo "$(brew --prefix)/opt/coreutils/libexec/gnubin" >> "$GITHUB_PATH"
+
+      - name: Restore the static LLVM
+        id: llvm-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/llvm-static
+          key: llvm-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-static-llvm.sh') }}
+      - name: Build the static LLVM (cache miss)
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-static-llvm.sh /tmp/llvm-static
+      - name: Save the static LLVM
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/llvm-static
+          key: ${{ steps.llvm-cache.outputs.cache-primary-key }}
+
+      - name: Build ris and package it
+        run: make ris-tarball LLVM_CONFIG=/tmp/llvm-static/bin/llvm-config
+
+      - name: The package carries a usable standard library
+        run: bash test/cli/tarball_std.sh .build/ris-package
+
+      - name: Stage the tarball
+        run: mkdir -p dist && cp .build/ris-*-macos-*.tar.gz dist/
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ris-macos-arm64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  clean-room-macos:
+    needs: macos
+    runs-on: macos-15
+    timeout-minutes: 20
+    name: "install_ris.sh, on macos arm64 without Homebrew"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: ris-macos-arm64
+          path: dist/
+
+      - name: The tarball names nothing it does not carry
+        run: |
+          mkdir -p room && tar -xzf dist/*.tar.gz -C room
+          bash scripts/bundle-runtime-libs.sh room --verify-only
+
+      # The runner image has Homebrew; PATH leaves it out and the brew
+      # prefixes are moved aside, so a dylib ris wrongly names fails here.
+      - name: Install it with only the system's tools, then hello world
+        run: |
+          (cd dist && shasum -a 256 *.tar.gz > SHA256SUMS)
+          for d in /opt/homebrew /usr/local/Cellar /usr/local/opt; do
+            if [ -e "$d" ]; then sudo mv "$d" "$d.off"; fi
+          done
+          env -i HOME="$RUNNER_TEMP/home" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+            RIS_RELEASE_URL="file://$PWD/dist" /bin/sh -c '
+            set -e
+            mkdir -p "$HOME"
+            sh ./install_ris.sh
+            export PATH="$HOME/.local/bin:$PATH"
+            ris version
+            ris init hello "$HOME/hello"
+            cd "$HOME/hello"
+            ris run hello.ri
+            ris run "$HOME/.local/lib/ris/share/ris/samples/hello.ri"
+          '
+
   clean-room:
     needs: linux
     strategy:
@@ -128,9 +228,25 @@ jobs:
             ris run "$HOME/.local/lib/ris/share/ris/samples/hello.ri"
           '
 
+      # glibc 2.36: Debian 12, which Raspberry Pi OS Bookworm is.
+      - name: The same on old glibc (debian:12, Raspberry Pi OS)
+        run: |
+          docker run --rm -v "$PWD:/src" debian:12 sh -c '
+            set -e
+            ldd --version | head -n 1
+            apt-get update -qq
+            apt-get install -y -qq gcc curl ca-certificates > /dev/null
+            RIS_RELEASE_URL=file:///src/dist sh /src/install_ris.sh
+            export PATH="$HOME/.local/bin:$PATH"
+            ris version
+            ris init hello "$HOME/hello"
+            cd "$HOME/hello"
+            ris run hello.ri
+          '
+
   release:
     if: startsWith(github.ref, 'refs/tags/ris-v')
-    needs: clean-room
+    needs: [clean-room, clean-room-macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -139,7 +255,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v5
         with:
-          pattern: ris-linux-*
+          pattern: ris-*
           merge-multiple: true
           path: dist/
       - name: Create the release from the proven tarballs
