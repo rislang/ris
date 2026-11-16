@@ -62,3 +62,7 @@ __pycache__/
 
 # ris: EGM drift reports are worksheets, not committed.
 /*_DRIFT_REPORT.md
+
+# Local caches
+/.iyi/
+__pycache__/
