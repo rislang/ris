@@ -432,7 +432,8 @@ check_ris_is_release: $(O)/ris$(EXE) $(O)/$(IYI_DAEMON_BIN)
 # beside it. Relocatable, because the binary finds its prelude relative to
 # itself. Unpacked into a directory of its own (`install_ris.sh`).
 RIS_VERSION := $(shell sed -n 's/^ *RIS_VERSION = "\(.*\)"/\1/p' src/compiler/iyi/config.cr)
-RIS_PACKAGE := ris-$(RIS_VERSION)-$(shell uname -s | tr A-Z a-z)-$(shell uname -m)
+# install_ris.sh's target names: Darwin ships as macos.
+RIS_PACKAGE := ris-$(RIS_VERSION)-$(subst darwin,macos,$(shell uname -s | tr A-Z a-z))-$(shell uname -m)
 
 .PHONY: ris-tarball
 ris-tarball: ## ris: build a relocatable tarball at $(O)
