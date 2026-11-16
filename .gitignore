@@ -66,3 +66,4 @@ __pycache__/
 # Local caches
 /.iyi/
 __pycache__/
+/bench/.work/
