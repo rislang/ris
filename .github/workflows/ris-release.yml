@@ -218,7 +218,7 @@ jobs:
           docker run --rm -v "$PWD:/src" ubuntu:26.04 sh -c '
             set -e
             apt-get update -qq
-            apt-get install -y -qq gcc curl ca-certificates > /dev/null
+            apt-get install -y -qq gcc libc6-dev curl ca-certificates > /dev/null
             RIS_RELEASE_URL=file:///src/dist sh /src/install_ris.sh
             export PATH="$HOME/.local/bin:$PATH"
             ris version
@@ -235,7 +235,7 @@ jobs:
             set -e
             ldd --version | head -n 1
             apt-get update -qq
-            apt-get install -y -qq gcc curl ca-certificates > /dev/null
+            apt-get install -y -qq gcc libc6-dev curl ca-certificates > /dev/null
             RIS_RELEASE_URL=file:///src/dist sh /src/install_ris.sh
             export PATH="$HOME/.local/bin:$PATH"
             ris version

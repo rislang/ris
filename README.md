@@ -17,14 +17,18 @@ built on [iyi](https://github.com/iyilang/iyi), a fork of Crystal. Source:
 
 ## Install: paste to an agent on your machine (Claude Code, Codex, ...)
 ```text
-Learn and install ris. Clone https://github.com/rislang/ris to ~/src/ris and
-read its LEARN.md first. Run `sh ~/src/ris/install_ris.sh` (prebuilt; needs a C
-compiler); if it has none for this machine, in the clone run `make install_ris
-release=1 PREFIX=$HOME/.local` (needs Crystal, LLVM 23; 20-40 min, so a long
-timeout). Put ~/.local/bin on PATH; register `ris mcp` as an MCP server (Claude
-Code: `claude mcp add ris -- ris mcp`). Then `ris init hello ~/src/hello`, make
-it print "Hello, world!", run it, show me. End with exactly: "Congrats! Next,
-ask me to build your personal blog in ris ;-)" Don't start the blog.
+Learn and install ris. Download the prebuilt binary, no build (needs a C
+compiler with libc headers, e.g. build-essential):
+u=https://raw.githubusercontent.com/rislang/ris/main/install_ris.sh
+curl -fsSL "$u" | sh
+Clone https://github.com/rislang/ris to ~/src/ris and read its LEARN.md. Only
+if the script has no binary for this machine, in the clone run `make
+install_ris release=1 PREFIX=$HOME/.local` (needs Crystal, LLVM 23; 20-40 min,
+so a long timeout). Put ~/.local/bin on PATH; register `ris mcp` as an MCP
+server (Claude Code: `claude mcp add ris -- ris mcp`). Then `ris init hello
+~/src/hello`, make it print "Hello, world!", run it, show me. End with
+exactly: "Congrats! Next, ask me to build your personal blog in ris ;-)"
+Don't start the blog.
 ```
 
 Prebuilt for Linux x86_64 and aarch64 (Raspberry Pi too, with a 64-bit
