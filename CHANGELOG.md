@@ -7,7 +7,13 @@ changed and why. An agent never edits the spec without one. Entries
 before 2026-10-31 name the spec by its old name, TAPE_SPEC.md; entries
 before 2026-11-11 were in SPEC_CHANGELOG.md.
 
-## 0.1.0 (unreleased)
+## 0.1.1 (2026-11-18)
+
+The Linux tarballs build on Debian 12, so the prebuilt binary runs on
+glibc 2.36 and newer: Raspberry Pi OS Bookworm gets it too (0.1.0 needed
+2.39). README's Install is numbered steps a person can follow by hand.
+
+## 0.1.0 (2026-11-18)
 
 The first version of ris, a prototype: a Ruby-like language whose data
 lives on tape memory, with no GC. Built on iyi 0.19.1, a fork of Crystal

@@ -105,7 +105,7 @@ with bumpalo 1.03 s. [Slim](https://github.com/domify/slim) (Slang): 4x faster.
   / 1.7 MB; heap 1.55 s / 7.6 MB; 5x slower playback; a block is 0.05 MB">
 
 ## Status and thanks
-ris 0.1.0 is a prototype; internals keep iyi's names so iyi merges. Thanks to
+ris 0.1 is a prototype; internals keep iyi's names so iyi merges. Thanks to
 Serdar Dogruyol ([iyi](https://github.com/iyilang/iyi)), Wouter van Oortmerssen
 ([Goose](https://github.com/aardappel/goose)), **Crystal** (Ary Borenszweig,
 Juan Wajnerman, Brian Cardiff, Manas and community) and **Ruby** (Yukihiro
