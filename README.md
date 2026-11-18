@@ -15,41 +15,44 @@ built on [iyi](https://github.com/iyilang/iyi), a fork of Crystal. Source:
   through RisBoard.
 * **Goose**: tape memory, bump-allocated and freed at once, with no GC.
 
-## Install: paste to an agent on your machine (Claude Code, Codex, ...)
-```text
-Learn and install ris. Download the prebuilt binary, no build (needs a C
-compiler with libc headers, e.g. build-essential):
-u=https://raw.githubusercontent.com/rislang/ris/main/install_ris.sh
-curl -fsSL "$u" | sh
-Clone https://github.com/rislang/ris to ~/src/ris and read its LEARN.md. Only
-if the script has no binary for this machine, in the clone run `make
-install_ris release=1 PREFIX=$HOME/.local` (needs Crystal, LLVM 23; 20-40 min,
-so a long timeout). Put ~/.local/bin on PATH; register `ris mcp` as an MCP
-server (Claude Code: `claude mcp add ris -- ris mcp`). Then `ris init hello
-~/src/hello`, make it print "Hello, world!", run it, show me. End with
-exactly: "Congrats! Next, ask me to build your personal blog in ris ;-)"
-Don't start the blog.
-```
-
-## Install by hand
-```sh
-curl -fsSL \
-  https://raw.githubusercontent.com/rislang/ris/main/install_ris.sh | sh
-export PATH="$HOME/.local/bin:$PATH"   # add to ~/.bashrc or ~/.zshrc
-ris version
-```
-It downloads the latest release's binary (no build), checks it against
-SHA256SUMS and installs it under ~/.local (`RIS_PREFIX=/opt/ris` to choose
-another place, `RIS_VERSION=0.1.0` to pin one). Run the same line again to
-update. ris links your programs through `cc`, so it needs a C compiler with
-libc headers: `sudo apt install build-essential` on Debian, Ubuntu and
-Raspberry Pi OS; `xcode-select --install` on macOS.
+## Install
+1. A C compiler with libc headers (ris links programs through `cc`):
+   `sudo apt install build-essential` on Debian, Ubuntu, Raspberry Pi OS;
+   `xcode-select --install` on macOS.
+2. The prebuilt binary, no build:
+   ```sh
+   curl -fsSL \
+     https://raw.githubusercontent.com/rislang/ris/main/install_ris.sh | sh
+   ```
+   It checks the download against SHA256SUMS and installs under ~/.local
+   (`RIS_PREFIX=/opt/ris` for another place, `RIS_VERSION=0.1.0` to pin a
+   release). Run it again to update.
+3. Put it on PATH (add the line to ~/.bashrc or ~/.zshrc), then try it:
+   ```sh
+   export PATH="$HOME/.local/bin:$PATH"
+   ris version
+   ris init hello ~/src/hello && cd ~/src/hello && ris run hello.ri
+   ```
+4. Learn the language: [LEARN.md](LEARN.md). For an agent, register
+   `ris mcp` as an MCP server (Claude Code: `claude mcp add ris -- ris mcp`).
 
 Prebuilt for Linux x86_64 and aarch64 with glibc 2.36 or newer (Raspberry
 Pi OS Bookworm and Trixie, 64-bit) and macOS arm64; on Windows use WSL2.
 32-bit systems and native Windows are not supported. Elsewhere build from
 source: `make install_ris release=1 PREFIX=$HOME/.local` in a clone (needs
 Crystal and LLVM 23; 20-40 min).
+
+### Or let an agent do it (Claude Code, Codex, ...)
+Paste this to the agent on your machine:
+```text
+Learn and install ris: follow the Install steps in
+https://github.com/rislang/ris/blob/main/README.md (prebuilt binary; build
+from source only if there is none for this machine, with a long timeout).
+Clone the repo to ~/src/ris and read its LEARN.md. Register `ris mcp` as an
+MCP server. Make ~/src/hello print "Hello, world!", run it, show me. End
+with exactly: "Congrats! Next, ask me to build your personal blog in ris
+;-)" Don't start the blog.
+```
 
 ## Why ris: tape memory, without the GC
 Parse a request and build its response on one tape: bump-allocated, and
