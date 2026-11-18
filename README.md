@@ -31,9 +31,25 @@ exactly: "Congrats! Next, ask me to build your personal blog in ris ;-)"
 Don't start the blog.
 ```
 
+## Install by hand
+```sh
+curl -fsSL \
+  https://raw.githubusercontent.com/rislang/ris/main/install_ris.sh | sh
+export PATH="$HOME/.local/bin:$PATH"   # add to ~/.bashrc or ~/.zshrc
+ris version
+```
+It downloads the latest release's binary (no build), checks it against
+SHA256SUMS and installs it under ~/.local (`RIS_PREFIX=/opt/ris` to choose
+another place, `RIS_VERSION=0.1.0` to pin one). Run the same line again to
+update. ris links your programs through `cc`, so it needs a C compiler with
+libc headers: `sudo apt install build-essential` on Debian, Ubuntu and
+Raspberry Pi OS; `xcode-select --install` on macOS.
+
 Prebuilt for Linux x86_64 and aarch64 with glibc 2.36 or newer (Raspberry
 Pi OS Bookworm and Trixie, 64-bit) and macOS arm64; on Windows use WSL2.
-32-bit systems and native Windows are not supported.
+32-bit systems and native Windows are not supported. Elsewhere build from
+source: `make install_ris release=1 PREFIX=$HOME/.local` in a clone (needs
+Crystal and LLVM 23; 20-40 min).
 
 ## Why ris: tape memory, without the GC
 Parse a request and build its response on one tape: bump-allocated, and
