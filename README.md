@@ -31,8 +31,9 @@ exactly: "Congrats! Next, ask me to build your personal blog in ris ;-)"
 Don't start the blog.
 ```
 
-Prebuilt for Linux x86_64 and aarch64 (Raspberry Pi too, with a 64-bit
-OS) and macOS arm64; on Windows use WSL2. 32-bit systems and native
+Prebuilt for Linux x86_64 and aarch64 with glibc 2.39 or newer (Raspberry
+Pi OS Trixie, 64-bit; Bookworm builds from source) and macOS arm64; on
+Windows use WSL2. 32-bit systems and native
 Windows are not supported.
 
 ## Why ris: tape memory, without the GC

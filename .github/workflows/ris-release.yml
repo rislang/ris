@@ -228,10 +228,11 @@ jobs:
             ris run "$HOME/.local/lib/ris/share/ris/samples/hello.ri"
           '
 
-      # glibc 2.36: Debian 12, which Raspberry Pi OS Bookworm is.
-      - name: The same on old glibc (debian:12, Raspberry Pi OS)
+      # glibc 2.41: Debian 13, which Raspberry Pi OS Trixie is. The build image
+      # has glibc 2.39, so Bookworm (2.36) builds from source for now.
+      - name: The same on debian:13 (Raspberry Pi OS)
         run: |
-          docker run --rm -v "$PWD:/src" debian:12 sh -c '
+          docker run --rm -v "$PWD:/src" debian:13 sh -c '
             set -e
             ldd --version | head -n 1
             apt-get update -qq
