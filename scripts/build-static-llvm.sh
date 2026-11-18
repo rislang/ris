@@ -22,7 +22,7 @@
 # and one built on a newer machine is a link error or a silent
 # binary-for-newer-glibc on this one. So each platform builds its own,
 # and the cost — roughly an hour on a CI runner — is paid once per
-# recipe change, not per push.
+# recipe change, not per push. Linux builds on debian:12 (glibc 2.36).
 #
 # Usage: build-static-llvm.sh <install-prefix>
 #

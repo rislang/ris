@@ -31,10 +31,28 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.target.runner }}
     timeout-minutes: 240
+    # The oldest glibc the tarball runs on is the one it is built on: 2.36,
+    # Debian 12 and Raspberry Pi OS Bookworm.
     container:
-      image: crystallang/crystal:1.21.0-build
+      image: debian:12
     name: "The ris tarball, linux ${{ matrix.target.arch }}"
     steps:
+      - name: The build tools and Crystal
+        env:
+          ARCH: ${{ matrix.target.arch }}
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends \
+            ca-certificates cmake curl g++ git libevent-dev libgmp-dev \
+            libpcre2-dev libssl-dev libxml2-dev libyaml-dev make pkg-config \
+            python3 xz-utils zlib1g-dev > /dev/null
+          base=https://github.com/crystal-lang/crystal/releases/download/1.21.0
+          curl -fsSL -o /tmp/crystal.tar.gz \
+            "$base/crystal-1.21.0-1-linux-$ARCH.tar.gz"
+          mkdir -p /opt/crystal
+          tar -xzf /tmp/crystal.tar.gz -C /opt/crystal --strip-components=1
+          echo /opt/crystal/bin >> "$GITHUB_PATH"
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -57,9 +75,7 @@ jobs:
           key: llvm-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-static-llvm.sh') }}
       - name: Build the static LLVM (cache miss)
         if: steps.llvm-cache.outputs.cache-hit != 'true'
-        run: |
-          apt-get update -qq && apt-get install -y -qq cmake curl xz-utils > /dev/null
-          bash scripts/build-static-llvm.sh /tmp/llvm-static
+        run: bash scripts/build-static-llvm.sh /tmp/llvm-static
       # Saved here, not at the job's end: a later failure keeps this hour.
       - name: Save the static LLVM
         if: steps.llvm-cache.outputs.cache-hit != 'true'
@@ -68,8 +84,15 @@ jobs:
           path: /tmp/llvm-static
           key: ${{ steps.llvm-cache.outputs.cache-primary-key }}
 
+      # The linker drops a library nothing has asked for yet, so the C++
+      # runtime must follow the static LLVM archives that need it.
       - name: Build ris and package it
-        run: make ris-tarball LLVM_CONFIG=/tmp/llvm-static/bin/llvm-config
+        run: |
+          llvm=/tmp/llvm-static/bin/llvm-config
+          flags=$("$llvm" --libs --system-libs --ldflags | tr '\n' ' ')
+          LLVM_LDFLAGS="$flags -lstdc++"
+          export LLVM_LDFLAGS
+          make ris-tarball LLVM_CONFIG="$llvm"
 
       # Every std module and shipped sample builds out of the package.
       - name: The package carries a usable standard library
@@ -228,11 +251,10 @@ jobs:
             ris run "$HOME/.local/lib/ris/share/ris/samples/hello.ri"
           '
 
-      # glibc 2.41: Debian 13, which Raspberry Pi OS Trixie is. The build image
-      # has glibc 2.39, so Bookworm (2.36) builds from source for now.
-      - name: The same on debian:13 (Raspberry Pi OS)
+      # glibc 2.36, the oldest the tarball promises to run on.
+      - name: The same on old glibc (debian:12, Raspberry Pi OS)
         run: |
-          docker run --rm -v "$PWD:/src" debian:13 sh -c '
+          docker run --rm -v "$PWD:/src" debian:12 sh -c '
             set -e
             ldd --version | head -n 1
             apt-get update -qq
