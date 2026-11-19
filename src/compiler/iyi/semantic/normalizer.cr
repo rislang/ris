@@ -499,6 +499,35 @@ module Iyi
     @ris_text_reassigned = Set(String).new
 
     # Names assigned inside a `tape do` block, which lowers its own text.
+    # Locals a block appends to (`items.each { |x| acc << x }`).
+    class BlockAppendNames < Visitor
+      getter names = Set(String).new
+      @depth = 0
+
+      def visit(node : Block)
+        @depth += 1
+        node.body.accept(self)
+        @depth -= 1
+        false
+      end
+
+      def visit(node : Call)
+        if @depth > 0 && node.name == "<<" && node.args.size == 1 &&
+           (receiver = node.obj).is_a?(Var)
+          @names << receiver.name
+        end
+        true
+      end
+
+      def visit(node : Def | ClassDef | ModuleDef | Macro)
+        false
+      end
+
+      def visit(node : ASTNode)
+        true
+      end
+    end
+
     class TapeBlockNames < Visitor
       getter names = Set(String).new
       @depth = 0
@@ -834,7 +863,8 @@ module Iyi
     end
 
     def prepare_text_growth(body : ASTNode, params = [] of String,
-                            builders = true) : ASTNode
+                            builders = true,
+                            only : Set(String)? = nil) : ASTNode
       @ris_growing_locals = Set(String).new
       @ris_text_slots = {} of String => Var
       return body unless program.tape_platform? && @macro_code == 0 &&
@@ -844,6 +874,7 @@ module Iyi
       scan = GrowingTextScan.new
       body.accept(scan)
       @ris_growing_locals = scan.locals
+      only.try { |names| @ris_growing_locals &= names }
       # A module unit grows a local a block assigns too (`head = ""` in a
       # task, appended in a loop), as a def does; one a `tape do` block
       # assigns keeps that block's lowering, freed with each round.
@@ -856,7 +887,9 @@ module Iyi
           target.as?(Var).try(&.name)
         end
         @ris_growing_locals.reject! do |name|
-          !direct.includes?(name) && taped.names.includes?(name)
+          rejected = !direct.includes?(name) && taped.names.includes?(name)
+          @ris_taped_text << name if rejected
+          rejected
         end
       end
       # Lend only a local assigned once: a rebinding (`kept = x.copy_to(...)`
@@ -887,6 +920,10 @@ module Iyi
     end
 
     @ris_growing_rebounds = Set(UInt64).new
+    # Module-level locals a `tape do` block assigns: that block grows
+    # them in place as a scope of its own (see transform(Call)).
+    @ris_taped_text = Set(String).new
+    @ris_taped_calls = Set(UInt64).new
     @ris_string_mutations = Set(UInt64).new
     @ris_text_arg_calls = Set(UInt64).new
 
@@ -958,6 +995,11 @@ module Iyi
     @ris_task_blocks = Set(UInt64).new
 
     def transform(node : Call)
+      if node.name == "tape" && node.obj.nil? && (block = node.block) &&
+         !@current_def && !@ris_taped_text.empty? &&
+         @ris_taped_calls.add?(node.object_id)
+        return transform_taped_text(node, block)
+      end
       if {"spawn", "spawn_parallel"}.includes?(node.name) && (block = node.block)
         @ris_task_blocks << block.object_id
       end
@@ -1146,6 +1188,31 @@ module Iyi
         true
       else
         false
+      end
+    end
+
+    # A module-level `tape do` block grows the String locals it assigns
+    # and a block in it appends to, as a def does. Their slots live in
+    # the block, so each round frees them.
+    private def transform_taped_text(node : Call, block : Block) : ASTNode
+      outer_locals, outer_slots = @ris_growing_locals, @ris_text_slots
+      outer_reassigned, outer_taped = @ris_text_reassigned, @ris_taped_text
+      @ris_taped_text = Set(String).new
+      # Only a local a block appends to: one appended directly keeps
+      # `__ris_append` on the round's tape, which maps nothing new.
+      appended = BlockAppendNames.new
+      block.body.accept(appended)
+      block.body = prepare_text_growth(block.body, builders: false,
+        only: outer_taped & appended.names)
+      @ris_growing_locals = outer_locals | @ris_growing_locals
+      @ris_text_slots = outer_slots.merge(@ris_text_slots)
+      @ris_text_reassigned = outer_reassigned | @ris_text_reassigned
+      @ris_taped_text = outer_taped | @ris_taped_text
+      begin
+        transform(node)
+      ensure
+        @ris_growing_locals, @ris_text_slots = outer_locals, outer_slots
+        @ris_text_reassigned, @ris_taped_text = outer_reassigned, outer_taped
       end
     end
 
@@ -1951,7 +2018,20 @@ module Iyi
         node.body = Expressions.new(slots + [node.body]).at(node) unless slots.empty?
       end
       task = @ris_task_blocks.includes?(node.object_id)
-      node = super
+      # A task reads the spawner's growing text but never takes it back:
+      # lending it there (`puts view`) would rebind the spawner's local.
+      outer_locals, outer_slots = @ris_growing_locals, @ris_text_slots
+      if task
+        scan = GrowingTextScan.new
+        node.body.accept(scan)
+        @ris_growing_locals = outer_locals & scan.assigned
+        @ris_text_slots = outer_slots.select { |name, _| scan.assigned.includes?(name) }
+      end
+      begin
+        node = super
+      ensure
+        @ris_growing_locals, @ris_text_slots = outer_locals, outer_slots
+      end
       TapeScopeChecker.mark(program, node) if node.is_a?(Block) && @macro_code == 0 && !task
 
       unpacks = node.unpacks
