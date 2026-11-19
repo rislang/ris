@@ -64,5 +64,5 @@ spec box.3
   box = Box(Array(Int32)).new([1, 2])
   pointer = box.to_unsafe
   Box(Array(Int32)).unbox(pointer) << 3
-  pointer.address == box.to_unsafe.address && box.object.size == 3
+  pointer == box.to_unsafe && box.object.size == 3
 end

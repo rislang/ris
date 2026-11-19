@@ -188,6 +188,12 @@ struct Pointer(T)
   @[Primitive(:pointer_diff)]
   def -(other : self) : Int64
   end
+
+  # Two pointers are equal when they hold one address; without this
+  # `Object#==` answered false even for `p == p`.
+  def ==(other : Pointer) : Bool
+    address == other.address
+  end
 end
 
 # The four atomic instructions, on the word an `Atomic(T)` holds

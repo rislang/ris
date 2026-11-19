@@ -286,12 +286,11 @@ fi
 # name, two semantics. It was removed rather than taught the prelude, and
 # this line is what keeps it removed.
 refuses "the session that was removed" "unknown command" -- "$RIS" repl
-# The two verbs that are Crystal's and not this language's. The refusal
-# used to end with "run it with the `crystal` binary in this checkout",
-# which is true of a developer's tree and false of the tarball and the
-# zip; it names what stands in for each now. `init` was the third of
-# these until it became a verb (`test/cli/init_project.sh`).
-refuses "spec, which is iyi test here" "\`ris test\` runs them" -- "$RIS" spec
+# The verb that is Crystal's and not this language's. The refusal used to
+# end with "run it with the `crystal` binary in this checkout", which is
+# true of a developer's tree and false of the tarball and the zip; it names
+# what stands in for it now. `init` and `spec` were the others until each
+# became a verb (`test/cli/init_project.sh`, `ris spec` for SPEC.md).
 refuses "eval, which has no evaluator here" "\`ris run\` it" -- "$RIS" eval "puts 1"
 refuses "an unknown flag" "Invalid option" -- "$RIS" build --nonesuch good.ri
 # `--mcpu` was handed to LLVM unchecked: an unknown name was warned about
@@ -617,10 +616,10 @@ fi
 mkdir -p upcase/tests
 cp hdr/app/bang.ri upcase/UP.IYI
 cp hdr/app/bang.ri upcase/tests/up_test.IYI
-refuses "a file stored as .IYI, run" 'ends in `.IYI`' -- "$RIS" run upcase/UP.IYI
-refuses "a file stored as .IYI, checked" 'ends in `.IYI`' -- "$RIS" check types upcase/UP.IYI
-refuses "a file stored as .IYI, formatted" 'ends in `.IYI`' -- "$RIS" check format upcase/UP.IYI
-refuses "a directory holding a _test.IYI, tested" 'ends in `.IYI`' -- "$RIS" test upcase/tests
+refuses "a file stored as .IYI, run" 'a ris file ends in .ri; rename it' -- "$RIS" run upcase/UP.IYI
+refuses "a file stored as .IYI, checked" 'a ris file ends in .ri; rename it' -- "$RIS" check types upcase/UP.IYI
+refuses "a file stored as .IYI, formatted" 'a ris file ends in .ri; rename it' -- "$RIS" check format upcase/UP.IYI
+refuses "a directory holding a _test.IYI, tested" 'a ris file ends in .ri; rename it' -- "$RIS" test upcase/tests
 # `where` on an `abstract def` bounds nothing - every impl answers a
 # requirement - and was dropped: `Elem = Float64` met `where Elem : Show`.
 printf 'trait Show\n  abstract def show : String\nend\n\ntrait Bag\n  type Elem\n  abstract def first : Elem where Elem : Show\nend\n' > wherereq.ri
@@ -629,8 +628,8 @@ refuses "a where bound on a requirement" "\`where\` can't bound a requirement" -
 # reopening `::String` with a `tag` had the first one's code run the
 # second's.
 mkdir -p reopen/lib
-printf 'module lib/x\n\nclass ::String\n  def tag : String\n    "x"\n  end\nend\n\npub def via_x(s : String) : String\n  s.tag\nend\n' > reopen/lib/x.ri
-printf 'module lib/y\n\nclass ::String\n  def tag : String\n    "y"\n  end\nend\n' > reopen/lib/y.ri
+printf 'module lib/x\n\nstruct ::String\n  def tag : String\n    "x"\n  end\nend\n\npub def via_x(s : String) : String\n  s.tag\nend\n' > reopen/lib/x.ri
+printf 'module lib/y\n\nstruct ::String\n  def tag : String\n    "y"\n  end\nend\n' > reopen/lib/y.ri
 printf 'module main\n\nimport lib/x\nimport lib/y\n\nputs Lib::X.via_x("s")\n' > reopen/main.ri
 refuses "a reopen replacing another module's method" "String#tag is lib/x's method, and this replaces it" -- \
   "$RIS" check types reopen/main.ri
@@ -796,15 +795,15 @@ fmt_gives "takes .or and .or_panic on the line under their value" \
 # every call to it was refused as a recovery with "no member of
 # App::Main::A implements `Error`". The def is refused now.
 printf 'module ordef\n\nclass A\n  def or(x : Int32) : Int32\n    x\n  end\nend\n\nputs A.new.or(5)\n' > ordef.ri
-refuses "a method named or" '`or` is a reserved name in iyi' -- "$RIS" check types ordef.ri
+refuses "a method named or" '`or` is a reserved name in ris' -- "$RIS" check types ordef.ri
 printf 'module orpanicdef\n\nclass A\n  def self.or_panic : Int32\n    1\n  end\nend\n' > orpanicdef.ri
-refuses "a class method named or_panic" '`or_panic` is a reserved name in iyi' -- \
+refuses "a class method named or_panic" '`or_panic` is a reserved name in ris' -- \
   "$RIS" check types orpanicdef.ri
 # `group do ... end` is the task group by name (iyi SPEC III.4.9), so a
 # class's own `def group` compiled and its call was lowered as a group:
 # "undefined method 'join' for Spawner". The def is refused now.
 printf 'module groupdef\n\nclass Pool\n  def group(& : Int32 -> Int32) : Int32\n    yield 1\n  end\nend\n' > groupdef.ri
-refuses "a method named group" '`group` is a reserved name in iyi' -- "$RIS" check types groupdef.ri
+refuses "a method named group" '`group` is a reserved name in ris' -- "$RIS" check types groupdef.ri
 # Under a comment on an `if` or `while` line, `/=` was read as a regex.
 fmt_gives "takes x /= y and x //= y under a comment on an if or while line" \
   $'a = 8\nif a > 1 # c\n  a /= 2\nend\nwhile a > 1 # c\n  a //= 2\nend\n'
@@ -1197,10 +1196,11 @@ fi
 # The edit is printed in backticks, the way messages write code. In single
 # quotes the Char an edit writes was quoted a second time: `fixed
 # split.ri:4:14: '" "' -> '' ''`, which reads as two empty strings.
+# String's own methods take a String too now, so a def taking a Char only.
 mkdir -p "$WORK/splitfix"
-printf 'module t\n\ns = "a b"\nputs s.split(" ").size\n' > "$WORK/splitfix/split.ri"
+printf 'module t\n\ndef sep(c : Char) : Char\n  c\nend\n\nputs sep(" ")\n' > "$WORK/splitfix/split.ri"
 (cd "$WORK/splitfix" && "$RIS" check types --fix split.ri) > "$WORK/splitfix.txt" 2>&1
-if grep -qF "fixed split.ri:4:14: \`\" \"\` -> \`' '\`" "$WORK/splitfix.txt"; then
+if grep -qF "fixed split.ri:7:10: \`\" \"\` -> \`' '\`" "$WORK/splitfix.txt"; then
   echo "  fix prints a string-to-char edit as \`\" \"\` -> \`' '\`"
 else
   echo "  fix printed its edit as:"; sed 's/^/    /' "$WORK/splitfix.txt" | head -3; status=1
@@ -1582,6 +1582,7 @@ refuses "a run inside a derive" '`run` is not available to a derive' -- \
 # person writes does — both branches, because a propagation that never
 # carries an error proves half of it.
 cat > "$WORK/macro_bang.ri" <<'RIS'
+@[OnTape]
 struct ParseError
   getter text : String
 

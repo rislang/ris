@@ -1,8 +1,8 @@
 # iyi's concurrency runtime — iyi SPEC III.4, built in the order III.4.8
 # settled: a scheduler, cancellable blocking primitives, then `group`;
-# messages between tasks are RisBoard's (board.ri). Every scheduler thread runs fibers of its own, and what makes
-# that concurrency rather than sequence is the poller — a fiber that would
-# block parks itself and the scheduler runs another, so two tasks' waits
+# messages between tasks are RisBoard's (board.ri). Every scheduler thread
+# runs fibers of its own, and what makes that concurrency rather than
+# sequence is the poller — a fiber that would block parks itself and the scheduler runs another, so two tasks' waits
 # overlap on one thread. What makes it parallelism is the pool (III.4.13):
 # `spawn_parallel` hands a task to worker threads, each a scheduler of its
 # own, and a task placed on a worker when it starts stays there to its end.
@@ -630,7 +630,7 @@ class IyiFiber
   {% else %}
     STACK_BYTES = 2097152_u64
   {% end %}
-  PAGE        =   4096_u64
+  PAGE = 4096_u64
 
   {% if flag?(:win32) %}
     # The room a fault handler has to stand in, on the one platform where

@@ -589,14 +589,14 @@ printf 'module example.test/user/rapp\n' > ris.mod
 grep -q "example.test/user/libr v1.0.0, new: nothing outside the language" reach1.log ||
   fail "a pure package's reach was not said, or its test's std/file was counted: $(cat reach1.log)"
 "$RIS" get example.test/user/libr@v1.1.0 > reach2.log 2>&1 || { fail "get libr@v1.1.0 failed"; cat reach2.log; }
-grep -q "libr v1.0.0 -> v1.1.0: now reaches std/dir, std/env, std/file, std/path, std/random, std/socket, std/system_roots, std/time; links m; C LibM.cos" reach2.log ||
+grep -q "libr v1.0.0 -> v1.1.0: now reaches std/dir, std/env, std/file, std/io, std/path, std/random, std/socket, std/system_roots, std/time; links m; C LibM.cos" reach2.log ||
   fail "the upgrade's new reach was not said: $(cat reach2.log)"
 grep -q "std/json" reach2.log && fail "a std module that calls nothing was counted as reach: $(cat reach2.log)"
 "$RIS" mod reach > reach3.log 2>&1 || { fail "mod reach failed"; cat reach3.log; }
-grep -q "^example.test/user/libr v1.1.0: std/dir, std/env, std/file, std/path, std/random, std/socket, std/system_roots, std/time; links m; C LibM.cos" reach3.log ||
+grep -q "^example.test/user/libr v1.1.0: std/dir, std/env, std/file, std/io, std/path, std/random, std/socket, std/system_roots, std/time; links m; C LibM.cos" reach3.log ||
   fail "mod reach did not list the build's reach: $(cat reach3.log)"
 "$RIS" get example.test/user/libr@v1.2.0 > reach4.log 2>&1 || { fail "get libr@v1.2.0 failed"; cat reach4.log; }
-grep -q "libr v1.1.0 -> v1.2.0: no longer reaches std/dir, std/env, std/file, std/path, std/random, std/socket, std/system_roots, std/time; links m; C LibM.cos" reach4.log ||
+grep -q "libr v1.1.0 -> v1.2.0: no longer reaches std/dir, std/env, std/file, std/io, std/path, std/random, std/socket, std/system_roots, std/time; links m; C LibM.cos" reach4.log ||
   fail "what the upgrade stopped reaching was not said: $(cat reach4.log)"
 [ "$status" -eq 0 ] && echo "  new: nothing; v1.1.0 adds std/socket, std/system_roots and what they import (through std/http), libm, LibM.cos; v1.2.0 drops them"
 
@@ -932,17 +932,17 @@ printf 'import example.test/user/libr::{version}\n\nputs version\n' > main.ri
 "$RIS" run main.ri > lim1.log 2>&1 && grep -q "^1.0.0$" lim1.log || fail "a pure version under reaches nothing did not build: $(cat lim1.log)"
 cp ris.mod ris.mod.before; cp ris.sum ris.sum.before
 if "$RIS" get example.test/user/libr@v1.1.0 > lim2.log 2>&1 ||
-   ! grep -q "example.test/user/libr v1.1.0 reaches std/dir, std/env, std/file, std/path, std/random, std/socket, std/system_roots, std/time, C, which its line in ris.mod does not allow" lim2.log; then
+   ! grep -q "example.test/user/libr v1.1.0 reaches std/dir, std/env, std/file, std/io, std/path, std/random, std/socket, std/system_roots, std/time, C, which its line in ris.mod does not allow" lim2.log; then
   fail "a get past reaches nothing was not refused by what it reaches: $(cat lim2.log)"
 fi
 cmp -s ris.mod ris.mod.before && cmp -s ris.sum ris.sum.before || fail "a refused get changed ris.mod or ris.sum"
-printf 'module example.test/user/lapp\nrequire example.test/user/libr v1.0.0 reaches std/dir, std/env, std/file, std/path, std/random, std/socket, std/system_roots, std/time, C\n' > ris.mod
+printf 'module example.test/user/lapp\nrequire example.test/user/libr v1.0.0 reaches std/dir, std/env, std/file, std/io, std/path, std/random, std/socket, std/system_roots, std/time, C\n' > ris.mod
 "$RIS" get example.test/user/libr@v1.1.0 > lim3.log 2>&1 || fail "a get inside the widened limit was refused: $(cat lim3.log)"
-grep -qx "require example.test/user/libr v1.1.0 reaches std/dir, std/env, std/file, std/path, std/random, std/socket, std/system_roots, std/time, C" ris.mod || fail "get did not keep the reaches clause: $(grep require ris.mod)"
+grep -qx "require example.test/user/libr v1.1.0 reaches std/dir, std/env, std/file, std/io, std/path, std/random, std/socket, std/system_roots, std/time, C" ris.mod || fail "get did not keep the reaches clause: $(grep require ris.mod)"
 printf 'module example.test/user/lapp\nrequire example.test/user/libr v1.1.0 reaches std/sockt, Files\n' > ris.mod
 "$RIS" run main.ri > lim4.log 2>&1
 grep -q "\`Files\` is not something a package reaches" lim4.log || fail "a word that is not a reach was not refused: $(cat lim4.log)"
-[ "$status" -eq 0 ] && echo "  reaches nothing: v1.0.0 builds, v1.1.0 refused as std/dir, std/env, std/file, std/path, std/random, std/socket, std/system_roots, std/time, C with nothing written; widened: allowed and kept"
+[ "$status" -eq 0 ] && echo "  reaches nothing: v1.0.0 builds, v1.1.0 refused as std/dir, std/env, std/file, std/io, std/path, std/random, std/socket, std/system_roots, std/time, C with nothing written; widened: allowed and kept"
 
 step "a package's sum is the same on every platform"
 # SHA-1 over each file's path and committed bytes (sum.cr), so the sum is

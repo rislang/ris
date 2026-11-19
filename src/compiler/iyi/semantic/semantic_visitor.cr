@@ -85,6 +85,23 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
         if relative_to
           message += " relative to '#{relative_to}'"
         end
+      elsif node.iyi_prelude? && @program.iyi_prelude?
+        # ris: the prelude the compiler injected is a file on the search
+        # path, not a shard. `RIS_PATH=""` is a list with nothing in it, and
+        # "Searched, in order:" followed by nothing read as cut off.
+        searched = @program.iyi_path.entries
+        notes << String.build do |note|
+          note << "This is a file on the search path, not a library name: "
+          note << "ris's prelude and `std` ship beside the compiler. "
+          if searched.empty?
+            note << "Nothing was searched: RIS_PATH is set and empty. "
+          else
+            note << "Searched, in order:\n"
+            searched.each { |entry| note << "  " << entry << '\n' }
+          end
+          note << "RIS_PATH sets that list, and unsetting it uses the one "
+          note << "this compiler was built with"
+        end
       else
         notes << <<-NOTE
           If you're trying to require a shard:

@@ -104,7 +104,7 @@ for name in sse_reconnect_id rsa_string_message response_owner \
 done
 # client_open_block compiles std/http's client: about 45 s on its own.
 for name in big_shift_right owner_reference client_open_block \
-  udp_handoff joined_task_borrow; do
+  udp_handoff joined_task_borrow pointer_equal; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
   if [ "$code" -eq 0 ] && [ -z "$out" ]; then
     echo "runs     $name"
