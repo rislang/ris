@@ -173,15 +173,16 @@ class Iyi::Command
      manifest_changed: manifest_changed, unimported: unimported}
   end
 
-  # `ris check types --json --affected`: the failures, for diagnostics.
-  private def check_affected_failures(affected : Array(String)) : Array({String, CodeError})
-    changed = affected.map { |value| Iyi.file_key(File.expand_path(value)) }
-    check_affected_result(changed, affected)[:failures]
-  end
-
   # One consumer, compiled alone. Definition-site typing rides in the
   # compiler itself now, so this is a plain front-end compile.
   private def check_one_alone(path : String) : CodeError?
+    check_one_report(path)[0]
+  end
+
+  # One file's verdict for `check types --json`: the error, the warnings
+  # the compile gathered, and a refusal that is no CodeError (bytes that
+  # are not text), which ended the run as text.
+  private def check_one_report(path : String) : {CodeError?, Array(CodeError), String?}
     expanded = File.expand_path(path)
     compiler = Compiler.new
     compiler.prelude = "ris/prelude"
@@ -201,11 +202,15 @@ class Iyi::Command
       compiler.use_iyimod = artifacts
       compiler.iyi_prefers_source = true
     end
-    compiler.compile(
-      Compiler::Source.new(expanded, code),
-      File.tempname("iyi-check", nil))
-    nil
-  rescue ex : CodeError
-    ex
+    begin
+      compiler.compile(
+        Compiler::Source.new(expanded, code),
+        File.tempname("iyi-check", nil))
+      {nil, compiler.warnings.reports, nil}
+    rescue ex : CodeError
+      {ex, compiler.warnings.reports, nil}
+    rescue ex : Error
+      {nil, compiler.warnings.reports, ex.message}
+    end
   end
 end

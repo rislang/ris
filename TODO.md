@@ -173,14 +173,6 @@ Unknown must be refused (SPEC 3.6).
   wasm_concurrency_probe.sh, windows_exercise.sh. test/speed: defer_cost.sh,
   definition_typing_scale.py, measured_numbers.py, metric_port.sh,
   rebuild_speed.py, tls_speed.sh.
-* test/cli/agent_loop.py fails at step 12 on main (2026-11-10) and no CI
-  job runs it (gates_reachable counts it only through a spec comment):
-  fix it and put it in .github/workflows/ris.yml. Its `check -f json`
-  and `fix --json` calls still need moving to `check types --json`
-  (diagnostics in the steps object) and `check types --fix`.
-* test/cli/test_verb.sh fails on main (2026-11-10) at "the discount says
-  when it turns itself off": the eiy macro gets the file name
-  `::String.view(::String.view("page.eiy"))` and panics `cannot read`.
 
 * Build each test/cli program, group refusals by message, fix per group.
   2026-11-14 (fifth round): 114 of 130 programs pass

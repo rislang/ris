@@ -16,6 +16,7 @@ machine without wasmtime skips the step loudly rather than faking it.
 """
 
 import json
+import re
 import os
 import subprocess
 import sys
@@ -40,6 +41,49 @@ def step(name, ok, detail=""):
 
 def run(*args, cwd=None):
     proc = subprocess.run([RIS, *args], capture_output=True, text=True, cwd=cwd)
+    return proc
+
+
+def check_json(rel, cwd=None):
+    """`check types --json`: the frames are the types step's diagnostics."""
+    proc = run("check", "types", "--json", rel, cwd=cwd)
+    try:
+        report = json.loads(proc.stdout)
+        proc.frames = next(st["diagnostics"] for st in report["steps"]
+                           if st["name"] == "types")
+    except (json.JSONDecodeError, KeyError, StopIteration):
+        proc.frames = None
+    return proc
+
+
+FIXED = re.compile(r"^fixed (.+):(\d+):(\d+): `(.*)` -> `(.*)`$")
+CAUSE = re.compile(r"^the cause is in (.+):(\d+):(\d+), ")
+
+
+def fix_json(rel, cwd=None):
+    """`check types --fix`, its text read back into the verdict an agent
+    branches on: the edits applied, clean or not, the remaining error,
+    the file the cause is in, and whether the edit cap stopped it."""
+    proc = run("check", "types", "--fix", rel, cwd=cwd)
+    applied = []
+    for line in proc.stdout.splitlines():
+        m = FIXED.match(line)
+        if m:
+            applied.append({"line": int(m[2]), "column": int(m[3]),
+                            "from": m[4], "to": m[5]})
+    fixed = {"applied": applied, "clean": proc.returncode == 0}
+    rest = []
+    for line in proc.stderr.splitlines():
+        m = CAUSE.match(line)
+        if m:
+            fixed["cause"] = {"file": m[1], "line": int(m[2]), "column": int(m[3])}
+        elif "edits is this run's cap" in line:
+            fixed["capped"] = True
+        else:
+            rest.append(line)
+    if not fixed["clean"]:
+        fixed["remaining"] = re.sub(r"^[^\n]*?:\d+:\d+: ", "", "\n".join(rest), count=1)
+    proc.fixed = fixed
     return proc
 
 
@@ -99,9 +143,9 @@ def main():
          "budget shapes text; json is data")
 
     # 3. check: the verdict is data, and it carries the edit
-    proc = run("check", "-f", "json", "app.ri", cwd=work)
+    proc = check_json("app.ri", cwd=work)
     step("check exits 1 on the broken file", proc.returncode == 1, "")
-    errors = json.loads(proc.stderr)
+    errors = proc.frames
     edit = next((e["suggested_edit"] for e in errors if "suggested_edit" in e), None)
     step("the error carries suggested_edit",
          edit is not None and edit["replacement"] == "shout" and edit["size"] == 6,
@@ -110,8 +154,8 @@ def main():
     # span is unknown, and `size` was `null` where every type error has
     # an integer - the one field of the promised five that changed type.
     write("cut.ri", "module cut\n\ndef f(\n")
-    proc = run("check", "-f", "json", "cut.ri", cwd=work)
-    errors = json.loads(proc.stderr)
+    proc = check_json("cut.ri", cwd=work)
+    errors = proc.frames
     step("a syntax error's size is an integer, like every other's",
          proc.returncode == 1 and len(errors) == 1
          and all(isinstance(errors[0][k], int) for k in ("line", "column", "size")),
@@ -124,8 +168,8 @@ def main():
     os.makedirs(os.path.join(work, "calc", "deep"), exist_ok=True)
     write("calc/deep/wrong.ri", "module calc/deep/wrong\n\npub def answer : Int32\n  \"no\"\nend\n")
     write("deep_user.ri", "module deep_user\n\nimport calc/deep/wrong::{answer}\n\nputs answer\n")
-    proc = run("check", "-f", "json", "deep_user.ri", cwd=work)
-    files = sorted({e["file"] for e in json.loads(proc.stderr) if "wrong" in e.get("file", "")})
+    proc = check_json("deep_user.ri", cwd=work)
+    files = sorted({e["file"] for e in proc.frames if "wrong" in e.get("file", "")})
     native = os.path.join("calc", "deep", "wrong.ri")
     step("an imported module's error names its file natively",
          proc.returncode == 1 and files != [] and all(f.endswith(native) and (os.sep == "/" or "/" not in f) for f in files),
@@ -139,17 +183,17 @@ def main():
     os.makedirs(os.path.join(cx, "app"))
     with open(os.path.join(cx, "app", "nilsize.ri"), "w", newline="\n") as f:
         f.write('module app/nilsize\n\nx = Program.args.size > 0 ? "a" : nil\nputs x.size\n')
-    proc = run("check", "-f", "json", "app/nilsize.ri", cwd=cx)
-    frames = json.loads(proc.stderr)
-    fixed = json.loads(run("fix", "--json", "app/nilsize.ri", cwd=cx).stdout)
-    step("an error's message carries no colour, in check -f json or in fix --json",
-         "\x1b" not in proc.stderr and "\x1b" not in fixed.get("remaining", "\x1b")
+    proc = check_json("app/nilsize.ri", cwd=cx)
+    frames = proc.frames
+    fixed = fix_json("app/nilsize.ri", cwd=cx).fixed
+    step("an error's message carries no colour, in check types --json or in --fix",
+         "\x1b" not in proc.stdout and "\x1b" not in fixed.get("remaining", "\x1b")
          and any("for Nil (compile-time type is (String | Nil))" in f["message"] for f in frames),
          f"{[f['message'][:70] for f in frames]}, remaining {fixed.get('remaining', '')[:70]!r}")
 
     # 4. fix: applies exactly that edit and converges
-    proc = run("fix", "--json", "app.ri", cwd=work)
-    fixed = json.loads(proc.stdout)
+    proc = fix_json("app.ri", cwd=work)
+    fixed = proc.fixed
     step("fix applies the compiler's own edit",
          fixed["clean"] and [(a["from"], a["to"]) for a in fixed["applied"]] == [("shoutt", "shout")],
          f"applied {fixed['applied']}")
@@ -158,23 +202,25 @@ def main():
 
     # 4a. the edit that spans a literal rather than a name: a
     # one-character string where a Char is wanted is the guess every
-    # arrival makes about `split`, and the round the context pack's
+    # arrival makes about a pad, and the round the context pack's
     # gate kept losing. The span is the literal, quotes included, and
-    # fix writes the Char with its escape.
+    # fix writes the Char with its escape. (`split` and `index` take a
+    # String now; ris lowers the literal to `String.view("/")`, which hid
+    # it from the hint until the hint looked through the view.)
     write("chars.ri", (
         "module app\n\n"
-        "puts \"/a/b\".split(\"/\").size\n"
-        "puts \"a\\tb\".index(\"\\t\")\n"
+        "puts \"ab\".ljust(5, \"/\")\n"
+        "puts \"ab\".rjust(5, \"\\t\")\n"
     ))
-    proc = run("check", "-f", "json", "chars.ri", cwd=work)
-    errors = json.loads(proc.stderr)
+    proc = check_json("chars.ri", cwd=work)
+    errors = proc.frames
     edit = next((e["suggested_edit"] for e in errors if "suggested_edit" in e), None)
     step("a one-character string where a Char is wanted carries the Char",
          edit is not None and edit["replacement"] == "'/'" and edit["size"] == 3
          and "Did you mean '/'" in errors[0]["message"],
          f"edit {edit}")
-    proc = run("fix", "--json", "chars.ri", cwd=work)
-    fixed = json.loads(proc.stdout)
+    proc = fix_json("chars.ri", cwd=work)
+    fixed = proc.fixed
     step("fix writes the Chars, escapes included",
          fixed["clean"] and [a["to"] for a in fixed["applied"]] == ["'/'", "'\\t'"],
          f"applied {[a['to'] for a in fixed['applied']]}")
@@ -194,19 +240,19 @@ def main():
         "import calc/typo::{bump}\n\n"
         "puts bump(1)\n"
     ))
-    proc = run("fix", "--json", "bumps.ri", cwd=work)
-    fixed = json.loads(proc.stdout)
+    proc = fix_json("bumps.ri", cwd=work)
+    fixed = proc.fixed
     cause = fixed.get("cause", {})
     step("fix names the file the remaining error is in",
          not fixed["clean"] and fixed["applied"] == []
          and cause.get("file", "").endswith(os.path.join("calc", "typo.ri")) and cause.get("line") == 8,
          f"cause {cause}")
-    proc = run("fix", "bumps.ri", cwd=work)
+    proc = run("check", "types", "--fix", "bumps.ri", cwd=work)
     step("and says so in prose",
-         f"the cause is in {os.path.join('calc', 'typo.ri')}:8:3" in proc.stderr and f"ris fix {os.path.join('calc', 'typo.ri')}" in proc.stderr,
+         f"the cause is in {os.path.join('calc', 'typo.ri')}:8:3" in proc.stderr and f"ris check types --fix {os.path.join('calc', 'typo.ri')}" in proc.stderr,
          proc.stderr.strip().splitlines()[-1])
-    proc = run("fix", "--json", "calc/typo.ri", cwd=work)
-    fixed = json.loads(proc.stdout)
+    proc = fix_json("calc/typo.ri", cwd=work)
+    fixed = proc.fixed
     step("and fixing that file converges",
          fixed["clean"] and [(a["from"], a["to"]) for a in fixed["applied"]] == [("helperr", "helper")]
          and run("check", "types", "bumps.ri", cwd=work).returncode == 0,
@@ -220,8 +266,8 @@ def main():
     write("calc/abss.ri", "module calc/abss\n\npub def answer : Int32\n  42.abss\nend\n")
     write("answers.ri", "module answers\n\nimport calc/abss::{answer}\n\nputs answer\n")
     write("sorts.ri", "module sorts\n\nclass Foo\nend\n\nputs [Foo.new, Foo.new].sorted.size\n")
-    far = json.loads(run("fix", "--json", "answers.ri", cwd=work).stdout).get("remaining", "")
-    near = json.loads(run("fix", "--json", "sorts.ri", cwd=work).stdout).get("remaining", "")
+    far = fix_json("answers.ri", cwd=work).fixed.get("remaining", "")
+    near = fix_json("sorts.ri", cwd=work).fixed.get("remaining", "")
     step("fix says the remaining error, not the frame above it",
          far.startswith("undefined method 'abss' for Int32")
          and "\nundefined method '<' for Sorts::Foo" in near,
@@ -240,14 +286,14 @@ def main():
     write("typos.ri", (
         "module typos\n\n"
         "pub trait Loud\n  abstract def loud : String\nend\n\n"
-        "pub struct Word\n  getter text : String\n\n  def initialize(@text : String)\n  end\nend\n\n"
+        "@[OnTape]\npub struct Word\n  getter text : String\n\n  def initialize(@text : String)\n  end\nend\n\n"
         "impl Loud for Word\n  def loud : String\n    shut(text)\n  end\nend\n\n"
         "def shout(text : String) : String\n  text.upcase\nend\n\n"
         "puts Word.new(\"ab\").loud.ljuts(5)\n"
         "x = 1 || \"a\"\nputs x.i_a?(Int32)\n"
     ))
-    proc = run("fix", "--json", "typos.ri", cwd=work)
-    fixed = json.loads(proc.stdout)
+    proc = fix_json("typos.ri", cwd=work)
+    fixed = proc.fixed
     step("a prelude method, a module function inside an impl, and a pseudo-method are each one edit away",
          proc.returncode == 0 and fixed["clean"]
          and sorted(a["to"] for a in fixed["applied"]) == ["is_a?", "ljust", "shout"]
@@ -290,8 +336,8 @@ def main():
 
     local_macro = 'module app/local\n\nmacro m(x)\n  {{x}}.upcse\nend\nputs m("abc")\n'
     mx_write("app/local.ri", local_macro)
-    proc = run("check", "-f", "json", "app/local.ri", cwd=mx)
-    frames = json.loads(proc.stderr)
+    proc = check_json("app/local.ri", cwd=mx)
+    frames = proc.frames
     cause = frames[-1] if frames else {}
     step("an error in a macro's expansion is at the call, and names the expansion",
          proc.returncode == 1 and (cause.get("line"), cause.get("column")) == (6, 6)
@@ -300,8 +346,8 @@ def main():
          and not any("suggested_edit" in frame for frame in frames),
          f"at {cause.get('line')}:{cause.get('column')}, expansion {cause.get('expansion')}, "
          f"edits {[frame['suggested_edit'] for frame in frames if 'suggested_edit' in frame]}")
-    proc = run("fix", "--json", "app/local.ri", cwd=mx)
-    fixed = json.loads(proc.stdout)
+    proc = fix_json("app/local.ri", cwd=mx)
+    fixed = proc.fixed
     step("and fix leaves the file alone",
          proc.returncode == 1 and fixed["applied"] == [] and not fixed["clean"]
          and mx_read("app/local.ri") == local_macro,
@@ -309,16 +355,16 @@ def main():
     mx_write("app/lib.ri", "module app/lib\n\npub macro bad(x)\n  {{x}}.upcse\nend\n")
     lib_user = 'module app/main\n\nimport app/lib::*\nputs bad("a")\n'
     mx_write("app/main.ri", lib_user)
-    proc = run("fix", "--json", "app/main.ri", cwd=mx)
-    fixed = json.loads(proc.stdout)
+    proc = fix_json("app/main.ri", cwd=mx)
+    fixed = proc.fixed
     step("an imported macro's typo leaves the calling file alone too",
          proc.returncode == 1 and fixed["applied"] == [] and mx_read("app/main.ri") == lib_user,
          f"applied {fixed['applied']}, line 1 now {mx_read('app/main.ri').splitlines()[0]!r}")
     # A parse error in an expansion: line 2 of the calling file, the line
     # the error had in the expansion, with no frame saying so.
     mx_write("app/cut.ri", "module app/cut\n\nmacro m\n  1 +\nend\nm\n")
-    proc = run("check", "-f", "json", "app/cut.ri", cwd=mx)
-    frames = json.loads(proc.stderr)
+    proc = check_json("app/cut.ri", cwd=mx)
+    frames = proc.frames
     cause = frames[-1] if frames else {}
     step("a parse error in an expansion is at the call too",
          proc.returncode == 1 and (cause.get("line"), cause.get("column")) == (6, 1)
@@ -347,15 +393,15 @@ def main():
         + "\n"
         + "".join(f"puts valeu{i}\n" for i in range(40))
     ))
-    proc = run("fix", "--json", "capped.ri", cwd=work)
-    fixed = json.loads(proc.stdout)
+    proc = fix_json("capped.ri", cwd=work)
+    fixed = proc.fixed
     step("a run that hits the edit cap is not clean, and says it is capped",
          proc.returncode == 1 and not fixed["clean"] and fixed.get("capped") is True
          and len(fixed["applied"]) == 32 and "valeu32" in fixed["remaining"]
          and run("check", "types", "capped.ri", cwd=work).returncode == 1,
          f"applied {len(fixed['applied'])}, clean {fixed['clean']}, capped {fixed.get('capped')}")
-    proc = run("fix", "--json", "capped.ri", cwd=work)
-    fixed = json.loads(proc.stdout)
+    proc = fix_json("capped.ri", cwd=work)
+    fixed = proc.fixed
     step("and the next run finishes it, clean with no cap",
          proc.returncode == 0 and fixed["clean"] and "capped" not in fixed
          and len(fixed["applied"]) == 8
@@ -444,8 +490,8 @@ def main():
         "def e(x : Int32, *, y : Int32) : Int32\n  \"named only\"\nend\n"
     )
     write("shapes.ri", shapes)
-    proc = run("check", "-f", "json", "shapes.ri", cwd=work)
-    lines = sorted({frame["line"] for frame in json.loads(proc.stderr or proc.stdout or "[]")
+    proc = check_json("shapes.ri", cwd=work)
+    lines = sorted({frame["line"] for frame in proc.frames
                     if "instantiating" not in frame["message"]})
     step("a class method, a default, an external name, a splat, a named-only and an abstract parameter are typed",
          proc.returncode == 1 and lines == [14, 19, 23, 27, 31, 35], f"lines {lines}")
@@ -499,10 +545,10 @@ def main():
          and "X#helper must return Int32 but it is returning String" in said
          and "undefined method 'bogus_method_call'" in said,
          said.strip().splitlines()[-1] if said.strip() else "")
-    proc = run("check", "-f", "json", "unbuilt.ri", cwd=work)
-    lines = sorted({frame["line"] for frame in json.loads(proc.stderr or proc.stdout)
+    proc = check_json("unbuilt.ri", cwd=work)
+    lines = sorted({frame["line"] for frame in proc.frames
                     if "instantiating" not in frame["message"]})
-    step("and -f json carries both, each at its own line", lines == [11, 18], f"lines {lines}")
+    step("and --json carries both, each at its own line", lines == [11, 18], f"lines {lines}")
     write("unbuilt.ri", (
         "module app4\n\n"
         "trait B\n  abstract def name : String\nend\n\n"
@@ -580,8 +626,8 @@ def main():
     ))
     step("and pub import opens it",
          run("check", "types", "qualified.ri", cwd=work).returncode == 0, "")
-    proc = run("fix", "--json", "uncalled.ri", cwd=work)
-    fixed = json.loads(proc.stdout)
+    proc = fix_json("uncalled.ri", cwd=work)
+    fixed = proc.fixed
     step("fix converges to check's verdict",
          fixed["clean"] and [(a["from"], a["to"]) for a in fixed["applied"]] == [("shoutt", "shout")],
          f"applied {fixed['applied']}")
@@ -594,8 +640,8 @@ def main():
         "import calc/add::{add}\n\n"
         "if addd(2, 2) != 4\n    puts \"broke\"\nend\n"
     ))
-    proc = run("fix", "--json", "uses.ri", cwd=work)
-    fixed = json.loads(proc.stdout)
+    proc = fix_json("uses.ri", cwd=work)
+    fixed = proc.fixed
     step("a name an import brought into scope is suggested and fixed",
          fixed["clean"] and [(a["from"], a["to"]) for a in fixed["applied"]] == [("addd", "add")],
          f"applied {fixed['applied']}")
@@ -625,10 +671,10 @@ def main():
     offered = {}
     for rel, text in unreachable.items():
         rx_write(rel, text)
-        frames = json.loads(run("check", "-f", "json", rel, cwd=rx).stderr)
-        proc = run("fix", "--json", rel, cwd=rx)
+        frames = check_json(rel, cwd=rx).frames
+        proc = fix_json(rel, cwd=rx)
         offered[rel] = ([f["suggested_edit"]["replacement"] for f in frames if "suggested_edit" in f],
-                        json.loads(proc.stdout)["applied"], rx_read(rel) == text)
+                        proc.fixed["applied"], rx_read(rel) == text)
     step("nothing out of the call's reach is suggested, and fix leaves the file",
          all(edits == [] and applied == [] and kept for edits, applied, kept in offered.values()),
          f"{offered}")
@@ -636,9 +682,9 @@ def main():
     # app/main itself was told "Only what a module marks `pub` is reachable
     # from outside it", about code that is inside it.
     rx_write("app/inside.ri", 'module app/inside\n\nstruct Point\nend\n\ndef hi : String\n  "x"\nend\n\nputs App::Inside::Point.new\nputs App::Inside.hi\n')
-    inside = [f["message"] for f in json.loads(run("check", "-f", "json", "app/inside.ri", cwd=rx).stderr)]
+    inside = [f["message"] for f in check_json("app/inside.ri", cwd=rx).frames]
     rx_write("outside.ri", "module outside\n\nimport app/lib\n\nputs App::Lib.helper\n")
-    outside = [f["message"] for f in json.loads(run("check", "-f", "json", "outside.ri", cwd=rx).stderr)]
+    outside = [f["message"] for f in check_json("outside.ri", cwd=rx).frames]
     step("a qualified name to the module's own unexported name is refused for what it is",
          any("from inside it too: write `Point` here" in m for m in inside)
          and not any("reachable from outside it" in m for m in inside)
@@ -646,7 +692,7 @@ def main():
                  for m in outside),
          f"inside {[m[:90] for m in inside]}, outside {[m[:60] for m in outside]}")
     rx_write("app/inside.ri", 'module app/inside\n\ndef hi : String\n  "x"\nend\n\nputs App::Inside.hi\n')
-    inside = [f["message"] for f in json.loads(run("check", "-f", "json", "app/inside.ri", cwd=rx).stderr)]
+    inside = [f["message"] for f in check_json("app/inside.ri", cwd=rx).frames]
     step("and so is a call",
          any("App::Inside does not export 'hi'" in m and "write `hi` here" in m for m in inside),
          f"{[m[:120] for m in inside]}")
@@ -730,14 +776,15 @@ def main():
          and "calc/add.ri is not there" in proc.stdout,
          proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else repr(proc.stderr[:80]))
     proc = run("check", "types", "--affected", "calc/add.ri", "--json", cwd=work)
-    report = json.loads(proc.stdout)
+    report = json.loads(proc.stdout)["steps"][0]
     step("and says so in the data",
          report.get("affected_not_found") == ["calc/add.ri"]
-         and any(f["file"] == "consumer.ri" for f in report["failed"]),
+         and "consumer.ri" in report.get("checked", [])
+         and any(f["file"].endswith("consumer.ri") for f in report["diagnostics"]),
          f"affected_not_found {report.get('affected_not_found')}")
     os.rename(os.path.join(work, "calc/add.gone"), os.path.join(work, "calc/add.ri"))
 
-    # 5b'. -f json is data whatever ends the run (`Command#json_report`).
+    # 5b'. check types --json is data whatever ends the run.
     # Four refusals were text: a module with a byte that is not UTF-8 past
     # its first ("Error: while importing", no file or line), an entry file
     # of such bytes, a file that is not there, and a warning, which a
@@ -754,11 +801,8 @@ def main():
     jx_write("bytes.ri", b"module bytes\n\nputs \"\xff\"\n")
     refusals = {}
     for name in ("app/main.ri", "bytes.ri", "missing.ri"):
-        proc = run("check", "-f", "json", name, cwd=jx)
-        try:
-            frames = json.loads(proc.stderr)
-        except json.JSONDecodeError:
-            frames = proc.stderr[:60]
+        proc = check_json(name, cwd=jx)
+        frames = proc.frames if proc.frames is not None else proc.stderr[:60]
         refusals[name] = (proc.returncode, frames)
     imported = refusals["app/main.ri"][1]
     step("a byte that is not UTF-8 anywhere in a module is refused at its import, as JSON",
@@ -773,11 +817,11 @@ def main():
          and refusals["missing.ri"][1][0]["message"] == "no such file: missing.ri",
          f"{ {k: v[1] if isinstance(v[1], str) else [f['message'][:50] for f in v[1]] for k, v in refusals.items()} }")
     jx_write("colon.ri", b"module colon\n\ndef f(x : Int32): Int32\n  x\nend\n\nputs f(1)\n")
-    proc = run("check", "-f", "json", "colon.ri", cwd=jx)
-    warned = json.loads(proc.stderr) if proc.stderr.startswith("[") else proc.stderr[:60]
+    proc = check_json("colon.ri", cwd=jx)
+    warned = proc.frames if proc.frames is not None else proc.stderr[:60]
     jx_write("colonbad.ri", b"module colonbad\n\ndef f(x : Int32): Int32\n  x\nend\n\nputs f(1).nope\n")
-    proc_bad = run("check", "-f", "json", "colonbad.ri", cwd=jx)
-    both = json.loads(proc_bad.stderr) if proc_bad.stderr.startswith("[") else proc_bad.stderr[:60]
+    proc_bad = check_json("colonbad.ri", cwd=jx)
+    both = proc_bad.frames if proc_bad.frames is not None else proc_bad.stderr[:60]
     step("a warning is a frame marked as one, beside an error in the same array",
          proc.returncode == 0 and isinstance(warned, list)
          and [(w["line"], w["column"], w.get("severity")) for w in warned] == [(3, 17, "warning")]
@@ -826,16 +870,22 @@ def main():
             line = server.stdout.readline()
             return json.loads(line) if line else None
 
+    def diagnostics(reply):
+        # The types step's diagnostics in a check tool's answer.
+        report = json.loads(reply["result"]["content"][0]["text"])
+        return next((st["diagnostics"] for st in report["steps"]
+                     if st["name"] == "types"), None)
+
     reply = rpc("initialize", {"protocolVersion": "2025-06-18"}, 1)
     step("mcp initialize names the server",
          reply["result"]["serverInfo"]["name"] == "ris", "")
     rpc("notifications/initialized")
     tools = [t["name"] for t in rpc("tools/list", None, 2)["result"]["tools"]]
     step("mcp lists the loop's tools",
-         tools == ["check", "fix", "context", "test", "ok", "doc"], f"{tools}")
-    reply = rpc("tools/call", {"name": "check", "arguments": {"file": "app.ri"}}, 3)
-    step("mcp check answers [] on the clean file",
-         json.loads(reply["result"]["content"][0]["text"]) == [], "")
+         tools == ["check", "context", "test", "doc"], f"{tools}")
+    reply = rpc("tools/call", {"name": "check", "arguments": {"part": "types", "file": "app.ri"}}, 3)
+    step("mcp check answers no diagnostics on the clean file",
+         diagnostics(reply) == [], "")
     reply = rpc("tools/call", {"name": "test",
                                "arguments": {"affected": ["calc/mul.ri"]}}, 4)
     report = json.loads(reply["result"]["content"][0]["text"])
@@ -844,7 +894,7 @@ def main():
     reply = rpc("tools/call", {"name": "doc", "arguments": {"target": "String"}}, 5)
     text = reply["result"]["content"][0]["text"]
     step("mcp doc answers a prelude type's surface",
-         text.startswith("#") and "class String" in text and "  def to_i : Int32" in text, text[:80])
+         text.startswith("#") and "struct String" in text and "  def to_i : Int32" in text, text[:80])
 
     # The flag an agent branches on. It was the constant `false`, so a tool
     # that could not answer said it had: a missing file came back as a
@@ -852,18 +902,17 @@ def main():
     # decide it either — `check` exits 1 when the file has diagnostics and
     # `test` exits 1 when a test fails, and both of those are answers — so
     # all four cases are held here.
-    reply = rpc("tools/call", {"name": "check", "arguments": {"file": "nope.ri"}}, 6)
+    reply = rpc("tools/call", {"name": "check", "arguments": {"part": "types", "file": "nope.ri"}}, 6)
     refusal = reply["result"]
     step("mcp says isError when it could not answer",
          refusal["isError"] is True and "no such file" in refusal["content"][0]["text"],
          repr(refusal)[:90])
     write("broken.ri", 'module broken\n\npub def x : Int32\n  "not a number"\nend\n')
-    reply = rpc("tools/call", {"name": "check", "arguments": {"file": "broken.ri"}}, 7)
+    reply = rpc("tools/call", {"name": "check", "arguments": {"part": "types", "file": "broken.ri"}}, 7)
     verdict = reply["result"]
     step("mcp keeps isError false for a verdict it did answer",
          verdict["isError"] is False
-         and isinstance(json.loads(verdict["content"][0]["text"]), list)
-         and json.loads(verdict["content"][0]["text"]) != [],
+         and diagnostics(reply) not in (None, []),
          repr(verdict)[:90])
     reply = rpc("tools/call", {"name": "doc", "arguments": {"target": "Nonesuch"}}, 8)
     missing_type = reply["result"]
@@ -874,7 +923,7 @@ def main():
     # so `\x1b[31;1mError: ` reached this JSON.
     with open(os.path.join(work, "binary.ri"), "wb") as raw:
         raw.write(b"\xff\xfe\xff\xfe")
-    reply = rpc("tools/call", {"name": "check", "arguments": {"file": "binary.ri"}}, 9)
+    reply = rpc("tools/call", {"name": "check", "arguments": {"part": "types", "file": "binary.ri"}}, 9)
     bytes_reply = reply["result"]
     step("mcp answers bytes that are not text as an error, uncoloured",
          bytes_reply["isError"] is True
@@ -953,12 +1002,12 @@ def main():
         aside = binary + ".gate-aside"
         os.rename(binary, aside)
         try:
-            reply = rpc("tools/call", {"name": "check", "arguments": {"file": "app.ri"}}, 13)
+            reply = rpc("tools/call", {"name": "check", "arguments": {"part": "types", "file": "app.ri"}}, 13)
         finally:
             os.rename(aside, binary)
         answered = reply is not None and "result" in reply and reply["result"]["isError"] is False
         step("mcp answers after its binary is renamed, as a rebuild on Windows does",
-             answered and json.loads(reply["result"]["content"][0]["text"]) == [],
+             answered and diagnostics(reply) == [],
              repr(reply)[:90])
     if server.poll() is None:
         rpc("exit")
