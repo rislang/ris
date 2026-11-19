@@ -1,0 +1,17 @@
+# Pointer#== on one address is true (box.3's proof once read false):
+# Pointer had no `==`, so `Object#==` answered false. Silent when right.
+import std/box::{Box}
+
+module PointerEqual
+  @[PointerUnsafe("compare two pointers to one box")]
+  def self.run : Nil
+    box = Box(Array(Int32)).new([1, 2])
+    first = box.to_unsafe
+    second = box.to_unsafe
+    puts "same address not ==" unless first == second
+    puts "pointer not == itself" unless first == first
+    puts "next address ==" if first == first + 1
+  end
+end
+
+PointerEqual.run
