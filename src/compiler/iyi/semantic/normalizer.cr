@@ -1899,20 +1899,6 @@ module Iyi
       call
     end
 
-    # ris: in a program, `Hash` and `Array` name the tape Hsh and Ary, so
-    # Ruby's names work and stay off the heap; std keeps the heap types.
-    def transform(node : Path)
-      if @macro_code == 0 && node.names.size == 1 && !node.global? &&
-         ris_program_code?(node)
-        case node.names.first
-        when "Hash"  then return Path.global("Hash").at(node)
-        when "Array" then return Path.global("Array").at(node)
-        when "String" then return Path.global("String").at(node)
-        end
-      end
-      node
-    end
-
     def transform(node : StringInterpolation)
       if tape_text?(node)
         return TapeTextLowering.interpolate(node).transform(self)

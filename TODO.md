@@ -12,7 +12,7 @@ How to work (fewer tokens, faster to the goal):
   git log. Remove an item when its guarantee passes its gate.
 * Linux x86_64 and aarch64, macOS arm64 (SPEC 7.1): no other targets.
 
-## 0.1.0 blockers (decided 2026-11-10)
+## 0.2 blockers (decided 2026-11-10)
 
 What CHANGELOG's 0.1.0 promises must work; the items stay in their
 sections below and are listed here in order:
@@ -21,8 +21,6 @@ sections below and are listed here in order:
 * SPEC todos all proved (decided 2026-11-15,
   doc/drafts/release-0.1-todos/triage.md), in order: 2.3, 4.2, 6.6,
   6.4, capsule.8, 5.4, 6.2, then 6.1 Pool(T) after an EGM draft.
-* Release: Linux tarball and its job, `install_ris.sh`, tag ris-v0.1.0;
-  `ris --version` prints 0.1.0.
 
 ## 1. Programs first
 
@@ -183,9 +181,6 @@ Unknown must be refused (SPEC 3.6).
 * test/cli/test_verb.sh fails on main (2026-11-10) at "the discount says
   when it turns itself off": the eiy macro gets the file name
   `::String.view(::String.view("page.eiy"))` and panics `cannot read`.
-* test/cli/packages_get.sh: 9 FAIL (get/reach/doc/mod context), 31 on main
-  before ris check; test/cli/verbs_exercise.sh: a reopen of String (now a
-  struct) and `fix printed its edit` (split.ri already clean).
 
 * Build each test/cli program, group refusals by message, fix per group.
   2026-11-14 (fifth round): 114 of 130 programs pass
