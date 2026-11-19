@@ -2001,6 +2001,9 @@ class Iyi::TapeShrinkChecker
   # statement whose value nothing reads, as in `each`.
   @discards_yield = Hash(UInt64, Bool).new
 
+  # `tape` calls whose value a statement drops.
+  @dropped_tapes = Set(UInt64).new
+
   def discards_yield?(target : Def) : Bool
     @discards_yield.fetch(target.object_id) do
       found = false
@@ -3019,8 +3022,12 @@ class Iyi::TapeShrinkChecker
       mark = @guards.size
       prefix = default_prefix(node)
       default_values(prefix, env) if prefix
-      (prefix ? node.expressions[prefix.size..] : node.expressions).each do |exp|
+      exps = prefix ? node.expressions[prefix.size..] : node.expressions
+      exps.each_with_index do |exp, i|
         @fallthrough = Guards.new
+        # A statement's value is dropped: a `tape` call there takes
+        # nothing out of its block.
+        @dropped_tapes << exp.object_id if i < exps.size - 1 && exp.is_a?(Call) && exp.name == "tape"
         result = value(exp, env)
         @guards.concat(@fallthrough) if exp.is_a?(If) || exp.is_a?(Expressions)
       end
@@ -3649,7 +3656,9 @@ class Iyi::TapeShrinkChecker
           @tape_kinds[block.object_id] = "tape block"
         end
         block_value = value(block.body, outer)
-        check_leaving(block.object_id, block_value, outer, block.body.type?, block) if explicit
+        if explicit && !@dropped_tapes.includes?(node.object_id)
+          check_leaving(block.object_id, block_value, outer, block.body.type?, block)
+        end
         @tape_blocks.pop if explicit
       else
         block_value = loop_value(block.body, outer, kind: "block", fresh_args: fresh_args)

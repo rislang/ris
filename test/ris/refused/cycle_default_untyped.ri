@@ -11,15 +11,15 @@ struct P
     @nodes = Array(C).new(8)
   end
 
-  def node(a = -1, v = C.new) : Int32
+  # Answering the Array it stored into keeps the store checked.
+  def node(a = -1, v = C.new)
     @nodes << v
-    @nodes.size - 1
   end
 
   def pipe(d : Int32) : Int32
     return 0 if d > 3
     b = other(d + 1)
-    node(b)
+    node(b).size
   end
 
   def other(d : Int32) : Int32
