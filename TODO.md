@@ -176,11 +176,6 @@ Unknown must be refused (SPEC 3.6).
   wasm_concurrency_probe.sh, windows_exercise.sh. test/speed: defer_cost.sh,
   definition_typing_scale.py, measured_numbers.py, metric_port.sh,
   rebuild_speed.py, tls_speed.sh.
-* test/cli/agent_loop.py fails at step 12 on main (2026-11-10) and no CI
-  job runs it (gates_reachable counts it only through a spec comment):
-  fix it and put it in .github/workflows/ris.yml. Its `check -f json`
-  and `fix --json` calls still need moving to `check types --json`
-  (diagnostics in the steps object) and `check types --fix`.
 * test/cli/packages_get.sh: 9 FAIL (get/reach/doc/mod context), 31 on main
   before ris check; test/cli/verbs_exercise.sh: a reopen of String (now a
   struct) and `fix printed its edit` (split.ri already clean).

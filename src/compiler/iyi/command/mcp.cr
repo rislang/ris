@@ -267,18 +267,19 @@ class Iyi::Command
     # produced the shape it promises. The four JSON tools have answered
     # when their output parses as JSON — diagnostics, a fix record, a
     # context pack, a test report — and have refused when it is a sentence.
-    # `check -f json` refuses in JSON too, so that a caller of the verb
-    # always parses what it gets: a file that is not there, or bytes that
-    # are not text, is a frame with no line (`Command#json_message_frame`),
-    # and a verdict about the code places at least one of its frames.
-    # `doc` promises text, so for it the exit code is the answer.
+    # `check types --json` refuses in JSON too, so that a caller of the
+    # verb always parses what it gets: a file that is not there, or bytes
+    # that are not text, is a frame with no line
+    # (`Command#json_message_frame`), and a verdict about the code places
+    # at least one of its frames. `doc` promises text, so for it the exit
+    # code is the answer.
     answered =
       if name == "doc"
         status.success?
       else
         begin
           parsed = JSON.parse(text)
-          name == "check" ? !parsed.as_h?.nil? : true
+          name == "check" ? mcp_check_answered?(parsed) : true
         rescue JSON::ParseException
           false
         end
@@ -294,6 +295,18 @@ class Iyi::Command
         end
       end
       json.field "isError", !answered
+    end
+  end
+
+  # The steps object, and no step whose every diagnostic is a frame with
+  # no line: that step refused (no such file, not text) rather than
+  # judged the code.
+  private def mcp_check_answered?(parsed : JSON::Any) : Bool
+    steps = parsed.as_h?.try(&.["steps"]?).try(&.as_a?)
+    return false unless steps
+    steps.none? do |step|
+      frames = step["diagnostics"]?.try(&.as_a?) || [] of JSON::Any
+      !frames.empty? && frames.all? { |frame| frame["line"]?.try(&.raw).nil? }
     end
   end
 

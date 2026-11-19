@@ -31,6 +31,7 @@ class Iyi::Command
     jobs = nil
     affected = [] of String
     paths = [] of String
+    missing = [] of String
     while option = options.shift?
       case option
       when "--help", "-h"
@@ -61,15 +62,22 @@ class Iyi::Command
       when .starts_with?('-')
         abort! "check: unknown flag #{option}. `#{Command.program_name} check --help` lists them", :USAGE_ERROR
       else
-        abort! "check: no such file or directory: #{option}", :USAGE_ERROR unless File.exists?(option)
-        paths << option
+        # Under `check types --json` a missing path is a frame like any
+        # other refusal; elsewhere it is a usage error.
+        if File.exists?(option)
+          paths << option
+        else
+          missing << option
+        end
       end
     end
 
     if part == "types" && json
       abort! "check types: --fix prints text; run `#{Command.program_name} check types --fix`, " \
              "then `#{Command.program_name} check types --json`", :USAGE_ERROR if fixing
-      check_types_json(paths, affected)
+      check_types_json(paths, affected, missing)
+    elsif path = missing.first?
+      abort! "check: no such file or directory: #{path}", :USAGE_ERROR
     elsif part && !json
       check_part(part, fixing, jobs, affected, paths)
     else
@@ -171,30 +179,41 @@ class Iyi::Command
     exit passed.all? ? 0 : 1
   end
 
-  private def check_types_errors(targets : Array(String)) : Array(CodeError)
-    targets.compact_map { |target| check_one_alone(target) }
-  end
-
   # `ris check types --json`: the one-step object, the diagnostics in it.
+  # Every refusal is a frame: a type error's chain, a path that is not
+  # there or not text, and each warning, marked `"severity": "warning"`
+  # after the errors. A warning alone does not fail the step.
   private def check_types_json(paths : Array(String),
-                               affected : Array(String)) : NoReturn
+                               affected : Array(String),
+                               missing : Array(String)) : NoReturn
     started = Time.instant
     status = "ok"
     errors = [] of CodeError
-    if check_skip("types", paths, affected)
+    warnings = [] of CodeError
+    refusals = missing.map { |path| "no such file: #{path}" }
+    if missing.empty? && check_skip("types", paths, affected)
       status = "skip"
+    elsif affected.empty?
+      # Only missing paths named: the directory is not what was asked.
+      targets = paths.empty? && !missing.empty? ? [] of String : ok_targets(paths)
+      targets.each do |target|
+        error, said, refusal = check_one_report(target)
+        errors << error if error
+        refusals << refusal if refusal
+        warnings.concat(said)
+      end
     else
-      errors =
-        if affected.empty?
-          check_types_errors(ok_targets(paths))
-        else
-          check_affected_failures(affected).map(&.[1])
-        end
-      status = "fail" unless errors.empty?
+      changed = affected.map { |value| Iyi.file_key(File.expand_path(value)) }
+      ripple = check_affected_result(changed, affected)
+      errors = ripple[:failures].map(&.[1])
     end
+    failed = !errors.empty? || !refusals.empty?
+    status = "fail" if failed
     seconds = (Time.instant - started).total_seconds
-    failed = status == "fail"
-    output = errors.join("\n") { |error| error.color = false; error.to_s }
+    output = String.build do |io|
+      errors.each { |error| error.color = false; io << error << '\n' }
+      refusals.each { |refusal| io << "Error: " << refusal << '\n' }
+    end.chomp
     JSON.build(STDOUT) do |builder|
       builder.object do
         builder.field "ok", !failed
@@ -209,6 +228,22 @@ class Iyi::Command
                   errors.each do |error|
                     JSON.parse(error.to_json).as_a.each(&.to_json(builder))
                   end
+                  refusals.each { |refusal| json_message_frame(builder, refusal) }
+                  warnings.each do |warning|
+                    warning.color = false
+                    warning.to_json_single(builder)
+                  end
+                end
+              end
+              # The ripple's own verdict, as `check types --affected`
+              # says it: who was checked, and a changed file that is not
+              # there, the manifest, or one no import can name.
+              if ripple
+                builder.field "checked", ripple[:consumers]
+                {"affected_not_found"    => ripple[:missing],
+                 "affected_manifest"     => ripple[:manifest_changed],
+                 "affected_not_imported" => ripple[:unimported]}.each do |key, list|
+                  builder.field key, list unless list.empty?
                 end
               end
             end

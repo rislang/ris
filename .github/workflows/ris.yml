@@ -68,6 +68,11 @@ jobs:
         run: python3 test/cli/check_verb.py
         env:
           RIS: ./bin/ris
+      - name: The agent loop
+        if: matrix.shard == 'heap'
+        run: python3 test/cli/agent_loop.py
+        env:
+          RIS: ./bin/ris
       - name: ris spec
         if: matrix.shard == 'heap'
         run: python3 test/cli/spec_verb.py

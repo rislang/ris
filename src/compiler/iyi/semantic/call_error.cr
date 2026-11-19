@@ -700,12 +700,18 @@ class Iyi::Call
     char_fix = nil
     char_span = nil
     sole = expected_types.first if expected_types.size == 1
-    if arg.is_a?(StringLiteral) && arg.value.size == 1 && sole.is_a?(CharType)
-      char_fix = arg.value[0].inspect
+    # ris: a string literal reaches here lowered to `::String.view("/")`.
+    literal = arg
+    if literal.is_a?(Call) && literal.name == "view" && literal.args.size == 1 &&
+       literal.obj.as?(Path).try(&.names) == ["String"]
+      literal = literal.args.first
+    end
+    if literal.is_a?(StringLiteral) && literal.value.size == 1 && sole.is_a?(CharType)
+      char_fix = literal.value[0].inspect
     elsif arg.is_a?(CharLiteral) && sole && sole == program.string
       char_fix = arg.value.to_s.inspect
     end
-    if char_fix && arg && (from = arg.location) && (to = arg.end_location) && from.line_number == to.line_number
+    if char_fix && literal && (from = literal.location) && (to = literal.end_location) && from.line_number == to.line_number
       char_span = to.column_number - from.column_number + 1
     end
 
