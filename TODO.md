@@ -181,9 +181,6 @@ Unknown must be refused (SPEC 3.6).
   fix it and put it in .github/workflows/ris.yml. Its `check -f json`
   and `fix --json` calls still need moving to `check types --json`
   (diagnostics in the steps object) and `check types --fix`.
-* test/cli/test_verb.sh fails on main (2026-11-10) at "the discount says
-  when it turns itself off": the eiy macro gets the file name
-  `::String.view(::String.view("page.eiy"))` and panics `cannot read`.
 * test/cli/packages_get.sh: 9 FAIL (get/reach/doc/mod context), 31 on main
   before ris check; test/cli/verbs_exercise.sh: a reopen of String (now a
   struct) and `fix printed its edit` (split.ri already clean).
