@@ -106,9 +106,63 @@ class RisRegion
     @@pool_waste = @@pool_waste &- bytes
   end
 
+  @[ThreadLocal]
+  @@pool_unused : UInt64 = 0_u64
+  @@total_pool_unused : UInt64 = 0_u64
+  @@program_moves : UInt64 = 0_u64
+  @@request_moves : UInt64 = 0_u64
+
+  # Capacity not occupied by initialized slots; freed slots are counted
+  # separately above. Deltas avoid retaining pointers into dead tapes.
+  @[NoSpec("runtime hook; test/ris/tape_stats_paths.ri proves SPEC 6.6")]
+  def self.pool_unused(before : UInt64, after : UInt64) : Nil
+    return unless stats_asked?
+    @@pool_unused = @@pool_unused &+ after &- before
+  end
+
+  # Moving targets call this only on the copying slow path. The side
+  # word belongs to the growing value, even when another tape is active.
+  @[NoSpec("runtime hook; test/ris/tape_stats_paths.ri proves SPEC 6.6")]
+  def self.owner_move(side : Pointer(UInt64), region : UInt64) : Nil
+    return unless stats_asked?
+    IyiRuntimeLock.lock
+    found = false
+    index = 0_u64
+    while index < @@owner_count
+      entry = @@owner_table &+ index &* 40_u64
+      state = IyiHeap.read64(IyiHeap.read64(entry))
+      if state != 0 && state &+ 24_u64 == side.address
+        IyiHeap.write64(entry &+ 32_u64,
+          IyiHeap.read64(entry &+ 32_u64) &+ 1_u64)
+        found = true
+        break
+      end
+      index = index &+ 1_u64
+    end
+    unless found
+      if region == @@program_tape || region == @@program_storage
+        @@program_moves = @@program_moves &+ 1_u64
+      else
+        @@request_moves = @@request_moves &+ 1_u64
+      end
+    end
+    IyiRuntimeLock.unlock
+  end
+
+  @[NoSpec("runtime hook; test/ris/tape_stats_paths.ri proves SPEC 6.6")]
+  def self.report_copies(name : String, moves : UInt64) : Nil
+    RisHeap.text("ris tape copies ")
+    RisHeap.text(name)
+    RisHeap.text(": ")
+    RisHeap.number(moves)
+    RisHeap.text(" growth moves, ")
+    RisHeap.number(moves)
+    RisHeap.text(" side transfers\n")
+  end
+
   # Owner fields for RIS_TAPE_STATS (SPEC 6.6): each entry is a growing
   # field of a program-owned object, by the name the compiler gave it
-  # (`Log.items`): the field's address, its name and its element width.
+  # (`Log.items`): address, name, element width and copy count.
   OWNER_SLOTS = 1024_u64
   @@owner_table : UInt64 = 0_u64
   @@owner_count : UInt64 = 0_u64
@@ -126,16 +180,17 @@ class RisRegion
     end
     IyiRuntimeLock.unlock
     table = @@owner_table
-    table = program_bytes(OWNER_SLOTS &* 32_u64, true) if table == 0
+    table = program_bytes(OWNER_SLOTS &* 40_u64, true) if table == 0
     IyiRuntimeLock.lock
     @@owner_table = table if @@owner_table == 0
-    entry = @@owner_table &+ @@owner_count &* 32_u64
+    entry = @@owner_table &+ @@owner_count &* 40_u64
     @@owner_count = @@owner_count &+ 1_u64
     IyiRuntimeLock.unlock
     IyiHeap.write64(entry, field)
     IyiHeap.write64(entry &+ 8_u64, name.to_unsafe.address)
     IyiHeap.write64(entry &+ 16_u64, name.bytesize.to_u64)
     IyiHeap.write64(entry &+ 24_u64, width)
+    IyiHeap.write64(entry &+ 32_u64, 0_u64)
   end
 
   # One line per owner field name: objects, reserved and used bytes.
@@ -143,12 +198,12 @@ class RisRegion
   def self.report_owners : Nil
     index = 0_u64
     while index < @@owner_count
-      entry = @@owner_table &+ index &* 32_u64
+      entry = @@owner_table &+ index &* 40_u64
       name = IyiHeap.read64(entry &+ 8_u64)
       first = true
       look = 0_u64
       while look < index
-        first = false if IyiHeap.read64(@@owner_table &+ look &* 32_u64 &+
+        first = false if IyiHeap.read64(@@owner_table &+ look &* 40_u64 &+
                                         8_u64) == name
         look = look &+ 1_u64
       end
@@ -156,10 +211,12 @@ class RisRegion
         objects = 0_u64
         reserved = 0_u64
         used = 0_u64
+        moves = 0_u64
         look = index
         while look < @@owner_count
-          other = @@owner_table &+ look &* 32_u64
+          other = @@owner_table &+ look &* 40_u64
           if IyiHeap.read64(other &+ 8_u64) == name
+            moves = moves &+ IyiHeap.read64(other &+ 32_u64)
             width = IyiHeap.read64(other &+ 24_u64)
             state = IyiHeap.read64(IyiHeap.read64(other))
             objects = objects &+ 1_u64
@@ -180,6 +237,8 @@ class RisRegion
         RisHeap.text(" bytes reserved, ")
         RisHeap.number(used)
         RisHeap.text(" used\n")
+        report_copies(String.new(Pointer(UInt8).new(name),
+          IyiHeap.read64(entry &+ 16_u64).to_i32), moves)
       end
       index = index &+ 1_u64
     end
@@ -611,6 +670,7 @@ class RisRegion
       capacity = size_mul(bytes, 4_u64)
       capacity = SIDE_FIRST if capacity < SIDE_FIRST
       own = acquire(capacity)
+      owner_move(side, region)
       @@moved = @@moved &+ 1_u64
       @@moved_bytes = @@moved_bytes &+ used
     {% end %}
@@ -889,6 +949,8 @@ class RisRegion
     @@total_grown = @@total_grown &+ @@grown
     @@total_results = @@total_results &+ @@results
     @@total_result_bytes = @@total_result_bytes &+ @@result_bytes
+    @@total_pool_unused = @@total_pool_unused &+ @@pool_unused
+    @@pool_unused = 0_u64
     @@total_pool_waste = @@total_pool_waste &+ @@pool_waste
     IyiRuntimeLock.unlock
     @@pool_waste = 0_u64
@@ -960,6 +1022,11 @@ class RisRegion
     RisHeap.text("ris tape pool waste: ")
     RisHeap.number(@@total_pool_waste)
     RisHeap.text(" bytes in freed slots not yet reused\n")
+    RisHeap.text("ris tape pool capacity waste: ")
+    RisHeap.number(@@total_pool_unused &+ @@total_pool_waste)
+    RisHeap.text(" bytes reserved minus used\n")
+    report_copies("Program.tape", @@program_moves)
+    report_copies("request.tape", @@request_moves)
     report_owners
     RisHeap.text("ris program storage: ")
     RisHeap.number(storage_taken)
@@ -970,7 +1037,18 @@ class RisRegion
   # `argv` on the stack the program began with: read there, not by
   # `Program.env`, whose `environ` would be one more undefined symbol
   # in every program, for a flag almost none of them is run with.
+  @[ThreadLocal]
+  @@stats_enabled : Int32 = 0
+
   def self.stats_asked? : Bool
+    cached = @@stats_enabled
+    return cached == 2 if cached != 0
+    enabled = stats_environment?
+    @@stats_enabled = enabled ? 2 : 1
+    enabled
+  end
+
+  private def self.stats_environment? : Bool
     {% if flag?(:win32) %}
       !Program.env("RIS_TAPE_STATS").nil?
     {% else %}

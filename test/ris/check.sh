@@ -2897,6 +2897,17 @@ else
   echo "FAILED   side_overflow: $out"; status=1
 fi
 
+# SPEC 6.6: owner copy counts and reserved pool capacity minus live bytes.
+out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/tape_stats_paths.ri 2>&1)
+if [ "$?" -eq 0 ] &&
+    grep -qF 'ris tape copies Program.tape: 0 growth moves, 0 side transfers' <<<"$out" &&
+    grep -qF 'ris tape copies request.tape: 0 growth moves, 0 side transfers' <<<"$out" &&
+    grep -qF 'ris tape pool capacity waste: 104 bytes reserved minus used' <<<"$out"; then
+  echo "runs     tape_stats_paths (owner copies and pool capacity)"
+else
+  echo "FAILED   tape_stats_paths: $out"; status=1
+fi
+
 # SPEC 6.6: RIS_TAPE_STATS on every way out (normal, exit, panic,
 # cancel, exhaustion): owner fields by name, pool waste, results.
 for mode in normal exit panic cancel exhaust; do

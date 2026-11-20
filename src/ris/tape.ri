@@ -3302,8 +3302,14 @@ struct SlicePool(T)
   # as long as the pool, not the scope that made a list.
   @words : Array(UInt64)
 
+  private def pool_unused_bytes : UInt64
+    ((@data.@state + 2_i64).value &- @data.size.to_u64) &*
+      sizeof(T).to_u64
+  end
+
   def initialize(capacity : Int32 | Int64 = 4)
     @data = Array(T).new(capacity, storage: RisPoolStorage.new)
+    RisRegion.pool_unused(0_u64, capacity.to_u64 &* sizeof(T).to_u64)
     @free = Array(String::Span).new
     @words = Array(UInt64).new(0, storage: RisPoolStorage.new)
   end
@@ -3354,9 +3360,11 @@ struct SlicePool(T)
   end
 
   private def extend_to(stop : Int32, fill : T) : Nil
+    before = pool_unused_bytes
     while @data.size < stop
       @data << fill
     end
+    RisRegion.pool_unused(before, pool_unused_bytes)
   end
 
   private def defaults(at : Int32, n : Int32, fill : T) : Nil
@@ -3748,8 +3756,14 @@ struct Pool(T)
   @free : Array(Int32)
 
   @[NoSpec("SPEC 6.1: proven by test/ris/pool*.ri (runtime)")]
+  private def pool_unused_bytes : UInt64
+    ((@data.@state + 2_i64).value &- @data.size.to_u64) &*
+      sizeof(T).to_u64
+  end
+
   def initialize(capacity : Int32 | Int64 = 4)
     @data = Array(T).new(capacity, storage: RisPoolStorage.new)
+    RisRegion.pool_unused(0_u64, capacity.to_u64 &* sizeof(T).to_u64)
     @gens = Array(UInt32).new(capacity, storage: RisPoolStorage.new)
     @free = Array(Int32).new
   end
@@ -3787,7 +3801,9 @@ struct Pool(T)
     else
       at = @data.size
       Tape.storage(at.to_i64 + 1_i64, sizeof(T).to_u64)
+      before = pool_unused_bytes
       @data << value
+      RisRegion.pool_unused(before, pool_unused_bytes)
       @gens << 0_u32
     end
     @gens[at] = Pool.next_gen(@gens[at])

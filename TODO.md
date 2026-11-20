@@ -479,7 +479,7 @@ change. Gates stay structural.
   origins, log sinks) into typed Pool/SlicePool with explicit free and
   index links (Goose
   doc/reference/goose/docs/design/owning_dynamic_data.md).
-* Stats: RIS_TAPE_STATS owner paths and pool waste (SPEC 6.6).
+* Stats: RIS_TAPE_STATS committed peaks (SPEC 6.6).
 * A tape hash map laid out as Ruby's Hash (st_table): entries in an
   Array in insertion order, bins an Array(Int32) of indices, String keys
   as views; Copyable like RisTree. Replace the linear-scan TapeMap copies

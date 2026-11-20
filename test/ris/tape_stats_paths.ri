@@ -1,0 +1,9 @@
+# spec: 6.6@ca5f6a2f
+# Unused reserved slots count as waste even before any slot is freed.
+tape do
+  pool = Pool(Int64).new(8)
+  pool.alloc(1_i64)
+  slices = SlicePool(Int64).new(8)
+  slices.alloc_slice(2)
+  nil
+end
