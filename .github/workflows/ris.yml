@@ -161,6 +161,15 @@ jobs:
           bash test/cli/format_exercise.sh
         env:
           RIS: ${{ github.workspace }}/bin/ris
+      - name: numbers, server load, editor tokens, named parses
+        if: matrix.shard == 'heap'
+        run: |
+          bash test/cli/number_exercise.sh
+          bash test/cli/server_load.sh
+          python3 test/cli/lsp_token_boundaries.py
+          python3 test/cli/language_is_named.py
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:

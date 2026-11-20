@@ -26,7 +26,7 @@ import tempfile
 import time
 
 RIS = os.path.abspath(os.environ.get("RIS", "./bin/ris"))
-SAMPLES = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "samples", "iyi"))
+SAMPLES = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "samples", "ris"))
 # `std` moved out of the samples into the library, so it is copied from there.
 # Copying the whole of it does not change what this measures: the entry imports
 # `std/list` and the front end types lazily, so the modules nobody imports are

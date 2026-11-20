@@ -45,7 +45,7 @@ import tempfile
 import time
 
 RIS = os.path.abspath(os.environ.get("RIS", "./bin/ris"))
-SAMPLES = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "samples", "iyi"))
+SAMPLES = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "samples", "ris"))
 ROUNDS = 5
 
 # Section kinds, iyimod.cr's enum.

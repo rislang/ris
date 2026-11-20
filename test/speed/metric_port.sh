@@ -20,7 +20,7 @@
 #
 #     bash test/speed/metric_port.sh
 #
-# Needs `make iyi`. Exits non-zero if the port does not build, if any
+# Needs `make ris`. Exits non-zero if the port does not build, if any
 # benchmark answers wrongly, or if a broken module goes unnoticed.
 set -u
 

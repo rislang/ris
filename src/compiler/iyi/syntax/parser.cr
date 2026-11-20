@@ -488,9 +488,14 @@ module Iyi
     private def self.ris_macro_declarations?(node : ASTNode) : Bool
       sources = ris_macro_sources(node)
       return false unless sources
+      # The branches are the text of the file the macro sits in, so they
+      # read by its dialect.
+      file = node.location.try(&.filename)
       sources.all? do |source|
         begin
-          ris_declaration?(Parser.new(source).parse)
+          branch = Parser.new(source)
+          branch.filename = file
+          ris_declaration?(branch.parse)
         rescue SyntaxException
           false
         end
@@ -903,6 +908,7 @@ module Iyi
         io << "end\n"
       end
       parser = Parser.new(text)
+      parser.filename = @filename
       parser.parse
     end
 

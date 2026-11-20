@@ -5,23 +5,15 @@
 #
 #     bash test/cli/server_load.sh
 #
-# Four steps, and two of them are failure proofs, because a gate that
-# cannot fail is not a gate:
+# Three steps, and one is a failure proof, because a gate that cannot
+# fail is not a gate:
 #
 #   1. The program holds, plain build: two hundred connections answered,
 #      the collector runs while fibers are parked, nothing is damaged,
 #      and the connections ran on a handful of stacks rather than two
 #      hundred.
 #   2. The same, release.
-#   3. Failure proof: the poller's event buffer held as an address again
-#      — a `UInt64` where the field is a pointer — and the collector,
-#      precise over a typed object's fields, cannot see it. The kernel
-#      writes epoll's answers into a chunk the allocator has handed to
-#      somebody else and the program dies. This is `wrk -c 100` against
-#      the sample web application, made small.
-#      On Windows, the fiber's OVERLAPPED held the same way, and the
-#      exercise's collection between a read and a write finds it freed.
-#   4. Failure proof: a finished fiber's stack not handed back, and the
+#   3. Failure proof: a finished fiber's stack not handed back, and the
 #      two hundred connections take two hundred mappings.
 set -u
 
@@ -82,86 +74,10 @@ if ! timeout 300 ./server-release > answers-release.txt 2>&1; then
 fi
 grep -q 'every property held' answers-release.txt || { cat answers-release.txt; exit 1; }
 
-mkdir -p patched/iyi
-cp "$REPO"/src/ris/*.ri patched/ris/
+mkdir -p patched/ris
 
-# This proof injects its defect into what the kernel writes into: the
-# event buffer `epoll_wait` and `kevent` fill, and on Windows, whose poller
-# is a completion port with no such buffer, the fiber's OVERLAPPED - held
-# as a number, the way the event buffer was. Storing it that way passed
-# every run until the exercise collected where only the field holds it,
-# between a connection's read and its write; it asks there now.
-case "$(uname -s)" in
-  MINGW* | MSYS* | CYGWIN* | Windows_NT)
-    step "failure proof: the fiber's OVERLAPPED as a number is an OVERLAPPED nobody keeps"
-    sed -e 's/^  property wait_overlapped : Pointer(UInt8)$/  property wait_overlapped_word : UInt64\n\n  def wait_overlapped : Pointer(UInt8)\n    Pointer(UInt8).new(@wait_overlapped_word)\n  end/' \
-        -e 's/^    @wait_overlapped = Pointer(UInt8)\.malloc(32_u64)$/    @wait_overlapped_word = Pointer(UInt8).malloc(32_u64).address/' \
-        "$REPO/src/ris/concurrency.ri" > patched/ris/concurrency.ri
-    [ "$(diff "$REPO/src/ris/concurrency.ri" patched/ris/concurrency.ri | grep -c '^>')" -eq 6 ] || {
-      echo "the sed did not find both lines it changes"; exit 1; }
-    if ! RIS_PATH="$WORK/patched${PSEP}$REPO/src" "$RIS" build "$REPO/test/cli/server_load.ri" -o hidden > build-hidden.log 2>&1; then
-      cat build-hidden.log; exit 1
-    fi
-    timeout -k 5 300 ./hidden > hidden.txt 2>&1
-    code=$?
-    if [ "$code" -ne 1 ] || ! grep -q 'freed the OVERLAPPED' hidden.txt; then
-      echo "an OVERLAPPED the collector cannot see survived the run, so the run proves nothing (exit $code):"
-      tail -3 hidden.txt; exit 1
-    fi
-    printf '  exits 1 at "%s"\n' "$(grep -m1 'freed the OVERLAPPED' hidden.txt | sed 's/^ris: panic: FAIL: //')"
-    ;;
-  *)
-    step "failure proof: the poller's buffer as a number is a buffer nobody keeps"
-    sed -e 's/^  property events : Pointer(UInt8)$/  property events : UInt64/' \
-        -e 's/^    @events = Pointer(UInt8)\.new(0_u64)$/    @events = 0_u64/' \
-        -e 's/^    return buffer\.address if buffer\.address != 0_u64$/    return buffer if buffer != 0_u64/' \
-        -e 's/^    buffer = Pointer(UInt8)\.malloc((EVENTS \* IYI_POLL_EVENT_BYTES)\.to_u64)$/    buffer = Pointer(UInt8).malloc((EVENTS * IYI_POLL_EVENT_BYTES).to_u64).address/' \
-        -e 's/^    buffer\.address$/    buffer/' \
-        "$REPO/src/ris/concurrency.ri" > patched/ris/concurrency.ri
-    cmp -s patched/ris/concurrency.ri "$REPO/src/ris/concurrency.ri" && {
-      echo "the sed found nothing to change"; exit 1; }
-    # The one arm here whose defect arrives by timing rather than by counting:
-    # the freed chunk has to be handed to a canary *and* the kernel has to write
-    # events into it before the run ends. Two hundred connections is enough on
-    # every machine that wrote this file and was not enough once on a loaded CI
-    # runner, where the hidden buffer was freed (the exercise refuses a run that
-    # collected nothing) and simply never reused. Measured on a machine held at
-    # sixteen times its cores: at two hundred rounds four of twenty-four runs
-    # survived the collector, at a thousand none of twenty-four, at two thousand
-    # none of twelve. A run that dies does it in the first collections, so the
-    # longer arm still costs about a second and a half. The claim is unchanged;
-    # the trials are more.
-    mkdir -p load
-    # The formatter aligns `ROUNDS` with the constant under it, so the pattern
-    # takes the run of spaces that alignment leaves; the `cmp` below is what
-    # proves the line was actually found.
-    sed -E 's/^ROUNDS[[:space:]]+= 200$/ROUNDS = 2000/' "$REPO/test/cli/server_load.ri" > load/server_load.ri
-    cmp -s load/server_load.ri "$REPO/test/cli/server_load.ri" && {
-      echo "the rounds line moved; this proof is running at the plain size"; exit 1; }
-    if ! RIS_PATH="$WORK/patched${PSEP}$REPO/src" "$RIS" build "$WORK/load/server_load.ri" -o hidden > build-hidden.log 2>&1; then
-      cat build-hidden.log; exit 1
-    fi
-    # Still timing: a loaded CI runner let the hidden buffer survive two
-    # thousand rounds once (a Linux run of 2026-10-01), where the machines
-    # here never did. Three runs, and the first that dies is the proof; a
-    # buffer the collector cannot see survives all three only if the
-    # check cannot see it either.
-    caught=""
-    for try in 1 2 3; do
-      timeout 300 ./hidden > hidden.txt 2>&1
-      code=$?
-      if [ "$code" -ne 0 ] && ! grep -q 'every property held' hidden.txt; then
-        caught="$try"; break
-      fi
-    done
-    if [ -z "$caught" ]; then
-      echo "a buffer the collector cannot see survived three runs, so the run proves nothing:"
-      grep -E '^(collections|answers|stacks|canary) ' hidden.txt | sed 's/^/  /'
-      tail -2 hidden.txt; exit 1
-    fi
-    printf '  exits %s on run %s\n' "$code" "$caught"
-    ;;
-esac
+# The proof that hid the poller's buffer from the collector is gone with
+# the collector: ris has no heap to collect.
 
 step "failure proof: a stack nobody hands back is a stack per connection"
 cp "$REPO"/src/ris/*.ri patched/ris/

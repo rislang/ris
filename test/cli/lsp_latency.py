@@ -21,7 +21,7 @@ import time
 
 from lsp_session import Client
 
-CORPUS_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "samples", "iyi")
+CORPUS_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "samples", "ris")
 
 # p95 budgets, seconds.
 BUDGETS = {
