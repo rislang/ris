@@ -989,7 +989,12 @@ module Iyi
         # are the prelude's or another module's, and either way they arrive
         # with the type; an include under this module's namespace could not
         # have been written anywhere but here.
-        included = own ? iyi_included_modules(type).select(&.lchop("::").starts_with?(own_prefix)) : [] of String
+        #
+        # ris: and only into a type this file writes down. `std/system_roots`
+        # includes x509's `RisCertificateStore::Storage` in its own
+        # `SystemRoots::Storage`; x509's artifact reopened that as a module,
+        # and a consumer then refused `pub class SystemRoots` as one.
+        included = own && named_here ? iyi_included_modules(type).select(&.lchop("::").starts_with?(own_prefix)) : [] of String
         # The fields of a type this file declares under a foreign name.
         # Nothing else on this side carries a field: a type the module does
         # not own arrives with its own, and one it owns is declared in the
@@ -1195,7 +1200,11 @@ module Iyi
           # the two undefined symbols and the one that reads as a different
           # problem.
           instance = type.instance_type
-          names << instance.to_s
+          # ris: a generic type itself (`is_a?(Array)`) is named bare: written
+          # `Array(T)`, a consumer read `T` as a type and refused the module.
+          name = instance.to_s
+          name = name.sub(/\(.*\)\z/, "") if instance.is_a?(GenericType)
+          names << name
         end
       end
 
@@ -1603,6 +1612,9 @@ module Iyi
         visibility: "pub",
         types: iyi_carried_types(program, filename, type, path: name),
         macros: iyi_macros_on(type),
+        # ris: what it includes, as the carried types write it: without it
+        # `SystemRoots` lost `include Storage` and every method it brings.
+        includes: iyi_included_modules(type),
         annotations: annotations,
         doc: type.doc || "",
         superclass: iyi_superclass_name(type),

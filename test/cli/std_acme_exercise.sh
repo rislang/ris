@@ -476,7 +476,7 @@ PY
   fi
 }
 prove_broken acme "a nonce reused" "each nonce used once" \
-  '    @nonce = answered ? keep(answered) : nil' '    @nonce = nonce'
+  '    @nonce = answered ? keep(answered) : nil' '    @nonce = keep(nonce)'
 prove_broken acme "the thumbprint over non-canonical JSON" "RFC 7638's thumbprint" \
   '"{\"e\":\"#{b64u(AcmeJws.minimal(key.exponent.to_bytes(4) || [] of UInt8))}\",\"kty\":\"RSA\",\"n\":\"#{b64u(n)}\"}"' \
   '"{\"kty\":\"RSA\",\"n\":\"#{b64u(n)}\",\"e\":\"#{b64u(AcmeJws.minimal(key.exponent.to_bytes(4) || [] of UInt8))}\"}"'

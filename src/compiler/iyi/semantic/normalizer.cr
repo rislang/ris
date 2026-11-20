@@ -995,6 +995,12 @@ module Iyi
     @ris_task_blocks = Set(UInt64).new
 
     def transform(node : Call)
+      # ris: a lowered `defer` read back as text (a body carried in a .rimod)
+      # has lost its mark; its proc runs before its tape ends, as before.
+      if node.name == "__iyi_defer_push" && node.global? && node.args.size == 1 &&
+         (proc = node.args[0]).is_a?(ProcLiteral)
+        proc.def.iyi_defer = true
+      end
       if node.name == "tape" && node.obj.nil? && (block = node.block) &&
          !@current_def && !@ris_taped_text.empty? &&
          @ris_taped_calls.add?(node.object_id)

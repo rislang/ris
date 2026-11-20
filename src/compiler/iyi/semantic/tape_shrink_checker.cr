@@ -720,8 +720,16 @@ class Iyi::TapeShrinkChecker
 
   # Resolve a borrowed intermediate field before following its children.
   # The field slot is a reference, not storage owned by the holder.
+  #
+  # ris: *done* keeps each root's answer for one call. Roots shared by
+  # several borrowed sources were walked once per path, which grew
+  # exponentially: the acme exercise built from its artifacts never ended.
   private def resolved_roots(root : UInt64, env : Env,
-                             seen = Set(UInt64).new) : Array(UInt64)
+                             seen = Set(UInt64).new,
+                             done = {} of UInt64 => Array(UInt64)) : Array(UInt64)
+    if found = done[root]?
+      return found
+    end
     return [root] unless seen.add?(root)
     type = root_type(root).try(&.remove_typedef)
     contents = env.slots[root]?
@@ -730,13 +738,13 @@ class Iyi::TapeShrinkChecker
         contains_root?([source], root)
       end
       unless borrowed.empty?
-        return borrowed.flat_map { |r| resolved_roots(r, env, seen.dup) }
+        return done[root] = borrowed.flat_map { |r| resolved_roots(r, env, seen.dup, done) }.uniq
       end
     end
     if parent = @parents[root]?
-      return resolved_roots(parent[0], env, seen).map do |base|
+      return done[root] = resolved_roots(parent[0], env, seen, done).map do |base|
         field_root(base, parent[1])
-      end
+      end.uniq
     end
     [root]
   end

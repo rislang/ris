@@ -593,7 +593,9 @@ pub class TlsConfig
   def refill(source : TlsConfig,
              ech : Array::View(UInt8)? = source.ech_configs.try(&.view),
              protocols : Array::View(String) = source.alpn.view) : Nil
-    names = ""
+    # A writer, not a growing `""`: this body travels in tls's artifact, and
+    # a carried body loses the mark that lends a growing local as a writer.
+    names = String::Builder.new(64)
     spans = Array({Int32, Int32}).new(protocols.size)
     protocols.each do |text|
       start = names.bytesize
@@ -612,7 +614,7 @@ pub class TlsConfig
     @alpn = @owned_alpn
     @owned_alpn.clear
     @owned_names.clear
-    @owned_names << names
+    @owned_names << names.finish
     spans.each do |span|
       @owned_alpn << @owned_names.finish[span[0], span[1]]
       nil
