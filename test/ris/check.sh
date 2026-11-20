@@ -2572,6 +2572,17 @@ for name in std_generic_tape std_small_tape curve_views mlkem_views shlex base32
   fi
 done
 
+# SSE keeps partial lines, decoded fields and event data across rounds.
+for poison in 0 1; do
+  out=$(RIS_TAPE_POISON="$poison" "$RIS" run test/ris/sse.ri 2>&1)
+  if [ "$?" -eq 0 ] && [ "$out" = \
+      'PASS: sse caller tape and explicit retained copy' ]; then
+    echo "runs     sse (RIS_TAPE_POISON=$poison)"
+  else
+    echo "FAILED   sse (RIS_TAPE_POISON=$poison): $out"; status=1
+  fi
+done
+
 # HPACK's tape overload agrees with the retained API across tape scopes.
 out=$("$RIS" run --release test/ris/hpack.ri 2>&1)
 if [ "$out" = \

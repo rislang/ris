@@ -40,4 +40,17 @@ end
 exit 10 unless count == 1
 exit 14 unless SSE.encode("hi") == "data: hi\n\n"
 exit 15 unless SSE.comment("hi") == ": hi\n"
+# Decoded text must survive take's scratch and later feed rounds.
+decoded = EventParser.new
+decoded.feed("event: up\xFF\nid: mark\xFF\ndata: first\n") { |_| exit 16 }
+decoded.feed("data: second\n\n") do |event|
+  exit 17 unless event.event == "up\uFFFD"
+  exit 18 unless event.id == "mark\uFFFD"
+  exit 19 unless event.data == "first\nsecond"
+end
+decoded.feed("data: third\n\n") do |event|
+  exit 20 unless event.event == "message"
+  exit 21 unless event.id == "mark\uFFFD" && event.data == "third"
+end
+exit 22 unless decoded.dispatched == 2_i64
 puts "PASS: sse caller tape and explicit retained copy"

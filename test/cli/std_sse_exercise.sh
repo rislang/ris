@@ -25,8 +25,7 @@ for candidate in python3 python; do
 done
 
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-sse.XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping, so the
 # scratch directory is named the way it reads it.
 case "$(uname -s)" in
@@ -520,20 +519,24 @@ prove_broken "the data's last LF kept" "the introduction's three messages" \
   '    data = data[0, data.bytesize - 1] if !data.empty? && data[-1] == 10_u8
 ' ''
 prove_broken "an id with a NUL taken" "an id with a NUL is ignored" \
-  "@id_buffer = value unless value.includes?('\\0')" '@id_buffer = value'
+  "unless value.includes?('\\0')" 'if true'
 prove_broken "the last event ID set at the id field" "the last event ID is set at the blank line" \
-  "@id_buffer = value unless value.includes?('\\0')" "@last_event_id = @id_buffer = value unless value.includes?('\\0')"
+  '        @id << value
+' '        @id << value
+        @last_id.clear
+        @last_id << value
+'
 prove_broken "an empty retry read as 0" "retry: digits alone" \
   '    return nil if text.bytesize == 0
     p = text
 ' '    p = text
 '
 prove_broken "the event type carried to the next event" "the type does not carry over" \
-  '    event = Event.new(kind, data, @last_event_id)
-    @type = "".as_tape' '    event = Event.new(kind, data, @last_event_id)'
+  '          @data.clear
+          @kind.clear' '          @data.clear'
 prove_broken "a blank line without data dispatching" "the four blocks" \
   '    if @data.length == 0
-      @type = "".as_tape
+      @kind.clear
       return nil
     end
 ' ''
@@ -547,11 +550,11 @@ prove_broken "a client gone not kept" "a client gone ends the stream's loop" \
   '    @fault = got
 ' ''
 prove_broken "Last-Event-ID not sent" "last_event_id: goes out as Last-Event-ID" \
-  'sent["Last-Event-ID"] = last if last.bytesize > 0 && !HTTP.control?(last)' ''
+  'sent["Last-Event-ID"] = id' ''
 prove_broken "an id with a control character sent" "contains a control character" \
-  'sent["Last-Event-ID"] = last if last.bytesize > 0 && !HTTP.control?(last)' 'sent["Last-Event-ID"] = last if last.bytesize > 0'
+  'if last.bytesize > 0 && !HTTP.control?(last)' 'if last.bytesize > 0'
 prove_broken "a reconnection's parser started with no ID" "a resumed stream keeps its place" \
-  'parser = EventParser.new(last)' 'parser = EventParser.new'
+  '    parser.resume(last)' ''
 prove_broken "the stream's retry ignored" "the stream's retry sets the delay" \
   '      if ms = parser.retry
         delay = ms

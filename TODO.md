@@ -165,12 +165,7 @@ Unknown must be refused (SPEC 3.6).
   "holder" a clear must refuse is a SPEC question: decide it (EGM),
   then refuse both forms or drop this item.
 
-## 4. SSE stable storage and HTTPS records
-
-* test/ris/sse.ri needs stable storage, then inclusion
-  in check.sh: EventParser replaces
-  `@line` and `@data` with a new builder in a round, and keeps `@type` and
-  `@id_buffer` from `SSE.clean`'s scratch. Give them stable storage.
+## 4. HTTPS records
 
 * HTTPClient HTTPS-records path: `HTTP.https_endpoints` stores `ech`
   bytes and the `ordered` alpn made in its block into the endpoints,
