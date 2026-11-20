@@ -175,14 +175,18 @@ Unknown must be refused (SPEC 3.6).
   macro as `__ris_program_init` call, not an array literal.
 
 * Build each test/cli program, group refusals by message, fix per group.
-  2026-11-14 (fifth round): 114 of 130 programs pass
-  `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 16 fail (114
-  after the fourth round, 112 after the third, 107 after the second,
-  100 before the first). http joined; big (std_big_exercise.ri:989, a
-  BigDecimal kept from a times block) and websocket (:1606, a loop
-  round's store) fail since the main merge of 2026-11-14, before this
-  round's changes.
+  2026-11-20 (sixth round): 117 of 131 programs pass
+  `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 14 fail (116
+  before this round, 114 after the fifth, 112 after the third, 107
+  after the second, 100 before the first). big and websocket build
+  again; eiy had broken since the fifth round.
   Names omit std_ and _exercise where present; each failure appears once.
+
+  Sixth round: eiy's `render` returned a Buffer's text from a def's
+  scratch (SPEC 1.9); it now writes through an `Eiy::Printer` into a
+  local String::Builder grown in place. fuzz: its `class Pool` clashed
+  with the prelude's Pool(T) (now CertPool); it still fails on the TLS
+  API drift below. The other failures are as the fifth round left them.
 
   Fifth round (checker questions): http builds. The String to Builder
   lowering covers std under an RIS_PATH entry's std/ (test/ris/

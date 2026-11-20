@@ -2259,7 +2259,7 @@ H2_CLIENT_SEEDS = h2_client_seeds
 
 # Certificates the x509 target starts from: the seeds, and the machine's
 # roots when `roots FILE` hands them in.
-class Pool
+class CertPool
   @@certs : Array(Array(UInt8)) = [] of Array(UInt8)
 
   def self.certs : Array(Array(UInt8))
@@ -2301,7 +2301,7 @@ def make_input(target : String, m : Mutator) : Array(UInt8)
     seed = m.pick(DER_SEEDS)
     m.chance(3) ? m.mutate(seed, DER_SEEDS, DER_WORDS) : mutate_der(seed, DER_SEEDS, m)
   when "x509"
-    pool = Pool.certs
+    pool = CertPool.certs
     seed = m.pick(pool)
     m.chance(4) ? m.mutate(seed, pool, DER_WORDS) : mutate_der(seed, pool, m)
   when "pem"
@@ -2648,7 +2648,7 @@ when "roots"
     puts "  the bundle is not PEM: #{blocks.message}"
     exit 1
   end
-  blocks.each { |der| Pool.add(der) }
+  blocks.each { |der| CertPool.add(der) }
   puts "  #{blocks.size} certificates of the machine's bundle among the seeds"
   exit(fuzz("x509", DEFAULT_SEED, args[2].to_i, args[3].to_i, true) ? 0 : 1)
 when "show"

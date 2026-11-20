@@ -76,6 +76,24 @@ pub struct Eiy
     end
   end
 
+  # A template's target writing into the caller's `String::Builder`, so a
+  # def can return the text: a Buffer's text would leave the def's scratch
+  # (SPEC 1.9), the caller's builder is grown in place (1.5).
+  pub class Printer
+    @text : String::Builder
+
+    def initialize(@text : String::Builder)
+    end
+
+    def print(text : String) : Nil
+      @text << text
+    end
+
+    def print(value) : Nil
+      @text << value.to_s
+    end
+  end
+
   pub class Lexer
     pub class Token
       enum Type
@@ -1027,9 +1045,10 @@ pub struct Eiy
   # not replace the buffer it is printing to.
   macro render(filename)
     begin
-      %buf = ::Std::Eiy::Eiy::Buffer.new
+      %text = String::Builder.new
+      %buf = ::Std::Eiy::Eiy::Printer.new(%text)
       ::Std::Eiy::Eiy.embed({{filename}}, %buf)
-      %buf.to_s
+      %text.finish
     end
   end
 
