@@ -376,10 +376,6 @@ Unknown must be refused (SPEC 3.6).
   http.ri. Its program builds (fifth round) and fails at run time at "a
   HEAD names the coding its GET would have, and writes no body".
 
-* `ris run --sandbox` (wasm32-wasi, src/compiler/iyi/command/sandbox.cr)
-  has no target in SPEC 7.1 and no test: remove it, with agent_loop's
-  sandbox step.
-
 ## 8. Speed
 
 Speed work stays out of minitest. The jq check at jqg.ri:424 is the
@@ -452,14 +448,18 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
 
 ## 12. Known failures
 
+* Every growing tape value reserves 128 MiB of address space, even a
+  128-byte builder (SIDE_RESERVE, region.ri:529). Under
+  `vm.overcommit_memory=2` each is charged: a FileServer answer holds
+  up to eight (doc/drafts/fileserver-outgoing.md, Memory). Growth must
+  not move or fail: reserve PROT_NONE and commit with mprotect, rather
+  than extending a small mapping in place (tried 2026-11-20: fails
+  when a neighbour mapping takes the next pages).
+
 * compiler_test's "Codegen: const" crashed once (signal 11) when all
   describes ran 30 at a time on minitest (2026-11-11); alone it passes
   three times of three. Find the race or the load-dependent fault.
 
-* Every growing tape value reserves 128 MiB of address space, even a
-  128-byte builder (SIDE_RESERVE, region.ri:529). Under
-  `vm.overcommit_memory=2` each is charged: a FileServer answer holds
-  up to eight (doc/drafts/fileserver-outgoing.md, Memory).
 * A constant's initializer runs on the program tape only in a .ri
   file; a compiler_test example (source "spec") still needs
   `.copy_to(Program.tape)` for a constant or class variable (SPEC 7.5).

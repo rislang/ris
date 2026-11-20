@@ -2,7 +2,7 @@
 # Fails when iyi grows a build or runtime tool dependency:
 #
 #   crystal, llvm-config, c++, cc, git (build time)
-#   cc, dsymutil, pkg-config, git, ldd, wasmtime (compiler runtime)
+#   cc, dsymutil, pkg-config, git, ldd (compiler runtime)
 #
 # A program iyi builds links only the platform libc (iyi SPEC III.9, III.10).
 # The compiler binary links four libraries (libLLVM, libc++, libgc, libSystem).
@@ -50,8 +50,6 @@
 #      invoked only when resolving remote packages (iyi mod get).
 #    - ldd: Detects GNU vs musl host libc on Linux. Conditional on Linux target
 #      configuration. Goes when target libc is specified explicitly.
-#    - wasmtime: WebAssembly runtime for `iyi run --sandbox`. Conditional on
-#      --sandbox. Goes if sandboxing uses native container isolation.
 #
 # Usage:
 #     bash test/cli/build_tool_floor.sh
@@ -85,7 +83,7 @@ done
 
 # Allowlists: each entry has a stated reason in the header above.
 ALLOWED_BUILD_TOOLS="c++ cc crystal git llvm-config"
-ALLOWED_RUNTIME_TOOLS="cc dsymutil git ldd pkg-config wasmtime"
+ALLOWED_RUNTIME_TOOLS="cc dsymutil git ldd pkg-config"
 
 # Tools reached only by auxiliary targets: docs, lint, spec, packaging. These
 # are not dependencies of iyi, because nobody needs them to build the compiler
