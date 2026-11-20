@@ -22,4 +22,14 @@ sum = 0
 [1, 2].each { |i| sum += i; Box.new(i) }
 3.times { |i| sum += i; "n#{i}" }
 each_twice { |i| sum += i; [Box.new(i)] }
+
+# A `tape` call whose value a statement drops needs no `nil` either.
+def taped(n : Int32) : Int32
+  tape do
+    Box.new(n)
+  end
+  n - n
+end
+
+sum += taped(5)
 puts sum

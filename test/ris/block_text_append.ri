@@ -31,3 +31,15 @@ end
 top = ""
 ["x", "y"].each { |item| top << item }
 puts "#{a1("f", ["a", "b"])} #{a2(["a", "b"])} #{a3(["a", "b"])} #{nested(["a", "b"])} #{top}"
+
+# A top-level tape block's own local grows in place too, each round.
+total = 0
+2.times do
+  tape do
+    acc = "a"
+    ["x", "y"].each { |item| acc << item }
+    total += acc.size
+    puts acc if total > 3
+    nil
+  end
+end

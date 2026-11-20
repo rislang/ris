@@ -51,21 +51,6 @@ Fix a checker hole below only when a cluster hits it.
 
 Unknown must be refused (SPEC 3.6).
 
-* A String local's `<<` is lowered to `__ris_append` unless the local is
-  growing; that result views the argument, so a block appending to an
-  outer String is refused. Lend the local to a builder parameter.
-
-* A `tape` block's value is checked as leaving even where the tape
-  call's own value is dropped: such blocks end with `nil` to pass.
-
-* An untyped class default still loses its roots at a cycle store
-  when the def answers the Array it stored into: in
-  refused/cycle_default_untyped, `def node(a = -1, v = C.new)` with the
-  body `@nodes << v` and `node(b).size` in pipe passes; ending node with
-  `0` is refused. In the checking pass the call's store holds an untyped
-  root that `placed` does not find in @default_roots. Track the default
-  at the call.
-
 * A refill under a branch in a loop is refused as clearing a view an
   earlier round left: a class whose `@names` view its own `@text`,
   refilled (`@text.clear; @names.clear`, then appends) through
