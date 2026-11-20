@@ -25,6 +25,7 @@ import std/time::{Time}
 import std/file::{File}
 import std/curve25519::{Ed25519, Ed25519PublicKey, CurveError}
 import std/tuple
+import std/int
 
 # A PEM text's certificates, kept in *store*; a text that does not read
 # panics with the reason.
@@ -538,9 +539,18 @@ widest = X509.self_signed(writer, ["a.example.com"], from, to, [0x7F_u8] + Array
 check widest.is_a?(Array(UInt8)) && Certificate.parse(widest).or_panic.serial.size == 20, "a 20-byte serial with its top bit clear is written in 20 octets"
 zero = X509.self_signed(writer, ["a.example.com"], from, to, [0_u8, 0_u8])
 check zero.is_a?(X509Error) && zero.message.includes?("positive"), "a zero serial refused: #{zero.is_a?(X509Error) ? zero.message : "written"}"
-drawn = (1..32).map { Certificate.parse(X509.self_signed(writer, ["a.example.com"], from, to).or_panic).or_panic.serial }
-check drawn.all? { |s| s.size <= 17 && s[0] < 0x80_u8 && s.any? { |b| b != 0_u8 } }, "32 drawn serials are positive and 17 octets at most"
-check drawn.uniq.size == 32, "32 drawn serials are 32 different numbers"
+# Each serial is written out as hex in its round: it views a certificate
+# its round frees, so a map of them kept 32 views of reused storage.
+serials = ""
+positive = true
+32.times do
+  s = Certificate.parse(X509.self_signed(writer, ["a.example.com"], from, to).or_panic).or_panic.serial
+  positive = false unless s.size <= 17 && s[0] < 0x80_u8 && s.any? { |b| b != 0_u8 }
+  s.each { |b| serials << "0123456789abcdef"[(b >> 4).to_i32, 1] << "0123456789abcdef"[(b & 15_u8).to_i32, 1] }
+  serials << "\n"
+end
+check positive, "32 drawn serials are positive and 17 octets at most"
+check serials.lines.uniq.size == 32, "32 drawn serials are 32 different numbers"
 puts "  a 64-character common name written and a 65-character one refused; serials positive and 20 octets at most, drawn ones distinct"
 
 puts "\nALL CHECKS PASSED"

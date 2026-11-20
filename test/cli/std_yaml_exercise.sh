@@ -157,6 +157,7 @@ module refuse_$name
 
 import std/yaml::{YAML, yaml_serializable}
 
+@[OnTape]
 struct Spot
   getter x : Float64
   getter name : String

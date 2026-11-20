@@ -1,0 +1,12 @@
+# SigningKey.p256 and .p384 answer a key whose public point outlives the
+# def that drew it: X509.self_signed wrote a 0-byte public key when the
+# key was returned from inside a `while true` round, whose end freed the
+# point (std_x509_exercise.sh). Silent on success.
+import std/x509::{SigningKey}
+
+narrow = SigningKey.p256
+filler = Array(UInt8).new(4096) { |i| (i % 256).to_u8 }
+raise "p256 info #{narrow.public_key_info.size}" unless narrow.public_key_info.size == 91 && filler.size == 4096
+wide = SigningKey.p384
+filler2 = Array(UInt8).new(4096) { |i| (i % 256).to_u8 }
+raise "p384 info #{wide.public_key_info.size}" unless wide.public_key_info.size == 120 && filler2.size == 4096

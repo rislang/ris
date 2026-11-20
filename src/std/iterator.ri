@@ -223,9 +223,13 @@ pub trait Iterator
     end
   end
 
+  # A loop of its own, not `each` with a block: the checker cannot see
+  # what a block handed to `each` keeps (checker-open-questions Q6).
   def to_a : Array(Elem)
     result = [] of Elem
-    each { |e| result << e }
+    until (item = self.next).is_a?(Stop)
+      result << item
+    end
     result
   end
 

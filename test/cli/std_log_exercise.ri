@@ -29,9 +29,12 @@ end
 
 # An entry's data as `key=value` pairs in order.
 def pairs(entry : RisLogEntry) : String
-  found = [] of String
-  entry.data.each { |field| found << "#{field.key}=#{field.value}" }
-  found.join(",")
+  text = String::Builder.new(64)
+  entry.data.each do |field|
+    text << "," if text.bytesize > 0
+    text << field.key << "=" << field.value
+  end
+  text.finish
 end
 
 # The last entry *backend* holds with *message*.
@@ -101,9 +104,12 @@ end
 Log.info("after")
 assert_str "request_id=7,user=ada,pool=main,shard=2", pairs(entry_for(notes, "inner")), "a context's data on every entry in its block"
 assert_str "request_id=7", pairs(entry_for(notes, "outer")), "the inner context closes with its block"
-assert_true pairs(entry_for(notes, "after")).empty? && Log.context.empty?, "no context after the block"
-answered = Log.with_context(k: "v") { Log.context["k"] }
-assert_str "v", answered, "with_context answers its block's answer"
+left_over = {} of String => String
+Log.context(left_over)
+assert_true pairs(entry_for(notes, "after")).empty? && left_over.empty?, "no context after the block"
+inside = {} of String => String
+answered = Log.with_context(k: "v") { Log.context(inside); inside["k"]? == "v" ? 42 : 0 }
+assert_true answered == 42, "with_context answers its block's answer, its data read in it"
 Log.with_context(request_id: 9) do
   group do |g|
     g.spawn do
@@ -151,7 +157,7 @@ refused = ""
 group do |g|
   attempt = g.spawn { Log.setup_from_env(backend: RisMemoryBackend.on_program); 0 }
   outcome = attempt.value
-  refused = outcome.message.to_s if outcome.is_a?(Panicked)
+  refused = outcome.message.to_s.copy_to(Program.tape) if outcome.is_a?(Panicked)
   0
 end
 assert_true refused.includes?("Log.setup_from_env: LOG_LEVEL=loud is no severity"), "LOG_LEVEL=loud refused: #{refused}"
@@ -190,7 +196,7 @@ group do |g|
     0
   end
   outcome = attempt.value
-  after = outcome.message.to_s if outcome.is_a?(Panicked)
+  after = outcome.message.to_s.copy_to(Program.tape) if outcome.is_a?(Panicked)
   0
 end
 assert_true after.includes?("AsyncBackend: an entry written after close"), "a write after close refused: #{after}"

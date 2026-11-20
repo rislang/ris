@@ -7,6 +7,7 @@ module test/ris/answer_compress
 import std/socket::{IyiSocket}
 import std/http::{HTTP, Server, Incoming, Outgoing, Response}
 import std/compress::{Gzip}
+import std/zstd::{Zstd}
 
 struct Ready
 end
@@ -60,11 +61,7 @@ def line(port : Int32, path : String, accept : String) : Nil
   if coding == "gzip"
     same = Gzip.decompress(raw.body) == written
   elsif coding == "zstd"
-    # Zstd.decompress is refused by the view check today: the frame's
-    # magic number stands in for the decode.
-    b = raw.body
-    same = b.bytesize > 4 && b.byte_at(0) == 0x28 && b.byte_at(1) == 0xB5 &&
-           b.byte_at(2) == 0x2F && b.byte_at(3) == 0xFD
+    same = Zstd.decompress(raw.body) == written
   end
   puts "#{path} #{accept}: #{coding} vary=#{vary} smaller=#{smaller} " +
        "same=#{same}"

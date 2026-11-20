@@ -22,22 +22,28 @@ sections below and are listed here in order:
 ## 1. Programs first
 
 * std on the tape, found porting the HTTP handlers (drift report in
-  doc/drafts/server-answer-features.md): the HTTPS client
+  doc/drafts/server-answer-features.md). Done 2026-11-20: Pattern views
+  its text (no growing field, SPEC 2.1) and `match` writes into the
+  caller's pieces, builder and Captures; `Zstd.decompress` decodes in
+  answer_compress; `HTTP.cookie_pairs` fills a caller's Hash; `Incoming`
+  has `form` (a Query), `cookies(found)` and `multipart { |parts| }`.
+  Left: `Router#call` hands `Incoming` to an opaque handler Proc,
+  refused ("cannot prove opaque callback retain/escape effects",
+  router.ri `@handlers[found].call`; doc/drafts/checker-open-questions),
+  so std_router_exercise does not build. The HTTPS client
   (`records_handshake` returns an owner, http.ri:4847; blocks
-  samples/ris/autocert.ri),
-  `Zstd.decompress` (view check, zstd.ri:1410), `Cookie.parse_header`
-  and `HTTP.cookie_pairs` (a Hash from a def). Then give `Incoming`
-  back `form`, `multipart` and `cookies`, which `Request` had.
+  samples/ris/autocert.ri).
 
 * The user's own ris programs: each obstacle becomes an item here.
 
-* `Iterator#to_a` (iterator.ri:225) stores each round's item past its
-  round, so samples/ris/std_iterator.ri does not build and is left out
-  of the tarball with autocert.ri (Makefile, ris-tarball). Probe
-  (checker-open-questions Q6, 2026-11-20): `Iterator.of(array)` with
-  map, select and to_a builds; what is refused is `map` over
-  `Iterator.of_entries(hash)` (its tuples view the Hash), even when the
-  proc answers an Int32 (std_iterator_exercise.ri:292, :313).
+* samples/ris/std_iterator.ri does not build and is left out of the
+  tarball with autocert.ri (Makefile, ris-tarball). 2026-11-20:
+  `Iterator#to_a` loops on `next` itself (no opaque `each` block). Left,
+  both shrink-checker false positives in to_a's `result << item`
+  (checker-open-questions Q6): `map` over `Iterator.of_entries(hash)` is
+  refused as if the proc shrank the entries' @keys
+  (std_iterator_exercise.ri:292, :313), and the sample's `cycle(n)` as
+  growing a pool run with a live view of CycleNIterator's @cache.
 
 Breakage between steps is fine; no transition stages.
 
@@ -51,6 +57,29 @@ Fix a checker hole below only when a cluster hits it.
 ## 2. Checker holes (ordered: those programs hit first)
 
 Unknown must be refused (SPEC 3.6).
+
+* A def's result that holds a value an earlier call of the def made is
+  taken, and freed with the def: `key = P256PrivateKey.from_bytes(..)`
+  then `SigningKey.new(key)` returned a key whose point was gone
+  (X509.self_signed wrote a 0-byte public key; fixed in std by drawing
+  in SigningKey's constructor, test/ris/signing_key_made.ri). SPEC 1.5
+  moves down only the last call's own value: refuse the rest (1.9).
+
+* A view kept past its round through a block's return value is taken:
+  `(1..32).map { Certificate.parse(..).serial }` kept 32 views of
+  certificates each round freed (std_x509_exercise.ri, now written out
+  in its round).
+
+* A field written through a `Pointer` escapes the checker: toml's
+  `@path.value = parts` kept a header def's own Array, freed with the
+  def, and a refusal naming the path segfaulted (fixed: @path is a plain
+  Array refilled, test/ris/toml_header_path.ri). Pointer in std is
+  unsafe by design; `ris unsafe` should list such field writes.
+
+* `--use-rimod` checks differently from a source build: toml's exercise
+  builds from source, yet from its artifacts is refused in std/json's
+  Builder ("live view of Std::Json::Builder ... (opaque contract)",
+  serializable:498). std_toml_exercise.sh's artifacts step fails on it.
 
 * A one-call def's value moves down only when it is one fresh flat
   value: a tuple or two locals do not. Bzip2.decompress tags its String
@@ -187,6 +216,8 @@ Unknown must be refused (SPEC 3.6).
   macro as `__ris_program_init` call, not an array literal.
 
 * Build each test/cli program, group refusals by message, fix per group.
+  2026-11-20 (seventh round): 123 of 131 build; left acme, autocert,
+  fuzz, http_https_records, iterator, router, tls, zip.
   2026-11-20 (sixth round): 117 of 131 programs pass
   `RIS_SCOPE_ERRORS=all bin/ris build --no-codegen FILE`; 14 fail (116
   before this round, 114 after the fifth, 112 after the third, 107
@@ -246,19 +277,24 @@ Unknown must be refused (SPEC 3.6).
     false (test/ris/array_equals_view.ri; ocsp's responder by key hash),
     each_line kept every line on the tape to the end, ocsp's hex wrote
     decimal bytes. Left:
-    - log: not a Time constant: `bound.for("x")` makes a program child
-      whose @parent is the request logger (log.ri:562, from
-      get_or_create_child). `for` is one def for both, so the checker
-      cannot split them: bound loggers need a type of their own.
-    - zip (Q2 probe): the first refusal is now the test's first_error
-      (std_zip_exercise.ri:78, a view stored past its owner), before the
-      decoder-refill blame.
+    - log: done 2026-11-20. `bind` answers a `BoundLogger`, a type of
+      its own whose `for` makes the child under the program logger
+      (test/ris/bound_logger.ri); `Log.context(found)` fills a caller's
+      Hash. std_log_exercise.sh holds.
+    - zip (Q2 probe): the test's first_error writes the sentence into
+      the caller's builder; the first refusal is now the Q2 blame
+      itself, in `ZipReader#extract` (zip.ri:513, "a view beyond its
+      owner scope", reported at the def's first line).
     - iterator (Q6 probe): see section 1.
-    - Run time, not checker: x509.sh fails at X509.self_signed (a
-      public key of 0 bytes) and 7 stale patch sites; toml.sh segfaults
-      in "what the reader refuses" and its refusal programs import
-      `Any`; yaml.sh fails "a 150 by 150 grid ... 4769 hashes". file.sh
-      and ocsp.sh pass.
+    - Run time, 2026-11-20: x509's 0-byte key (a def's result holding
+      an earlier call's value, section 2), its 7 stale patch sites and
+      the test's kept serial views are fixed; x509.sh is left failing
+      only --release: "a P-256 chain checked inside a task, 100 frames
+      down" overflows the task's stack. toml's segfault (a header path
+      kept through a Pointer, section 2) is fixed; toml.sh is left on
+      the --use-rimod refusal (section 2). yaml's sequence hash mixes
+      through a Tuple (test/ris/yaml_seq_hash.ri) and its refusal
+      programs mark Spot @[OnTape]. file.sh and ocsp.sh pass.
 
   Fourth round (the TLS-owner group): benchmark and websocket build.
   benchmark: bm and ips answer Nil, Tms and Entry are `@[OnTape]`

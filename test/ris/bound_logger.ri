@@ -1,0 +1,19 @@
+# A bound logger is a type of its own, BoundLogger
+# (doc/drafts/checker-open-questions/, log): made in a request's round,
+# its `for` makes the child under the program logger, so the program's
+# tree never points at request data. Silent on success.
+import std/log::{Log, Logger, BoundLogger, RisMemoryBackend, Severity}
+
+notes = RisMemoryBackend.on_program
+Log.setup(Severity::Info, notes)
+3.times do |i|
+  request = Log.for("web").bind(request_id: i)
+  request.for("db").info("query")
+  request.bind(user: "ada").info("hi")
+end
+raise "entries #{notes.entries.size}" unless notes.entries.size == 6
+last = notes.entries[4]
+raise "source #{last.source}" unless last.source == "web.db"
+raise "data #{last.data.size}" unless last.data.size == 1 && last.data[0].value == "2"
+raise "two fields" unless notes.entries[5].data.size == 2
+raise "the program child" unless Log.for("web.db").source == "web.db"

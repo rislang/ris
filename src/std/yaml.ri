@@ -468,7 +468,9 @@ pub struct TapeValue
     k = kind
     if k == KIND_ARRAY
       value = 0
-      as_a.each { |item| value = value &* 31 &+ item.hash }
+      # Mixed through a Tuple's hash: `31 * h + item` over integers that
+      # hash as themselves gave [i, j] 4,769 hashes on a 150 by 150 grid.
+      as_a.each { |item| value = {value, item.hash}.hash }
       {value, as_a.size}.hash
     elsif k == KIND_HASH
       pairs = as_h

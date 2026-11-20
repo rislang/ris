@@ -1695,20 +1695,28 @@ pub struct SigningKey
   # The 32 bytes it is made from are drawn again in the 2^-32 chance that
   # they are not below the group's order.
   def self.p256 : SigningKey
-    while true
-      key = P256PrivateKey.from_bytes(Random::Secure.random_bytes(32))
-      return SigningKey.new(key) unless key.is_a?(EcdsaError)
-    end
-    raise "unreachable"
+    SigningKey.new(256)
   end
 
   # A new P-384 key, as `p256` makes one.
   def self.p384 : SigningKey
-    while true
-      key = P384PrivateKey.from_bytes(Random::Secure.random_bytes(48))
-      return SigningKey.new(key) unless key.is_a?(EcdsaError)
+    SigningKey.new(384)
+  end
+
+  # A new P-256 or P-384 key, drawn here: made by the constructor, it
+  # moves to the caller with its point. A key made by an earlier call of
+  # the def lived in the def's scratch, and its point was freed when the
+  # def ended (test/ris/signing_key_made.ri).
+  protected def initialize(bits : Int32)
+    bytes = Array(UInt8).new(bits // 8, 0_u8)
+    Random::Secure.random_bytes(bytes)
+    while (bits == 256 ? P256PrivateKey.from_bytes(bytes) : P384PrivateKey.from_bytes(bytes)).is_a?(EcdsaError)
+      Random::Secure.random_bytes(bytes)
     end
-    raise "unreachable"
+    @p256 = bits == 256 ? P256PrivateKey.new(bytes) : nil
+    @p384 = bits == 384 ? P384PrivateKey.new(bytes) : nil
+    @rsa = nil
+    @seed = nil
   end
 
   # The key in *text*'s one PRIVATE KEY block (PKCS #8: P-256, P-384, RSA

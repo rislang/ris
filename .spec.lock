@@ -68,6 +68,8 @@ capsule.5 cffb63ba
 capsule.6 437aa40b
 capsule.7 285c1871
 capsule.8 f491a4f4
+http.23 c41e54ce
+router.3 889e8323
 nospec samples/ris/app/formal.ri address title
 nospec samples/ris/app/greeter.ri greet greeting polite title
 nospec samples/ris/autocert.ri call configuration initialize

@@ -553,44 +553,22 @@ pub class Logger
   # when its own children are made.
   @first_child : Logger?
   @sibling : Logger?
-  # What `bind` gave this logger, on every entry it and its children write.
-  @bound : Metadata?
 
-  def initialize(@source : String, level : Severity? = nil, backend : Backend? = nil, parent : Logger? = nil, bound : Metadata? = nil)
+  def initialize(@source : String, level : Severity? = nil, backend : Backend? = nil, parent : Logger? = nil)
     @level = level
     @backend = backend
     @parent = parent
     @first_child = nil
     @sibling = nil
-    @bound = bound
-    if bound && parent
-      if older = parent.bound_node
-        @bound = Metadata.combine(older, bound)
-      end
-    end
   end
 
   # A logger for the same source, its level and backend this one's, whose
-  # entries all carry *data*: a request's id, a connection's peer.
-  def bind(**data) : Logger
-    Logger.new(self, data)
-  end
-
-  def initialize(parent : Logger, data : NamedTuple)
-    initialize(parent.source, nil, nil, parent)
-    node = nil.as(Metadata?)
-    texts = String::Builder.new(256)
-    texts << node.bytes if node
-    data.each do |key, value|
-      Metadata.append(texts, key.to_s, LogField.text(value))
-      nil
-    end
-    node = Metadata.from_bytes(texts.finish)
-    @bound = if older = parent.bound_node
-               Metadata.combine(older, node)
-             else
-               node
-             end
+  # entries all carry *data*: a request's id, a connection's peer. It is
+  # a `BoundLogger`, a type of its own: the program's loggers live on the
+  # program tape, a bound one where it was made (a request's tape), and
+  # a program logger never points at it.
+  def bind(**data) : BoundLogger
+    BoundLogger.new(self, nil, data)
   end
 
   # This logger's own level, or the nearest ancestor's; Info at a root
@@ -679,9 +657,7 @@ pub class Logger
   def log(severity : Severity, message : String, **data) : Nil
     return if severity < level || severity == Severity::None
     if b = backend
-      node = bound_node
-      bytes = node ? node.bytes : "".as_tape
-      EntryWriter.write_entry(@source, b, bytes, severity, message, **data)
+      EntryWriter.write_entry(@source, b, "".as_tape, severity, message, **data)
     end
   end
 
@@ -689,16 +665,6 @@ pub class Logger
     return if severity < level || severity == Severity::None
     return unless backend
     log(severity, block.call.as_tape, **data)
-  end
-
-  protected def bound_node : Metadata?
-    if bound = @bound
-      bound
-    elsif parent = @parent
-      parent.bound_node
-    else
-      nil
-    end
   end
 
   def trace(message : String | String, **data) : Nil
@@ -783,6 +749,130 @@ pub class Logger
 
   def fatal? : Bool
     level <= Severity::Fatal
+  end
+end
+
+# A program logger with data on every entry it writes: what
+# `Logger#bind` answers. It lives on the tape it was made on, a request's,
+# and reads its logger, which lives on the program tape; nothing on the
+# program tape points back at it. Its level and backend are its logger's.
+@[OnTape]
+pub class BoundLogger
+  getter logger : Logger
+  @bound : Metadata
+
+  # *logger* with *older*'s data, then *data*'s.
+  def initialize(@logger : Logger, older : Metadata?, data : NamedTuple)
+    texts = String::Builder.new(256)
+    texts << older.bytes if older
+    data.each do |key, value|
+      Metadata.append(texts, key.to_s, LogField.text(value))
+      nil
+    end
+    @bound = Metadata.from_bytes(texts.finish)
+  end
+
+  protected def initialize(@logger : Logger, @bound : Metadata)
+  end
+
+  def source : String
+    @logger.source
+  end
+
+  def level : Severity
+    @logger.level
+  end
+
+  def backend : Backend?
+    @logger.backend
+  end
+
+  # This logger's data, then *data*'s.
+  def bind(**data) : BoundLogger
+    BoundLogger.new(@logger, @bound, data)
+  end
+
+  # The program logger for *child_name* under this one's, with this one's
+  # data: the child is made under the program logger, never under this.
+  def for(child_name : String) : BoundLogger
+    BoundLogger.new(@logger.for(child_name), @bound)
+  end
+
+  def log(severity : Severity, message : String, **data) : Nil
+    return if severity < level || severity == Severity::None
+    if b = backend
+      EntryWriter.write_entry(source, b, @bound.bytes, severity, message, **data)
+    end
+  end
+
+  def log(severity : Severity, **data, &block : -> String) : Nil
+    return if severity < level || severity == Severity::None
+    return unless backend
+    log(severity, block.call.as_tape, **data)
+  end
+
+  def trace(message : String, **data) : Nil
+    log(Severity::Trace, message, **data)
+  end
+
+  def trace(**data, &b : -> String) : Nil
+    log(Severity::Trace, **data, &b)
+  end
+
+  def debug(message : String, **data) : Nil
+    log(Severity::Debug, message, **data)
+  end
+
+  def debug(**data, &b : -> String) : Nil
+    log(Severity::Debug, **data, &b)
+  end
+
+  def info(message : String, **data) : Nil
+    log(Severity::Info, message, **data)
+  end
+
+  def info(**data, &b : -> String) : Nil
+    log(Severity::Info, **data, &b)
+  end
+
+  def notice(message : String, **data) : Nil
+    log(Severity::Notice, message, **data)
+  end
+
+  def notice(**data, &b : -> String) : Nil
+    log(Severity::Notice, **data, &b)
+  end
+
+  def warn(message : String, **data) : Nil
+    log(Severity::Warn, message, **data)
+  end
+
+  def warn(**data, &b : -> String) : Nil
+    log(Severity::Warn, **data, &b)
+  end
+
+  def error(message : String, **data) : Nil
+    log(Severity::Error, message, **data)
+  end
+
+  def error(**data, &b : -> String) : Nil
+    log(Severity::Error, **data, &b)
+  end
+
+  def fatal(message : String, **data) : Nil
+    log(Severity::Fatal, message, **data)
+  end
+
+  def fatal(**data, &b : -> String) : Nil
+    log(Severity::Fatal, **data, &b)
+  end
+
+  def info? : Bool
+    level <= Severity::Info
+  end
+
+  def debug? : Bool
+    level <= Severity::Debug
   end
 end
 
@@ -880,14 +970,14 @@ pub class Log
     end
   end
 
-  # The data this task's open contexts give an entry, the outermost first.
-  def self.context : Hash(String, String)
-    found = {} of String => String
-    return found if @@open.get == 0_u64
+  # The data this task's open contexts give an entry, the outermost first,
+  # added to the caller's *found*. The keys and values view the open
+  # context: read them before its block ends.
+  def self.context(found : Hash(String, String)) : Nil
+    return if @@open.get == 0_u64
     if node = context_node
       node.merge_into(found)
     end
-    found
   end
 
   # This task's key in the table, its fiber's id; 0 on wasm32, which has

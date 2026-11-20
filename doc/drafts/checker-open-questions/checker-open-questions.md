@@ -1,7 +1,9 @@
 # Draft: the checker and SPEC questions left by the bench port
 
 Status: design draft, reviewed by EGM (2026-11-14,
-consolidated_review_report.md) and revised. Not implemented.
+consolidated_review_report.md) and revised. Q1, Q3, Q4 and Q5
+implemented 2026-11-20 (Q1's round store is refused by SPEC 2.2's type
+rule, so no new checker rule); Q2 and Q6 probed, open (TODO.md).
 Source: TODO.md section 7 ("Left, with their cause"). Each question
 names the program that meets it, what the checker does today, the
 proposed answer with the clause it touches, its tests and its place in
@@ -85,13 +87,14 @@ Proposal: the router is the one owner. It keeps every pattern's parts in
 flat arrays (`@segments : Array(String)` viewing its own `@text`,
 `@starts : Array(Int32)` per pattern) and a pattern is an index.
 `Router#handle(text, handler) : RouterError?` parses into those arrays.
-`Pattern.parse` and the `Pattern` class are removed; `PatternView` (a
-struct of index and router) answers what tests asked of a `Pattern`
-(`to_s`, `matches?`). The opaque handler call (router.ri:591) is not
-part of this step.
+The opaque handler call (router.ri:591) is not part of this step.
 
-Tests: std_router_exercise builds; refused test: a program that keeps a
-`PatternView` past its router (test/ris/refused/pattern_view_kept.ri).
+Resolved 2026-11-20 by main's design, kept at the merge: `Pattern` is an
+`@[OnTape]` struct that views the text it was read from and holds no
+data of its own (SPEC 2.1), so the router's `Array(Pattern)` is flat.
+`match` writes into the caller's pieces, builder and Captures. Tests:
+test/ris/router_patterns.ri; refused: a Pattern kept past the round
+that made its text (test/ris/refused/pattern_view_kept.ri).
 
 ## Q4. `File.read_lines`
 

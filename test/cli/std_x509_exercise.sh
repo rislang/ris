@@ -461,14 +461,22 @@ prove_broken() {
     echo "  no python3 on this machine, so the $1 proof is unmeasured"
     return
   fi
-  if ! OLD="$3" NEW="$4" MODULE="${5:-x509}" "$PY" - <<PY
+  # A sixth and seventh argument patch a second site of the same module:
+  # a check whose reader repeats it (a `return` copy and a `raise` copy).
+  if ! OLD="$3" NEW="$4" MODULE="${5:-x509}" OLD2="${6:-}" NEW2="${7:-}" \
+      "$PY" - <<PY
 import os
 from pathlib import Path
 module = os.environ["MODULE"]
 src = Path("$REPO/src/std/" + module + ".ri").read_text(encoding="utf-8")
-if src.count(os.environ["OLD"]) != 1:
-    raise SystemExit("patch site missing or not one")
-Path("$WORK/patched/std/" + module + ".ri").write_text(src.replace(os.environ["OLD"], os.environ["NEW"], 1), encoding="utf-8")
+for old, new in ((os.environ["OLD"], os.environ["NEW"]),
+                 (os.environ["OLD2"], os.environ["NEW2"])):
+    if not old:
+        continue
+    if src.count(old) != 1:
+        raise SystemExit("patch site missing or not one")
+    src = src.replace(old, new, 1)
+Path("$WORK/patched/std/" + module + ".ri").write_text(src, encoding="utf-8")
 PY
   then
     echo "  the $1 patch did not apply"
@@ -499,15 +507,15 @@ prove_broken "extKeyUsage unchecked" "a leaf for clientAuth only: expected a ref
 prove_broken "a CA taken as the leaf" "a leaf that is a CA: expected a refusal" \
   '    return "#{leaf.subject_name} is a CA certificate, not a #{purpose.holder}'"'"'s" if leaf.ca' ''
 prove_broken "unknown critical extensions passed over" "a leaf with an unknown critical extension: expected a refusal" \
-  '        @unhandled_critical << oid if critical' ''
+  '        @unhandled_critical << save_text(oid) if critical' ''
 prove_broken "the issuer's signature unchecked" "a leaf signed by another key under the same name: expected a refusal" \
   '    child.signature_error(issuer)
   end' '    nil
   end'
 prove_broken "the first candidate issuer only" "a decoy intermediate under the same name, tried first: refused" \
-  '        failures << problem
-        next' '        failures << problem
-        return nil'
+  '        failures << problem if failures.length == 0
+        next' '        failures << problem if failures.length == 0
+        return 0'
 prove_broken "SHA-1 taken" "a leaf signed under SHA-1: expected a refusal" \
   '    when X509Oids::SHA1_RSA, X509Oids::ECDSA_SHA1
       return "#{what} is signed under SHA-1, which is refused"' '    when X509Oids::SHA1_RSA, X509Oids::ECDSA_SHA1
@@ -527,9 +535,14 @@ prove_broken "an IP range compared unmasked" "an address inside the permitted ra
 prove_broken "IPv6 :: unexpanded" "an IPv6 address: refused" \
   '    head + Array(UInt8).new(16 - head.size - tail.size, 0_u8) + tail' '    head + tail'
 prove_broken "inner and outer algorithms unchecked" "an outer algorithm that is not the inner one refused" \
-  '    unless inner_algorithm.same_raw?(outer_algorithm)' '    if false'
+  '    unless inner_algorithm.same_raw?(outer_algorithm)
+      return "the signature' '    if false
+      return "the signature' x509 \
+  '    unless inner_algorithm.same_raw?(outer_algorithm)
+      raise("the signature' '    if false
+      raise("the signature'
 prove_broken "a duplicate extension taken" "an extension written twice refused" \
-  '      return X509Error.new("extension #{oid} appears twice") if seen.includes?(oid)' ''
+  '      return "extension #{oid} appears twice" if @seen.includes?(oid)' ''
 # Unchecked, the bad byte reaches std/base64, which panics: the refusal
 # the check expects never comes.
 prove_broken "PEM's base64 unchecked" "base64: invalid byte" \
@@ -537,7 +550,7 @@ prove_broken "PEM's base64 unchecked" "base64: invalid byte" \
 prove_broken "the purpose passed over: serverAuth asked of every chain" "a leaf for clientAuth only, as a client's" \
   '    usages.includes?(purpose.oid) || usages.includes?(X509Oids::ANY_EXTENDED_KEY_USAGE)' '    usages.includes?(X509Oids::SERVER_AUTH) || usages.includes?(X509Oids::ANY_EXTENDED_KEY_USAGE)'
 prove_broken "an Ed25519 key's parameters taken" "an Ed25519 key whose algorithm carries parameters refused" \
-  '      return X509Error.new("an Ed25519 key with parameters, which RFC 8410 says are absent") unless algorithm.size == 1' ''
+  '        return keep_result(X509Error.new("an Ed25519 key with parameters, which RFC 8410 says are absent")) unless algorithm.size == 1' ''
 prove_broken "an Ed25519 signature unchecked" "an Ed25519 leaf signed by another key under the root's name: expected a refusal" \
   '      return nil if key.verify(signed, signature)' '      return nil'
 prove_broken "an Ed25519 signature's parameters taken" "an Ed25519 signature whose algorithm carries parameters: expected a refusal" \
@@ -548,7 +561,8 @@ prove_broken "an Ed25519 signature's parameters taken" "an Ed25519 signature who
 prove_broken "a search for a chain without a bound" "seven intermediates signing each other: refused with" \
   '  MAX_SIGNATURE_CHECKS = 100' '  MAX_SIGNATURE_CHECKS = 1_000_000'
 prove_broken "an Ed25519 key off the curve taken" "an Ed25519 key off the curve refused" \
-  '    return CurveError.new("Ed25519: the public key is not a point on the curve, or not its canonical encoding") unless CurvePoint.decode(p)' '' curve25519
+  '    return "Ed25519: the public key is not a point on the curve, or not its canonical encoding" unless CurvePoint.decode(p)' '' curve25519 \
+  '    raise("Ed25519: the public key is not a point on the curve, or not its canonical encoding") unless CurvePoint.decode(p)' ''
 # A name under constraints, judged as the host matcher reads it: each
 # break below is the module as it was before SECURITY_REVIEW_TLS.md's
 # finding, one rule at a time.
@@ -568,7 +582,8 @@ prove_broken "an issuer's RSA key of any size taken" "an intermediate whose key 
   '    weak = weak_key(issuer)
     return weak if weak' ''
 prove_broken "a second extensions block read over the first" "a TBSCertificate with two extensions blocks refused" \
-  '      return X509Error.new("#{field.describe} after [#{last}], where RFC 5280 has each of [1], [2] and [3] once and in order") unless tag > last' ''
+  '      return "#{field.describe} after [#{last}], where RFC 5280 has each of [1], [2] and [3] once and in order" unless tag > last' '' x509 \
+  '      raise("#{field.describe} after [#{last}], where RFC 5280 has each of [1], [2] and [3] once and in order") unless tag > last' ''
 prove_broken "an empty RelativeDistinguishedName taken" "an empty RDN refused: accepted" \
   '      return X509Error.new("an empty RelativeDistinguishedName") if attributes.empty?' ''
 prove_broken "a name constraint's mask with a hole taken" "a name constraint's mask with a hole refused: accepted" \

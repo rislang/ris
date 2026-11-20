@@ -138,7 +138,7 @@ def assert_str(expected : String, actual : String, msg : String) : Nil
   raise "ASSERTION FAILED: #{msg}\n  expected #{expected.inspect}\n  got      #{actual.inspect}" unless expected == actual
 end
 
-import std/router::{Router, PatternView, RouterError}
+import std/router::{Router, Pattern, RouterError, Captures}
 import std/http::{HTTP, Incoming, Outgoing, Field, Response, Server}
 import std/socket::{IyiSocket}
 
@@ -428,10 +428,6 @@ end
 # Modes the gate script runs: `table` prints every table with this
 # router's answers for the gate's Go program to answer too; `serve`
 # prints a port and serves a small router until `/stop`.
-# Patterns read for their own sake, not routed: one router holds them
-# all (a pattern is an index into its router, SPEC 2.1).
-read = Router.new
-
 args = Program.args
 if args.size > 0 && args[0] == "table"
   show_table("main", MAIN, main_requests)
@@ -439,13 +435,13 @@ if args.size > 0 && args[0] == "table"
   show_table("hosts", HOSTS, hosts_requests)
   conflicts.each do |pair|
     puts "C #{pair[0]}\t#{pair[1]}"
-    first = read.parse(pair[0]).or_panic
-    second = read.parse(pair[1]).or_panic
+    first = Pattern.parse(pair[0]).or_panic
+    second = Pattern.parse(pair[1]).or_panic
     puts "A C #{pair[0]}\t#{pair[1]} => #{first.conflict(second) ? "conflict" : "ok"}"
   end
   parses[0, parses.size - DEPARTURES].each do |row|
     puts "V #{row[0]}"
-    puts "A V #{row[0]} => #{read.parse(row[0]).is_a?(RouterError) ? "invalid" : "ok"}"
+    puts "A V #{row[0]} => #{Pattern.parse(row[0]).is_a?(RouterError) ? "invalid" : "ok"}"
   end
   __iyi_exit(0)
 end
@@ -459,7 +455,7 @@ puts "== patterns"
 # Go's grammar: a method and a space, a host, a path of segments; what a
 # pattern that is not one is refused with.
 parses.each do |row|
-  parsed = read.parse(row[0])
+  parsed = Pattern.parse(row[0])
   if parsed.is_a?(RouterError)
     assert_str "Router: #{row[0].inspect} is not a pattern: #{row[1]}", parsed.message, "the pattern #{row[0].inspect} is refused"
   else
@@ -467,12 +463,17 @@ parses.each do |row|
     assert_str row[0], parsed.to_s, "a pattern is what was written"
   end
 end
-spaced = read.parse("GET \t /a").or_panic
-assert_true spaced.method == "GET" && spaced.host == "" && spaced.matches?("/a"), "a method and spaces and a tab"
-hosted = read.parse("PUT example.com/b/{bucket}/o/{objectname...}").or_panic
+spaced = Pattern.parse("GET \t /a").or_panic
+assert_true spaced.method == "GET" && spaced.host == "" && spaced.match("/a", [] of String, String::Builder.new, nil), "a method and spaces and a tab"
+hosted = Pattern.parse("PUT example.com/b/{bucket}/o/{objectname...}").or_panic
 assert_true hosted.method == "PUT" && hosted.host == "example.com", "a method and a host"
-assert_true hosted.matches?("/b/b%201/o/a/b/"), "a pattern's wildcards match"
-assert_true !hosted.matches?("/b/x/o") && !hosted.matches?("/b//o/x"), "no rest past the end, no empty segment"
+got = Captures.new
+seen = [] of String
+text = String::Builder.new
+assert_true hosted.match("/b/b%201/o/a/b/", seen, text, got), "a pattern's wildcards match"
+assert_str "b 1|a/b/", got["bucket"] + "|" + got["objectname"], "a pattern's wildcards"
+assert_true !hosted.match("/b/x/o", [] of String, String::Builder.new, nil), "no rest past the end"
+assert_true !hosted.match("/b//o/x", [] of String, String::Builder.new, nil), "no empty segment"
 puts "  #{parses.size} patterns: #{parses.count { |row| row[1].empty? }} read, #{parses.count { |row| !row[1].empty? }} refused by their sentence"
 
 puts "\n== precedence and conflicts"
@@ -480,8 +481,8 @@ puts "\n== precedence and conflicts"
 # requests are a strict subset; neither, with requests in common, is a
 # conflict, refused when the second is registered.
 conflicts.each do |pair|
-  first = read.parse(pair[0]).or_panic
-  second = read.parse(pair[1]).or_panic
+  first = Pattern.parse(pair[0]).or_panic
+  second = Pattern.parse(pair[1]).or_panic
   sentence = first.conflict(second)
   if pair[2].empty?
     assert_true sentence.nil?, "#{pair[0]} beside #{pair[1]} is no conflict: #{sentence}"
@@ -491,22 +492,22 @@ conflicts.each do |pair|
   end
 end
 pairs = [
-  {"/images/thumbnails/", "/images/", Router::MORE_SPECIFIC},
-  {"/", "/a", Router::MORE_GENERAL},
-  {"/", "/{$}", Router::MORE_GENERAL},
-  {"/a/b", "/a/{x}", Router::MORE_SPECIFIC},
-  {"/a/{x}", "/a/", Router::MORE_SPECIFIC},
-  {"GET /a", "/a", Router::MORE_SPECIFIC},
-  {"GET /a", "HEAD /a", Router::MORE_GENERAL},
-  {"/a/{x...}", "/a/b/{y...}", Router::MORE_GENERAL},
-  {"/{x}", "/{$}", Router::DISJOINT},
-  {"/a/{x}", "/a/{x}/b", Router::DISJOINT},
-  {"GET /a", "POST /a", Router::DISJOINT},
-  {"/a/{x}/c", "/a/b/{y}", Router::OVERLAPS},
-  {"/x/{a}", "/x/{b}", Router::EQUIVALENT},
+  {"/images/thumbnails/", "/images/", Pattern::MORE_SPECIFIC},
+  {"/", "/a", Pattern::MORE_GENERAL},
+  {"/", "/{$}", Pattern::MORE_GENERAL},
+  {"/a/b", "/a/{x}", Pattern::MORE_SPECIFIC},
+  {"/a/{x}", "/a/", Pattern::MORE_SPECIFIC},
+  {"GET /a", "/a", Pattern::MORE_SPECIFIC},
+  {"GET /a", "HEAD /a", Pattern::MORE_GENERAL},
+  {"/a/{x...}", "/a/b/{y...}", Pattern::MORE_GENERAL},
+  {"/{x}", "/{$}", Pattern::DISJOINT},
+  {"/a/{x}", "/a/{x}/b", Pattern::DISJOINT},
+  {"GET /a", "POST /a", Pattern::DISJOINT},
+  {"/a/{x}/c", "/a/b/{y}", Pattern::OVERLAPS},
+  {"/x/{a}", "/x/{b}", Pattern::EQUIVALENT},
 ]
 pairs.each do |pair|
-  got = read.parse(pair[0]).or_panic.relation(read.parse(pair[1]).or_panic)
+  got = Pattern.parse(pair[0]).or_panic.relation(Pattern.parse(pair[1]).or_panic)
   assert_true got == pair[2], "#{pair[0]} beside #{pair[1]}: relation #{got}, not #{pair[2]}"
 end
 # `handle` refuses the second of a conflicting pair with the sentence,

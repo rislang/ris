@@ -1,0 +1,13 @@
+# HTTP.cookie_pairs adds a Cookie header's pairs to the caller's Hash:
+# no Hash leaves the def (SPEC 1.9), and the names and values view the
+# header, so a round's pairs go with the round's tape.
+import std/http::{HTTP}
+
+pairs = {} of String => String
+HTTP.cookie_pairs(" a=1; b=\"two\" ;a=3; =x; c; d=", pairs)
+raise "pairs: #{pairs.inspect}" unless pairs == {"a" => "1", "b" => "two", "d" => ""}
+3.times do |i|
+  round = {} of String => String
+  HTTP.cookie_pairs("n=#{i}; m=q", round)
+  raise "round #{i}: #{round.inspect}" unless round["n"] == i.to_s && round["m"] == "q"
+end

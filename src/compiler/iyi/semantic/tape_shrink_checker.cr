@@ -2576,6 +2576,115 @@ class Iyi::TapeShrinkChecker
     class_instance?(type)
   end
 
+  # Whether a constructor given an owner argument still allocates past
+  # it: an allocating call naming no owner parameter puts its data on
+  # the running tape, though a builder or pool was handed in.
+  def allocates_past_owner?(target : Def, owners : Set(String)) : Bool
+    return true if owners.empty?
+    key = {target.object_id, owners.to_a.sort.join(",")}
+    known = @past_owner[key]?
+    return known unless known.nil?
+    @past_owner[key] = false
+    scan = PastOwnerScan.new(self, @graph, owners)
+    target.body.accept scan
+    @past_owner[key] = scan.found
+  end
+
+  @past_owner = Hash(Tuple(UInt64, String), Bool).new
+
+  def owner_parameters(target : Def) : Set(String)
+    target.args.select { |a| owner_argument?(a.type?) }.map(&.name).to_set
+  end
+
+  class PastOwnerScan < Visitor
+    getter found = false
+
+    def initialize(@checker : TapeShrinkChecker, @graph : TapeCallGraph,
+                   owners : Set(String))
+      @owners = owners.dup
+    end
+
+    # A temporary bound to the owner (`__temp = sb`) is the owner.
+    def visit(node : Assign)
+      target = node.target
+      if target.is_a?(Var) && names_owner?(node.value)
+        @owners << target.name
+        return false
+      end
+      !@found
+    end
+
+    private def names_owner?(node : ASTNode?) : Bool
+      case node
+      when Var      then @owners.includes?(node.name)
+      when InstanceVar then @owners.includes?(node.name)
+      when Call     then names_owner?(node.obj)
+      else               false
+      end
+    end
+
+    private def holds_owner?(node : ASTNode) : Bool
+      scan = OwnerUse.new(@owners)
+      node.accept scan
+      scan.found
+    end
+
+    class OwnerUse < Visitor
+      getter found = false
+
+      def initialize(@owners : Set(String))
+      end
+
+      def visit(node : Var | InstanceVar)
+        @found ||= @owners.includes?(node.name)
+        false
+      end
+
+      def visit(node : ASTNode)
+        !@found
+      end
+    end
+
+    def visit(node : Call)
+      return false if @found
+      if expanded = node.expanded
+        expanded.accept self
+        return false
+      end
+      if node.name == "initialize"
+        @graph.targets(node).try &.each do |t|
+          inner = Set(String).new
+          node.args.each_with_index do |a, i|
+            next unless arg = t.args[i]?
+            inner << arg.name if holds_owner?(a)
+          end
+          @found ||= inner.empty? ? @graph.allocates?(t.body) : @checker.allocates_past_owner?(t, inner)
+        end
+        return false
+      end
+      # Through the owner: what it makes lands on the owner.
+      return false if names_owner?(node.obj) ||
+                      node.args.any? { |a| names_owner?(a) }
+      # A call handed the owner deeper in its arguments: look inside.
+      return true if node.args.any? { |a| holds_owner?(a) }
+      # Only fresh text or storage counts: a view of an argument
+      # (`contents[0, 0]`) is not made here.
+      @found ||= @graph.fresh?(node) ||
+                 (node.type?.try { |t| TapeChecker.possible_string?(t) } == true &&
+                  @graph.allocates?(node))
+      STDERR.puts "DBG past-owner #{node.name} at #{node.location}" if @found && ENV["RIS_DBG"]?
+      false
+    end
+
+    def visit(node : Def)
+      false
+    end
+
+    def visit(node : ASTNode)
+      !@found
+    end
+  end
+
   private def struct_value?(root : UInt64) : Bool
     return false if @handed.includes?(root) || @allocating_structs.includes?(root)
     return false unless type = @root_types[root]?
@@ -3760,7 +3869,11 @@ class Iyi::TapeShrinkChecker
           @allocating_structs << node.object_id
           # Given nowhere else to put it, what the constructor makes is
           # on the running tape: the value holds this scope's data.
-          @made_structs << node.object_id unless node.args.any? { |arg| owner_argument?(arg.type?) }
+          # An owner argument takes it only if the constructor allocates
+          # through it alone; anything else it makes is here.
+          if @graph.targets(node).try(&.any? { |t| allocates_past_owner?(t, owner_parameters(t)) })
+            @made_structs << node.object_id
+          end
         end
         holder = node.name == "new" && struct_value?(node.object_id)
         # Tracked fields carry replaceable borrows. A duplicate on the

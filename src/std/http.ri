@@ -2188,6 +2188,44 @@ pub struct Incoming
     [] of Certificate
   end
 
+  # The `Cookie` header's pairs, added to *found*, the caller's
+  # (`HTTP.cookie_pairs`): names and values view the request's bytes.
+  def cookies(found : Hash(String, String)) : Nil
+    if value = header("Cookie")
+      HTTP.cookie_pairs(value, found)
+    end
+  end
+
+  # The fields of a form, read on the request's tape: the query's, then an
+  # `application/x-www-form-urlencoded` body's. A body read from
+  # `body_io` (*stream_bodies*) is not read here: `body` is empty then.
+  def form : Query
+    Query.parse(@query || @path[0, 0], form_body)
+  end
+
+  private def form_body : String
+    none = @body[0, 0]
+    type = header("Content-Type")
+    return none unless type
+    parsed = MIME.parse?(type)
+    return none unless parsed && parsed.essence == "application/x-www-form-urlencoded"
+    @body
+  end
+
+  # The body as `multipart/form-data` parts, handed to the block, which
+  # reads them as they arrive (`Multipart#next_part`). False, the block
+  # not called, when the `Content-Type` is not multipart or names no
+  # boundary (`Multipart.boundary`).
+  def multipart(& : Multipart -> Nil) : Bool
+    type = header("Content-Type")
+    return false unless type
+    boundary = Multipart.boundary(type)
+    return false unless boundary
+    parts = Multipart.new(body_io, boundary)
+    yield parts
+    true
+  end
+
   # The body as it arrives: the connection's under *stream_bodies*,
   # else a reader of `body`.
   def body_io : BodyReader
@@ -5708,11 +5746,15 @@ pub struct HTTP
   end
 
   # The pairs of a request's `Cookie` header, `a=1; b=2` (RFC 6265 §4.2),
-  # a value's quotes taken off; the first of a name is kept, as a server
-  # reads the most specific cookie first.
-  def self.cookie_pairs(value : String) : Hash(String, String)
-    found = {} of String => String
-    value.split(';').each do |part|
+  # a value's quotes taken off, added to *found*, the caller's: names and
+  # values view *value*. The first of a name is kept, as a server reads
+  # the most specific cookie first.
+  def self.cookie_pairs(value : String, found : Hash(String, String)) : Nil
+    start = 0
+    while start < value.bytesize
+      stop = value.index(';', start) || value.bytesize
+      part = value[start, stop - start]
+      start = stop + 1
       eq = part.index('=')
       next unless eq
       name = trim(part[0, eq])
@@ -5721,7 +5763,7 @@ pub struct HTTP
       text = text[1, text.bytesize - 2] if text.bytesize >= 2 && text.starts_with?("\"") && text.ends_with?("\"")
       found[name] = text unless found.has_key?(name)
     end
-    found
+    nil
   end
 
   # *n* in lowercase hexadecimal: a chunk's size line.
@@ -8343,4 +8385,41 @@ class H2Out
     return fault if fault.is_a?(Cancelled) || fault.is_a?(SocketError)
     SocketError.layered("write an HTTP/2 answer", fault ? fault.message : "the client reset the stream")
   end
+end
+
+# http.23 Incoming strings borrow request bytes and expire with the request
+#   tape; Outgoing writes into caller-owned response storage. Retaining a body
+#   or field requires SPEC 1.7, and caller-created streaming/client resources
+#   require close.
+spec http.23
+  head = "a=1&b=caf%C3%A9"
+  fields = [Field.new("Content-Type", "application/x-www-form-urlencoded"),
+            Field.new("Cookie", "sid=\"abc\"; theme=dark; sid=old")]
+  req = Incoming.new("POST", "/f", head, fields, "c=x+y&a=2")
+  req.header("cookie") == "sid=\"abc\"; theme=dark; sid=old"
+  seen = ""
+  req.form.each { |key, value| seen << key << "=" << value << ";" }
+  seen == "a=1;b=café;c=x y;a=2;"
+  jar = {} of String => String
+  req.cookies(jar)
+  jar == {"sid" => "abc", "theme" => "dark"}
+  !req.multipart { |_| raise "not multipart" }
+  text = "--B\r\nContent-Disposition: form-data; name=\"one\"\r\n\r\n" +
+         "first\r\n--B--\r\n"
+  parted = Incoming.new("POST", "/u", nil,
+    [Field.new("Content-Type", "multipart/form-data; boundary=B")], text)
+  names = ""
+  took = parted.multipart do |parts|
+    slot = Part.new(parts)
+    while part = parts.next_part(slot).or_panic
+      names << (part.name || "-") << ":" << part.read_all.or_panic << ";"
+    end
+  end
+  took && names == "one:first;"
+  res = Outgoing.new
+  res.header("X-A", "1")
+  res.body << "hi"
+  res.body.to_s == "hi"
+  kept = req.body.copy_to(Program.tape)
+  kept == "c=x+y&a=2"
 end

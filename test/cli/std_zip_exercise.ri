@@ -73,23 +73,31 @@ def drain(r : ZipEntryReader, max : Int32, label : String) : String
   all.to_s
 end
 
-# The first error opening the archive and reading every entry answers.
-def first_error(data : String, limit : Int64 = ZipReader::NO_LIMIT) : ZipError?
+# The sentence of the first error opening the archive and reading every
+# entry answers, written into *into*: the error views the reader, which
+# ends with this def.
+def first_error(data : String, into : String::Builder, limit : Int64 = ZipReader::NO_LIMIT) : Nil
   zip = ZipReader.new(data, limit)
   loaded = zip.load
-  return loaded if loaded.is_a?(ZipError)
+  if loaded.is_a?(ZipError)
+    into << loaded.message
+    return
+  end
   zip.entries.each do |e|
     got = zip.read(e)
-    return got if got.is_a?(ZipError)
+    if got.is_a?(ZipError)
+      into << got.message
+      return
+    end
   end
-  nil
 end
 
 def refused(data : String, phrase : String, label : String, limit : Int64 = ZipReader::NO_LIMIT) : Nil
-  fault = first_error(data, limit)
-  raise "ASSERTION FAILED: #{label}: read instead of refusing" unless fault
-  assert_true fault.message.includes?(phrase), "#{label}: refused with #{fault.message.inspect}, which does not say #{phrase.inspect}"
-  puts "  #{label}: #{fault.message}"
+  fault = ""
+  first_error(data, fault, limit)
+  raise "ASSERTION FAILED: #{label}: read instead of refusing" if fault.empty?
+  assert_true fault.includes?(phrase), "#{label}: refused with #{fault.inspect}, which does not say #{phrase.inspect}"
+  puts "  #{label}: #{fault}"
 end
 
 def le16(s : String, at : Int32) : Int32
@@ -445,7 +453,9 @@ refused(patched32(round, last + 20, 1000000_i64), "runs into the central directo
 total = 0_i64
 zip.entries.each { |e| total = total + e.size }
 refused(round, "the limit of #{total - 1} bytes", "the limit refuses one byte less", total - 1)
-assert_true first_error(round, total).nil?, "the limit admits exactly the total"
+admitted = String::Builder.new(128)
+first_error(round, admitted, total)
+assert_true admitted.bytesize == 0, "the limit admits exactly the total"
 # A flipped byte in stored content: the CRC-32 catches it.
 flipped = patched(round, 30 + 10 + 3, [0x48])
 refused(flipped, "\"stored.txt\"'s CRC-32 is", "a flipped byte is refused by its CRC-32")

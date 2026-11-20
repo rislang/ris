@@ -1,0 +1,57 @@
+# A def answering a String or an error, whose error path allocates (an
+# interpolated sentence) but whose String views the parser's own
+# builder, is no fresh value: `Item.new(word(at)!)` kept in the parser's
+# Array past the round passes (std/toml's `TapeAny.new(basic_string!)`).
+# Silent on success.
+@[OnTape]
+struct ParseError
+  getter reason : String
+
+  def initialize(@reason : String)
+  end
+end
+
+impl Error for ParseError
+  def message : String
+    @reason
+  end
+end
+
+@[OnTape]
+struct Item
+  getter text : String
+
+  def initialize(@text : String)
+  end
+end
+
+class Parser
+  @texts : String::Builder = String::Builder.new(64)
+  @items = [] of Item
+
+  def initialize(@input : String)
+  end
+
+  private def word(at : Int32) : String | ParseError
+    return ParseError.new("bad #{at}") if at >= @input.size
+    from = @texts.length
+    @texts << @input[at, 1]
+    @texts.finish[from, @texts.length - from]
+  end
+
+  private def item(at : Int32) : Item | ParseError
+    Item.new(word(at)!)
+  end
+
+  def run : Int32
+    @input.size.times do |i|
+      found = item(i)
+      return -1 if found.is_a?(ParseError)
+      @items << found
+    end
+    @items.size
+  end
+end
+
+parser = Parser.new("abc")
+raise "count" unless parser.run == 3

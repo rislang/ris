@@ -962,10 +962,13 @@ struct TapeReader
   @array_used : Int32
   @empty_path : Array(String)
   @texts : String::Builder
-  @path : Pointer(Array(String))
+  # The current header's key, refilled by each header: a header's own
+  # `parts` is its def's scratch, and kept here it was read after it was
+  # freed (test/ris/toml_header_path.ri).
+  @path : Array(String)
 
   def path : Array(String)
-    @path.value
+    @path
   end
 
   # Deep enough for any document a person wrote, and shallow enough that
@@ -986,8 +989,6 @@ struct TapeReader
       RisRegion.tape_bytes(sizeof(String::Scanner).to_u64))
     @current = Pointer(TapeTable).new(
       RisRegion.tape_bytes(sizeof(TapeTable).to_u64))
-    @path = Pointer(Array(String)).new(
-      RisRegion.tape_bytes(sizeof(Array(String)).to_u64))
     @scan.value = String::Scanner.new(text)
     @slot_pool = SlicePool(TapePair(TapeSlot)?).new
     @flag_pool = SlicePool(Bool).new
@@ -998,7 +999,7 @@ struct TapeReader
     @scratch = scratch
     @root = TapeTable.new(0, true, false, @slot_pool, @flag_pool)
     @current.value = @root
-    @path.value = Array(String).new
+    @path = Array(String).new
     @key_parts = Array(String).new
     @key_starts = Array(Int32).new
     @key_used = 0
@@ -1322,7 +1323,7 @@ struct TapeReader
   private def pair(table : TapeTable, inline : Bool) : Nil | TOMLError
     # An inline table's keys are named from the table itself. The path is
     # read here, not passed through the value's recursion (SPEC 3.5).
-    path = inline ? @empty_path : @path.value
+    path = inline ? @empty_path : @path
     input = bytes
     input_size = size
     mark = @key_used
@@ -1396,7 +1397,9 @@ struct TapeReader
     start = pos
     array = pos + 1 < input_size && input[pos + 1] == 91_u8
     self.pos = pos + (array ? 2 : 1)
-    parts = Array(String).new
+    # Read straight into the reader's own @path: a refusal ends the read.
+    parts = @path
+    parts.clear
     starts = Array(Int32).new
     key(parts, starts)!
     closer = array ? "]]" : "]"
@@ -1478,7 +1481,6 @@ struct TapeReader
       end
     end
     @current.value = target
-    @path.value = parts
     nil
   end
 

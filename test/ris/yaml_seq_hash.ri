@@ -1,0 +1,16 @@
+# A YAML sequence's hash mixes its items: `31 * h + item` over integers
+# that hash as themselves gave a grid of [i, j] few distinct hashes
+# (std_yaml_exercise.sh, "a 150 by 150 grid"). Silent on success.
+import std/yaml::{YAML}
+
+seen = Hash(Int32, Bool).new
+i = 0
+while i < 40
+  j = 0
+  while j < 40
+    seen[YAML.parse("[#{i}, #{j}]").hash] = true
+    j = j + 1
+  end
+  i = i + 1
+end
+raise "#{seen.size} hashes of 1600" unless seen.size >= 1550

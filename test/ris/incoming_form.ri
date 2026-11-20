@@ -1,0 +1,37 @@
+# Incoming's form, cookies and multipart, which Request had, on the
+# request's tape: form answers a Query (its own text), cookies adds to
+# the caller's Hash, multipart hands a Multipart to a block (SPEC 1.9,
+# 2.1: no Hash or owner leaves a def).
+import std/http::{Incoming, Field, Multipart, Part}
+
+posted = [Field.new("Content-Type", "application/x-www-form-urlencoded; charset=utf-8"),
+          Field.new("Cookie", "sid=\"abc\"; theme=dark; sid=old")]
+req = Incoming.new("POST", "/f", "a=1&b=caf%C3%A9", posted, "c=x+y&a=2")
+seen = ""
+req.form.each { |key, value| seen << key << "=" << value << ";" }
+raise "form: #{seen}" unless seen == "a=1;b=café;c=x y;a=2;"
+jar = {} of String => String
+req.cookies(jar)
+raise "cookies: #{jar.inspect}" unless jar == {"sid" => "abc", "theme" => "dark"}
+
+plain = Incoming.new("POST", "/f", nil, [Field.new("Content-Type", "text/plain")], "c=1")
+count = 0
+plain.form.each { |_, _| count += 1 }
+raise "a text/plain body is no form" unless count == 0
+raise "no multipart in text/plain" if plain.multipart { |_| raise "called" }
+none = {} of String => String
+plain.cookies(none)
+raise "no cookies" unless none.empty?
+
+text = "--B\r\nContent-Disposition: form-data; name=\"one\"\r\n\r\n" +
+       "first\r\n--B--\r\n"
+parted = Incoming.new("POST", "/u", nil,
+  [Field.new("Content-Type", "multipart/form-data; boundary=B")], text)
+names = ""
+took = parted.multipart do |parts|
+  slot = Part.new(parts)
+  while part = parts.next_part(slot).or_panic
+    names << (part.name || "-") << ":" << part.read_all.or_panic << ";"
+  end
+end
+raise "multipart: #{took} #{names}" unless took && names == "one:first;"

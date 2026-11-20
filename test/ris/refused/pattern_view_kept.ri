@@ -1,11 +1,11 @@
-# A PatternView is an index into its router's storage
-# (doc/drafts/checker-open-questions/, Q3): kept past the def that made
-# the router, it would read freed storage.
-import std/router::{Router, PatternView}
+# A Pattern views the text it was read from
+# (doc/drafts/checker-open-questions/, Q3): kept past the round that made
+# the text, it would read freed storage.
+import std/router::{Pattern}
 
-def first_pattern : PatternView
-  router = Router.new
-  router.parse("GET /a").as(PatternView)
+kept = [] of Pattern
+3.times do |i|
+  text = "GET /" + i.to_s
+  kept << Pattern.parse(text).as(Pattern)
 end
-
-puts first_pattern.to_s
+puts kept[0].to_s

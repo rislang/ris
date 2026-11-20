@@ -1,0 +1,24 @@
+# struct_owner_made_here's neighbour: a constructor that makes its text
+# only through the builder it is handed (`sb << name`, `sb.finish`) puts
+# it on the builder's storage, so a struct kept past the round passes.
+# Silent on success.
+@[OnTape]
+struct Account
+  getter id : String
+
+  def initialize(name : String, sb : String::Builder)
+    sb << name
+    @id = sb.finish
+  end
+end
+
+def all(names : Array(String)) : Int32
+  sb = String::Builder.new(64)
+  list = [] of Account
+  names.each do |name|
+    list << Account.new(name, sb)
+  end
+  list.size
+end
+
+raise "count" unless all(["ada", "bob"]) == 2

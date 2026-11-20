@@ -1,0 +1,12 @@
+# A TOML reader names the current header's key in its refusals: the key
+# was kept as the header def's own Array, freed when the def ended, and
+# naming it segfaulted (std_toml_exercise.sh, "what the reader refuses").
+# Silent on success.
+import std/toml::{TOML, TOMLError}
+
+answer = TOML.parse("[p]\ntype = 1\ntype.edible = false\n")
+raise "accepted" unless answer.is_a?(TOMLError)
+raise answer.message unless answer.message == "p.type is an integer, not a table at line 3, column 1"
+nested = TOML.parse("[a.b]\nx = { y = 1 }\nx.z = 2\n")
+raise "accepted" unless nested.is_a?(TOMLError)
+raise nested.message unless nested.message.starts_with?("the inline table a.b.x is closed")

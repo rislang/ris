@@ -171,10 +171,10 @@ PY
     fi
   }
   caught_at unbound "a bound logger that forgets its data" \
-    '    Logger.new(@source, nil, nil, self, node)' '    Logger.new(@source, nil, nil, self, nil)' \
+    '      EntryWriter.write_entry(source, b, @bound.bytes, severity, message, **data)' '      EntryWriter.write_entry(source, b, "".as_tape, severity, message, **data)' \
     "a bound logger's data, then the call's"
   caught_at contextless "an entry without the task's context" \
-    '      Log.context_into(fields)
+    '      Log.context_into(fields, texts)
 ' '' \
     "a context's data on every entry in its block"
   caught_at unrestored "a context left open after its block" \

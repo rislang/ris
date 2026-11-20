@@ -1,0 +1,23 @@
+# A struct whose constructor is handed a builder but makes its text
+# itself (`names.size.to_s`) holds data made on the running tape: kept
+# in an Array from before the round, it would dangle. The builder
+# argument does not take what the constructor does not write into it.
+@[OnTape]
+struct Account
+  getter id : String
+
+  def initialize(names : Array(String), sb : String::Builder)
+    @id = names.size.to_s
+  end
+end
+
+def all(names : Array(String)) : Int32
+  sb = String::Builder.new(8)
+  list = [] of Account
+  names.each do |name|
+    list << Account.new(names, sb)
+  end
+  list.size
+end
+
+puts all(["ada", "bob"])
