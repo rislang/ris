@@ -2357,8 +2357,10 @@ class Iyi::TapeShrinkChecker
         next if !node.is_a?(Def) && blocks && !blocks.includes?(scope)
       end
       next if copied_root?(source) && root_scope(source).empty?
-      # A copy onto the running tape that the def returns: KEEP carries it.
+      # A struct copied onto the running tape that the def returns: KEEP
+      # carries it. A class copy stays refused here, at the return.
       next if node.is_a?(Def) && current_copy?(source) &&
+              type.try(&.remove_typedef.struct?) &&
               TapeScopeChecker.keeps?(node.body)
       what = node.is_a?(Def) ? "def `#{node.name}`" : "block"
       refuse node, "cannot return a value made in this #{what}'s scratch: " \
