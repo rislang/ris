@@ -59,31 +59,6 @@ Unknown must be refused (SPEC 3.6).
   check_leaving (SPEC 1.9) as written. Moving two values down needs a
   SPEC 1.5 change (EGM review) and codegen for a multi-value move.
 
-* A struct whose constructor makes its own data is refused at a store
-  past its round only with no owner argument: one given an Array or Hash
-  it reads, or a builder, pool or class it does not allocate through, is
-  still taken by the older rule. Follow where the constructor allocates.
-
-* The call graph's `fresh?` takes a call's String-or-error union as
-  fresh when any path allocates (an error sentence's interpolation),
-  though every String it answers views the parser (toml's
-  basic_string now writes into the parser's @texts): scalar's
-  `TapeAny.new(basic_string!)` is refused. Narrow by summary.
-
-* text_grow: `field.take_event(Program.tape)` returns
-  `GrowingTextEvent.new(@text).copy_to(owner)`, yet the caller sees the
-  event as a live view of `field`'s text, so the later rebind is refused
-  as a shrink. A callee's copy_to result is not a view of its input.
-
-* A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
-  is refused: the block frees its scratch before the task copy takes
-  the value. Copy the value at the boundary before the reset.
-
-* OptionParser.parse given an `args` shorter-lived than `found` is
-  refused at the append inside std/option_parser, with a generic message:
-  the refusal belongs at the caller's `parse` line
-  (doc/drafts/option-parser/probes/p14d.ri).
-
 ## 3. SPEC 3.3 alias clear (EGM decision)
 
 * SPEC 3.3: `v = w.rows`, `w.rows.clear`, `puts v.size` passes, as
