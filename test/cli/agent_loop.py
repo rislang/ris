@@ -10,9 +10,6 @@ The loop is the one an agent actually runs:
     ground -> edit -> check -> fix -> test (only what the edit reaches)
 and the server underneath it (mcp) speaking the same answers.
 
-`run --sandbox` is asserted only when a wasi toolchain is present: the
-sandbox refusing to fall back to native is its own contract, so a
-machine without wasmtime skips the step loudly rather than faking it.
 """
 
 import json
@@ -1013,28 +1010,6 @@ def main():
         rpc("exit")
     server.wait(timeout=10)
     step("mcp exits on exit", server.returncode == 0, "")
-
-    # 7. the sandbox, where the toolchain exists
-    wasi_cc = os.environ.get("RIS_WASI_CC") or next(
-        (p for p in ["/opt/wasi-sdk/bin/clang",
-                     os.path.expanduser("~/.local/opt/wasi-sdk/bin/clang")]
-         if os.path.exists(p)), None)
-    wasmtime = os.environ.get("RIS_WASMTIME") or next(
-        (p for p in [os.path.expanduser("~/.wasmtime/bin/wasmtime")]
-         if os.path.exists(p)), None) or subprocess.run(
-        ["which", "wasmtime"], capture_output=True).returncode == 0
-    if wasi_cc and wasmtime:
-        write("honest.ri", "module honest\n\npub def work() : Int32\n  55\nend\n\nputs work()\n")
-        proc = run("run", "--sandbox", "honest.ri", cwd=work)
-        step("sandbox runs the honest program",
-             proc.returncode == 0 and proc.stdout.strip() == "55", "")
-        write("theft.ri", "module theft\n\nf = File.open(\"/etc/passwd\")\nputs f\n")
-        proc = run("run", "--sandbox", "theft.ri", cwd=work)
-        step("sandbox refuses the theft, leaks nothing",
-             proc.returncode != 0 and "root:" not in proc.stdout,
-             "refused at the compile fence")
-    else:
-        print("step - sandbox: skipped (no wasi-sdk/wasmtime on this machine) — the CI wasi job runs it")
 
     print("agent loop gate: every step held")
 

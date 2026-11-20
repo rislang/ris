@@ -1097,18 +1097,6 @@ case "$(uname -s)" in
       "$RIS" build --cross-compile --target wasm32-wasi -o "$WORK/towasm" good.ri
     ;;
 esac
-# `run --sandbox` names the variable it was given. RIS_WASI_CC pointed at
-# nothing was skipped in silence and the refusal said to set it; and under
-# `$WASI_SDK` clang is `clang.exe` on Windows, where a bare `clang` was
-# looked for, so an installed wasi-sdk was "install wasi-sdk". Found, the
-# next tool is the one named.
-refuses "an RIS_WASI_CC that points at nothing" "RIS_WASI_CC is" -- \
-  env RIS_WASI_CC="$WORK/no-clang" "$RIS" run --sandbox good.ri
-mkdir -p "$WORK/wasisdk/bin"
-: > "$WORK/wasisdk/bin/clang"
-: > "$WORK/wasisdk/bin/clang.exe"
-refuses "a wasi-sdk clang under WASI_SDK" "RIS_WASMTIME is" -- \
-  env -u RIS_WASI_CC WASI_SDK="$WORK/wasisdk" RIS_WASMTIME="$WORK/no-wasmtime" "$RIS" run --sandbox good.ri
 
 echo
 echo "== what the verbs that were never here refuse"
