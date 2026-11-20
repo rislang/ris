@@ -49,8 +49,6 @@ Totals: user 34, build 41, runtime 68, test data 13, prose 1; 157 names.
 * user: `IYI_TDF` src/compiler/iyi/codegen/fun.cr:70
 * user: `IYI_VERIFY` src/compiler/iyi/compiler.cr:3788
 * user: `IYI_WARM` src/compiler/iyi/compiler.cr:581
-* user: `IYI_WASI_CC` src/compiler/iyi/command/sandbox.cr:108
-* user: `IYI_WASMTIME` src/compiler/iyi/command/sandbox.cr:127
 * user: `IYI_WORKERS` doc/drafts/ri-extension/DRAFT.md:80
 * build: `IYI_ALLOCATING_PROGRAM` test/compiler/compiler_test.cr:11
 * build: `IYI_ARM_EXP_CONFIG` test/cli/libm_oracle/math_config.h:10

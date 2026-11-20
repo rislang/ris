@@ -1,0 +1,83 @@
+# A pooled transport must outlive the request that first connected it.
+import std/http::{HTTPClient, Server, Incoming, Outgoing}
+import std/socket::{IyiSocket}
+import std/tls::{TlsConfig, TlsServerConfig, TlsIdentity, TlsError}
+import std/x509::{RisCertificateStore}
+
+struct Ready
+end
+
+LEAF_PEM = "-----BEGIN CERTIFICATE-----\n" \
+          "MIIBQzCB9qADAgECAgEDMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
+          "dDAgFw0yNTAxMDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1OVowFDESMBAGA1UEAwwJ\n" \
+          "bG9jYWxob3N0MCowBQYDK2VwAyEAOeskudtTVi76JObK6QHqJy6M7PaEu/aLlC5H\n" \
+          "B5OLks+jZjBkMBQGA1UdEQQNMAuCCWxvY2FsaG9zdDAMBgNVHRMBAf8EAjAAMB0G\n" \
+          "A1UdDgQWBBQN8ZJay/U7zf07disj78hKukvGAjAfBgNVHSMEGDAWgBSNjkTWVhBs\n" \
+          "a874Ao2cPFX4w4saajAFBgMrZXADQQAcAgj9qe58GnzceRkYfxyfNHxmqWOgDJkn\n" \
+           "b3rO1pz+8OCRioO1P+BhFa1FR/FMHSH9bOFEKfXfy3Nwr+y+GkMM\n" \
+           "-----END CERTIFICATE-----\n"
+ROOT_PEM = "-----BEGIN CERTIFICATE-----\n" \
+          "MIIBJDCB16ADAgECAgEBMAUGAytlcDAZMRcwFQYDVQQDDA5peWkgYmVuY2ggcm9v\n" \
+          "dDAgFw0yNTAxMDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1OVowGTEXMBUGA1UEAwwO\n" \
+          "aXlpIGJlbmNoIHJvb3QwKjAFBgMrZXADIQCQIEeX9suXr4DL8DiLdBUfoWaJU+Hv\n" \
+          "7JhN3IpqspsuOqNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYw\n" \
+          "HQYDVR0OBBYEFI2ORNZWEGxrzvgCjZw8VfjDixpqMAUGAytlcANBAFEfpUf437+b\n" \
+          "PwJvPGD/gB0zIegp6+3cJzF42Tx6Hj8tIJgdtXVKA58EXmitGetqb788+xoJ49My\n" \
+           "4Wc3L1uxxAI=\n" \
+           "-----END CERTIFICATE-----\n"
+KEY_PEM = "-----BEGIN PRIVATE KEY-----\n" \
+          "MC4CAQAwBQYDK2VwBCIEIOYKs3OzEJYJ/j+ZQYLoAU929MQeanF9kupAR9HpeHJ8\n" \
+          "-----END PRIVATE KEY-----\n"
+
+class Handler
+  getter tls_config : TlsServerConfig
+
+  def initialize(config : Int32)
+    identity = TlsIdentity.new(LEAF_PEM + ROOT_PEM, KEY_PEM)
+    raise identity.error.as(TlsError).message if identity.error
+    server = TlsServerConfig.new(identity)
+    @tls_config = server
+    @tls_config.alpn = ["http/1.1"]
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    res.body << "pooled"
+  end
+end
+
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
+group do |g|
+  g.spawn do
+    Server.answer("127.0.0.1", port, 0, Handler, max_connections: 1)
+    0
+  end
+  RisBoard.take(Ready).or_panic
+  store = RisCertificateStore.new
+  if problem = store.read_pem(ROOT_PEM)
+    raise problem.message
+  end
+  config = TlsConfig.new
+  config.roots = store.kept_certificates
+  config.alpn = ["http/1.1"]
+  client = HTTPClient.new(idle: 1, timeout_ms: 5000, tls: config)
+  2.times do
+    got = client.open("GET", "https://localhost:#{port}/") do |answer|
+      answer.load
+      raise "wrong status" unless answer.status == 200
+      raise "wrong body" unless answer.body == "pooled"
+      true
+    end
+    raise "request failed: #{got}" unless got == true
+  end
+  raise "opened twice" unless client.connections_made == 1
+  raise "did not reuse" unless client.connections_reused == 1
+  client.close
+  g.cancel_children
+end
+puts "PASS: two HTTPS requests on one pooled connection"

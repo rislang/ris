@@ -143,14 +143,7 @@ class Iyi::Command
       eval
     when command == "run"
       options.shift
-      # `--sandbox` re-routes before the native pipeline parses anything:
-      # a sandbox that fell back to native on a flag typo would be a lie.
-      if options.includes?("--sandbox")
-        options.delete("--sandbox")
-        run_sandbox
-      else
-        run_command(single_file: false)
-      end
+      run_command(single_file: false)
     when command == "spec"
       # Exact: the clauses and their tests (SPEC 6.7). Crystal's `spec`
       # verb, and its `s`/`sp` prefixes, are gone.

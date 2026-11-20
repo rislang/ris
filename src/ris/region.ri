@@ -14,6 +14,8 @@ class RisRegion
   # This tape's growing payload reservations (`growing_state`), linked
   # through their OFF_PARENT words and released with it.
   OFF_SIDE  =         48_u64
+  # End of the writable prefix of a Linux side reservation.
+  OFF_COMMIT =        56_u64
   DATA      =         64_u64
   UNDER     =         16_u64
   CAPACITY  =   67108864_u64
@@ -477,6 +479,7 @@ class RisRegion
       capacity = payload if payload > capacity
       state = Pointer(UInt64).new(tape_bytes(words * 8_u64))
       own = acquire_side(capacity)
+      commit_side(own, size_add(DATA, payload))
       region = @@tape
       IyiHeap.write64(own &+ OFF_PARENT, IyiHeap.read64(region &+ OFF_SIDE))
       IyiHeap.write64(region &+ OFF_SIDE, own)
@@ -557,6 +560,7 @@ class RisRegion
         IyiHeap.write64(tail &+ OFF_PARENT, own)
       end
     end
+    commit_side(own, size_add(DATA, size_add(40_u64, capacity)))
     state = Pointer(UInt64).new(own &+ DATA)
     start = state.address &+ 40_u64
     state.value = start
@@ -570,7 +574,7 @@ class RisRegion
   end
 
   # Linux growing values own their reservation before publishing elements.
-  # MAP_NORESERVE commits pages on touch; the final grain is PROT_NONE.
+  # Linux commits a writable prefix in steps; the last grain stays guarded.
   # A raw, unpublished extent may acquire a reservation on first growth;
   # a displaced published extent is refused rather than copied.
   # Other targets retain the legacy moving side-region implementation.
@@ -588,6 +592,7 @@ class RisRegion
     if ((stop &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64) ==
          IyiHeap.read64(home &+ OFF_CURSOR) &&
        size_add(start, bytes) <= IyiHeap.read64(home &+ OFF_LIMIT)
+      commit_side(home, fresh &- home) if own != 0
       IyiHeap.write64(home &+ OFF_CURSOR, fresh)
       return start
     end
@@ -618,6 +623,7 @@ class RisRegion
     side.value = own
     # acquire reserved capacity >= bytes, including alignment room.
     moved = own &+ DATA
+    commit_side(own, size_add(DATA, bytes))
     IyiHeap.write64(own &+ OFF_CURSOR,
       (moved &+ bytes &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64)
     {% unless flag?(:linux) || flag?(:darwin) %}
@@ -630,7 +636,7 @@ class RisRegion
   # Linux policy: reserve 128 MiB per growing payload, or its initial
   # capacity if larger. No reservation grows or relocates: exhaustion is
   # checked before mutation. MAX_COUNT still bounds the element count.
-  # MAP_NORESERVE avoids commit accounting; scope rollback reuses spares.
+  # PROT_NONE avoids Linux commit charges; rollback reuses side spares.
   # The allocation graph must recognize growing_state so those rollbacks
   # are retained even when constructors no longer call tape_bytes directly.
   SIDE_RESERVE = 134217728_u64
@@ -644,7 +650,8 @@ class RisRegion
   {% if flag?(:darwin) %}
     # libSystem, as the prelude's darwin arm: raw syscalls are no stable ABI.
     # MAP_NORESERVE has no effect there; pages still commit on touch.
-    def self.sys_mmap(length : UInt64, flags : Int64) : UInt64
+    def self.sys_mmap(length : UInt64, flags : Int64,
+                      prot : Int64 = 3_i64) : UInt64
       LibC.mmap(Pointer(Void).new(0_u64), length, 3, 0x1002, -1, 0_i64).address
     end
 
@@ -657,17 +664,18 @@ class RisRegion
     # Raw syscalls, as the prelude's `__iyi_mmap`: a Linux program names
     # no libc symbol for its tape (test/cli/floor_base.sh). Each answers
     # what libc's would: an address or all ones, 0 or -1.
-    def self.sys_mmap(length : UInt64, flags : Int64) : UInt64
+    def self.sys_mmap(length : UInt64, flags : Int64,
+                      prot : Int64 = 3_i64) : UInt64
       result = uninitialized Int64
       {% if flag?(:x86_64) %}
         asm("syscall" : "={rax}"(result)
-                      : "{rax}"(9_i64), "{rdi}"(0_i64), "{rsi}"(length), "{rdx}"(3_i64),
+                      : "{rax}"(9_i64), "{rdi}"(0_i64), "{rsi}"(length), "{rdx}"(prot),
                         "{r10}"(flags), "{r8}"(-1_i64), "{r9}"(0_i64)
                       : "rcx", "r11", "memory"
                       : "volatile")
       {% else %}
         asm("svc #0" : "={x0}"(result)
-                     : "{x8}"(222_i64), "{x0}"(0_i64), "{x1}"(length), "{x2}"(3_i64),
+                     : "{x8}"(222_i64), "{x0}"(0_i64), "{x1}"(length), "{x2}"(prot),
                        "{x3}"(flags), "{x4}"(-1_i64), "{x5}"(0_i64)
                      : "memory"
                      : "volatile")
@@ -719,9 +727,16 @@ class RisRegion
         spare = following
       end
       region = side_slice(length)
-      if sys_mprotect(region &+ usable, GRAIN, 0_i64) != 0
-        RisHeap.mapping_failure(length)
-      end
+      {% if flag?(:linux) %}
+        if sys_mprotect(region, GRAIN, 3_i64) != 0
+          RisHeap.mapping_failure(length)
+        end
+        IyiHeap.write64(region &+ OFF_COMMIT, GRAIN)
+      {% else %}
+        if sys_mprotect(region &+ usable, GRAIN, 0_i64) != 0
+          RisHeap.mapping_failure(length)
+        end
+      {% end %}
       @@mapped = @@mapped &+ 1_u64
       IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
       IyiHeap.write64(region &+ OFF_LIMIT, region &+ DATA &+ capacity)
@@ -747,16 +762,18 @@ class RisRegion
       size_add(mapping_length(side_capacity(1_u64)), GRAIN)
     end
 
-    # MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, read/write on touch.
+    # Linux reserves inaccessible pages: MAP_NORESERVE alone is ignored
+    # under strict overcommit. Darwin retains read/write demand paging.
     def self.side_slice(length : UInt64) : UInt64
+      prot = {% if flag?(:linux) %} 0_i64 {% else %} 3_i64 {% end %}
       unless length == arena_length
-        region = sys_mmap(length, 0x4022_i64)
+        region = sys_mmap(length, 0x4022_i64, prot)
         RisHeap.mapping_failure(length) if region == 0xFFFFFFFFFFFFFFFF_u64
         return region
       end
       if @@arena_next == @@arena_end
         bytes = size_mul(length, ARENA_SLICES)
-        chunk = sys_mmap(bytes, 0x4022_i64)
+        chunk = sys_mmap(bytes, 0x4022_i64, prot)
         RisHeap.mapping_failure(bytes) if chunk == 0xFFFFFFFFFFFFFFFF_u64
         @@arena_next = chunk
         @@arena_end = chunk &+ bytes
@@ -766,6 +783,27 @@ class RisRegion
       region
     end
   {% end %}
+
+  # Keep the entire address reservation; only the writable prefix grows.
+  # GRAIN is page aligned on every supported Linux target. The guard and
+  # reservation limit remain unchanged, including when a spare is reused.
+  @[NoSpec("runtime hook; test/cli/side_commit.sh checks staged commitment")]
+  def self.commit_side(region : UInt64, need : UInt64) : Nil
+    {% if flag?(:linux) %}
+      committed = IyiHeap.read64(region &+ OFF_COMMIT)
+      return if need <= committed
+      limit = IyiHeap.read64(region &+ OFF_MAP) &- GRAIN
+      fresh = committed
+      while fresh < need
+        fresh = size_mul(fresh, 2_u64)
+      end
+      fresh = limit if fresh > limit
+      if sys_mprotect(region &+ committed, fresh &- committed, 3_i64) != 0
+        RisHeap.mapping_failure(fresh)
+      end
+      IyiHeap.write64(region &+ OFF_COMMIT, fresh)
+    {% end %}
+  end
 
   def self.acquire(capacity : UInt64) : UInt64
     length = mapping_length(capacity)
