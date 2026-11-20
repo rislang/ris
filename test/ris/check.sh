@@ -3800,6 +3800,14 @@ for name in std_big_exercise std_websocket_exercise; do
   fi
 done
 
+# Macro evaluation sees literals inside program-owned initializers.
+out=$("$RIS" run test/ris/macro_literal_constant.ri 2>&1)
+if [ "$out" = "macro_literal_constant ok" ]; then
+  echo "runs     macro_literal_constant"
+else
+  echo "FAILED   macro_literal_constant: $out"; status=1
+fi
+
 # Run heap workloads after the other gates to avoid compiler contention.
 # Keep their fixed timeouts: a hung census must still fail.
 python3 test/ris/heap_check.py || status=1

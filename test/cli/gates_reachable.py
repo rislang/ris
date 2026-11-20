@@ -83,7 +83,6 @@ TOOLS = {
 BROKEN = {
     "collections_exercise.sh",
     "collector_free_floor.sh",
-    "daemon_agrees.py",
     "debug_info.py",
     "generic_boundary.py",
     "io_exercise.sh",
@@ -95,7 +94,6 @@ BROKEN = {
     "socket_exercise.sh",
     "value_exercise.sh",
     "metric_port.sh",
-    "rebuild_speed.py",
 }
 
 

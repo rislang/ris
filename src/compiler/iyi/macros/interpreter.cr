@@ -573,7 +573,14 @@ module Iyi
       case matched_type
       when Const
         @program.check_deprecated_constant(matched_type, node)
-        matched_type.value
+        value = matched_type.value
+        # Tape constants allocate in the program owner at runtime. Macros
+        # inspect the source value, without executing that initializer.
+        if value.is_a?(Call) && value.program_initializer? &&
+           (block = value.block)
+          value = block.body
+        end
+        value
       when Type
         matched_type = matched_type.remove_alias
 

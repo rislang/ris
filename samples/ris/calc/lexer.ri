@@ -3,6 +3,7 @@ module calc/lexer
 
 # What the scanner produces. A token is its kind, the text it covers and where
 # it started, because an error that cannot say where is half an error.
+@[OnTape]
 pub struct Token
   getter kind : String
   getter text : String
@@ -14,9 +15,9 @@ end
 
 pub struct BadCharacter
   getter at : Int32
-  getter found : Char
+  getter found : UInt8
 
-  def initialize(@at : Int32, @found : Char)
+  def initialize(@at : Int32, @found : UInt8)
   end
 end
 
@@ -36,7 +37,7 @@ pub def scan(source : String) : Array(Token) | BadCharacter
     # A line ends in CRLF on Windows: `echo 2 + 3 * 4| iyi run
     # samples\iyi\calc.ri` in cmd answered "unexpected character at 9",
     # the `\r`.
-    if c == ' ' || c == '\n' || c == '\t' || c == '\r'
+    if c == 32_u8 || c == 10_u8 || c == 9_u8 || c == 13_u8
       index = index + 1
     elsif digit?(c)
       start = index
@@ -62,14 +63,17 @@ pub def scan(source : String) : Array(Token) | BadCharacter
   tokens
 end
 
-def digit?(c : Char) : Bool
-  c >= '0' && c <= '9'
+def digit?(c : UInt8) : Bool
+  c >= '0'.ord.to_u8 && c <= '9'.ord.to_u8
 end
 
-def letter?(c : Char) : Bool
-  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+def letter?(c : UInt8) : Bool
+  (c >= 'a'.ord.to_u8 && c <= 'z'.ord.to_u8) ||
+    (c >= 'A'.ord.to_u8 && c <= 'Z'.ord.to_u8) || c == '_'.ord.to_u8
 end
 
-def operator?(c : Char) : Bool
-  c == '+' || c == '-' || c == '*' || c == '/' || c == '(' || c == ')' || c == '='
+def operator?(c : UInt8) : Bool
+  c == '+'.ord.to_u8 || c == '-'.ord.to_u8 || c == '*'.ord.to_u8 ||
+    c == '/'.ord.to_u8 || c == '('.ord.to_u8 || c == ')'.ord.to_u8 ||
+    c == '='.ord.to_u8
 end

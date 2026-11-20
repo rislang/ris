@@ -4,6 +4,7 @@ module calc/ast
 # What an evaluated program can go wrong with. Both are ordinary members of the
 # union an evaluation returns (iyi SPEC III.1), so a caller either handles them
 # or propagates with `!`.
+@[OnTape]
 pub struct UnknownName
   getter name : String
 
@@ -47,6 +48,7 @@ impl Node for Number
   end
 end
 
+@[OnTape]
 pub struct Name
   getter name : String
 

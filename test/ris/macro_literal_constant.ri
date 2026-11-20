@@ -1,0 +1,13 @@
+METHODS = ["get", "post"]
+TYPED : Array(String) = ["put", "delete"]
+
+{% for method, index in METHODS %}
+  raise "constant array" unless {{ method }} == {{ ["get", "post"][index] }}
+{% end %}
+{% for method, index in TYPED %}
+  expected = {{ ["put", "delete"][index] }}
+  raise "typed constant array" unless {{ method }} == expected
+{% end %}
+raise "runtime constant" unless METHODS[1] == "post"
+raise "typed runtime constant" unless TYPED[0] == "put"
+puts "macro_literal_constant ok"
