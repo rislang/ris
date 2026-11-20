@@ -3719,6 +3719,13 @@ else
   echo "FAILED   spec module dir: $out"; status=1
 fi
 
+out=$("$RIS" check test src/std/int.ri 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module int'
+else
+  echo "FAILED   spec module int: $out"; status=1
+fi
+
 out=$("$RIS" check test src/std/io.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module io'

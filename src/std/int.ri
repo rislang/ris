@@ -58,8 +58,9 @@ pub struct RisBits
       LibLLVMBits.cttz{{ w }}(x, false).to_i32
     end
   {% end %}
-end
 
+# Keep the generated absolute type declarations inside a declaration so
+# the spec runner does not mistake this macro for executable program code.
 {% begin %}
   {% types = [
        {"Int8", 8, true, "i8"},
@@ -526,6 +527,7 @@ end
     end
   {% end %}
 {% end %}
+end
 
 struct ::Int
   # Against any integer, as the other library's `Int#<=>` is, the widths

@@ -13,6 +13,10 @@ a rename after 0.1.0 would break callers (doc/drafts/pool-t, Q5).
 
 ## To take to iyi
 
+* std/int keeps its type-generation macro inside RisBits, with absolute
+  type names. Pure spec blocks then avoid program runners and their
+  filesystem imports. Gate: test/ris/check.sh, spec module int.
+
 * Formatter macro fragments retain their enclosing def and local-variable
   scope. Regex literals beginning with `=` also retokenize `/=` as a
   delimiter. Gates: test/compiler/formatter/iyi_formatter_test.cr.

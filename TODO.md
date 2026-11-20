@@ -462,10 +462,6 @@ change. Gates stay structural.
   TERM handler) is not caught.
 * Add IDNA.
 
-* std/int's spec blocks never run: `ris test src/std/int.ri` stops on
-  the import cycle int -> ris_spec -> dir -> path -> int. int.6 and
-  int.7 are proved by test/cli/std_int128_uri_resolution.sh meanwhile.
-
 ## 11. macOS arm64
 
 SPEC 7.1 lists it; these are what Linux has and it lacks yet.
