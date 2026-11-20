@@ -75,7 +75,8 @@ build_and_run() {
     status=1
     return 1
   fi
-  "$WORK/$name" >"$WORK/$name.out" 2>&1
+  # Freed tape reads 0xDB, so a read of freed memory fails here.
+  RIS_TAPE_POISON=1 "$WORK/$name" >"$WORK/$name.out" 2>&1
   local exit_code=$?
   sed 's/^/  /' "$WORK/$name.out"
   if [ "$exit_code" -ne 0 ]; then

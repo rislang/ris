@@ -2434,6 +2434,7 @@ end
 lib LibTapeCopy
   fun memcpy = "llvm.memcpy.p0.p0.i64"(destination : Pointer(UInt8), source : Pointer(UInt8), count : UInt64, volatile : Bool) : Nil
   fun memmove = "llvm.memmove.p0.p0.i64"(destination : Pointer(UInt8), source : Pointer(UInt8), count : UInt64, volatile : Bool) : Nil
+  fun memset = "llvm.memset.p0.i64"(destination : Pointer(UInt8), value : UInt8, count : UInt64, volatile : Bool) : Nil
 end
 
 # Outside the prelude, scopes begin with `__iyi_scope_mark(false)`.
@@ -2499,14 +2500,15 @@ def __iyi_scope_release(mark : RisScopeMark) : Nil
   # Pages written past the warm first MiB go back to the kernel, as the
   # tape's own release hands them back: the cursor that release reads is
   # the mark's now. wasm32's tape is heap blocks, with no pages to return.
+  written = IyiHeap.read64(region &+ RisRegion::OFF_CURSOR)
   {% unless flag?(:wasm32) %}
-    written = IyiHeap.read64(region &+ RisRegion::OFF_CURSOR)
     low = mark.cursor &+ (RisRegion::GRAIN &- 1_u64)
     low = low & 0xFFFFFFFFFFFF0000_u64
     keep = region &+ RisRegion::KEEP_WARM
     low = keep if low < keep
     __iyi_release_pages(low, written &- low) if written > low &+ RisRegion::KEEP_WARM
   {% end %}
+  RisRegion.poison(mark.cursor, written) if RisRegion.poison?
   IyiHeap.write64(region &+ RisRegion::OFF_CURSOR, mark.cursor)
 end
 

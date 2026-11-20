@@ -2336,19 +2336,50 @@ class Iyi::TapeShrinkChecker
         # What the def yielded goes back to that def, which holds it.
         next if !node.is_a?(Def) && @yielded_roots.includes?(source)
         # A struct a callee made here leaves as that callee's result did:
-        # moved down by RESULT. Only a store of it is checked.
-        next if @made_struct_calls.includes?(source)
+        # moved down by RESULT. Not a callee's copy_to(RisCurrentTape.new):
+        # KEEP put what it holds on this scope's tape, and RESULT moves
+        # only texts down (an Array or view in it would be freed).
+        if @made_struct_calls.includes?(source)
+          next unless @current_struct_calls.includes?(source) && node.is_a?(Def)
+          # A def that ends with copy_to(RisCurrentTape.new) leaves by
+          # KEEP at every exit.
+          next if node.is_a?(Def) && TapeScopeChecker.keeps?(node.body)
+          next if leaving_moved?(@root_types[source]?, type)
+          refuse node, "cannot return a callee's copy_to(RisCurrentTape.new) " \
+                       "that holds more than texts: this #{node.is_a?(Def) ? "def" : "block"}'s " \
+                       "end frees what it holds (SPEC 1.5, 1.9).\nEnd the def " \
+                       "with the call alone, or end it with " \
+                       "copy_to(RisCurrentTape.new) of the value", root_name(source)
+          next
+        end
         # A block's value made before the block (the def's builder that
         # its block appends to) is older than the block's scratch.
         next if !node.is_a?(Def) && blocks && !blocks.includes?(scope)
       end
       next if copied_root?(source) && root_scope(source).empty?
+      # A copy onto the running tape that the def returns: KEEP carries it.
+      next if node.is_a?(Def) && current_copy?(source) &&
+              TapeScopeChecker.keeps?(node.body)
       what = node.is_a?(Def) ? "def `#{node.name}`" : "block"
       refuse node, "cannot return a value made in this #{what}'s scratch: " \
                  "it would have to be copied out (SPEC 1.9).\nEnd the def " \
                  "with the call alone, append to a String or Array " \
                  "parameter, grow a local in place and return it, or " \
                  "write copy_to(owner)", root_name(source)
+    end
+  end
+
+  # Whether each tape member of *source* that *result* can hold is one
+  # RESULT moves down whole.
+  private def leaving_moved?(source : Type?, result : Type?) : Bool
+    return false unless source && result
+    members = ->(t : Type) {
+      t = t.remove_typedef
+      t.is_a?(UnionType) ? t.union_types.map(&.remove_typedef) : [t]
+    }
+    outs = members.call(result)
+    members.call(source).all? do |m|
+      !outs.includes?(m) || !TapeChecker.tape_in(@program, m) || moved_type?(m)
     end
   end
 
@@ -2537,6 +2568,15 @@ class Iyi::TapeShrinkChecker
   # either is made where the call runs. What it views of its inputs, a
   # builder it was handed or program data is not.
   @made_struct_calls = Set(UInt64).new
+  # Of those, a callee's copy_to(RisCurrentTape.new): on this scope's
+  # tape, not moved down by RESULT unless it is texts alone.
+  @current_struct_calls = Set(UInt64).new
+
+  private def answers_current_copy?(summary : Summary, inputs : Array(Value)) : Bool
+    (summary.result.roots + summary.result.views.map(&.root)).any? do |root|
+      current_copy?(root) && translate(root, summary, inputs).empty?
+    end
+  end
 
   private def answers_made_struct?(summary : Summary, inputs : Array(Value)) : Bool
     (summary.result.roots + summary.result.views.map(&.root)).any? do |root|
@@ -3679,6 +3719,7 @@ class Iyi::TapeShrinkChecker
             @root_types[node.object_id] ||= node.type
             @handed << node.object_id
             @made_struct_calls << node.object_id
+            @current_struct_calls << node.object_id if answers_current_copy?(summary, actuals)
             call_result = merge(call_result, Value.new([node.object_id], [] of View))
           end
         else

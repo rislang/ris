@@ -200,6 +200,10 @@ collections hold these views rather than nested growing arrays.
 Each fiber has its own tape; a spawned fiber cannot take its parent's values.
 Size writers and arrays up front, refill with `clear`, write output straight
 to its IO. `RIS_TAPE_STATS=1` counts side transfers and growth moves.
+`RIS_TAPE_POISON=1` fills freed tape with 0xDB bytes when a def, round or
+scope ends and when a mapping or side reservation is released, so a read
+of freed memory sees the pattern instead of the old bytes. It is off by
+default and costs one branch per release when off.
 `@[TapeUnsafe]` is std-only.
 
 ## Numeric and log text

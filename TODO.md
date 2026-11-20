@@ -70,6 +70,21 @@ Unknown must be refused (SPEC 3.6).
   JSON it parsed; String::Builder views kept across its growth. Each
   gets a refused/ fixture that runs under ASan or reads poison, then
   the checker refuses it.
+  2026-11-20, RIS_TAPE_POISON=1: the acme exercise from before the port
+  no longer builds (SPEC 1.9); the current one crashed poisoned. Found
+  and fixed: (a) a struct holding more than texts (an Array, a view)
+  made by a call, a callee's copy_to(RisCurrentTape.new) included,
+  returned from a def that is not one call: RESULT moves only texts
+  (refused/kept_struct_returned; acme's error paths, x509.read_pem and
+  time's Location.load now end in copy_to(RisCurrentTape.new)); (b) std/http's supervise spawned a task
+  whose @[TaskClosureUnsafe] closure lived on supervise's tape (now in
+  prefork). Open: (c) `return AcmeError.new("#{x}")` from a loop round
+  in a def that is not one call passes, and its detail read poison
+  (acme's poll): check_leaving drops a struct value's root
+  (struct_value?), and __iyi_text_move skips a struct with a view
+  field, so the text stays in the freed scratch. A small repro did not
+  show it. The other shapes (a constructor's view, a loop round's key,
+  JSON-viewing strings, builder growth) do not reproduce poisoned.
 
 * A one-call def's value moves down only when it is one fresh flat
   value: a tuple or two locals do not. Bzip2.decompress tags its String

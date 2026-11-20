@@ -1,0 +1,27 @@
+module test/ris/refused/kept_struct_returned
+
+# A callee's copy_to(RisCurrentTape.new) is on its caller's tape. A
+# caller that is not one call and returns it frees the Array the struct
+# holds when it ends: RESULT moves texts down, not an Array. Found with
+# RIS_TAPE_POISON=1 in std/acme (an error's subproblems).
+@[OnTape]
+struct Problem
+  getter subs : Array(String)
+
+  def initialize(@subs : Array(String))
+  end
+end
+
+def problem : Problem
+  subs = ["sub"]
+  Problem.new(subs).copy_to(RisCurrentTape.new)
+end
+
+def outer(n : Int32) : Problem | String
+  got = problem
+  return "none" if n < 0
+  got
+end
+
+got = outer(1)
+puts got.subs[0] if got.is_a?(Problem)

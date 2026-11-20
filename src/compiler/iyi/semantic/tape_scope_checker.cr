@@ -60,6 +60,31 @@ class Iyi::TapeScopeChecker
     finder.found || current_copy?(body)
   end
 
+  # Whether a def leaves by KEEP: its marked body's cleanup, or the
+  # body as written when it is not marked yet.
+  def self.keeps?(body : ASTNode) : Bool
+    finder = KeepCall.new
+    body.accept(finder)
+    finder.found || current_copy_result?(body)
+  end
+
+  private class KeepCall < Visitor
+    getter found = false
+
+    def visit(node : Call) : Bool
+      @found = true if node.name == KEEP
+      !@found
+    end
+
+    def visit(node : Def) : Bool
+      false
+    end
+
+    def visit(node : ASTNode) : Bool
+      !@found
+    end
+  end
+
   def self.current_copy?(node : ASTNode) : Bool
     while node.is_a?(Expressions) && !node.expressions.empty?
       node = node.expressions.last

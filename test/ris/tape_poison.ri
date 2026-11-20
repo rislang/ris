@@ -1,0 +1,18 @@
+# RIS_TAPE_POISON=1 fills freed tape with 0xDB: a read of bytes a def
+# made and freed sees the pattern; without it the old bytes remain.
+# The stale read goes through an address, never a checker hole.
+@[PointerUnsafe("test: keep the address of bytes the def frees")]
+def made_and_freed(n : Int32) : UInt64
+  address = RisRegion.tape_bytes(n.to_u64)
+  Pointer(UInt8).new(address).value = 0x78_u8
+  address
+end
+
+@[PointerUnsafe("test: read bytes after their def freed them")]
+def stale_byte(address : UInt64) : UInt8
+  Pointer(UInt8).new(address).value
+end
+
+address = made_and_freed(64)
+byte = stale_byte(address)
+puts byte == 0xDB_u8 ? "poisoned" : "kept #{byte}"

@@ -2979,37 +2979,27 @@ pub struct Server
       {host.as_tape, port, config})
     defer image.close
     group do |workers|
+      # The supervisors' closure lives on this def's tape, which outlives
+      # the group: a def that spawned and returned would free it first.
       count.times do
-        supervise(workers, image, typeof({host.as_tape, port, config}),
-          factory, stream_bodies, compress, timeout_ms,
-          request_timeout_ms)
-      end
-      0
-    end
-  end
-
-  @[TaskClosureUnsafe("serve joins supervisors and their packed config readers")]
-  private def self.supervise(workers : IyiGroup, image : RisTaskConfig,
-                             configuration_type : C.class,
-                             factory : F.class,
-                             stream_bodies : Bool, compress : Bool,
-                             timeout_ms : Int32,
-                             request_timeout_ms : Int32) : Nil forall C, F
-    workers.spawn do
-      while !IyiScheduler.current.cancelled
-        outcome = group do |own|
-          task = own.spawn do
-            run_worker(image.read(C), factory, stream_bodies,
-              compress, timeout_ms, request_timeout_ms)
+        workers.spawn do
+          while !IyiScheduler.current.cancelled
+            outcome = group do |own|
+              task = own.spawn do
+                run_worker(image.read(typeof({host.as_tape, port, config})), factory, stream_bodies,
+                  compress, timeout_ms, request_timeout_ms)
+              end
+              task.value
+            end
+            if outcome.is_a?(RisHttpStartFailure)
+              listen_failed(outcome.error)
+            else
+              # A request may cancel its own worker as well as panic. Keep
+              # its place populated unless the pool itself was cancelled.
+              sleep(5) unless IyiScheduler.current.cancelled
+            end
           end
-          task.value
-        end
-        if outcome.is_a?(RisHttpStartFailure)
-          listen_failed(outcome.error)
-        else
-          # A request may cancel its own worker as well as panic. Keep
-          # its place populated unless the pool itself was cancelled.
-          sleep(5) unless IyiScheduler.current.cancelled
+          0
         end
       end
       0

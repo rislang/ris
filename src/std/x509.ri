@@ -1769,7 +1769,7 @@ pub struct SigningKey
     when X509Oids::ED25519
       # RFC 8410 section 7: the privateKey OCTET STRING holds another, the
       # seed.
-      return ed25519_pkcs8(fields[2])
+      return ed25519_pkcs8(fields[2]).copy_to(RisCurrentTape.new)
     else
       return X509Error.new("a private key for #{oid}, not P-256, P-384, RSA or Ed25519")
     end

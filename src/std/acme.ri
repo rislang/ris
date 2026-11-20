@@ -205,7 +205,8 @@ pub struct AcmeDirectory
       terms = AcmeJson.text(fields, "termsOfService")
       required = AcmeJson.flag(fields, "externalAccountRequired")
     end
-    AcmeDirectory.new(nonce, account, order, key_change, revoke, terms, required)
+    AcmeDirectory.new(nonce, account, order, key_change, revoke, terms,
+      required).copy_to(RisCurrentTape.new)
   end
 end
 
@@ -489,7 +490,7 @@ pub class AcmeClient
     return AcmeError.new("the account #{url} is #{status || "without a status"}, not valid") unless status == "valid"
     kept = keep(url)
     @account_url = kept
-    kept
+    kept.copy_to(RisCurrentTape.new)
   end
 
   private def keep(text : String) : String
@@ -523,7 +524,8 @@ pub class AcmeClient
         json.field("oldKey") { json.raw(AcmeJws.jwk(@key.public_key)) }
       end
     end
-    post(url, AcmeJws.sign(new_key, inner_header, inner_payload))!
+    sent = post(url, AcmeJws.sign(new_key, inner_header, inner_payload))
+    return kept(sent) if sent.is_a?(AcmeError)
     @key = new_key
     # `thumbprint` takes the new key's anew.
     @thumbprint = ""
@@ -647,7 +649,7 @@ pub class AcmeClient
       return AcmeError.new("the certificate at #{url}: #{problem.message}")
     end
     return AcmeError.new("the certificate at #{url} holds no certificate") if chain.kept_certificates.empty?
-    keep(response.body)
+    keep(response.body).copy_to(RisCurrentTape.new)
   end
 
   # *payload* - nil for POST-as-GET - signed and posted to *url*, a
@@ -670,7 +672,7 @@ pub class AcmeClient
       return post(url, payload, accept, retries + 1)
     end
     return problem if problem
-    response
+    response.copy_to(RisCurrentTape.new)
   end
 
   # The nonce the last answer carried, dropped as it is taken, or a new
@@ -686,7 +688,7 @@ pub class AcmeClient
     return problem if problem
     nonce = response.nonce
     return AcmeError.new("newNonce answered #{response.status} without a Replay-Nonce") unless nonce
-    keep(nonce)
+    keep(nonce).copy_to(RisCurrentTape.new)
   end
 
   # *first*'s body, or the body of an answer polling *url* gives after
@@ -704,7 +706,7 @@ pub class AcmeClient
       object = AcmeJson.object(body, what)
       return AcmeError.new(object.detail) if object.is_a?(AcmeError)
       status = AcmeJson.text(object, "status") || ""
-      return body unless waiting.includes?(status)
+      return body.copy_to(RisCurrentTape.new) unless waiting.includes?(status)
       return AcmeError.new("#{what} is still #{status} after #{polls} polls") if polls >= @max_polls
       wait = AcmeClient.delay(retry_after, @poll_ms, Time.utc)
       left = started + @wait_ms - AcmeClock.ms
@@ -753,7 +755,7 @@ pub class AcmeClient
 
   private def self.exchange_into(method : String, url : String, body : String, accept : String?, timeout_ms : Int32, http : HTTPClient?, into : String::Builder) : AcmeResponse | AcmeError
     refused = https(url, method)
-    return refused if refused
+    return AcmeError.new(keep(refused.detail, into).as(String)) if refused
     headers = {"User-Agent" => USER_AGENT}
     headers["Content-Type"] = "application/jose+json" if method == "POST"
     headers["Accept"] = accept if accept
@@ -793,7 +795,7 @@ struct AcmeResponse
     if object.is_a?(AcmeError)
       return AcmeError.new("#{what} answered #{@status}: #{AcmeJson.excerpt(@body)}", status: @status)
     end
-    AcmeJson.problem(object, @status)
+    AcmeJson.problem(object, @status).copy_to(RisCurrentTape.new)
   end
 end
 
