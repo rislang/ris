@@ -371,7 +371,7 @@ struct String::Builder
     append(value.to_s)
   end
 
-  def append_value(value : Array) : Nil
+  def append_value(value : Array | Array::View) : Nil
     push(91_u8)
     first = true
     value.each do |item|
@@ -423,7 +423,7 @@ struct String::Builder
       value.inspect(self)
     elsif value.is_a?(Char)
       push(39_u8)
-      append_value(value)
+      value.inspect_into(self, '\'')
       push(39_u8)
     elsif value.nil?
       append("nil")
@@ -1080,5 +1080,11 @@ struct String
     {% raise "growing text needs a concrete field owner;\n\n" +
              "declare the append method in the owning class or " +
              "an @[OnTape] struct" %}
+  end
+end
+
+struct Array::View(T)
+  def to_s : String
+    String.build(16 * (size + 1)) { |writer| writer.append_value(self) }
   end
 end

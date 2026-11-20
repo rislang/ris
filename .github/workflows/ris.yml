@@ -186,6 +186,16 @@ jobs:
           bash test/cli/io_exercise.sh
         env:
           RIS: ${{ github.workspace }}/bin/ris
+      - name: Collections on the caller's tape
+        if: matrix.shard == 'heap'
+        run: bash test/cli/collections_exercise.sh
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
+      - name: Sockets and read result lifetimes
+        if: matrix.shard == 'heap'
+        run: bash test/cli/socket_exercise.sh
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
       - name: numbers, server load, editor tokens, named parses
         if: matrix.shard == 'heap'
         run: |

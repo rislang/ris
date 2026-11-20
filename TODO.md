@@ -198,25 +198,10 @@ Unknown must be refused (SPEC 3.6).
   scripts deleted, bounded_gate and 3 timings are TOOLS. The gates below
   fail and sit in gates_reachable.py's BROKEN; each moves to a CI step
   and off BROKEN when it passes.
-* collections_exercise.sh: brace padding and missing-key text fixed.
-  The typed Hash constructor now takes capacity, not a default; port
-  default-map calls to with_default. Mutations still name the removed
-  array.ri/hash.ri; nested Hash arrays are refused by the tape rules.
-  Decision: the gate requires insertion under 1 s and draining under
-  50 ms without a SPEC promise. Move measurements to test/speed/ rather
-  than inventing a timing guarantee; then port the correctness proofs.
 * collector_free_floor.sh: "a collector is still linked"; samples/ris/
   autocert.ri fails "cannot store a view beyond its owner scope"; "the
   default build broke".
 * debug_info.py: no sample builds with --debug (autocert, basics, calc…).
-* socket_exercise.sh: plain and release programs pass; mutation proofs
-  fail. The small-read proof subtracts allocator addresses across loop
-  scopes; its injected temporary is now correctly reclaimed at def end.
-  Decision: specify an allocation metric or replace this old cursor
-  budget with a result-lifetime proof. Do not retain temporaries merely
-  to make the mutation fail. Localhost and IPv6 mutations name removed
-  code; refusal probes still call the forbidden to_unsafe. The SIGPIPE
-  proof inherits an ignored signal in this runner.
 * parallel_exercise.sh: shares_array is refused for the tape-proc reason,
   not the one the script expects.
 * runtime_exercise.sh: dependency floor: the runtime puts undefined
@@ -552,9 +537,6 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
   comparison on minitest.
 * test/compiler/iyimod_test.cr's getter/defer case cannot resolve
   `Pointer(RisArrayPool(String))` from boot/shelf's type ids.
-* test/cli/socket_exercise.sh: several mutations are not caught; a
-  unix-socket mutation fails with "the address is in use". Recheck on
-  minitest.
 * The mutation phases of std_acme, cookie, router, sse and websocket .sh
   run past 20 minutes; recheck on minitest whether they finish.
 * base64's timing ratio fails under load; recheck on minitest.

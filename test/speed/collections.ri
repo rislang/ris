@@ -1,0 +1,32 @@
+# Measurements only: former collection gate workloads, with no budget.
+module main
+
+def oldest(table : Hash(Int32, Int32)) : Int32
+  table.each { |key, value| return key }
+  -1
+end
+
+started = __iyi_monotonic_ns
+shared = Hash(Int32, Int32).new(20000)
+20000.times { |k| shared[k &* 65536] = k }
+puts "shared low bits, 20,000 inserts: #{(__iyi_monotonic_ns - started) // 1000000} ms"
+
+queue = Hash(Int32, Int32).new(40000)
+40000.times { |k| queue[k] = k }
+started = __iyi_monotonic_ns
+while queue.size > 0
+  queue.delete(oldest(queue))
+end
+puts "hash, 40,000 oldest deletes: #{(__iyi_monotonic_ns - started) // 1000000} ms"
+
+array = Array(Int32).new(300000) { |i| i }
+started = __iyi_monotonic_ns
+while array.shift?
+end
+puts "array, 300,000 shifts: #{(__iyi_monotonic_ns - started) // 1000000} ms"
+
+set = Set(Int32).new
+50000.times { |i| set.add(i) }
+started = __iyi_monotonic_ns
+50000.times { |i| set.delete(i) if i % 2 == 0 }
+puts "set, 25,000 deletes: #{(__iyi_monotonic_ns - started) // 1000000} ms"

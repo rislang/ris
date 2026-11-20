@@ -84,12 +84,13 @@ TOOLS = {
     "defer_cost.sh",
     "definition_typing_scale.py",
     "tls_speed.sh",
+    # Former collection gate timings, run by hand without budgets.
+    "collections.sh",
 }
 
 # A gate that fails on this tree: it stays out of CI until its TODO.md item
 # (section 7) is done, and then moves into a workflow step and off this list.
 BROKEN = {
-    "collections_exercise.sh",
     "collector_free_floor.sh",
     "debug_info.py",
     "generic_boundary.py",
@@ -98,7 +99,6 @@ BROKEN = {
     "mod_context.sh",
     "parallel_exercise.sh",
     "runtime_exercise.sh",
-    "socket_exercise.sh",
     "metric_port.sh",
 }
 
