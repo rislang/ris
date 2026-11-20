@@ -819,6 +819,9 @@ struct Conn
         raise "HTTP connection buffer past its #{limit &- old.address} bytes"
       end
       top = (old.address &+ bytes &+ 7_u64) & 0xFFFFFFFFFFFFFFF8_u64
+      # Linux maps a reservation PROT_NONE past its writable prefix: open
+      # the pages first, or a socket read into them fails with EFAULT.
+      RisRegion.commit_side(own, top &- own)
       IyiHeap.write64(own &+ RisRegion::OFF_CURSOR, top) \
         if top > IyiHeap.read64(own &+ RisRegion::OFF_CURSOR)
       return

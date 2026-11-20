@@ -3584,6 +3584,14 @@ class Iyi::TapeShrinkChecker
             @root_scopes[node.object_id] ||= @scopes.dup
             note_fresh(node.object_id) unless @root_tapes.has_key?(node.object_id)
           end
+          # A tape struct a constructor built with storage it allocated (a
+          # derived type's Array field) leaves as that call's result, though
+          # the summary names only views of the input: `T.new(value)` ending
+          # a reader def moves down by RESULT (SPEC 1.5, 1.9).
+          if node.name == "new" &&
+             node.type?.try { |t| tape_struct?(t) } && @graph.allocates?(node)
+            @made_struct_calls << node.object_id
+          end
           # A union the callee made (a SocketError beside the socket) is
           # this call's value, though a branch's summary answers none.
           made_here = !@tape_blocks.empty? && socket_union?(node.type?) &&

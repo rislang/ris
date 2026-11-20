@@ -1151,3 +1151,18 @@ pub class Log
     root.fatal(**data, &b)
   end
 end
+
+# log.4 Field precedence is task context, bound logger fields, then call
+#   fields; later values replace earlier ones.
+spec log.4
+  memory = RisMemoryBackend.on_program
+  web = Logger.on_program("spec.web", Severity::Info, memory)
+  bound = web.bind(id: 1)
+  child = bound.for("db").bind(pool: "main")
+  child.info("ok", id: 2)
+  data = memory.entries[0].data
+  bound.source == "spec.web" && bound.level == Severity::Info &&
+    child.source == "spec.web.db" && !bound.backend.nil? &&
+    data.any? { |f| f.key == "id" && f.value == "2" } &&
+    data.any? { |f| f.key == "pool" && f.value == "main" }
+end

@@ -4,10 +4,10 @@ import std/log::{Logger, IOBackend, RisMemoryBackend, Severity, Log, Metadata}
 
 sink = File.open("/dev/null", "w", owner: Program.tape)
 backend = IOBackend.on_program(sink)
-log = Logger.new("web", Severity::Info, backend)
+log = Logger.on_program("web", Severity::Info, backend)
 # Includes the caller's temporary integer text and quoted metadata.
 100.times { log.info("done", id: 42, name: "a \"b\"\n") }
-memory = RisMemoryBackend.new(Program.tape)
+memory = RisMemoryBackend.on_program
 log.backend = memory
 log.info("done", id: 42)
 raise "retained entry" unless memory.entries.size == 1
@@ -18,7 +18,7 @@ log.backend = backend
 bound = log.bind(id: 1, base: "a b")
 Log.with_context(id: 0, request: "ok") do
   100.times { bound.info("done", id: 2) }
-  bound.backend = memory
+  log.backend = memory # a bound logger writes to its logger's backend
   bound.info("merged", id: 2)
 end
 last = memory.entries[1]
@@ -26,8 +26,7 @@ raise "metadata precedence" unless last.data.any? { |f| f.key == "id" && f.value
                                    last.data.any? { |f| f.key == "base" && f.value == "a b" } &&
                                    last.data.any? { |f| f.key == "request" && f.value == "ok" }
 parent = log.bind(parent: "p")
-child = Logger.new("direct", Severity::Info, memory, parent,
-  Metadata.new("child", "c", nil))
+child = parent.for("direct").bind(child: "c")
 child.info("direct")
 last = memory.entries[2]
 raise "constructor metadata" unless last.data.any? { |f| f.key == "parent" && f.value == "p" } &&

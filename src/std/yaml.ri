@@ -2985,11 +2985,12 @@ pub struct YAML
 
   # A type that reads itself, the `initialize(yaml)` a `derive
   # yaml_serializable` wrote, made by a tail call in the caller's scope; a
-  # nilable type reads null as nil.
+  # nilable type reads null as nil. The inner type is named from the root
+  # (`::`): yaml.ri's own spec Point must not stand for a caller's Point.
   def self.read_value(value : TapeValue, type : T.class) : T forall T
     {% if T.nilable? %}
       return nil if value.null?
-      read_value(value, {{ T.union_types.reject { |u| u == ::Nil }.first }})
+      read_value(value, ::{{ T.union_types.reject { |u| u == ::Nil }.first }})
     {% else %}
       T.new(value)
     {% end %}

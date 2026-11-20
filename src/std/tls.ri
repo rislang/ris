@@ -1106,7 +1106,9 @@ module RisTlsConnectionState
     @master12.clear
     @randoms12.clear
     @renegotiation_refused = false
-    @plain_in.clear
+    # Not `@plain_in.clear`: it may be the inbox itself (an opened record
+    # is read where it lies), which a reused connection still needs.
+    @plain_in = @inbox
     @plain_at = 0
     @plain_left = 0
     @update_owed = false
