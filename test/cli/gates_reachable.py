@@ -50,6 +50,14 @@ REFERENCE = re.compile(r"test/(?:cli|speed)/([A-Za-z0-9_]+\.(?:sh|py))")
 # nothing for a job to pass or fail. Each says where its answer is used,
 # because "not a gate" is a claim and this is where it is written down.
 TOOLS = {
+    # These measurements already live in test/speed/: artifact loading
+    # versus source, the edited-module rebuild loop, a machine fingerprint
+    # with CPU/startup/front-end times, and macro expansion overhead.
+    # Run by hand for comparisons; none promises a pass/fail timing.
+    "artifact_speed.py",
+    "incremental.py",
+    "machine_probe.py",
+    "macro_cost.py",
     # `bash test/speed/http2_tape.sh [BASE]` compares std/http and std/hpack
     # before and after their move onto the tape; it measures, it does not
     # hold a line, and speed is measured for the whole project later.
@@ -76,23 +84,21 @@ TOOLS = {
     "defer_cost.sh",
     "definition_typing_scale.py",
     "tls_speed.sh",
+    # Former collection gate timings, run by hand without budgets.
+    "collections.sh",
 }
 
 # A gate that fails on this tree: it stays out of CI until its TODO.md item
 # (section 7) is done, and then moves into a workflow step and off this list.
 BROKEN = {
-    "collections_exercise.sh",
     "collector_free_floor.sh",
     "debug_info.py",
     "generic_boundary.py",
-    "io_exercise.sh",
     "lsp_artifacts.py",
     "lsp_positions.py",
     "mod_context.sh",
     "parallel_exercise.sh",
     "runtime_exercise.sh",
-    "socket_exercise.sh",
-    "value_exercise.sh",
     "metric_port.sh",
 }
 

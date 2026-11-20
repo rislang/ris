@@ -12,8 +12,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 # The gate runs whatever compiler the caller names; `bin/ris` is a shell
 # wrapper, and on Windows the caller has to point at the built exe itself.
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-io.XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from the shell's `pwd` finds no prelude at all, and a scratch
 # directory named `/tmp/tmp.X` on it is silently ignored, so the patched
@@ -81,9 +80,15 @@ echo "== the checks fail when the mechanism is broken"
 
 prove_fails() {
   local label="$1" dir="$2" phrase="$3" script="$4"
+  local file="${5:-io.ri}"
   mkdir -p "$WORK/$dir/ris"
   cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
-  awk "$script" "$REPO/src/ris/io.ri" > "$WORK/$dir/ris/io.ri"
+  awk "$script" "$REPO/src/ris/$file" > "$WORK/$dir/ris/$file"
+  if cmp -s "$REPO/src/ris/$file" "$WORK/$dir/ris/$file"; then
+    echo "  $label: the patch changed nothing"
+    status=1
+    return
+  fi
   if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build \
        -o "$WORK/$dir/program" "$REPO/test/cli/io_exercise.ri" \
        >"$WORK/$dir/build.log" 2>&1; then
@@ -115,11 +120,11 @@ prove_fails "flush check fails" noflush "flush:" \
 
 # 2. Short reads broken: bytes in read_bytes corrupted
 prove_fails "short reads fail" noshort "short_reads:" \
-  '{ sub(/target\.copy_from\(result_buf, total_read\)/, "target[0] = 63_u8"); print }'
+  '{ sub(/writer\.append\(String.new\(@read_buffer \+ @read_pos, take\)\)/, "writer.append(\"?\" * take)"); print }'
 
 # 3. Buffer boundary broken: take count in multi-buffer read_line corrupted
 prove_fails "read across buffer boundary fails" noboundary "buffer_boundary:" \
-  '{ if ($0 ~ /take = newline \? j - @read_pos \+ 1 : avail/) { print "        take = 1"; next } print }'
+  '{ if ($0 ~ /take = newline \? stop - @read_pos \+ 1 : avail/) { print "        take = 1"; next } print }'
 
 # 4. EOF check broken: eof? always returns false
 prove_fails "eof check fails" noeof "eof:" \
@@ -129,13 +134,13 @@ prove_fails "eof check fails" noeof "eof:" \
 case "$(uname -s)" in
   Linux)
     prove_fails "read_all a buffer at a time fails" noread_all "read_all:" \
-      '{ if ($0 ~ /got = low_level_read\(@fd, \(buffer \+ filled\).as\(Void\*\), \(capacity - filled\).to_u64\)/) { print "      got = low_level_read(@fd, (buffer + filled).as(Void*), 4096_u64)"; next } print }'
+      '{ if ($0 ~ /got = low_level_read\(@fd, buffer.as\(Void\*\), 65536_u64\)/) { print "      got = low_level_read(@fd, buffer.as(Void*), 4096_u64)"; next } print }'
     ;;
 esac
 
 # 5. puts ends every line, ended or not
 prove_fails "puts ending an ended line fails" noends "puts:" \
-  '{ if ($0 ~ /text.bytesize > 0 && text.to_unsafe\[text.bytesize - 1\] == 10_u8 \? write\(text\) : write_line\(text\)/) { print "    write_line(text)"; next } print }'
+  '{ if ($0 ~ /unless text.bytesize > 0 && text\[-1\] == 10_u8/) { print "    write(\"\\n\")"; next } print }' tape.ri
 
 # 6. A real console, which a pipe is not: typed keys, read wide. A
 #    program reading to the end of its input could not be ended from the

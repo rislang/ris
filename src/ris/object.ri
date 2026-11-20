@@ -146,15 +146,9 @@ struct Tuple
     value.hash
   end
 
-  # A first member in braces of its own is spaced off, `{ {1, 2}, 3 }`, as the other library's is.
+  # Write members into the caller's tape builder, as interpolation does.
   def to_s : String
-    pad = {% if T.size > 0 %} self[0].is_a?(Tuple) || self[0].is_a?(NamedTuple) || self[0].is_a?(Hash) ? " " : "" {% else %} "" {% end %}
-    result = "{" + pad
-    {% for i in 0...T.size %}
-      result = result + ", " if {{i}} > 0
-      result = result + self[{{i}}].inspect
-    {% end %}
-    result + pad + "}"
+    String.build { |writer| writer.append_value(self) }
   end
 
   def inspect : String

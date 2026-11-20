@@ -81,6 +81,11 @@ jobs:
         run: python3 test/cli/agent_loop.py
         env:
           RIS: ./bin/ris
+      - name: Context packs omit bodies and reduce grounding bytes
+        if: matrix.shard == 'heap'
+        run: python3 test/cli/context_pack.py
+        env:
+          RIS: ./bin/ris
       - name: 128-bit text and URI resolution
         if: matrix.shard == 'heap'
         run: bash test/cli/std_int128_uri_resolution.sh
@@ -172,6 +177,23 @@ jobs:
           bash test/cli/enum_exercise.sh
           bash test/cli/float_text.sh
           bash test/cli/format_exercise.sh
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
+      - name: values and buffered IO
+        if: matrix.shard == 'heap'
+        run: |
+          bash test/cli/value_exercise.sh
+          bash test/cli/io_exercise.sh
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
+      - name: Collections on the caller's tape
+        if: matrix.shard == 'heap'
+        run: bash test/cli/collections_exercise.sh
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
+      - name: Sockets and read result lifetimes
+        if: matrix.shard == 'heap'
+        run: bash test/cli/socket_exercise.sh
         env:
           RIS: ${{ github.workspace }}/bin/ris
       - name: numbers, server load, editor tokens, named parses

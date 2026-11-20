@@ -371,7 +371,7 @@ struct String::Builder
     append(value.to_s)
   end
 
-  def append_value(value : Array) : Nil
+  def append_value(value : Array | Array::View) : Nil
     push(91_u8)
     first = true
     value.each do |item|
@@ -385,22 +385,35 @@ struct String::Builder
   def append_value(value : Hash) : Nil
     push(123_u8)
     first = true
+    padded = false
     value.each do |key, item|
+      if first
+        padded = key.is_a?(Tuple) || key.is_a?(NamedTuple) || key.is_a?(Hash)
+        push(32_u8) if padded
+      end
       append(", ") unless first
       append_inspect(key)
       append(" => ")
       append_inspect(item)
       first = false
     end
+    push(32_u8) if padded
     push(125_u8)
   end
 
   def append_value(value : Tuple(*T)) : Nil forall T
     push(123_u8)
+    padded = {% if T.size > 0 %}
+               value[0].is_a?(Tuple) || value[0].is_a?(NamedTuple) || value[0].is_a?(Hash)
+             {% else %}
+               false
+             {% end %}
+    push(32_u8) if padded
     {% for i in 0...T.size %}
       append(", ") if {{i}} > 0
       append_inspect(value[{{i}}])
     {% end %}
+    push(32_u8) if padded
     push(125_u8)
   end
 
@@ -410,7 +423,7 @@ struct String::Builder
       value.inspect(self)
     elsif value.is_a?(Char)
       push(39_u8)
-      append_value(value)
+      value.inspect_into(self, '\'')
       push(39_u8)
     elsif value.nil?
       append("nil")
@@ -1067,5 +1080,11 @@ struct String
     {% raise "growing text needs a concrete field owner;\n\n" +
              "declare the append method in the owning class or " +
              "an @[OnTape] struct" %}
+  end
+end
+
+struct Array::View(T)
+  def to_s : String
+    String.build(16 * (size + 1)) { |writer| writer.append_value(self) }
   end
 end

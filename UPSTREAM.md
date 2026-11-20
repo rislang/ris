@@ -209,6 +209,10 @@ a rename after 0.1.0 would break callers (doc/drafts/pool-t, Q5).
 * Task launch validates ended state atomically with adoption; completed
   tasks stay live through tape cleanup before waking the group joiner.
 
+* Hash missing-key diagnostics say `no such key` and inspect the key,
+  matching the collection exercise's inherited contract. Take this
+  wording fix upstream to iyi; tape brace formatting stays in ris.
+
 ## Stays in ris
 
 * Tape: std/http `parse_head` and `ParsedHead`, the tape list in
@@ -256,3 +260,7 @@ belong upstream in iyi (doc/drafts/spec-port/, phases 3-4).
 128-bit text parsing and RFC 3986 resolution example coverage belong in
 iyi as well (src/std/int.ri and src/std/uri.ri). Builder formatting and
 resolution keep their output on the caller's tape in ris.
+
+IDNA and Punycode caller-builder overloads and RFC 3492 section 7.1
+proofs belong in iyi too (src/std/idna.ri). Inputs remain borrowed and
+writer results stay on the caller's tape in ris.

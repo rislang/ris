@@ -81,7 +81,7 @@ struct Hash(K, V)
       if default = @default
         return default[0]
       end
-      raise "Hash: missing key #{key}"
+      raise "no such key #{key.inspect}"
     end
     @values[index]
   end

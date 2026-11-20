@@ -29,7 +29,7 @@ import sys
 import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-RIS = pathlib.Path(os.environ.get("RIS", REPO / "bin" / "iyi"))
+RIS = pathlib.Path(os.environ.get("RIS", REPO / "bin" / "ris"))
 
 # {entry file: its import closure's sources — what raw grounding costs}
 TARGETS = {

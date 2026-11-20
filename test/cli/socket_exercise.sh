@@ -20,8 +20,7 @@ case "$(uname -s)" in
 esac
 
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-socket.XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from `pwd` is `/c/...` and finds no prelude at all, and a
 # scratch directory named `/tmp/tmp.X` is silently ignored on that path, so
@@ -55,7 +54,7 @@ run_case() {
     status=1
     return 1
   fi
-  "$WORK/$name" >"$WORK/$name.out" 2>&1
+  RIS_TAPE_POISON=1 "$WORK/$name" >"$WORK/$name.out" 2>&1
   local exit_code=$?
   sed 's/^/  /' "$WORK/$name.out"
   if [ "$exit_code" -ne 0 ]; then
@@ -82,7 +81,7 @@ fi
 
 echo
 echo "== every socket check reported"
-phrases="connect_accept message_exchange short_read nodelay connect_bound closed_peer close_write ipv6 localhost localhost_v6 localhost_race unix timeout closed_under_read stream"
+phrases="connect_accept message_exchange short_read small_read nodelay connect_bound closed_peer close_write ipv6 localhost localhost_v6 localhost_race unix timeout closed_under_read stream"
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT) phrases="$phrases backlog" ;;
   Linux) phrases="$phrases reset_after_chunk" ;;
@@ -178,12 +177,18 @@ prove_fails() {
   if ! RIS_PATH="$WORK/$dir${PSEP}$REPO/src" "$RIS" build $flag \
        -o "$WORK/$dir/program" "$REPO/test/cli/socket_exercise.ri" \
        >"$WORK/$dir/build.log" 2>&1; then
+    if [ "$dir" = heapread ] &&
+       grep -q 'a tape pointer in a @\[TapeUnsafe\] def' \
+         "$WORK/$dir/build.log"; then
+      echo "  $label: raw result view refused at compile time"
+      return
+    fi
     echo "  $label: the patched library did not build"
     sed -n '1,12p' "$WORK/$dir/build.log"
     status=1
     return
   fi
-  "$WORK/$dir/program" >"$WORK/$dir/out" 2>&1
+  RIS_TAPE_POISON=1 "$WORK/$dir/program" >"$WORK/$dir/out" 2>&1
   local exit_code=$?
   if [ "$exit_code" -eq 0 ]; then
     echo "  $label: the exercise still passed, so it does not test this"
@@ -210,12 +215,15 @@ prove_fails "short read size mismatch" badshort "short_read:" \
 # 3. Broken closed peer detection (does not answer empty string on EOF)
 prove_fails "closed peer EOF missed" badoff "closed_peer:" \
   '{ sub(/^      return got unless got\.nil\?$/, "      return (got.is_a?(String) \\&\\& got.empty? ? \"eof_missed\" : got) unless got.nil?"); print }'
-# 4. A small read that keeps the whole room it was given on the tape
-prove_fails "a socket read that keeps all it may read" heapread "small_read:" \
+# A returned String must own its bytes on the caller's tape. Rebuilding a
+# raw view is refused; finish is the safe result form.
+prove_fails "a read returning a view of reclaimed storage" heapread "small_read:" \
   '/private def read_ready/ { inside = 1 }
    inside && /^    writer\.finish$/ {
-     print "    RisRegion.tape_bytes(max_bytes.to_u64)"; inside = 0
+     print "    max_bytes == 65536 ? String.new(writer.finish.to_unsafe, received.to_i32) : writer.finish"
+     next
    }
+   inside && /^  end$/ { inside = 0 }
    { print }'
 
 # The peer's name asked of this end: `getsockname` for `getpeername`.
@@ -238,7 +246,7 @@ prove_fails "a gone peer is a panic" panicwrite "cannot write to socket" \
 # 5b. `localhost` raced ::1 first, as a name with a route to ::1 is: the
 #     refusal names the two the other way round.
 prove_fails "localhost raced ::1 first" localhostorder "localhost_race:" \
-  '{ sub(/return race\(address, port, loopback, timeout_ms\) if localhost\?\(address\)/, "return race(address, port, loopback.reverse, timeout_ms) if localhost?(address)"); print }'
+  '{ sub(/race\(address, port, loopback, timeout_ms\)/, "race(address, port, loopback.reversed, timeout_ms)"); print }'
 # 5c. The attempt delay an hour: ::1 starts only once 127.0.0.1 has been
 #     refused, which Windows takes 2 s to do. Elsewhere the refusal is at
 #     once and the delay is never waited; std_dns_exercise.sh proves it
@@ -281,7 +289,13 @@ case "$(uname -s)" in
       echo "  SIGPIPE on a gone peer: the patched library did not build"
       status=1
     else
-      "$WORK/sigpipe/program" >"$WORK/sigpipe/out" 2>&1
+      # The runner may inherit SIGPIPE ignored. Python resets it for exec.
+      python3 - "$WORK/sigpipe/program" >"$WORK/sigpipe/out" 2>&1 <<'PYTHON'
+import subprocess
+import sys
+code = subprocess.run([sys.argv[1]], restore_signals=True).returncode
+sys.exit(128 - code if code < 0 else code)
+PYTHON
       code=$?
       if [ "$code" -eq 141 ] && ! grep -q "disconnect: ok" "$WORK/sigpipe/out"; then
         echo "  SIGPIPE on a gone peer: killed by the signal at the disconnect (exit 141)"
@@ -337,7 +351,7 @@ fi
 prove_fails "ipv6 written uncompressed" badsix "ipv6:" \
   '{ sub(/best_size = 1$/, "best_size = 8"); print }'
 prove_fails "an IPv6 socket made as IPv4" badfamily "cannot bind socket to \[::1\]:0" \
-  '{ sub(/return \{address_bytes\(parse_ipv6\(host\), port\), AF_INET6\}/, "return {address_bytes(parse_ipv6(host), port), AF_INET}"); print }'
+  '{ sub(/^      return AF_INET6$/, "      return AF_INET"); print }'
 
 # 9. A unix listener whose close leaves its file: the path cannot be bound
 #    again.
@@ -424,13 +438,13 @@ refuses "a port past sixteen bits" port_big "is not a port" \
 refuses "a negative port" port_neg "is not a port" \
   "IyiSocket.listen(-1, 1).local_port"
 refuses "an address with too many digits" addr_long "cannot resolve address" \
-  "IyiSocket.connect(\"999999999999.1.1.1\", 80).or_panic.to_unsafe"
+  "IyiSocket.connect(\"999999999999.1.1.1\", 80).or_panic.closed?"
 refuses "an octet past 255" addr_octet "cannot resolve address" \
-  "IyiSocket.connect(\"256.1.1.1\", 80).or_panic.to_unsafe"
+  "IyiSocket.connect(\"256.1.1.1\", 80).or_panic.closed?"
 refuses "an octet with a leading zero" addr_octal "cannot resolve address: \"010.1.1.1\": an octet with a leading zero" \
-  "IyiSocket.connect(\"010.1.1.1\", 80).or_panic.to_unsafe"
+  "IyiSocket.connect(\"010.1.1.1\", 80).or_panic.closed?"
 refuses "a one-digit leading zero" addr_octal_short "cannot resolve address: \"01.2.3.4\"" \
-  "IyiSocket.connect(\"01.2.3.4\", 80).or_panic.to_unsafe"
+  "IyiSocket.connect(\"01.2.3.4\", 80).or_panic.closed?"
 refuses "a host with a leading space, shown inspected" addr_space "cannot resolve address: \" 1.2.3.4\"" \
   "IyiSocket.parse_ip(\" 1.2.3.4\").b0"
 refuses "a host with a trailing space, shown inspected" addr_tspace "cannot resolve address: \"1.2.3.4 \"" \
@@ -452,9 +466,9 @@ refuses "a trailing colon" addr_trailing "a trailing colon" \
 refuses "a unix socket path past the platform's room" unix_long "is 300 bytes, and the platform's limit is" \
   "IyiSocket.listen_unix(\"/\" * 300).local_address"
 refuses "a negative timeout" timeout_negative "negative timeout: -1" \
-  "IyiSocket.new(0).read_timeout_ms = -1"
+  "IyiSocket.listen(0).read_timeout_ms = -1"
 refuses "an empty unix socket path" unix_empty "a unix socket path is empty" \
-  "IyiSocket.connect_unix(\"\").or_panic.to_unsafe"
+  "IyiSocket.connect_unix(\"\").or_panic.closed?"
 # A port somebody listens on is theirs, whichever address either side
 # names. On Windows a bind to 127.0.0.1:P went through while 0.0.0.0:P
 # listened, and the other way round, and the more specific listener took
@@ -476,11 +490,11 @@ esac
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     refuses "a connect to the wildcard address" connect_any "not an address this host can use" \
-      "IyiSocket.connect(\"0.0.0.0\", IyiSocket.listen(\"0.0.0.0\", 0).local_port).or_panic.to_unsafe"
+      "IyiSocket.connect(\"0.0.0.0\", IyiSocket.listen(\"0.0.0.0\", 0).local_port).or_panic.closed?"
     ;;
 esac
 refuses "a port asked of a unix socket" unix_port "a unix socket has no port" \
-  "IyiSocket.new(0, 1).local_port"
+  "IyiSocket.listen_unix(\"$WORK/port.sock\").local_port"
 refuses "a dotted tail past six groups" addr_tail "a dotted tail after more than six groups" \
   "IyiSocket.parse_ipv6(\"1:2:3:4:5:6:7:1.2.3.4\")"
 
