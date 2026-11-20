@@ -1,0 +1,34 @@
+# A class refilling its own buffer (`@text.clear; @names.clear`, then
+# appends) under a branch in a loop, then read again, passes: the path
+# that skips the refill keeps the old view, the path that clears holds
+# only the new one. Silent on success.
+
+class RefillClient
+  @text : String::Builder = String::Builder.new(16)
+  @names = [] of String
+
+  def refill : Int32
+    @text.clear
+    @names.clear
+    @text << "ab"
+    @names << @text.finish[0, 1]
+    @names.size
+  end
+
+  def count : Int32
+    @names.size
+  end
+end
+
+owner = RefillClient.new
+client = Program.args.size < 5 ? owner : nil
+n = 0
+2.times do
+  if c = client
+    n += c.refill
+  end
+end
+if c = client
+  n += c.count
+end
+raise "count #{n}" unless n == 3

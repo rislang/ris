@@ -1610,6 +1610,23 @@ class Iyi::TapeShrinkChecker
     end
   end
 
+  # Joins an If's two branch values. A view only one branch holds lives
+  # only on that path: it takes the branch's guard, so a shrink on the
+  # other path (whose slot dropped the view) never pairs with it.
+  private def merge_branches(a : Value, b : Value, choice : UInt64) : Value
+    return merge(a, b) if a.views == b.views
+    same = ->(x : View, y : View) { x.root == y.root && x.born == y.born && x.index == y.index }
+    only = ->(v : Value, other : Value, side : Bool) do
+      v.views.map do |x|
+        next x if other.views.any? { |y| same.call(x, y) }
+        next x if x.guards.any? { |g| g[0] == choice }
+        x.copy_with(guards: x.guards + [{choice, side}])
+      end
+    end
+    Value.new((a.roots + b.roots).uniq, (only.call(a, b, true) + only.call(b, a, false)).uniq,
+      (a.procs + b.procs).uniq, a.unknown_proc || b.unknown_proc)
+  end
+
   # Back edges forget branch choices: the next round can take another
   # branch. Birth positions are canonical while solving, chronological
   # while checking. Allocation roots are AST identities, so this lattice
@@ -1718,7 +1735,8 @@ class Iyi::TapeShrinkChecker
           source = @marks[-x.born - 1][0]
           carried = source.is_a?(String) ? finish[source]? : finish.slots[source]?
           carried.try &.views.each do |w|
-            views << View.new(w.root, unmark(w.born, from), x.guards, w.index)
+            # The carried view keeps the round-1 path that left it.
+            views << View.new(w.root, unmark(w.born, from), x.guards + w.guards, w.index)
           end
         elsif x.born <= a
           views << x
@@ -3002,9 +3020,9 @@ class Iyi::TapeShrinkChecker
                    else
                      Guards.new
                    end
-    (left.keys | right.keys).each { |key| env[key] = merge(left[key]? || EMPTY, right[key]? || EMPTY) }
+    (left.keys | right.keys).each { |key| env[key] = merge_branches(left[key]? || EMPTY, right[key]? || EMPTY, choice) }
     (left.slots.keys | right.slots.keys).each do |key|
-      env.slots[key] = merge(left.slots[key]? || EMPTY, right.slots[key]? || EMPTY)
+      env.slots[key] = merge_branches(left.slots[key]? || EMPTY, right.slots[key]? || EMPTY, choice)
     end
     result = merge(a, b)
     boundary = node.object_id
