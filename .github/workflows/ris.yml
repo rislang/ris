@@ -170,6 +170,11 @@ jobs:
           python3 test/cli/language_is_named.py
         env:
           RIS: ${{ github.workspace }}/bin/ris
+      - name: Small builders commit only their writable pages
+        if: matrix.shard == 'heap'
+        run: bash test/cli/side_commit.sh
+        env:
+          RIS: ./bin/ris
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:

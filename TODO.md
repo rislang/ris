@@ -416,14 +416,6 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
 
 ## 12. Known failures
 
-* Every growing tape value reserves 128 MiB of address space, even a
-  128-byte builder (SIDE_RESERVE, region.ri:529). Under
-  `vm.overcommit_memory=2` each is charged: a FileServer answer holds
-  up to eight (doc/drafts/fileserver-outgoing.md, Memory). Growth must
-  not move or fail: reserve PROT_NONE and commit with mprotect, rather
-  than extending a small mapping in place (tried 2026-11-20: fails
-  when a neighbour mapping takes the next pages).
-
 * compiler_test's "Codegen: const" crashed once (signal 11) when all
   describes ran 30 at a time on minitest (2026-11-11); alone it passes
   three times of three. Find the race or the load-dependent fault.
