@@ -75,7 +75,8 @@ build_and_run() {
     status=1
     return 1
   fi
-  "$WORK/$name" >"$WORK/$name.out" 2>&1
+  # Freed tape reads 0xDB, so a read of freed memory fails here.
+  RIS_TAPE_POISON=1 "$WORK/$name" >"$WORK/$name.out" 2>&1
   local exit_code=$?
   sed 's/^/  /' "$WORK/$name.out"
   if [ "$exit_code" -ne 0 ]; then
@@ -475,16 +476,16 @@ PY
   fi
 }
 prove_broken acme "a nonce reused" "each nonce used once" \
-  '      @nonce = response.nonce' '      @nonce = nonce'
+  '    @nonce = answered ? keep(answered) : nil' '    @nonce = nonce'
 prove_broken acme "the thumbprint over non-canonical JSON" "RFC 7638's thumbprint" \
   '"{\"e\":\"#{b64u(AcmeJws.minimal(key.exponent.to_bytes(4) || [] of UInt8))}\",\"kty\":\"RSA\",\"n\":\"#{b64u(n)}\"}"' \
   '"{\"kty\":\"RSA\",\"n\":\"#{b64u(n)}\",\"e\":\"#{b64u(AcmeJws.minimal(key.exponent.to_bytes(4) || [] of UInt8))}\"}"'
 prove_broken acme "an ECDSA signature sent as DER, not R || S" "an ES256 signature is R || S" \
   '    raw(signed, public.curve.size)' '    signed'
 prove_broken acme "a jwk where the kid belongs" "jwk for newAccount alone and kid after it" \
-  '      use_jwk = url == @directory.new_account' '      use_jwk = true'
+  '    use_jwk = url == directory.new_account' '    use_jwk = true'
 prove_broken acme "Retry-After ignored" "Retry-After: 2 honoured" \
-  '      wait = AcmeClient.delay(response.retry_after, @poll_ms, Time.utc)' '      wait = @poll_ms.to_i64'
+  '      wait = AcmeClient.delay(retry_after, @poll_ms, Time.utc)' '      wait = @poll_ms.to_i64'
 prove_broken acme "a problem document taken as success" "a problem document is an error naming its type and detail" \
   '    return nil if @status < 400' '    return nil if @status < 600'
 prove_broken x509 "the CSR signed by another key" "the CSR's signature verifies under its own key" \
@@ -497,7 +498,7 @@ prove_broken acme "a wait past max_polls" "a wait stops at max_polls" \
 prove_broken acme "POST-as-GET sent with {}" "POST-as-GET's payload empty" \
   '    body = payload ? b64u(payload) : ""' '    body = b64u(payload || "{}")'
 prove_broken acme "the key authorization without its thumbprint" "the key authorization is token.thumbprint" \
-  '"#{token}.#{@thumbprint}"' '"#{token}"'
+  '"#{token}.#{thumbprint}"' '"#{token}"'
 prove_broken acme "the acmeIdentifier extension not critical" "the acmeIdentifier extension is critical" \
   'X509Extension.new(ACME_IDENTIFIER, true, value)' 'X509Extension.new(ACME_IDENTIFIER, false, value)'
 prove_broken x509 "a request without its extensionRequest" "by subjectAltName" \
@@ -509,7 +510,7 @@ prove_broken acme "a request sent to an http:// URL" "an http:// directory is re
 prove_broken acme "a directory's http:// URLs taken" "a directory naming an http:// URL is refused by name" \
   '        refused = AcmeClient.https(url, "the directory'"'"'s #{field}")' '        refused = nil'
 prove_broken acme "an http:// account URL given taken" "an http:// account URL given is refused by name" \
-  '      refused = https(account_url, "the account")' '      refused = nil'
+  '      if refused = AcmeClient.https(account_url, "the account")' '      if refused = nil'
 prove_broken acme "an http:// account Location taken" "an http:// account Location is refused by name" \
   '    refused = AcmeClient.https(url, "newAccount'"'"'s Location")' '    refused = nil'
 prove_broken acme "an http:// order Location taken" "an http:// order Location is refused by name" \

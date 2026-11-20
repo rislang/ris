@@ -692,44 +692,16 @@ end
 @[OnTape]
 pub class AutocertIssuer
   include RisAutocertViewState
-  @client : AcmeClient? = nil
-  @transport : HTTPClient? = nil
   # Each challenge's failure, refilled per order: an order's protocol calls
   # may reach `issue` again, so no growing local lives across them.
   @failures = String::Builder.new(256)
   # The one name an order is for, refilled per order as `@failures` is.
   @names = [] of String
 
+  # The CA's client lives on this call's tape: the transport, its trust
+  # and the ACME session are made here and handed down, not kept in
+  # fields, so nothing views a scope that has ended.
   def issue(name : String) : AutocertError?
-    defer close_transport
-    @failures.clear
-    made = order(name, @failures)
-    made.is_a?(AutocertError) ? made : nil
-  end
-
-  private def close_transport : Nil
-    if transport = @transport
-      transport.close
-    end
-  end
-
-  # Sets @client up once: the account key read or made, the directory
-  # read and the account registered; or why it could not be.
-  private def open_client : AutocertError?
-    return nil if @client
-    stored = @cache.get(ACCOUNT_KEY)
-    return stored if stored.is_a?(AutocertError)
-    key = nil.as(SigningKey?)
-    if stored
-      read = SigningKey.from_pem(stored)
-      return AutocertError.new("the account key in the cache: #{read.message}") if read.is_a?(X509Error)
-      key = read
-    else
-      fresh = AutocertPem.new_key
-      written = @cache.put(ACCOUNT_KEY, AutocertPem.key(fresh))
-      return written if written
-      key = SigningKey.new(fresh.key)
-    end
     trust = TlsConfig.new
     trust.alpn = ["http/1.1"]
     unless @config.ca_roots_pem.empty?
@@ -739,8 +711,35 @@ pub class AutocertIssuer
       trust.roots = trust.kept_certificates
     end
     transport = HTTPClient.new(idle: 0, tls: trust)
-    @transport = transport
+    defer transport.close
+    key = account_key
+    return key if key.is_a?(AutocertError)
     session = AcmeClient.new(@config.directory_url, key, http: transport)
+    opened = open_account(session)
+    return opened if opened
+    @failures.clear
+    made = order(session, name, @failures)
+    made.is_a?(AutocertError) ? made : nil
+  end
+
+  # The account key read from the cache, or made and put there.
+  private def account_key : SigningKey | AutocertError
+    stored = @cache.get(ACCOUNT_KEY)
+    return stored if stored.is_a?(AutocertError)
+    if stored
+      read = SigningKey.from_pem(stored)
+      return AutocertError.new("the account key in the cache: #{read.message}") if read.is_a?(X509Error)
+      return read
+    end
+    fresh = AutocertPem.new_key
+    written = @cache.put(ACCOUNT_KEY, AutocertPem.key(fresh))
+    return written if written
+    SigningKey.new(fresh.key)
+  end
+
+  # *session*'s directory read and its account registered (or found:
+  # RFC 8555 section 7.3.1 answers an existing key with its account).
+  private def open_account(session : AcmeClient) : AutocertError?
     if problem = session.error
       return AutocertError.new("the CA's directory: #{problem.message}")
     end
@@ -748,7 +747,6 @@ pub class AutocertIssuer
     contact = @config.email.empty? ? [] of String : ["mailto:#{@config.email}"]
     account = session.register(contact, terms_agreed: @config.accept_terms)
     return AutocertError.new("the account: #{account.message}") if account.is_a?(AcmeError)
-    @client = session
     nil
   end
 
@@ -756,10 +754,7 @@ pub class AutocertIssuer
   # cache: an order proved by each of `challenges` in turn - a fresh order
   # for the next only when the last one's authorization failed - and
   # finalized.
-  private def order(name : String, failures : String::Builder) : RisAutocertHeld | AutocertError
-    opened = open_client
-    return opened if opened
-    acme = @client.as(AcmeClient)
+  private def order(acme : AcmeClient, name : String, failures : String::Builder) : RisAutocertHeld | AutocertError
     @config.challenges.each do |kind|
       @names.clear
       @names << name

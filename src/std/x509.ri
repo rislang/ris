@@ -1693,36 +1693,38 @@ pub struct SigningKey
 
   # A new P-256 key, from the system's entropy (std/random's `Secure`).
   # The 32 bytes it is made from are drawn again in the 2^-32 chance that
-  # they are not below the group's order.
+  # they are not below the group's order. The key is made in one call,
+  # on the caller's tape: made in a loop round, it would be freed with it.
   def self.p256 : SigningKey
-    SigningKey.new(256)
+    SigningKey.new(P256PrivateKey.from_bytes(scalar(32, false)).or_panic)
   end
 
   # A new P-384 key, as `p256` makes one.
   def self.p384 : SigningKey
-    SigningKey.new(384)
+    SigningKey.new(P384PrivateKey.from_bytes(scalar(48, true)).or_panic)
   end
 
-  # A new P-256 or P-384 key, drawn here: made by the constructor, it
-  # moves to the caller with its point. A key made by an earlier call of
-  # the def lived in the def's scratch, and its point was freed when the
-  # def ended (test/ris/signing_key_made.ri).
-  protected def initialize(bits : Int32)
-    bytes = Array(UInt8).new(bits // 8, 0_u8)
-    Random::Secure.random_bytes(bytes)
-    while (bits == 256 ? P256PrivateKey.from_bytes(bytes) : P384PrivateKey.from_bytes(bytes)).is_a?(EcdsaError)
-      Random::Secure.random_bytes(bytes)
+  # *size* bytes from the system's entropy that P-256 (or P-384, when
+  # *wide*) takes as a private key, drawn again until it does.
+  private def self.scalar(size : Int32, wide : Bool) : Array(UInt8)
+    bytes = Array(UInt8).new(size, 0_u8)
+    while true
+      drawn = Random::Secure.random_bytes(size)
+      size.times { |i| bytes[i] = drawn[i] }
+      taken = wide ? !P384PrivateKey.from_bytes(bytes).is_a?(EcdsaError) : !P256PrivateKey.from_bytes(bytes).is_a?(EcdsaError)
+      return bytes if taken
     end
-    @p256 = bits == 256 ? P256PrivateKey.new(bytes) : nil
-    @p384 = bits == 384 ? P384PrivateKey.new(bytes) : nil
-    @rsa = nil
-    @seed = nil
+    raise "unreachable"
   end
 
   # The key in *text*'s one PRIVATE KEY block (PKCS #8: P-256, P-384, RSA
   # or Ed25519), EC PRIVATE KEY block (SEC 1, P-256 or P-384) or RSA
   # PRIVATE KEY block (PKCS #1).
   def self.from_pem(text : String) : SigningKey | X509Error
+    read_pem(text).copy_to(RisCurrentTape.new)
+  end
+
+  private def self.read_pem(text : String) : SigningKey | X509Error
     pkcs8 = X509Pem.blocks(text, "PRIVATE KEY")!
     sec1 = X509Pem.blocks(text, "EC PRIVATE KEY")!
     pkcs1 = X509Pem.blocks(text, "RSA PRIVATE KEY")!
@@ -1752,24 +1754,31 @@ pub struct SigningKey
       curve = X509Asn1.text(algorithm[1].oid)!
       if curve == EcdsaCurve::P256.oid
         key = P256PrivateKey.from_pkcs8(der)
-        return key.is_a?(EcdsaError) ? X509Error.new(key.message) : SigningKey.new(key)
+        return X509Error.new(key.message) if key.is_a?(EcdsaError)
+        return SigningKey.new(key)
       elsif curve == EcdsaCurve::P384.oid
         key = P384PrivateKey.from_pkcs8(der)
-        return key.is_a?(EcdsaError) ? X509Error.new(key.message) : SigningKey.new(key)
+        return X509Error.new(key.message) if key.is_a?(EcdsaError)
+        return SigningKey.new(key)
       end
-      X509Error.new("an EC private key on #{curve}, not P-256 or P-384")
+      return X509Error.new("an EC private key on #{curve}, not P-256 or P-384")
     when X509Oids::RSA_ENCRYPTION
       rsa = RsaPrivateKey.from_pkcs8(der)
-      rsa.is_a?(RsaError) ? X509Error.new(rsa.message) : SigningKey.new(rsa)
+      return X509Error.new(rsa.message) if rsa.is_a?(RsaError)
+      return SigningKey.new(rsa)
     when X509Oids::ED25519
       # RFC 8410 section 7: the privateKey OCTET STRING holds another, the
       # seed.
-      inner = X509Asn1.bytes(fields[2].octet_string)!
-      seed = X509Asn1.bytes(X509Asn1.value(Der.parse(inner))!.octet_string)!
-      SigningKey.ed25519(seed)
+      return ed25519_pkcs8(fields[2]).copy_to(RisCurrentTape.new)
     else
-      X509Error.new("a private key for #{oid}, not P-256, P-384, RSA or Ed25519")
+      return X509Error.new("a private key for #{oid}, not P-256, P-384, RSA or Ed25519")
     end
+  end
+
+  private def self.ed25519_pkcs8(field : DerValue) : SigningKey | X509Error
+    inner = X509Asn1.bytes(field.octet_string)!
+    seed = X509Asn1.bytes(X509Asn1.value(Der.parse(inner))!.octet_string)!
+    SigningKey.ed25519(seed).copy_to(RisCurrentTape.new)
   end
 
   def public_key : RsaPublicKey | EcdsaPublicKey | Ed25519PublicKey

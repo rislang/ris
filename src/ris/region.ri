@@ -842,6 +842,10 @@ class RisRegion
       side = following
     end
     used = IyiHeap.read64(region &+ OFF_CURSOR) &- region
+    if poison?
+      poison(region &+ DATA, region &+ used)
+      used = 0_u64
+    end
     IyiHeap.write64(region &+ OFF_CURSOR, region &+ DATA)
     length = IyiHeap.read64(region &+ OFF_MAP)
     {% if flag?(:linux) || flag?(:darwin) %}
@@ -970,19 +974,53 @@ class RisRegion
     {% if flag?(:win32) %}
       !Program.env("RIS_TAPE_STATS").nil?
     {% else %}
-      wanted = "RIS_TAPE_STATS=".to_unsafe
+      env_named?("RIS_TAPE_STATS=".to_unsafe, 15)
+    {% end %}
+  end
+
+  {% unless flag?(:win32) %}
+    @[NoSpec("runtime hook; test/ris/tape_poison.ri proves it")]
+    def self.env_named?(wanted : Pointer(UInt8), length : Int32) : Bool
       entry = ARGV_UNSAFE + (ARGC_UNSAFE + 1)
       while entry.value.address != 0_u64
         name = entry.value
         index = 0
-        while index < 15 && name[index] == wanted[index]
+        while index < length && name[index] == wanted[index]
           index = index + 1
         end
-        return true if index == 15
+        return true if index == length
         entry = entry + 1
       end
       false
-    {% end %}
+    end
+  {% end %}
+
+  # `RIS_TAPE_POISON=1`: freed tape bytes (a def, round or scope's end,
+  # a released mapping or side reservation) are filled with POISON, so
+  # a read of freed memory sees 0xDB bytes instead of the old value.
+  # Read once; when off, a release costs one branch.
+  POISON = 0xDB_u8
+  @@poison : Int32 = 0
+
+  @[NoSpec("runtime hook; test/ris/tape_poison.ri proves it")]
+  def self.poison? : Bool
+    state = @@poison
+    if state == 0
+      {% if flag?(:win32) %}
+        state = Program.env("RIS_TAPE_POISON") == "1" ? 2 : 1
+      {% else %}
+        state = env_named?("RIS_TAPE_POISON=1".to_unsafe, 17) ? 2 : 1
+      {% end %}
+      @@poison = state
+    end
+    state == 2
+  end
+
+  @[NoSpec("runtime hook; test/ris/tape_poison.ri proves it")]
+  def self.poison(start : UInt64, stop : UInt64) : Nil
+    return unless stop > start
+    LibTapeCopy.memset(Pointer(UInt8).new(start), POISON, stop &- start,
+      false)
   end
 
   # The thread's spares back to the kernel, when the thread ends.

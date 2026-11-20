@@ -327,11 +327,8 @@ class RisAcmeScriptHandler
   end
 
   def call(req : Incoming, res : Outgoing) : Nil
-    response = @script.answer(req)
+    @script.answer(req, res)
     @script.publish
-    res.status = response.status
-    response.headers.each { |name, value| res.header(name, value) }
-    res.body << response.body
   end
 end
 
@@ -450,10 +447,14 @@ def der_of(raw : Array(UInt8)) : Array(UInt8)
   body.size < 128 ? [0x30_u8, body.size.to_u8] + body : [0x30_u8, 0x81_u8, body.size.to_u8] + body
 end
 
-# The three parts of a flattened JWS.
+# The three parts of a flattened JWS. Each part is one call, so the JSON
+# it views is parsed on the caller's tape, not in a def's scratch.
 def jws_parts(jws : String) : {String, String, String}
-  fields = JSON.parse(jws).as_h
-  {fields["protected"].as_s, fields["payload"].as_s, fields["signature"].as_s}
+  {jws_part(jws, "protected"), jws_part(jws, "payload"), jws_part(jws, "signature")}
+end
+
+def jws_part(jws : String, name : String) : String
+  JSON.parse(jws).as_h[name].as_s
 end
 
 RFC7638_N = "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw"
@@ -482,8 +483,9 @@ ED_X         = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
 ED_SIGNATURE = "hgyY0il_MGCjP0JzlnLWG1PPOt7-09PGcvMg3AIbQR6dWbhijcNR4ki4iylGjg5BhVsPt9g7sVvpAr_MuM0KAg"
 
 def a2_key : SigningKey
-  rsa = RsaPrivateKey.new(unb64(A2_N), unb64("AQAB"), unb64(A2_D), unb64(A2_P), unb64(A2_Q), unb64(A2_DP), unb64(A2_DQ), unb64(A2_QI)).or_panic
-  SigningKey.new(rsa)
+  # One call: the key and the numbers it views are built on the caller's
+  # tape, not in this def's scratch.
+  SigningKey.new(RsaPrivateKey.new(unb64(A2_N), unb64("AQAB"), unb64(A2_D), unb64(A2_P), unb64(A2_Q), unb64(A2_DP), unb64(A2_DQ), unb64(A2_QI)).or_panic)
 end
 
 def a3_key : SigningKey
@@ -496,8 +498,10 @@ end
 
 # The names a certificate request asks for, and whether its signature is
 # its own key's: read from its DER field by field (RFC 2986), the names
-# from the extensionRequest attribute's subjectAltName.
-def request_fields(der : Array(UInt8)) : {Array(String), Bool, String}
+# from the extensionRequest attribute's subjectAltName. The names go into
+# *names*, viewing *texts*; the subject's CN is written to *cn*.
+def request_fields(der : Array(UInt8), names : Array(String),
+                   texts : String::Builder, cn : String::Builder) : Bool
   outer = Der.parse(der).or_panic.sequence.or_panic
   info = outer[0]
   fields = info.sequence.or_panic
@@ -516,7 +520,6 @@ def request_fields(der : Array(UInt8)) : {Array(String), Bool, String}
              else
                false
              end
-  names = [] of String
   attributes = fields[3]
   check attributes.context?(0), "the request's attributes are [0]"
   attributes.children.or_panic.each do |attribute|
@@ -526,17 +529,22 @@ def request_fields(der : Array(UInt8)) : {Array(String), Bool, String}
       e = extension.sequence.or_panic
       next unless e[0].oid.or_panic == "2.5.29.17"
       Der.parse(e[e.size - 1].octet_string.or_panic).or_panic.sequence.or_panic.each do |name|
-        names << text(name.content) if name.context?(2)
+        if name.context?(2)
+          at = texts.bytesize
+          name.content.each { |byte| texts.write_byte(byte) }
+          names << texts.finish[at, texts.bytesize - at]
+        end
       end
     end
   end
-  cn = subject.size > 2 ? Der.parse(subject).or_panic.sequence.or_panic[0].set.or_panic[0].sequence.or_panic[1].string.or_panic : ""
-  {names, verified, cn}
+  cn << Der.parse(subject).or_panic.sequence.or_panic[0].set.or_panic[0].sequence.or_panic[1].string.or_panic if subject.size > 2
+  verified
 end
 
 # The tls-alpn-01 certificate's acmeIdentifier extension: whether it is
-# critical, and the bytes its OCTET STRING holds.
-def acme_identifier(der : Array(UInt8)) : {Bool, Array(UInt8)}?
+# critical (nil when there is none), and the bytes its OCTET STRING
+# holds, appended to *inner*.
+def acme_identifier(der : Array(UInt8), inner : Array(UInt8)) : Bool?
   tbs = Der.parse(der).or_panic.sequence.or_panic[0].sequence.or_panic
   tbs.each do |field|
     next unless field.context?(3)
@@ -544,8 +552,8 @@ def acme_identifier(der : Array(UInt8)) : {Bool, Array(UInt8)}?
       e = extension.sequence.or_panic
       next unless e[0].oid.or_panic == AcmeTlsAlpn01::ACME_IDENTIFIER
       critical = e.size == 3 && e[1].boolean.or_panic
-      inner = Der.parse(e[e.size - 1].octet_string.or_panic).or_panic.octet_string.or_panic
-      return {critical, inner}
+      inner.concat(Der.parse(e[e.size - 1].octet_string.or_panic).or_panic.octet_string.or_panic)
+      return critical
     end
   end
   nil
@@ -604,14 +612,18 @@ def pure_checks : Nil
   names = ["www.ri-acme.example", "iyi-acme.example"]
   { {"P-256", SigningKey.p256}, {"P-384", SigningKey.p384}, {"RSA-2048", rs}, {"Ed25519", ed} }.each do |pair|
     der = X509.request(pair[1], names).or_panic
-    asked, verified, cn = request_fields(der)
+    asked = [] of String
+    cn = String::Builder.new
+    verified = request_fields(der, asked, String::Builder.new, cn)
     check verified, "#{pair[0]}: the CSR's signature verifies under its own key"
     check asked == names, "#{pair[0]}: the CSR asks for #{names.join(", ")} by subjectAltName, not #{asked.join(", ")}"
-    check cn == names[0], "#{pair[0]}: the CSR's subject is CN=#{names[0]}"
+    check cn.finish == names[0], "#{pair[0]}: the CSR's subject is CN=#{names[0]}"
   end
   long = "a" * 60 + ".ri-acme.example"
-  asked, verified, cn = request_fields(X509.request(SigningKey.p256, [long]).or_panic)
-  check cn == "" && asked == [long] && verified, "a name past 64 bytes leaves the subject empty and stays in subjectAltName"
+  asked = [] of String
+  cn = String::Builder.new
+  verified = request_fields(X509.request(SigningKey.p256, [long]).or_panic, asked, String::Builder.new, cn)
+  check cn.finish == "" && asked == [long] && verified, "a name past 64 bytes leaves the subject empty and stays in subjectAltName"
   refused = X509.request(SigningKey.p256, ["bad name.example"])
   check refused.is_a?(X509Error) && refused.message.includes?("is not a host name"), "a name with a space is refused"
   refused = X509.request(SigningKey.p256, [] of String)
@@ -625,11 +637,12 @@ def pure_checks : Nil
   certificate = Certificate.parse(der).or_panic
   check certificate.dns_names == [domain], "the tls-alpn-01 certificate names #{domain} alone"
   check certificate.signed_by?(certificate), "the tls-alpn-01 certificate is signed by its own key"
-  found = acme_identifier(der)
+  inner = [] of UInt8
+  found = acme_identifier(der, inner)
   check !found.nil?, "the tls-alpn-01 certificate carries id-pe-acmeIdentifier"
-  if found
-    check found[0], "the acmeIdentifier extension is critical"
-    check found[1] == SHA256.hash_bytes(authorization), "the acmeIdentifier extension holds the key authorization's SHA-256"
+  unless found.nil?
+    check found, "the acmeIdentifier extension is critical"
+    check inner == SHA256.hash_bytes(authorization), "the acmeIdentifier extension holds the key authorization's SHA-256"
   end
   check certificate.unhandled_critical == [AcmeTlsAlpn01::ACME_IDENTIFIER], "std/x509 reads the extension as critical and not its own"
   prepared = RisAcmeTlsIdentity.new(domain, authorization)
@@ -725,12 +738,18 @@ class Script
   getter gap_ms : Int64 = -1_i64
   getter csr_verified : Bool = false
   getter csr_names : Array(String) = [] of String
+  @csr_texts = String::Builder.new
   getter rolled : Bool = false
   getter after_roll : Bool = false
-  @nonces : Hash(String, Bool) = {} of String => Bool
+  # Whether nonce-N was used, at N - 1, for each nonce issued.
+  @nonces_used = Array(Bool).new(256)
   @counter : Int32 = 0
-  @accounts : Hash(String, EcdsaPublicKey) = {} of String => EcdsaPublicKey
-  @bad_nonce_value : String = ""
+  # Each account's P-256 point, 65 bytes an account, by its number less
+  # one; and whether its URL is on the plain base.
+  @account_points = Array(UInt8).new(65 * 16)
+  @account_plain = Array(Bool).new(16)
+  # The counter of the nonce the badNonce answer carried; 0 for none.
+  @bad_nonce_n : Int32 = 0
   @challenges : Hash(Int32, String) = {} of Int32 => String
   @polled_at : Int64 = 0_i64
   @order1 : String = "pending"
@@ -749,68 +768,96 @@ class Script
 
   def fresh : String
     @counter = @counter + 1
-    nonce = "nonce-#{@counter}"
-    @nonces[nonce] = false
-    nonce
+    @nonces_used << false
+    "nonce-#{@counter}"
   end
 
-  def problem(status : Int32, kind : String, detail : String, extra : String = "") : Response
-    Response.new(status, "{\"type\":\"urn:ietf:params:acme:error:#{kind}\",\"detail\":\"#{detail}\"#{extra}}",
-      {"Content-Type" => "application/problem+json", "Replay-Nonce" => fresh})
+  def problem(res : Outgoing, status : Int32, kind : String, detail : String, extra : String = "") : Nil
+    res.status = status
+    res.header("Content-Type", "application/problem+json")
+    res.header("Replay-Nonce", fresh)
+    res.body << "{\"type\":\"urn:ietf:params:acme:error:" << kind << "\",\"detail\":\"" << detail << "\"" << extra << "}"
   end
 
-  def json(status : Int32, body : String, headers : Hash(String, String) = {} of String => String) : Response
-    headers["Content-Type"] = "application/json"
-    headers["Replay-Nonce"] = fresh
-    Response.new(status, body, headers)
+  def json(res : Outgoing, status : Int32, body : String, location : String? = nil, retry_after : String? = nil) : Nil
+    res.status = status
+    res.header("Content-Type", "application/json")
+    res.header("Replay-Nonce", fresh)
+    res.header("Location", location) if location
+    res.header("Retry-After", retry_after) if retry_after
+    res.body << body
   end
 
-  def key_of(jwk : Any) : EcdsaPublicKey
+  def point_of(jwk : Any) : Array(UInt8)
     fields = jwk.as_h
-    EcdsaPublicKey.from_point(EcdsaCurve::P256, [4_u8] + unb64(fields["x"].as_s) + unb64(fields["y"].as_s)).or_panic
+    [4_u8] + unb64(fields["x"].as_s) + unb64(fields["y"].as_s)
+  end
+
+  # The index in @nonces_used of *nonce*, one this server issued; or -1.
+  def nonce_index(nonce : String) : Int32
+    return -1 unless nonce.starts_with?("nonce-") && nonce.bytesize < 16
+    n = nonce[6, nonce.bytesize - 6].to_i?
+    n && n >= 1 && n <= @nonces_used.size ? n - 1 : -1
+  end
+
+  def account_url(index : Int32) : String
+    "#{@account_plain[index] ? @plain : @base}/acct/#{index + 1}"
+  end
+
+  # The number less one of the account at *url*, or -1.
+  def account_index(url : String) : Int32
+    @account_plain.size.times { |i| return i if account_url(i) == url }
+    -1
+  end
+
+  def account_point(index : Int32) : Array(UInt8)
+    Array(UInt8).new(65) { |i| @account_points[index * 65 + i] }
   end
 
   # The JWS in *req* checked - its nonce, url, jwk or kid, and ES256
-  # signature - or the problem it is answered with.
-  def verify(req : Incoming, need_jwk : Bool) : Signed | Response
+  # signature - yielded, or the problem it is answered with written to
+  # *res*.
+  def verify(req : Incoming, need_jwk : Bool, res : Outgoing, & : Signed -> Nil) : Nil
     fields = JSON.parse(req.body).as_h
     head = fields["protected"].as_s
     body = fields["payload"].as_s
     header = JSON.parse(Base64.decode(head)).as_h
     nonce_text = Bench::StdAcmeExercise.field_s(header, "nonce")
-    unless @nonces.has_key?(nonce_text)
+    used = nonce_index(nonce_text)
+    if used < 0
       @unknown = @unknown + 1
-      return problem(400, "badNonce", "a nonce this server did not issue")
+      return problem(res, 400, "badNonce", "a nonce this server did not issue")
     end
-    if @nonces[nonce_text]
+    if @nonces_used[used]
       @reused = @reused + 1
-      return problem(400, "badNonce", "a nonce used before")
+      return problem(res, 400, "badNonce", "a nonce used before")
     end
-    @nonces[nonce_text] = true
-    @retried_with_sent = true if nonce_text == @bad_nonce_value
+    @nonces_used[used] = true
+    @retried_with_sent = true if @bad_nonce_n > 0 && nonce_text == "nonce-#{@bad_nonce_n}"
     unless Bench::StdAcmeExercise.field_s(header, "url") == @base + req.path
       @wrong_urls = @wrong_urls + 1
-      return problem(401, "unauthorized", "the url is not the one posted to")
+      return problem(res, 401, "unauthorized", "the url is not the one posted to")
     end
     jwk = header["jwk"]?
     kid = header["kid"]?
     if need_jwk ? (jwk.nil? || !kid.nil?) : (kid.nil? || !jwk.nil?)
       @misplaced = @misplaced + 1
-      return problem(400, "malformed", "jwk where kid belongs, or kid where jwk does")
+      return problem(res, 400, "malformed", "jwk where kid belongs, or kid where jwk does")
     end
     account = kid ? kid.as_s : ""
-    key = jwk ? key_of(jwk) : @accounts[account]?
-    return problem(400, "accountDoesNotExist", "no account #{account}") unless key
+    index = jwk ? -1 : account_index(account)
+    return problem(res, 400, "accountDoesNotExist", "no account #{account}") if !jwk && index < 0
+    key = EcdsaPublicKey.from_point(EcdsaCurve::P256, jwk ? point_of(jwk) : account_point(index)).or_panic
     signature = unb64(fields["signature"].as_s)
     unless signature.size == 64
       @der_signatures = @der_signatures + 1
-      return problem(400, "malformed", "an ES256 signature of #{signature.size} bytes, not R || S")
+      return problem(res, 400, "malformed", "an ES256 signature of #{signature.size} bytes, not R || S")
     end
     unless key.verify(EcdsaHash::SHA256, "#{head}.#{body}", der_of(signature))
       @bad_signatures = @bad_signatures + 1
-      return problem(400, "malformed", "a signature that does not verify")
+      return problem(res, 400, "malformed", "a signature that does not verify")
     end
-    Signed.new(header, Base64.decode(body), account, key)
+    yield Signed.new(header, Base64.decode(body), account, key)
   end
 
   def order_json(n : Int32, status : String) : String
@@ -826,19 +873,28 @@ class Script
     "{\"status\":\"#{status}\",\"identifier\":{\"type\":\"dns\",\"value\":\"#{NAMES[n]}\"},\"challenges\":[#{challenge}]}"
   end
 
-  def answer(req : Incoming) : Response
+  def answer(req : Incoming, res : Outgoing) : Nil
     @requests = @requests + 1
     path = req.path
     if path == "/dir"
-      return json(200, "{\"newNonce\":\"#{@base}/nonce\",\"newAccount\":\"#{@base}/new-acct\",\"newOrder\":\"#{@base}/new-order\",\"keyChange\":\"#{@base}/key-change\",\"meta\":{\"termsOfService\":\"https://iyi-acme.example/terms\"}}")
+      return json(res, 200, "{\"newNonce\":\"#{@base}/nonce\",\"newAccount\":\"#{@base}/new-acct\",\"newOrder\":\"#{@base}/new-order\",\"keyChange\":\"#{@base}/key-change\",\"meta\":{\"termsOfService\":\"https://iyi-acme.example/terms\"}}")
     end
     if path == "/dir-plain"
-      return json(200, "{\"newNonce\":\"#{@plain}/nonce\",\"newAccount\":\"#{@base}/new-acct\",\"newOrder\":\"#{@base}/new-order\"}")
+      return json(res, 200, "{\"newNonce\":\"#{@plain}/nonce\",\"newAccount\":\"#{@base}/new-acct\",\"newOrder\":\"#{@base}/new-order\"}")
     end
-    return Response.new(200, "", {"Replay-Nonce" => fresh, "Cache-Control" => "no-store"}) if path == "/nonce"
-    return Response.new(405, "") unless req.method == "POST"
-    signed = verify(req, path == "/new-acct")
-    return signed if signed.is_a?(Response)
+    if path == "/nonce"
+      res.header("Replay-Nonce", fresh)
+      res.header("Cache-Control", "no-store")
+      return
+    end
+    unless req.method == "POST"
+      res.status = 405
+      return
+    end
+    verify(req, path == "/new-acct", res) { |signed| answer_signed(path, signed, res) }
+  end
+
+  def answer_signed(path : String, signed : Signed, res : Outgoing) : Nil
     parts = path.split('/')
     n = parts.size > 2 ? parts[2].to_i : 0
     case parts[1]
@@ -849,83 +905,85 @@ class Script
       if (contact = payload["contact"]?) && (items = contact.as_a?)
         plain = items.any? { |x| x.as_s? == "mailto:plain@iyi-acme.example" }
       end
-      account = "#{plain ? @plain : @base}/acct/#{@accounts.size + 1}"
-      @accounts[account] = signed.key
-      json(201, "{\"status\":\"valid\"}", {"Location" => account})
+      index = @account_plain.size
+      @account_plain << plain
+      point_of(signed.header["jwk"]).each { |byte| @account_points << byte }
+      json(res, 201, "{\"status\":\"valid\"}", account_url(index))
     when "new-order"
       name = JSON.parse(signed.payload).as_h["identifiers"].as_a[0].as_h["value"].as_s
       if name == "bad.example"
-        return problem(400, "rejectedIdentifier", "bad.example is refused here",
+        return problem(res, 400, "rejectedIdentifier", "bad.example is refused here",
           ",\"subproblems\":[{\"type\":\"urn:ietf:params:acme:error:rejectedIdentifier\",\"detail\":\"a refused name\",\"identifier\":{\"type\":\"dns\",\"value\":\"bad.example\"}}]")
       end
       if name == "a.example" && @bad_nonce_sent == 0
         @bad_nonce_sent = 1
-        answer = problem(400, "badNonce", "this nonce is refused, once")
-        @bad_nonce_value = answer.headers["Replay-Nonce"]
-        return answer
+        @bad_nonce_n = @counter + 1
+        return problem(res, 400, "badNonce", "this nonce is refused, once")
       end
       if name == "e.example"
-        return json(201, "{\"status\":\"pending\",\"identifiers\":[{\"type\":\"dns\",\"value\":\"e.example\"}],\"authorizations\":[\"#{@plain}/authz/5\"],\"finalize\":\"#{@base}/finalize/5\"}",
-          {"Location" => "#{@base}/order/5"})
+        return json(res, 201, "{\"status\":\"pending\",\"identifiers\":[{\"type\":\"dns\",\"value\":\"e.example\"}],\"authorizations\":[\"#{@plain}/authz/5\"],\"finalize\":\"#{@base}/finalize/5\"}",
+          "#{@base}/order/5")
       end
-      return json(201, order_json(1, "pending"), {"Location" => "#{@plain}/order/6"}) if name == "f.example"
+      return json(res, 201, order_json(1, "pending"), "#{@plain}/order/6") if name == "f.example"
       number = NAMES.index(name) || 0
-      return problem(400, "rejectedIdentifier", "#{name} is not one of this server's") if number == 0
+      return problem(res, 400, "rejectedIdentifier", "#{name} is not one of this server's") if number == 0
       @challenges[number] = "pending"
-      json(201, order_json(number, "pending"), {"Location" => "#{@base}/order/#{number}"})
+      json(res, 201, order_json(number, "pending"), "#{@base}/order/#{number}")
     when "chall"
       unless signed.payload == "{}"
         @not_empty = @not_empty + 1
-        return problem(400, "malformed", "a challenge is answered with {}")
+        return problem(res, 400, "malformed", "a challenge is answered with {}")
       end
       @challenges[n] = "processing"
-      json(200, challenge_json(n, "processing"))
+      json(res, 200, challenge_json(n, "processing"))
     when "authz"
-      return post_as_get_refused unless signed.payload.empty?
-      authorization(n)
+      return post_as_get_refused(res) unless signed.payload.empty?
+      authorization(n, res)
     when "order"
-      return post_as_get_refused unless signed.payload.empty?
+      return post_as_get_refused(res) unless signed.payload.empty?
       @after_roll = true if @rolled
       status = n == 1 ? @order1 : "pending"
       if n == 1 && @order1 == "processing"
         @order1 = "valid"
         status = "valid"
       end
-      json(200, order_json(n, status))
+      json(res, 200, order_json(n, status))
     when "finalize"
       csr = unb64(JSON.parse(signed.payload).as_h["csr"].as_s)
-      names, verified, _cn = request_fields(csr)
-      @csr_verified = verified
-      @csr_names = names
+      @csr_names.clear
+      @csr_texts.clear
+      @csr_verified = request_fields(csr, @csr_names, @csr_texts, String::Builder.new)
       @order1 = "processing"
-      json(200, order_json(1, "processing"), {"Retry-After" => "1"})
+      json(res, 200, order_json(1, "processing"), retry_after: "1")
     when "cert"
-      return post_as_get_refused unless signed.payload.empty?
-      @nonces[fresh] = false
-      Response.new(200, @cert_pem, {"Content-Type" => "application/pem-certificate-chain", "Replay-Nonce" => fresh})
+      return post_as_get_refused(res) unless signed.payload.empty?
+      fresh
+      res.header("Content-Type", "application/pem-certificate-chain")
+      res.header("Replay-Nonce", fresh)
+      res.body << @cert_pem
     when "key-change"
-      roll(signed)
+      roll(signed, res)
     else
-      problem(404, "malformed", "no such resource #{path}")
+      problem(res, 404, "malformed", "no such resource #{path}")
     end
   end
 
-  def post_as_get_refused : Response
+  def post_as_get_refused(res : Outgoing) : Nil
     @not_empty = @not_empty + 1
-    problem(400, "malformed", "POST-as-GET carries an empty payload")
+    problem(res, 400, "malformed", "POST-as-GET carries an empty payload")
   end
 
   # Authorization *n*: 1 pending until its challenge is answered, then
   # pending once more with Retry-After: 2, then valid; 2 invalid once
   # answered; 3 pending for ever; 4 pending with Retry-After: 3600.
-  def authorization(n : Int32) : Response
+  def authorization(n : Int32, res : Outgoing) : Nil
     state = @challenges[n]? || "pending"
     case n
     when 1
       if state == "processing"
         @challenges[1] = "waiting"
         @polled_at = ms
-        return json(200, authz_json(1, "pending", challenge_json(1, "processing")), {"Retry-After" => "2"})
+        return json(res, 200, authz_json(1, "pending", challenge_json(1, "processing")), retry_after: "2")
       end
       if state == "waiting"
         @gap_ms = ms - @polled_at
@@ -933,41 +991,43 @@ class Script
         @order1 = "ready"
         state = "valid"
       end
-      json(200, authz_json(1, state == "valid" ? "valid" : "pending", challenge_json(1, state)))
+      json(res, 200, authz_json(1, state == "valid" ? "valid" : "pending", challenge_json(1, state)))
     when 2
-      return json(200, authz_json(2, "pending", challenge_json(2, "pending"))) if state == "pending"
+      return json(res, 200, authz_json(2, "pending", challenge_json(2, "pending"))) if state == "pending"
       error = ",\"error\":{\"type\":\"urn:ietf:params:acme:error:incorrectResponse\",\"detail\":\"the key authorization at token-2 is not this account's\"}"
-      json(200, authz_json(2, "invalid", challenge_json(2, "invalid", error)))
+      json(res, 200, authz_json(2, "invalid", challenge_json(2, "invalid", error)))
     when 4
-      json(200, authz_json(4, "pending", challenge_json(4, state)), {"Retry-After" => "3600"})
+      json(res, 200, authz_json(4, "pending", challenge_json(4, state)), retry_after: "3600")
     else
-      json(200, authz_json(n, "pending", challenge_json(n, state)))
+      json(res, 200, authz_json(n, "pending", challenge_json(n, state)))
     end
   end
 
   # keyChange (RFC 8555 section 7.3.5): the inner JWS carries the new key
   # as jwk, no nonce, the same url, and names the account and its old key.
-  def roll(outer : Signed) : Response
+  def roll(outer : Signed, res : Outgoing) : Nil
     inner = JSON.parse(outer.payload).as_h
     head = inner["protected"].as_s
     body = inner["payload"].as_s
     header = JSON.parse(Base64.decode(head)).as_h
     jwk = header["jwk"]?
-    return problem(400, "malformed", "the inner JWS carries no jwk") unless jwk
-    return problem(400, "malformed", "the inner JWS carries a nonce") if header["nonce"]?
-    return problem(400, "malformed", "the inner JWS carries a kid") if header["kid"]?
-    return problem(400, "malformed", "the inner url differs") unless Bench::StdAcmeExercise.field_s(header, "url") == "#{@base}/key-change"
-    key = key_of(jwk)
+    return problem(res, 400, "malformed", "the inner JWS carries no jwk") unless jwk
+    return problem(res, 400, "malformed", "the inner JWS carries a nonce") if header["nonce"]?
+    return problem(res, 400, "malformed", "the inner JWS carries a kid") if header["kid"]?
+    return problem(res, 400, "malformed", "the inner url differs") unless Bench::StdAcmeExercise.field_s(header, "url") == "#{@base}/key-change"
+    point = point_of(jwk)
+    key = EcdsaPublicKey.from_point(EcdsaCurve::P256, point).or_panic
     signature = unb64(inner["signature"].as_s)
-    return problem(400, "malformed", "the inner signature is not R || S") unless signature.size == 64
-    return problem(400, "malformed", "the inner signature does not verify") unless key.verify(EcdsaHash::SHA256, "#{head}.#{body}", der_of(signature))
+    return problem(res, 400, "malformed", "the inner signature is not R || S") unless signature.size == 64
+    return problem(res, 400, "malformed", "the inner signature does not verify") unless key.verify(EcdsaHash::SHA256, "#{head}.#{body}", der_of(signature))
     payload = JSON.parse(Base64.decode(body)).as_h
-    return problem(400, "malformed", "keyChange names another account") unless payload["account"].as_s == outer.account
+    return problem(res, 400, "malformed", "keyChange names another account") unless payload["account"].as_s == outer.account
     old = payload["oldKey"].to_json
-    return problem(400, "malformed", "keyChange's oldKey is not the account's key") unless old == AcmeJws.jwk(outer.key)
-    @accounts[outer.account] = key
+    return problem(res, 400, "malformed", "keyChange's oldKey is not the account's key") unless old == AcmeJws.jwk(outer.key)
+    at = account_index(outer.account) * 65
+    65.times { |i| @account_points[at + i] = point[i] }
     @rolled = true
-    json(200, "{\"status\":\"valid\"}")
+    json(res, 200, "{\"status\":\"valid\"}")
   end
 end
 
@@ -1012,13 +1072,13 @@ def scripted(script : RisAcmeView, certificate_pem : String) : Nil
   store = RisCertificateStore.new
   trust = TlsConfig.new
   trusting(trust, store, ROOT_PEM)
-  http = HTTPClient.new(tls: trust)
+  # idle: 0 - a second request on a pooled HTTPS connection crashes
+  # (TODO.md, the HTTPClient pool).
+  http = HTTPClient.new(idle: 0, tls: trust)
   defer http.close
   account = SigningKey.p256
   client = AcmeClient.new("#{script.base}/dir", account, 5000, http: http)
-  if problem = client.error
-    raise problem.message
-  end
+  raise client.error.to_s if client.error
   check client.directory.terms_of_service == "https://iyi-acme.example/terms", "the directory's termsOfService read"
   client.poll_ms = 500
   registered = client.register(["mailto:admin@iyi-acme.example"], terms_agreed: true)
@@ -1118,9 +1178,7 @@ def scripted(script : RisAcmeView, certificate_pem : String) : Nil
   kept_error = kept.error
   check kept_error.is_a?(AcmeError) && kept_error.message.includes?("\"#{plain}/acct/1\" is not https://"), "an http:// account URL given is refused by name: #{kept}"
   fresh = AcmeClient.new("#{script.base}/dir", SigningKey.p256, 5000, http: http)
-  if problem = fresh.error
-    raise problem.message
-  end
+  raise fresh.error.to_s if fresh.error
   account = fresh.register(["mailto:plain@iyi-acme.example"], terms_agreed: true)
   check account.is_a?(AcmeError) && account.message.includes?("Location \"#{plain}/acct/") && fresh.account_url.nil?, "an http:// account Location is refused by name: #{account}"
   located = client.new_order(["f.example"])
@@ -1375,12 +1433,12 @@ def run_pebble(directory : String, minica : String, challtestsrv : String, folde
   store = RisCertificateStore.new
   trust = TlsConfig.new
   trusting(trust, store, File.read(minica))
-  http = HTTPClient.new(tls: trust)
+  # idle: 0 - a second request on a pooled HTTPS connection crashes
+  # (TODO.md, the HTTPClient pool).
+  http = HTTPClient.new(idle: 0, tls: trust)
   defer http.close
   acme = AcmeClient.new(directory, SigningKey.p256, http: http)
-  if problem = acme.error
-    raise problem.message
-  end
+  raise acme.error.to_s if acme.error
   check acme.error.nil?, "Pebble's directory read over HTTPS, its certificate checked against Pebble's test root: #{acme}"
   account = acme.register(["mailto:acme@iyi-acme.example"], terms_agreed: true)
   check account.is_a?(String), "an ES256 account made at Pebble: #{account}"
@@ -1395,9 +1453,7 @@ def run_pebble(directory : String, minica : String, challtestsrv : String, folde
   retries = retries + acme.bad_nonce_retries
 
   wide = AcmeClient.new(directory, SigningKey.p384, http: http)
-  if problem = wide.error
-    raise problem.message
-  end
+  raise wide.error.to_s if wide.error
   check wide.register(terms_agreed: true).is_a?(String), "an ES384 account made at Pebble"
   domain_key = rsa_pems.empty? ? SigningKey.p256 : SigningKey.from_pem(File.read(rsa_pems[1])).or_panic
   obtain(wide, "es384.ri-acme.example", "dns-01", domain_key, responder, challtestsrv, roots, folder)
@@ -1408,22 +1464,18 @@ def run_pebble(directory : String, minica : String, challtestsrv : String, folde
   else
     # A client of the branch's own: its pool keeps what these sessions,
     # which end with the branch, hand it.
-    rsa_http = HTTPClient.new(tls: trust)
+    rsa_http = HTTPClient.new(idle: 0, tls: trust)
     rsa_pem = File.read(rsa_pems[0])
     rsa_key = SigningKey.from_pem(rsa_pem).or_panic
     rsa = AcmeClient.new(directory, rsa_key, http: rsa_http)
-    if problem = rsa.error
-      raise problem.message
-    end
+    raise rsa.error.to_s if rsa.error
     made = rsa.register(terms_agreed: true)
     check made.is_a?(String), "an RS256 account made at Pebble: #{made}"
     rolled = rsa.roll_key(SigningKey.p256)
     check rolled.nil?, "the RS256 account's key rolled over to P-256 at Pebble: #{rolled}"
     obtain(rsa, "rollover.ri-acme.example", "dns-01", SigningKey.p256, responder, challtestsrv, roots, folder)
     again = AcmeClient.new(directory, SigningKey.from_pem(rsa_pem).or_panic, http: rsa_http)
-    if problem = again.error
-      raise problem.message
-    end
+    raise again.error.to_s if again.error
     gone = again.register(only_existing: true)
     check gone.is_a?(AcmeError) && gone.problem_type == "urn:ietf:params:acme:error:accountDoesNotExist", "after the rollover the old key finds no account: #{gone}"
     puts "  an RS256 account rolled over to P-256, and its old key refused: #{gone}"
@@ -1432,9 +1484,7 @@ def run_pebble(directory : String, minica : String, challtestsrv : String, folde
   end
 
   ed = AcmeClient.new(directory, ed_key, http: http)
-  if problem = ed.error
-    raise problem.message
-  end
+  raise ed.error.to_s if ed.error
   refused = ed.register(terms_agreed: true)
   check refused.is_a?(AcmeError) && refused.problem_type == "urn:ietf:params:acme:error:badSignatureAlgorithm", "Pebble refuses EdDSA by its problem document: #{refused}"
   puts "  EdDSA refused, as Pebble takes RS256 and ECDSA alone: #{refused}"

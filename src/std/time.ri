@@ -827,7 +827,7 @@ pub struct Location
       end
     end
     where = looked.empty? ? "there is no time zone database on this machine; set ZONEINFO to a directory of TZif files" : "looked in #{looked.join(", ")}"
-    LocationError.new("no time zone named #{name.inspect}: #{where}")
+    LocationError.new("no time zone named #{name.inspect}: #{where}").copy_to(RisCurrentTape.new)
   end
 
   # A location from the bytes of a TZif file, RFC 8536, named *name*.

@@ -205,7 +205,8 @@ pub struct AcmeDirectory
       terms = AcmeJson.text(fields, "termsOfService")
       required = AcmeJson.flag(fields, "externalAccountRequired")
     end
-    AcmeDirectory.new(nonce, account, order, key_change, revoke, terms, required)
+    AcmeDirectory.new(nonce, account, order, key_change, revoke, terms,
+      required).copy_to(RisCurrentTape.new)
   end
 end
 
@@ -232,7 +233,24 @@ pub struct AcmeChallenge
     if (error = object["error"]?) && (fields = error.as_h?)
       problem = AcmeJson.problem(fields, 0)
     end
-    AcmeChallenge.new(kind, url, AcmeJson.text(object, "token") || "", status, problem)
+    AcmeChallenge.new(kind, url, AcmeJson.text(object, "token") || "", status, problem).copy_to(RisCurrentTape.new)
+  end
+
+  # The challenge in *object* appended to *into*, or why it cannot be.
+  @[NoSpec("from's reading, appended for AcmeAuthorization.from")]
+  def self.read(object : RisJsonFields, into : Array(AcmeChallenge)) : AcmeError?
+    kind = AcmeJson.text(object, "type")
+    url = AcmeJson.text(object, "url")
+    status = AcmeJson.text(object, "status")
+    return AcmeError.new("a challenge without its type, url or status") unless kind && url && status
+    # The leaf alone, built here: `problem`'s copy would be made in this
+    # def's scratch, which ends before *into* does.
+    problem = nil
+    if (error = object["error"]?) && (fields = error.as_h?)
+      problem = AcmeJson.problem_leaf(fields, 0, nil)
+    end
+    into << AcmeChallenge.new(kind, url, AcmeJson.text(object, "token") || "", status, problem)
+    nil
   end
 end
 
@@ -257,9 +275,12 @@ pub struct AcmeAuthorization
       identifier = AcmeJson.text(fields, "value") || ""
     end
     challenges = [] of AcmeChallenge
-    AcmeJson.each_object(object, "challenges") { |c| challenges << AcmeChallenge.from(c)! }
+    AcmeJson.each_object(object, "challenges") do |c|
+      failed = AcmeChallenge.read(c, challenges)
+      return failed if failed
+    end
     wildcard = AcmeJson.flag(object, "wildcard")
-    AcmeAuthorization.new(url, identifier, status, wildcard, challenges)
+    AcmeAuthorization.new(url, identifier, status, wildcard, challenges).copy_to(RisCurrentTape.new)
   end
 
   # The challenge of *kind* offered, or why there is none.
@@ -296,7 +317,7 @@ pub struct AcmeOrder
     if (error = object["error"]?) && (fields = error.as_h?)
       problem = AcmeJson.problem(fields, 0)
     end
-    AcmeOrder.new(url, status, names, AcmeJson.texts(object, "authorizations"), finalize, AcmeJson.text(object, "certificate"), problem)
+    AcmeOrder.new(url, status, names, AcmeJson.texts(object, "authorizations"), finalize, AcmeJson.text(object, "certificate"), problem).copy_to(RisCurrentTape.new)
   end
 end
 
@@ -307,14 +328,30 @@ pub class AcmeClient
   # The most bytes of an answer read: Pebble's chains of two were 1,275
   # and 1,279 bytes of PEM when measured, and Let's Encrypt's run to a few
   # certificates, so a megabyte is room for any chain and no more.
-  MAX_BODY   = 1048576_i64
+  MAX_BODY = 1048576_i64
+  # The bytes a session keeps, at most: a certificate chain or two and
+  # the small JSON answers of an order's requests and polls.
+  TEXTS      = 4194304
   USER_AGENT = "iyi-acme"
 
   @directory : AcmeDirectory? = nil
-  getter error : AcmeError? = nil
+  @error : AcmeError? = nil
+  # Whether the directory was read (or given): `error` and `directory`
+  # read it on first use, so what the session keeps of the answer is
+  # copied into @texts outside the constructor (SPEC 2.2).
+  @loaded = false
+
+  # Why the session cannot be used - its directory not read, or a URL
+  # given that is not https:// - or nil.
+  @[NoSpec("the getter it was, reading the directory first")]
+  def error : AcmeError?
+    load
+    @error
+  end
 
   def directory : AcmeDirectory
-    directory.as(AcmeDirectory)
+    load
+    @directory.as(AcmeDirectory)
   end
 
   getter key : SigningKey
@@ -331,13 +368,16 @@ pub class AcmeClient
   property timeout_ms : Int32
   @directory_url : String
   @nonce : String? = nil
-  @texts = String::Builder.new
-  @thumbprint : String
+  # What the session keeps (URLs, nonces, bodies it parses), as views of
+  # this one builder: sized up front, as growing would move it from
+  # under the views (`keep` refuses to).
+  @texts = String::Builder.new(TEXTS)
+  @thumbprint = ""
 
   @http : HTTPClient?
 
   def initialize(@directory_url : String, @key : SigningKey, @directory : AcmeDirectory, @timeout_ms : Int32, @http : HTTPClient? = nil)
-    @thumbprint = AcmeJws.thumbprint(@key.public_key)
+    @loaded = true
   end
 
   # A session with the server whose directory is at *url*, signing with
@@ -349,29 +389,37 @@ pub class AcmeClient
   def initialize(@directory_url : String, @key : SigningKey,
                  @timeout_ms : Int32 = 30000, account_url : String? = nil,
                  @http : HTTPClient? = nil)
-    @thumbprint = AcmeJws.thumbprint(@key.public_key)
     @account_url = account_url
     raise "acme: a timeout must be at least 1 ms" if @timeout_ms < 1
-    if account_url
+  end
+
+  # The directory read, once; what is kept of its answer is copied into
+  # @texts, as the answer is freed when this call ends.
+  private def load : Nil
+    return if @loaded
+    @loaded = true
+    if account_url = @account_url
       if refused = AcmeClient.https(account_url, "the account")
-        @error = refused
+        @error = kept(refused)
         return
       end
     end
     response = AcmeClient.exchange("GET", @directory_url, "", nil, @timeout_ms, @http)
     if response.is_a?(AcmeError)
-      @error = response
+      @error = kept(response)
       return
     end
     if problem = response.problem("the directory")
-      @error = problem
+      @error = kept(problem)
       return
     end
     parsed = AcmeDirectory.parse(response.body)
     if parsed.is_a?(AcmeError)
-      @error = parsed
+      @error = kept(parsed)
     else
-      @directory = parsed
+      @directory = AcmeDirectory.new(keep(parsed.new_nonce), keep(parsed.new_account), keep(parsed.new_order),
+        keep?(parsed.key_change), keep?(parsed.revoke_cert), keep?(parsed.terms_of_service),
+        parsed.external_account_required)
     end
   end
 
@@ -393,12 +441,13 @@ pub class AcmeClient
 
   # The account key's JWK thumbprint (RFC 7638), SHA-256 and base64url.
   def thumbprint : String
+    @thumbprint = keep(AcmeJws.thumbprint(@key.public_key)) if @thumbprint.empty?
     @thumbprint
   end
 
   # *token*'s key authorization (section 8.1): `token.thumbprint`.
   def key_authorization(token : String) : String
-    "#{token}.#{@thumbprint}"
+    "#{token}.#{thumbprint}"
   end
 
   # The dns-01 TXT record's value for *token* (section 8.4).
@@ -441,13 +490,23 @@ pub class AcmeClient
     return AcmeError.new("the account #{url} is #{status || "without a status"}, not valid") unless status == "valid"
     kept = keep(url)
     @account_url = kept
-    kept
+    kept.copy_to(RisCurrentTape.new)
   end
 
   private def keep(text : String) : String
+    raise "acme: a session keeps #{TEXTS} bytes at most" if @texts.bytesize + text.bytesize > TEXTS
     at = @texts.bytesize
     @texts << text
     @texts.finish[at, text.bytesize]
+  end
+
+  private def keep?(text : String?) : String?
+    text ? keep(text) : nil
+  end
+
+  # *error* with its texts kept; its subproblems are not.
+  private def kept(error : AcmeError) : AcmeError
+    AcmeError.new(keep(error.detail), keep(error.problem_type), error.status, keep(error.identifier))
   end
 
   # The account moved to *new_key* (section 7.3.5): keyChange's inner JWS
@@ -465,9 +524,11 @@ pub class AcmeClient
         json.field("oldKey") { json.raw(AcmeJws.jwk(@key.public_key)) }
       end
     end
-    post(url, AcmeJws.sign(new_key, inner_header, inner_payload))!
+    sent = post(url, AcmeJws.sign(new_key, inner_header, inner_payload))
+    return kept(sent) if sent.is_a?(AcmeError)
     @key = new_key
-    @thumbprint = AcmeJws.thumbprint(new_key.public_key)
+    # `thumbprint` takes the new key's anew.
+    @thumbprint = ""
     nil
   end
 
@@ -489,41 +550,45 @@ pub class AcmeClient
       end
     end
     response = post(directory.new_order, payload)!
-    url = response.location
+    url = keep?(response.location)
     return AcmeError.new(keep("newOrder answered #{response.status} without the order's Location")) unless url
     refused = AcmeClient.https(url, "newOrder's Location")
     return refused if refused
-    AcmeOrder.from(url, AcmeJson.object(response.body, "the order")!)
+    AcmeOrder.from(url, AcmeJson.object(keep(response.body), "the order")!).copy_to(RisCurrentTape.new)
   end
 
   # The order at *url*, read (POST-as-GET).
   def order(url : String) : AcmeOrder | AcmeError
-    AcmeOrder.from(url, AcmeJson.object(post(url, nil)!.body, "the order")!)
+    AcmeOrder.from(url, AcmeJson.object(keep(post(url, nil)!.body), "the order")!)
   end
 
   # The authorization at *url*, read (POST-as-GET).
   def authorization(url : String) : AcmeAuthorization | AcmeError
-    AcmeAuthorization.from(url, AcmeJson.object(post(url, nil)!.body, "the authorization")!)
+    AcmeAuthorization.from(url, AcmeJson.object(keep(post(url, nil)!.body), "the authorization")!)
   end
 
   # Tells the server *challenge* is ready to be checked (section 7.5.1):
   # its URL posted `{}`. Put the answer in place first.
   def respond(challenge : AcmeChallenge) : AcmeChallenge | AcmeError
-    AcmeChallenge.from(AcmeJson.object(post(challenge.url, "{}")!.body, "the challenge")!)
+    AcmeChallenge.from(AcmeJson.object(keep(post(challenge.url, "{}")!.body), "the challenge")!)
   end
 
   # The authorization at *url* polled until it is no longer pending: the
   # valid authorization, or the error that made it something else.
   def wait_authorization(url : String) : AcmeAuthorization | AcmeError
-    object = poll(url, post(url, nil)!, ["pending"], "the authorization #{url}")!
+    what = "the authorization #{url}"
+    object = AcmeJson.object(poll(url, post(url, nil)!, ["pending"], what)!, what)!
     authorization = AcmeAuthorization.from(url, object)!
-    return authorization if authorization.status == "valid"
-    authorization.challenges.each do |c|
-      if problem = c.error
-        return problem
+    unless authorization.status == "valid"
+      authorization.challenges.each do |c|
+        if problem = c.error
+          return kept(problem)
+        end
       end
+      return AcmeError.new(keep("the authorization for #{authorization.identifier} is #{authorization.status}"))
     end
-    AcmeError.new(keep("the authorization for #{authorization.identifier} is #{authorization.status}"))
+    # The one copy out, last: what was read lives in this def's scratch.
+    authorization.copy_to(RisCurrentTape.new)
   end
 
   # The order finalized with a certificate request for its names that
@@ -532,25 +597,43 @@ pub class AcmeClient
   # URL; or the error that made it invalid.
   def finalize_order(order : AcmeOrder, key : SigningKey) : AcmeOrder | AcmeError
     current = order
-    if current.status == "pending"
-      current = AcmeOrder.from(order.url, poll(order.url, post(order.url, nil)!, ["pending"], "the order #{order.url}")!)!
+    if order.status == "pending"
+      read = poll_order(order.url, post(order.url, nil), ["pending"])
+      return kept(read) if read.is_a?(AcmeError)
+      current = read
     end
-    return current if current.status == "valid"
-    return order_failure(current) unless current.status == "ready"
-    request = X509.request(key, current.identifiers)
-    return AcmeError.new("the certificate request: #{request.message}") if request.is_a?(X509Error)
-    payload = JSON.build do |json|
-      json.object { json.field("csr", AcmeJws.b64u(request)) }
+    unless current.status == "valid"
+      return order_failure(current) unless current.status == "ready"
+      request = X509.request(key, current.identifiers)
+      return AcmeError.new(keep("the certificate request: #{request.message}")) if request.is_a?(X509Error)
+      payload = JSON.build do |json|
+        json.object { json.field("csr", AcmeJws.b64u(request)) }
+      end
+      finished = poll_order(order.url, post(current.finalize_url, payload), ["ready", "processing"])
+      return kept(finished) if finished.is_a?(AcmeError)
+      return order_failure(finished) unless finished.status == "valid" && finished.certificate_url
+      current = finished
     end
-    answered = post(current.finalize_url, payload)!
-    finished = AcmeOrder.from(order.url, poll(order.url, answered, ["ready", "processing"], "the order #{order.url}")!)!
-    return finished if finished.status == "valid" && finished.certificate_url
-    order_failure(finished)
+    # The one copy out, last: the order read lives in this def's scratch.
+    current.copy_to(RisCurrentTape.new)
+  end
+
+  # The order at *url* as *answer* - a POST to it or its finalize URL -
+  # and the polls after it give it once its status is not one of
+  # *waiting*.
+  private def poll_order(url : String, answer : AcmeResponse | AcmeError, waiting : Array(String)) : AcmeOrder | AcmeError
+    return kept(answer) if answer.is_a?(AcmeError)
+    what = "the order #{url}"
+    body = poll(url, answer, waiting, what)
+    return kept(body) if body.is_a?(AcmeError)
+    object = AcmeJson.object(body, what)
+    return kept(object) if object.is_a?(AcmeError)
+    AcmeOrder.from(url, object).copy_to(RisCurrentTape.new)
   end
 
   private def order_failure(order : AcmeOrder) : AcmeError
     if problem = order.error
-      return problem
+      return kept(problem)
     end
     AcmeError.new(keep("the order #{order.url} is #{order.status}"))
   end
@@ -566,33 +649,30 @@ pub class AcmeClient
       return AcmeError.new("the certificate at #{url}: #{problem.message}")
     end
     return AcmeError.new("the certificate at #{url} holds no certificate") if chain.kept_certificates.empty?
-    response.body
+    keep(response.body).copy_to(RisCurrentTape.new)
   end
 
   # *payload* - nil for POST-as-GET - signed and posted to *url*, a
   # `badNonce` answer sent again with the nonce it carried. An answer of
   # 400 or more is its problem, as an error.
-  private def post(url : String, payload : String?, accept : String? = nil) : AcmeResponse | AcmeError
-    retries = 0
-    while true
-      nonce = take_nonce!
-      use_jwk = url == directory.new_account
-      kid = use_jwk ? nil : @account_url
-      return AcmeError.new("a request to #{url} before the account is known: register first") unless use_jwk || kid
-      body = AcmeJws.sign(@key, AcmeJws.header(@key, nonce, url, kid), payload)
-      response = AcmeClient.exchange("POST", url, body, accept, @timeout_ms, @http)!
-      nonce = response.nonce
-      @nonce = nonce ? keep(nonce) : nil
-      problem = response.problem("POST #{url}")
-      if problem && problem.problem_type == AcmeError::BAD_NONCE && retries < MAX_BAD_NONCE
-        retries = retries + 1
-        @bad_nonce_retries = @bad_nonce_retries + 1
-        next
-      end
-      return problem if problem
-      return response
+  private def post(url : String, payload : String?, accept : String? = nil, retries : Int32 = 0) : AcmeResponse | AcmeError
+    nonce = take_nonce
+    return AcmeError.new(nonce.detail, nonce.problem_type, nonce.status, nonce.identifier) if nonce.is_a?(AcmeError)
+    use_jwk = url == directory.new_account
+    kid = use_jwk ? nil : @account_url
+    return AcmeError.new("a request to #{url} before the account is known: register first") unless use_jwk || kid
+    body = AcmeJws.sign(@key, AcmeJws.header(@key, nonce, url, kid), payload)
+    response = AcmeClient.exchange("POST", url, body, accept, @timeout_ms, @http)
+    return AcmeError.new(response.detail) if response.is_a?(AcmeError)
+    answered = response.nonce
+    @nonce = answered ? keep(answered) : nil
+    problem = response.problem("POST #{url}")
+    if problem && problem.problem_type == AcmeError::BAD_NONCE && retries < MAX_BAD_NONCE
+      @bad_nonce_retries = @bad_nonce_retries + 1
+      return post(url, payload, accept, retries + 1)
     end
-    raise "unreachable"
+    return problem if problem
+    response.copy_to(RisCurrentTape.new)
   end
 
   # The nonce the last answer carried, dropped as it is taken, or a new
@@ -602,34 +682,43 @@ pub class AcmeClient
       @nonce = nil
       return held
     end
-    response = AcmeClient.exchange("HEAD", directory.new_nonce, "", nil, @timeout_ms, @http)!
+    response = AcmeClient.exchange("HEAD", directory.new_nonce, "", nil, @timeout_ms, @http)
+    return AcmeError.new(response.detail) if response.is_a?(AcmeError)
     problem = response.problem("newNonce")
     return problem if problem
     nonce = response.nonce
     return AcmeError.new("newNonce answered #{response.status} without a Replay-Nonce") unless nonce
-    nonce
+    keep(nonce).copy_to(RisCurrentTape.new)
   end
 
-  # *response*'s object, and the objects polling *url* answers after it,
-  # until its status is not one of *waiting*: each poll after the time its
-  # answer's Retry-After asks, or `poll_ms`; `max_polls` polls and
-  # `wait_ms` at most.
-  private def poll(url : String, response : AcmeResponse, waiting : Array(String), what : String) : RisJsonFields | AcmeError
+  # *first*'s body, or the body of an answer polling *url* gives after
+  # it, once its status is not one of *waiting*: each poll after the time
+  # its answer's Retry-After asks, or `poll_ms`; `max_polls` polls and
+  # `wait_ms` at most. Each body is kept in @texts: a round's answer is
+  # freed when the round ends (the bodies of one wait, `max_polls` at
+  # most).
+  private def poll(url : String, first : AcmeResponse, waiting : Array(String), what : String) : String | AcmeError
     started = AcmeClock.ms
     polls = 0
+    body = keep(first.body)
+    retry_after = keep?(first.retry_after)
     while true
-      object = AcmeJson.object(response.body, what)!
+      object = AcmeJson.object(body, what)
+      return AcmeError.new(object.detail) if object.is_a?(AcmeError)
       status = AcmeJson.text(object, "status") || ""
-      return object unless waiting.includes?(status)
+      return body.copy_to(RisCurrentTape.new) unless waiting.includes?(status)
       return AcmeError.new("#{what} is still #{status} after #{polls} polls") if polls >= @max_polls
-      wait = AcmeClient.delay(response.retry_after, @poll_ms, Time.utc)
+      wait = AcmeClient.delay(retry_after, @poll_ms, Time.utc)
       left = started + @wait_ms - AcmeClock.ms
       if wait > left
         return AcmeError.new("#{what} is still #{status}, and the next poll would come #{wait} ms from now, past the #{@wait_ms} ms the wait has")
       end
       return AcmeError.new("the wait for #{what} was cancelled") if sleep(wait.to_i32).is_a?(Cancelled)
       polls = polls + 1
-      response = post(url, nil)!
+      answer = post(url, nil)
+      return AcmeError.new(answer.detail, answer.problem_type, answer.status, answer.identifier) if answer.is_a?(AcmeError)
+      body = keep(answer.body)
+      retry_after = keep?(answer.retry_after)
     end
     raise "unreachable"
   end
@@ -666,7 +755,7 @@ pub class AcmeClient
 
   private def self.exchange_into(method : String, url : String, body : String, accept : String?, timeout_ms : Int32, http : HTTPClient?, into : String::Builder) : AcmeResponse | AcmeError
     refused = https(url, method)
-    return refused if refused
+    return AcmeError.new(keep(refused.detail, into).as(String)) if refused
     headers = {"User-Agent" => USER_AGENT}
     headers["Content-Type"] = "application/jose+json" if method == "POST"
     headers["Accept"] = accept if accept
@@ -706,7 +795,7 @@ struct AcmeResponse
     if object.is_a?(AcmeError)
       return AcmeError.new("#{what} answered #{@status}: #{AcmeJson.excerpt(@body)}", status: @status)
     end
-    AcmeJson.problem(object, @status)
+    AcmeJson.problem(object, @status).copy_to(RisCurrentTape.new)
   end
 end
 
@@ -718,7 +807,7 @@ struct AcmeJson
     return AcmeError.new("#{what} is not JSON: #{excerpt(text)}") unless doc
     object = doc.as_h?
     return AcmeError.new("#{what} is JSON, and not an object") unless object
-    object
+    object.copy_to(RisCurrentTape.new)
   end
 
   def self.text(object : RisJsonFields, key : String) : String?
@@ -773,11 +862,12 @@ struct AcmeJson
   def self.problem(object : RisJsonFields, status : Int32) : AcmeError
     subproblems = [] of AcmeError
     each_object(object, "subproblems") { |sub| subproblems << problem_leaf(sub, status, nil) }
-    problem_leaf(object, status, subproblems)
+    problem_leaf(object, status, subproblems).copy_to(RisCurrentTape.new)
   end
 
-  private def self.problem_leaf(object : RisJsonFields, status : Int32,
-                                subproblems : Array(AcmeError)?) : AcmeError
+  @[NoSpec("problem's own step, shared with AcmeChallenge.read")]
+  def self.problem_leaf(object : RisJsonFields, status : Int32,
+                        subproblems : Array(AcmeError)?) : AcmeError
     kind = text(object, "type") || "about:blank"
     detail = text(object, "detail") || "(no detail)"
     identifier = ""
@@ -984,7 +1074,7 @@ pub struct AcmeTlsAlpn01
   # The identity a std/tls server shows for *domain*: `certificate`
   # under a P-256 key made for it. Its config is the caller's owner:
   # `config = TlsServerConfig.new(identity)`, its `alpn` [PROTOCOL] alone.
-  def self.identity(*args, **options)
+  def self.identity(*args : *T, **options : **U) : NoReturn forall T, U
     {% raise "ACME identities have an owner: declare prepared =
 " +
              "RisAcmeTlsIdentity.new(domain, key_authorization), check prepared.error,

@@ -33,7 +33,9 @@ class TlsHandler < HttpHandler
   end
 end
 
-def configuration : AutocertConfig
+# The configuration the arguments give, yielded: it lives on the
+# caller's tape for the block, not past it.
+def configuration(&)
   args = Program.arguments
   if args.size < 5
     raise "DIRECTORY CACHE HOST EMAIL accept-terms [TLS_PORT HTTP_PORT]"
@@ -43,20 +45,22 @@ def configuration : AutocertConfig
   config = AutocertConfig.new(args[0], args[1], hosts)
   config.email = args[3]
   config.accept_terms = args[4] == "accept-terms".as_tape
-  config
+  yield config
 end
 
 group do |g|
   g.spawn do
-    if failed = Autocert.run(configuration)
-      raise failed.message
+    configuration do |config|
+      if failed = Autocert.run(config)
+        raise failed.message
+      end
     end
     0
   end
   g.spawn do
     args = Program.arguments
     port = args.size > 6 ? args[6].to_i : 80
-    Server.answer("0.0.0.0", port, configuration, HttpHandler)
+    configuration { |config| Server.answer("0.0.0.0", port, config, HttpHandler) }
     0
   end
   g.spawn do
@@ -66,6 +70,6 @@ group do |g|
   end
   args = Program.arguments
   port = args.size > 5 ? args[5].to_i : 443
-  Server.answer("0.0.0.0", port, configuration, TlsHandler)
+  configuration { |config| Server.answer("0.0.0.0", port, config, TlsHandler) }
   0
 end

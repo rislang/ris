@@ -78,6 +78,7 @@ expect() {
 }
 
 expect byte_char_equal 'A String index is a UInt8 byte'
+expect kept_struct_returned 'that holds more than texts'
 
 # Yielded holders retain the provenance of their borrowed owner fields.
 for name in yield_owner_field yield_clone_attrs svcb_store \
@@ -2635,6 +2636,14 @@ if grep -qF 'tape_block_handler_store.ri:13:5' <<<"$out" &&
   echo "refused  tape_block_handler_store (at the handler's line)"
 else
   echo "FAILED   tape_block_handler_store line: $out"; status=1
+fi
+# RIS_TAPE_POISON=1: freed tape reads 0xDB only when it is set.
+plain=$("$RIS" run test/ris/tape_poison.ri 2>&1)
+poisoned=$(RIS_TAPE_POISON=1 "$RIS" run test/ris/tape_poison.ri 2>&1)
+if [ "$plain" = "kept 120" ] && [ "$poisoned" = "poisoned" ]; then
+  echo "runs     tape_poison (freed tape poisoned on request)"
+else
+  echo "FAILED   tape_poison: $plain / $poisoned"; status=1
 fi
 # What a tape block may still do; its scratch is freed when it ends.
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/tape_block_reset.ri 2>&1)

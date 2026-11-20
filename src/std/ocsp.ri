@@ -397,7 +397,12 @@ pub struct OcspResponse
     return OcspError.new("a ResponseData with no SingleResponse") if singles.empty?
     response_start = store.responses.size
     responses = store.responses
-    singles.each { |single| responses << read_single(single, store)!; nil }
+    i = 0
+    while i < singles.size
+      failed = read_single(singles[i], store, responses)
+      return failed if failed
+      i = i + 1
+    end
     nonce = nil.as(Array::View(UInt8)?)
     if data.size == 4
       return OcspError.new("#{data[3].describe} where a ResponseData's extensions [1] belong") unless data[3].context?(1)
@@ -411,7 +416,10 @@ pub struct OcspResponse
       certificates[cert_start, certificates.size - cert_start])
   end
 
-  private def self.read_single(single : DerValue, store : RisOcspStore) : OcspSingleResponse | OcspError
+  # The SingleResponse in *single*, appended to *responses*; or why it
+  # does not read.
+  private def self.read_single(single : DerValue, store : RisOcspStore,
+                               responses : Array(OcspSingleResponse)) : OcspError?
     fields = OcspAsn1.tape_values(single.tape_sequence)!
     return OcspError.new("a SingleResponse of #{fields.size} values, not 3 to 5") unless fields.size >= 3 && fields.size <= 5
     cert_id = read_cert_id(fields[0], store)!
@@ -447,7 +455,8 @@ pub struct OcspResponse
       rest = rest + 1
     end
     return OcspError.new("#{fields[rest].describe} where a SingleResponse ends") unless rest == fields.size
-    OcspSingleResponse.new(cert_id, status, revoked_at, reason, this_update, next_update)
+    responses << OcspSingleResponse.new(cert_id, status, revoked_at, reason, this_update, next_update)
+    nil
   end
 
   private def self.read_cert_id(value : DerValue, store : RisOcspStore) : OcspCertId | OcspError
