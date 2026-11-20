@@ -67,6 +67,40 @@ TOOLS = {
     # WEIGHTS `test/cli/std_siblings.sh` deals its shards by; the logs are a
     # run's, downloaded, so there is nothing in a checkout to point it at.
     "sibling_times.py",
+    # `bash test/cli/bounded_gate.sh MINUTES GATE [ARGS...]` runs another
+    # gate under a time limit; it is a wrapper, with no answer of its own.
+    "bounded_gate.sh",
+    # These time a cost against a budget or a ratio. A timing never fails
+    # a check unless SPEC promises the number (AGENTS.md), and none does;
+    # they are run by hand on a quiet machine.
+    "defer_cost.sh",
+    "definition_typing_scale.py",
+    "tls_speed.sh",
+}
+
+# A gate that fails on this tree: it stays out of CI until its TODO.md item
+# (section 7) is done, and then moves into a workflow step and off this list.
+BROKEN = {
+    "collections_exercise.sh",
+    "collector_free_floor.sh",
+    "daemon_agrees.py",
+    "debug_info.py",
+    "generic_boundary.py",
+    "io_exercise.sh",
+    "language_is_named.py",
+    "lsp_artifacts.py",
+    "lsp_positions.py",
+    "lsp_token_boundaries.py",
+    "mod_context.sh",
+    "number_exercise.sh",
+    "parallel_exercise.sh",
+    "runtime_exercise.sh",
+    "server_load.sh",
+    "socket_exercise.sh",
+    "value_exercise.sh",
+    "measured_numbers.py",
+    "metric_port.sh",
+    "rebuild_speed.py",
 }
 
 
@@ -142,21 +176,26 @@ def main():
     every = scripts()
     by = reached(every)
     unreached = sorted(set(every) - set(by))
-    unexplained = [name for name in unreached if name not in TOOLS]
+    unexplained = [n for n in unreached if n not in TOOLS | BROKEN]
 
     print(f"{len(every)} scripts under test/cli/ and test/speed/, {len(by)} of them reached")
     for name in unreached:
-        why = "a tool, not a gate" if name in TOOLS else "REACHED BY NOTHING"
+        if name in TOOLS:
+            why = "a tool, not a gate"
+        elif name in BROKEN:
+            why = "fails: see TODO.md"
+        else:
+            why = "REACHED BY NOTHING"
         print(f"  {name:34s} {why}")
 
-    missing_tools = sorted(TOOLS - set(every))
+    missing_tools = sorted((TOOLS | BROKEN) - set(every))
     if missing_tools:
         print()
         print("TOOLS names a file that is not there: " + ", ".join(missing_tools))
         print("Remove it from the list, in the same commit as the file.")
         return 1
 
-    named_tools = sorted(TOOLS & set(by))
+    named_tools = sorted((TOOLS | BROKEN) & set(by))
     if named_tools:
         print()
         print("TOOLS names a file something runs: " + ", ".join(named_tools))

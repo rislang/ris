@@ -129,6 +129,38 @@ jobs:
         run: bash test/cli/ri_only.sh
         env:
           RIS: ./bin/ris
+      - name: every gate is reached by something
+        if: matrix.shard == 'heap'
+        run: python3 test/cli/gates_reachable.py
+      - name: ris test runs a project's tests
+        if: matrix.shard == 'heap'
+        run: bash test/cli/test_verb.sh
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
+      - name: the verbs and packages
+        if: matrix.shard == 'heap'
+        run: |
+          bash test/cli/verbs_exercise.sh
+          bash test/cli/packages_get.sh
+          bash test/cli/spec_required.sh
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
+      - name: the build cache, under concurrency and in its dir
+        if: matrix.shard == 'heap'
+        run: |
+          bash test/cli/cache_concurrency.sh
+          bash test/cli/iyi_cache_dir.sh
+          bash test/cli/mod_diff.sh
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
+      - name: the enum, float text and format surfaces
+        if: matrix.shard == 'heap'
+        run: |
+          bash test/cli/enum_exercise.sh
+          bash test/cli/float_text.sh
+          bash test/cli/format_exercise.sh
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
       - name: test/ris/check.sh
         run: bash test/ris/check.sh
         env:

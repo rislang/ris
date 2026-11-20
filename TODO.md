@@ -160,19 +160,45 @@ Unknown must be refused (SPEC 3.6).
 
 ## 7. Benches
 
-* 36 check scripts nothing runs (not CI, not test/ris/check.sh, not another
-  script; gates_reachable.py lists them): wire each into CI or delete it.
-  test/cli: bounded_gate.sh, collections_exercise.sh, collector_free_floor.sh,
-  daemon_agrees.py, debug_info.py, enum_exercise.sh, float_text.sh,
-  format_exercise.sh, gates_reachable.py, generic_boundary.py, io_exercise.sh,
-  language_is_named.py, lsp_artifacts.py, lsp_positions.py,
-  lsp_token_boundaries.py, mod_context.sh, mod_diff.sh, number_exercise.sh,
-  packages_get.sh, parallel_exercise.sh, runtime_exercise.sh,
-  sandbox_story.sh, server_load.sh, socket_exercise.sh, tarball_std.sh,
-  test_verb.sh, value_exercise.sh, verbs_exercise.sh,
-  wasm_concurrency_probe.sh, windows_exercise.sh. test/speed: defer_cost.sh,
-  definition_typing_scale.py, measured_numbers.py, metric_port.sh,
-  rebuild_speed.py, tls_speed.sh.
+* Unrun check scripts sorted (2026-11-20): 12 run in CI, windows, wasm
+  and sandbox scripts deleted, bounded_gate and 3 timings are TOOLS. The
+  20 below fail and sit in gates_reachable.py's BROKEN; each moves to a
+  CI step and off BROKEN when it passes.
+* collections_exercise.sh: `{{1, 2} => 5}` prints without the space
+  `{ {1, 2} => 5 }`; a missing key panics without "no such key";
+  "tape bad size: -1".
+* value_exercise.sh: a tuple whose first item is a tuple prints
+  `{{1, 2}, 3}`, expected `{ {1, 2}, 3 }`.
+* collector_free_floor.sh: "a collector is still linked"; samples/ris/
+  autocert.ri fails "cannot store a view beyond its owner scope"; "the
+  default build broke".
+* debug_info.py: no sample builds with --debug (autocert, basics, calc…).
+* io_exercise.sh: the break-it proofs pass broken (short reads, read_all,
+  puts on an ended line): the exercise does not test them.
+* socket_exercise.sh: "accept after close" exits 1 at "socket is closed".
+* parallel_exercise.sh: shares_array is refused for the tape-proc reason,
+  not the one the script expects.
+* runtime_exercise.sh: dependency floor: the runtime puts undefined
+  symbols back on the link line (__gmon_start__, _ITM_*…).
+* server_load.sh: the failure proof copies to patched/ris/, which is not
+  there (`cp: target 'patched/ris/'`).
+* number_exercise.sh: the break-it step edits src/ris/string.ri, gone;
+  "remainder without its guard" dies of signal 8.
+* language_is_named.py: two Parser.new calls without filename in
+  syntax/parser.cr (lines 493, 905).
+* mod_context.sh: imports left ungrounded (autocert calc logline webapp);
+  tool dependencies fail on webapp.
+* lsp_artifacts.py: the workspace does not build (with source and
+  artifact-only); no interface hash.
+* lsp_positions.py: hangs (killed after 15 min, no output).
+* lsp_token_boundaries.py: reads samples/iyi, gone.
+* generic_boundary.py: builds immutable.ri from the wrong directory
+  ("no such file: immutable.ri").
+* daemon_agrees.py: runs bin/iyi, gone; use bin/ris.
+* test/speed/measured_numbers.py: reads README.iyi.md, gone.
+* test/speed/metric_port.sh: the port imports std/gc, refused.
+* test/speed/rebuild_speed.py: copies samples/iyi; "can't find module
+  calc/lexer".
 
 * Build each test/cli program, group refusals by message, fix per group.
   2026-11-14 (fifth round): 114 of 130 programs pass
@@ -359,6 +385,10 @@ Unknown must be refused (SPEC 3.6).
 * Most of std_http_exercise.sh's mutation patterns no longer match
   http.ri. Its program builds (fifth round) and fails at run time at "a
   HEAD names the coding its GET would have, and writes no body".
+
+* `ris run --sandbox` (wasm32-wasi, src/compiler/iyi/command/sandbox.cr)
+  has no target in SPEC 7.1 and no test: remove it, with agent_loop's
+  sandbox step.
 
 ## 8. Speed
 
