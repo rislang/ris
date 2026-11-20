@@ -104,7 +104,7 @@ for name in sse_reconnect_id rsa_string_message response_owner \
 done
 # client_open_block compiles std/http's client: about 45 s on its own.
 for name in big_shift_right owner_reference client_open_block \
-  udp_handoff joined_task_borrow pointer_equal; do
+  udp_handoff joined_task_borrow pointer_equal refill_branch_loop; do
   out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
   if [ "$code" -eq 0 ] && [ -z "$out" ]; then
     echo "runs     $name"
@@ -116,6 +116,8 @@ expect yield_owner_field 'cannot return a value made in this block'
 expect block_item_downcase 'cannot store data made in this block'
 expect def_scratch_struct 'cannot store data made in this block'
 expect owner_reference_view 'cannot shrink tape storage with a live view'
+expect refill_branch_loop_view 'cannot shrink tape storage with a live view'
+expect refill_branch_loop_kept 'cannot shrink tape storage with a live view'
 # A joined task borrows one value of its spawner (SPEC 5.1), no more.
 expect borrow_used_in_group 'inside the group whose task spawned'
 expect borrow_two_tasks 'inside the group whose task spawned'

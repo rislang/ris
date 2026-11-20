@@ -51,21 +51,13 @@ Fix a checker hole below only when a cluster hits it.
 
 Unknown must be refused (SPEC 3.6).
 
-* A refill under a branch in a loop is refused as clearing a view an
-  earlier round left: a class whose `@names` view its own `@text`,
-  refilled (`@text.clear; @names.clear`, then appends) through
-  `if c = client; c.refill; end` in `2.times`, then `client` read, is
-  refused at the clear. The else path keeps the slot the then path
-  emptied, and the next round's use carries the old view, born before
-  that round's clear. No path holds it: kill the view with its slot.
-
 * A one-call def's value moves down only when it is one fresh flat
   value: a tuple or two locals do not. Bzip2.decompress tags its String
   (a 0 or 1 byte first) to answer bytes or an error in one value.
-
-* A def with several returns loses what its answer views: read_union's
-  `Array(String)` member was taken as made in its caller's scratch and
-  refused (SPEC 1.9); std/json reads it by a tail call instead.
+  Found 2026-11-20: not a checker hole. SPEC 1.5 moves down only "a fresh
+  flat value"; a Tuple(String, Array) made in a def is refused by
+  check_leaving (SPEC 1.9) as written. Moving two values down needs a
+  SPEC 1.5 change (EGM review) and codegen for a multi-value move.
 
 * A struct whose constructor makes its own data is refused at a store
   past its round only with no owner argument: one given an Array or Hash

@@ -1,0 +1,31 @@
+# refill_branch_loop's neighbour: a name one round's else path keeps
+# views the buffer a later round's refill clears, so it is refused.
+
+class RefillKeptClient
+  @text : String::Builder = String::Builder.new(16)
+  @names = [] of String
+
+  def refill : Int32
+    @text.clear
+    @names.clear
+    @text << "ab"
+    @names << @text.finish[0, 1]
+    @names.size
+  end
+
+  def first : String
+    @names[0]
+  end
+end
+
+owner = RefillKeptClient.new
+owner.refill
+held = ""
+3.times do |i|
+  puts held
+  if i == 1
+    owner.refill
+  else
+    held = owner.first
+  end
+end
