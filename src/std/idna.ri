@@ -57,6 +57,11 @@
 #   * Symbols and emoji are DISALLOWED in IDNA2008 and refused (`"☃.net"`,
 #     even written `"xn--n3h.net"`), where a WHATWG URL parser takes them.
 #
+# Writer overloads borrow input and append to the caller's builder.
+# On error a writer may have appended a prefix; discard it before reuse.
+# UTS 46 non-transitional mapping is out of scope: ASCII lowercasing
+# plus Punycode labels with xn-- is the supported conversion.
+#
 # Pure computation: no platform, no clock, no randomness; `std/uri` builds
 # `URI.ascii_host` on it.
 
@@ -134,57 +139,61 @@ pub struct Punycode
   # string has one. Bytes that are not UTF-8 are read as `each_char` reads
   # them, U+FFFD each.
   def self.encode(text : String) : String
-    points = [] of Int64
+    String.build(text.bytesize + 8) { |io| encode(text, io) }
+  end
+
+  # Append RFC 3492 Punycode directly to the caller's builder.
+  def self.encode(text : String, io : String::Builder) : Nil
+    points = Array(Int64).new(text.bytesize)
     text.each_char { |char| points << char.ord.to_i64 }
-    String.build(text.bytesize + 8) do |io|
-      basic = 0_i64
-      points.each do |point|
-        if point < 128_i64
-          io.write_byte(point.to_u8)
-          basic = basic + 1_i64
-        end
-      end
-      io.write_byte(45_u8) if basic > 0_i64
-      n = INITIAL_N
-      delta = 0_i64
-      bias = INITIAL_BIAS
-      h = basic
-      total = points.size.to_i64
-      while h < total
-        # The smallest code point not yet written.
-        m = MAXINT
-        j = 0
-        while j < points.size
-          m = points[j] if points[j] >= n && points[j] < m
-          j = j + 1
-        end
-        delta = delta + (m - n) * (h + 1_i64)
-        n = m
-        j = 0
-        while j < points.size
-          c = points[j]
-          delta = delta + 1_i64 if c < n
-          if c == n
-            q = delta
-            k = BASE
-            while true
-              t = threshold(k, bias)
-              break if q < t
-              io.write_byte(digit(t + (q - t) % (BASE - t)))
-              q = (q - t) // (BASE - t)
-              k = k + BASE
-            end
-            io.write_byte(digit(q))
-            bias = adapt(delta, h + 1_i64, h == basic)
-            delta = 0_i64
-            h = h + 1_i64
-          end
-          j = j + 1
-        end
-        delta = delta + 1_i64
-        n = n + 1_i64
+    basic = 0_i64
+    points.each do |point|
+      if point < 128_i64
+        io.write_byte(point.to_u8)
+        basic = basic + 1_i64
       end
     end
+    io.write_byte(45_u8) if basic > 0_i64
+    n = INITIAL_N
+    delta = 0_i64
+    bias = INITIAL_BIAS
+    h = basic
+    total = points.size.to_i64
+    while h < total
+      # The smallest code point not yet written.
+      m = MAXINT
+      j = 0
+      while j < points.size
+        m = points[j] if points[j] >= n && points[j] < m
+        j = j + 1
+      end
+      delta = delta + (m - n) * (h + 1_i64)
+      n = m
+      j = 0
+      while j < points.size
+        c = points[j]
+        delta = delta + 1_i64 if c < n
+        if c == n
+          q = delta
+          k = BASE
+          while true
+            t = threshold(k, bias)
+            break if q < t
+            io.write_byte(digit(t + (q - t) % (BASE - t)))
+            q = (q - t) // (BASE - t)
+            k = k + BASE
+          end
+          io.write_byte(digit(q))
+          bias = adapt(delta, h + 1_i64, h == basic)
+          delta = 0_i64
+          h = h + 1_i64
+        end
+        j = j + 1
+      end
+      delta = delta + 1_i64
+      n = n + 1_i64
+    end
+    nil
   end
 
   # The string *text* is the Punycode of (section 6.2), or the reason it
@@ -203,17 +212,25 @@ pub struct Punycode
   # The decoded text after a 0 byte, or the refusal's sentence after a
   # 1: one flat String, which moves down to the caller (SPEC 1.5).
   def self.decoded(text : String) : String
+    io = String::Builder.new(text.bytesize * 4 + 1)
+    error = decode(text, io)
+    error ? "\u0001" + error.message : "\u0000" + io.finish
+  end
+
+  # Append decoded code points, or answer the refusal without appending.
+  def self.decode(text : String,
+                  io : String::Builder) : PunycodeError | Nil
     bytes = text
     size = text.bytesize
     last = -1
     i = 0
     while i < size
       byte = bytes[i]
-      return "\u0001Punycode: byte #{i} is 0x#{byte.to_s(16).upcase}, which is not ASCII" if byte >= 128_u8
+      return PunycodeError.new("Punycode: byte #{i} is 0x#{byte.to_s(16).upcase}, which is not ASCII") if byte >= 128_u8
       last = i if byte == 45_u8
       i = i + 1
     end
-    output = [] of Int64
+    output = Array(Int64).new(size)
     # The basic code points are the ones before the last delimiter, and
     # the extended part starts after it only when there were any: a `-`
     # at the start delimits nothing and is read as a digit, which it is
@@ -235,28 +252,28 @@ pub struct Punycode
       w = 1_i64
       k = BASE
       while true
-        return "\u0001Punycode: the input ends inside a number" if at >= size
+        return PunycodeError.new("Punycode: the input ends inside a number") if at >= size
         value = digit_value(bytes[at])
-        return "\u0001Punycode: #{bytes[at].unsafe_chr.inspect} at byte #{at} is not a base-36 digit" if value < 0_i64
-        return "\u0001Punycode: the number at byte #{at} overflows" if value > (MAXINT - index) // w
+        return PunycodeError.new("Punycode: #{bytes[at].unsafe_chr.inspect} at byte #{at} is not a base-36 digit") if value < 0_i64
+        return PunycodeError.new("Punycode: the number at byte #{at} overflows") if value > (MAXINT - index) // w
         index = index + value * w
         t = threshold(k, bias)
         at = at + 1
         break if value < t
-        return "\u0001Punycode: the number at byte #{at - 1} overflows" if w > MAXINT // (BASE - t)
+        return PunycodeError.new("Punycode: the number at byte #{at - 1} overflows") if w > MAXINT // (BASE - t)
         w = w * (BASE - t)
         k = k + BASE
       end
       count = output.size.to_i64 + 1_i64
       bias = adapt(index - old, count, old == 0_i64)
-      return "\u0001Punycode: the number ending at byte #{at - 1} overflows" if index // count > MAXINT - n
+      return PunycodeError.new("Punycode: the number ending at byte #{at - 1} overflows") if index // count > MAXINT - n
       n = n + index // count
       index = index % count
       if n > 0x10FFFF_i64
-        return "\u0001Punycode: the number ending at byte #{at - 1} is code point #{IDNA.u_plus(n)}, past U+10FFFF"
+        return PunycodeError.new("Punycode: the number ending at byte #{at - 1} is code point #{IDNA.u_plus(n)}, past U+10FFFF")
       end
       if n >= 0xD800_i64 && n <= 0xDFFF_i64
-        return "\u0001Punycode: the number ending at byte #{at - 1} is #{IDNA.u_plus(n)}, a surrogate, which UTF-8 does not hold"
+        return PunycodeError.new("Punycode: the number ending at byte #{at - 1} is #{IDNA.u_plus(n)}, a surrogate, which UTF-8 does not hold")
       end
       output << 0_i64
       j = output.size - 1
@@ -267,10 +284,8 @@ pub struct Punycode
       output[index.to_i32] = n
       index = index + 1_i64
     end
-    io = ""
-    io << 0_u8.unsafe_chr
     output.each { |point| io << point.to_i32.unsafe_chr }
-    io
+    nil
   end
 
   # Section 6.1.
@@ -326,6 +341,16 @@ pub struct IDNA
   # every ASCII label lower-cased.
   def self.to_ascii(name : String) : String | IdnaError
     convert(name, true)
+  end
+
+  # Append the ASCII host to the caller's builder.
+  def self.to_ascii(name : String, io : String::Builder) : IdnaError | Nil
+    convert_into(name, true, io)
+  end
+
+  # Append the Unicode host to the caller's builder.
+  def self.to_unicode(name : String, io : String::Builder) : IdnaError | Nil
+    convert_into(name, false, io)
   end
 
   # The name as a person reads it: every A-label decoded, every ASCII
@@ -420,14 +445,14 @@ pub struct IDNA
   end
 
   private def self.chars_of(text : String) : Array(Char)
-    chars = [] of Char
+    chars = Array(Char).new(text.bytesize)
     text.each_char { |char| chars << char }
     chars
   end
 
   # The labels between the four full stops UTS #46 maps to `.`.
   private def self.split(name : String) : Array(String)
-    labels = [] of String
+    labels = Array(String).new(name.bytesize + 1)
     fill_labels(labels, name)
     labels
   end
@@ -476,37 +501,42 @@ pub struct IDNA
   # The name after a 0 byte, or the refusal's sentence after a 1: one
   # flat String, which moves down to the caller (SPEC 1.5).
   private def self.converted(name : String, ascii : Bool) : String
-    return "\u0001IDNA: #{name.inspect} is not UTF-8" unless Unicode.valid?(name)
+    io = String::Builder.new(name.bytesize * 4 + 8)
+    error = convert_into(name, ascii, io)
+    error ? "\u0001" + error.message : "\u0000" + io.finish
+  end
+
+  # Borrow *name*, appending labels directly; an error can leave a prefix.
+  private def self.convert_into(name : String, ascii : Bool,
+                                io : String::Builder) : IdnaError | Nil
+    return IdnaError.new("IDNA: #{name.inspect} is not UTF-8") unless Unicode.valid?(name)
     labels = split(name)
     trailing = labels.size > 1 && labels.last.empty?
     labels.pop if trailing
-    return "\u0001IDNA: the name is empty" if labels.size == 1 && labels[0].empty?
-    a = String::Builder.new(name.bytesize * 4 + 8)
-    u = String::Builder.new(name.bytesize * 4 + 8)
-    a.push(0_u8)
-    u.push(0_u8)
+    return IdnaError.new("IDNA: the name is empty") if labels.size == 1 && labels[0].empty?
+    scratch = String::Builder.new(name.bytesize * 4 + 8)
+    a = ascii ? io : scratch
+    u = ascii ? scratch : io
+    start_size = a.length
     i = 0
     while i < labels.size
       text = labels[i]
-      return "\u0001IDNA: label #{i + 1} of #{name.inspect} is empty" if text.empty?
+      return IdnaError.new("IDNA: label #{i + 1} of #{name.inspect} is empty") if text.empty?
       if i > 0
         a << "."
         u << "."
       end
       refused = label(a, u, text)
-      return "\u0001" + refused if refused
+      return IdnaError.new(refused) if refused
       i = i + 1
     end
-    if a.length - 1 > MAX_NAME
-      return "\u0001IDNA: the name is #{a.length - 1} octets in ASCII, past the #{MAX_NAME} a DNS name holds"
+    if a.length - start_size > MAX_NAME
+      return IdnaError.new("IDNA: the name is #{a.length - start_size} octets in ASCII, past the #{MAX_NAME} a DNS name holds")
     end
-    w = ascii ? a : u
-    w << "." if trailing
-    w.finish
+    io << "." if trailing
+    nil
   end
 
-  # One label as its A-label and its U-label (the same lower-cased text
-  # for an ASCII label), or why it is neither.
   # One label: its A-label written into *a* and its U-label into *u*
   # (the same lower-cased text for an ASCII label), or why it is
   # neither.
@@ -638,4 +668,199 @@ pub struct IDNA
       !chars.any? { |other| other.ord >= 0x0660 && other.ord <= 0x0669 }
     end
   end
+end
+
+# idna.1 Punycode follows RFC 3492 section 7.1; host conversion appends
+#   ASCII lowercase and xn-- labels, preserving the caller's prefix.
+spec idna.1
+  # RFC 3492 section 7.1 sample A.
+  raw = "ليهمابتكلموشعربي؟"
+  encoded = "egbpdaj6bu4bxfgehfvwxn"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample B.
+  raw = "他们为什么不说中文"
+  encoded = "ihqwcrb4cv8a8dqg056pqjye"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample C.
+  raw = "他們爲什麽不說中文"
+  encoded = "ihqwctvzc91f659drss3x8bo0yb"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample D.
+  raw = "Pročprostěnemluvíčesky"
+  encoded = "Proprostnemluvesky-uyb24dma41a"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample E.
+  raw = "למההםפשוטלאמדבריםעברית"
+  encoded = "4dbcagdahymbxekheh6e0a7fei0b"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample F.
+  raw = "यहलोगहिन्दीक्योंनहींबोलसकतेहैं"
+  encoded = "i1baa7eci9glrd9b2ae1bj0hfcgg6iyaf8o0a1dig0cd"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample G.
+  raw = "なぜみんな日本語を話してくれないのか"
+  encoded = "n8jok5ay5dzabd5bym9f0cm5685rrjetr6pdxa"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample H.
+  raw = "세계의모든사람들이한국어를이해한다면얼마나좋을까"
+  encoded = "989aomsvi5e83db1d2a355cv1e0vak1dwrv93d5xbh15a0dt30a5jpsd879ccm6fea98c"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample I.
+  raw = "почемужеонинеговорятпорусски"
+  encoded = "b1abfaaepdrnnbgefbadotcwatmq2g4l"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample J.
+  raw = "PorquénopuedensimplementehablarenEspañol"
+  encoded = "PorqunopuedensimplementehablarenEspaol-fmd56a"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample K.
+  raw = "TạisaohọkhôngthểchỉnóitiếngViệt"
+  encoded = "TisaohkhngthchnitingVit-kjcr8268qyxafd2f1b9g"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample L.
+  raw = "3年B組金八先生"
+  encoded = "3B-ww4c5e180e575a65lsy2b"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample M.
+  raw = "安室奈美恵-with-SUPER-MONKEYS"
+  encoded = "-with-SUPER-MONKEYS-pc58ag80a8qai00g7n9n"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample N.
+  raw = "Hello-Another-Way-それぞれの場所"
+  encoded = "Hello-Another-Way--fc4qua05auwb3674vfr0b"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample O.
+  raw = "ひとつ屋根の下2"
+  encoded = "2-u9tlzr9756bt3uc0v"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample P.
+  raw = "MajiでKoiする5秒前"
+  encoded = "MajiKoi5-783gue6qz075azm5e"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample Q.
+  raw = "パフィーdeルンバ"
+  encoded = "de-jg4avhby1noc0d"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample R.
+  raw = "そのスピードで"
+  encoded = "d9juau41awczczp"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  # RFC 3492 section 7.1 sample S.
+  raw = "-> $1.00 <-"
+  encoded = "-> $1.00 <--"
+  w = String::Builder.new(256)
+  Punycode.encode(raw, w)
+  w.finish == encoded
+  w = String::Builder.new(256)
+  Punycode.decode(encoded, w).nil?
+  w.finish == raw
+  w = String::Builder.new(256)
+  w << "prefix:"
+  IDNA.to_ascii("Bücher.Example.", w).nil?
+  w << "/"
+  IDNA.to_unicode("XN--BCHER-KVA.Example.", w).nil?
+  w.finish == "prefix:xn--bcher-kva.example./bücher.example."
+  w = String::Builder.new(64)
+  w << "prefix:"
+  Punycode.encode("bücher", w)
+  Punycode.decode("bcher-KVA", w).nil?
+  w.finish == "prefix:bcher-kvabücher"
+  w = String::Builder.new(32)
+  Punycode.encode("", w)
+  Punycode.decode("", w).nil?
+  w.finish.empty?
+  IDNA.to_ascii("-bad.example", w).is_a?(IdnaError)
+  Punycode.decode("!", w).is_a?(PunycodeError)
+  Punycode.decode("999999999999999999999999", w).is_a?(PunycodeError)
+  IDNA.to_ascii("faß.de") == "xn--fa-hia.de"
 end

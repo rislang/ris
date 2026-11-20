@@ -507,7 +507,6 @@ change. Gates stay structural.
   mutation checks (part A's gates: test/ris/autocert.ri, autocert_wire.ri).
 * std_process: the `handlers` mutation proof (child keeps this program's
   TERM handler) is not caught.
-* Add IDNA.
 
 ## 11. macOS arm64
 
