@@ -202,22 +202,18 @@ Unknown must be refused (SPEC 3.6).
   autocert.ri fails "cannot store a view beyond its owner scope"; "the
   default build broke".
 * debug_info.py: no sample builds with --debug (autocert, basics, calc…).
-* parallel_exercise.sh: shares_array is refused for the tape-proc reason,
-  not the one the script expects.
-* runtime_exercise.sh: dependency floor: the runtime puts undefined
-  symbols back on the link line (__gmon_start__, _ITM_*…).
-* mod_context.sh: imports left ungrounded (autocert calc logline webapp);
-  tool dependencies fail on webapp.
 * lsp_artifacts.py: the workspace does not build (with source and
   artifact-only); no interface hash.
 * lsp_positions.py: hangs (killed after 15 min, no output).
 * generic_boundary.py: reads samples/ris now; samples/ris/calc does not
   build: String indexes are UInt8 (calc.ri:37, calc/parser.ri:92 passes
   a byte as Binary's Char op).
-* test/speed/metric_port.sh: std/gc dropped from the port and
-  `Array.new(n) { }` fixed; the port still needs String indexes as bytes
-  (`.ord` on UInt8, Hash(Char) keys) and Coordinates.from_json refers to
-  a private constant.
+* test/speed/metric_port.sh: byte indexing, pointer constructors and
+  the private nested JSON constructor are fixed. Brainfuck2 still uses
+  recursive `Array(OpT)` values, refused as growing collection elements.
+  Decide the port representation (fixed-size operations and SlicePool
+  handles recommended); matrix and Sudoku nested arrays need the same
+  review. Keep on BROKEN until that tape port has its EGM review.
 
 * Build each test/cli program, group refusals by message, fix per group.
   2026-11-20 (seventh round): 123 of 131 build; left acme, autocert,

@@ -16,8 +16,8 @@ set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-gate.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from `pwd` is `/c/...` and finds no prelude at all, and a
 # scratch directory named `/tmp/tmp.X` is silently ignored on that path, so
@@ -94,7 +94,7 @@ case "$(uname -s)" in
   *)
     added="$(nm -u exercise |
       sed -e 's/^ *[wU] *//' -e 's/@.*$//' |
-      grep -v -E '^(_ITM_deregisterTMCloneTable|_ITM_registerTMCloneTable|__cxa_finalize|__gmon_start__|__libc_start_main|mmap|mprotect)$' |
+      grep -v -E '^(_ITM_deregisterTMCloneTable|_ITM_registerTMCloneTable|__cxa_finalize|__gmon_start__|__libc_start_main|_PROCEDURE_LINKAGE_TABLE_|mmap|mprotect)$' |
       grep -cv '^\s*$')"
     if [ "$added" -ne 0 ]; then
       echo "the runtime put $added undefined symbols back on the link line:"

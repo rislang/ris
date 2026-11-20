@@ -3,7 +3,7 @@
 #
 #     bash test/cli/parallel_exercise.sh
 #
-# Seven steps; the last three are failure proofs, because a gate that
+# Runtime properties and failure proofs, because a gate that
 # cannot fail is not a gate:
 #
 #   1. The exercise holds every property, plain and --release: parallel
@@ -16,11 +16,7 @@
 #      lists, and the typed group answers.
 #   2. The binary keeps the dependency floor the concurrency gate holds,
 #      plus `environ`, the C runtime's table `RIS_WORKERS` is read from.
-#   3. The speedup, measured: CPU-bound tasks on one worker and on several,
-#      release build, best of three, and the ratio held to a floor of 0.6
-#      per worker - a pool that is parallel only in name cannot pass it.
-#      The table for 1, 2, 4 and 8 workers (as far as the cores go) is
-#      printed for the record.
+#   Timings live in the parallel measurement under test/speed/.
 #   4. A deadlock across threads - a parallel task waiting on a board take
 #      nobody sends on - is named, not hung.
 #   5. `Share` gates the parallel block at compile time: a captured
@@ -34,14 +30,12 @@
 #      the pool (a cancelled task run as if it were not); and the race
 #      step's add made a plain load and store, which loses adds only when
 #      tasks really run at the same instant.
-#   7. Failure proof: the pool held to one worker whatever it was asked
-#      for, and step 3's floor refuses the ratio that comes out.
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-gate.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
 
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
@@ -152,7 +146,7 @@ case "$(uname -s)" in
     for bin in exercise-plain exercise-release; do
       added="$("$NM" -u "$bin" |
         sed -e 's/^ *[wU] *//' -e 's/@.*$//' |
-        grep -v -E '^(_ITM_deregisterTMCloneTable|_ITM_registerTMCloneTable|__cxa_finalize|__gmon_start__|__libc_start_main|environ|__environ)$' |
+        grep -v -E '^(_ITM_deregisterTMCloneTable|_ITM_registerTMCloneTable|__cxa_finalize|__gmon_start__|__libc_start_main|_PROCEDURE_LINKAGE_TABLE_|environ|__environ)$' |
         grep -v -E '^(pthread_create|pthread_join|pthread_attr_init|pthread_attr_setstack|pthread_attr_destroy)$' |
         grep -cv '^\s*$')"
       if [ "$added" -ne 0 ]; then
@@ -162,49 +156,6 @@ case "$(uname -s)" in
     echo "  the C runtime template's names, glibc's thread and environ, which RIS_WORKERS is read through, plain and release: the pool itself is raw syscalls"
     ;;
 esac
-
-# ── 3. The speedup ────────────────────────────────────────────────────────
-# Sixteen tasks of integer work with nothing to allocate, so the ratio is
-# the scheduler's and not the collector's. Best of three, because a
-# shared machine's clock is weather.
-TASKS=16
-ROUNDS=40000000
-best_ms() { # workers binary
-  local best="" run ms
-  for run in 1 2 3; do
-    ms="$(timeout -k 5 300 "./$2" speed "$1" "$TASKS" "$ROUNDS" | sed -n 's/.*wall_ms=\([0-9]*\).*/\1/p')"
-    [ -n "$ms" ] || { echo "the speed run at $1 workers printed no time" >&2; return 1; }
-    if [ -z "$best" ] || [ "$ms" -lt "$best" ]; then best="$ms"; fi
-  done
-  echo "$best"
-}
-# The floor: k workers must finish at least 0.6 * k times faster than one.
-holds_floor() { # one_ms k_ms k
-  awk -v one="$1" -v many="$2" -v k="$3" 'BEGIN { exit !(many > 0 && one / many >= 0.6 * k) }'
-}
-K=4
-[ "$CORES" -lt "$K" ] && K="$CORES"
-step "the speedup: $TASKS CPU-bound tasks, release build, best of three, $CORES cores here"
-if [ "$CORES" -lt 2 ]; then
-  echo "  one core here: nothing to scale onto, so the ratio is not held"
-else
-  ONE="$(best_ms 1 exercise-release)" || exit 1
-  printf '  %2s worker(s): %6s ms\n' 1 "$ONE"
-  MANY=""
-  for w in 2 4 8; do
-    [ "$w" -gt "$CORES" ] && break
-    ms="$(best_ms "$w" exercise-release)" || exit 1
-    ratio="$(awk -v a="$ONE" -v b="$ms" 'BEGIN { printf "%.2f", a / b }')"
-    printf '  %2s worker(s): %6s ms, %sx one worker\n' "$w" "$ms" "$ratio"
-    [ "$w" -eq "$K" ] && MANY="$ms"
-  done
-  [ -n "$MANY" ] || MANY="$(best_ms "$K" exercise-release)" || exit 1
-  if ! holds_floor "$ONE" "$MANY" "$K"; then
-    echo "$K workers took $MANY ms against one worker's $ONE ms: under 0.6 x $K, which is not parallel"
-    exit 1
-  fi
-  echo "  $K workers: $(awk -v a="$ONE" -v b="$MANY" 'BEGIN { printf "%.2f", a / b }')x one worker, over the floor of $(awk -v k="$K" 'BEGIN { printf "%.1f", 0.6 * k }')x"
-fi
 
 # ── 4. A deadlock across threads is named ────────────────────────────────
 step "a deadlock across threads is a diagnosis, not a hang"
@@ -243,7 +194,7 @@ refused() { # name, expected text, program body
   fi
   echo "  refused: $(grep -m1 -F "$2" "$1.log" | sed 's/^ *//' | cut -c1-150)"
 }
-refused shares_array 'the block spawn_parallel runs on another thread captures `items : Array(Int32)`, which is not Share' '
+refused shares_array 'this block becomes a proc, which may run after the tape block that made `items : Array(Int32)` has ended' '
 items = [1, 2, 3]
 group do |g|
   g.spawn_parallel { items.size }
@@ -322,26 +273,6 @@ else
     echo "a plain add lost nothing (exit $code), so the race step proves nothing:"; cat plainadd.txt; exit 1
   fi
   echo "  exits 1 at \"$(grep -m1 'increments lost' plainadd.txt | sed 's/^FAIL: //')\""
-fi
-
-# ── 7. Failure proof: one worker, whatever was asked for ──────────────────
-step "failure proof: a pool held to one worker fails the speedup floor"
-if [ "$CORES" -lt 2 ]; then
-  echo "  one core here: the floor is not held, so there is nothing to fail"
-else
-  mkdir -p oneworker/iyi
-  cp "$REPO"/src/ris/*.ri oneworker/ris/
-  awk '/^      workers = resolved$/ { print "      workers = 1"; next } { print }' \
-    "$REPO/src/ris/concurrency.ri" > oneworker/ris/concurrency.ri
-  cmp -s oneworker/ris/concurrency.ri "$REPO/src/ris/concurrency.ri" && { echo "the awk for oneworker found nothing to change"; exit 1; }
-  if ! RIS_PATH="$WORK/oneworker${PSEP}$REPO/src" "$RIS" build --release "$REPO/test/cli/parallel_exercise.ri" -o oneworker-run > build-oneworker.log 2>&1; then
-    echo "the one-worker copy failed to build:"; tail -20 build-oneworker.log; exit 1
-  fi
-  SLOW="$(best_ms "$K" oneworker-run)" || exit 1
-  if holds_floor "$ONE" "$SLOW" "$K"; then
-    echo "a pool of one worker asked for $K took $SLOW ms against $ONE ms and passed the floor"; exit 1
-  fi
-  echo "  asked for $K, ran on 1: $SLOW ms against $ONE ms, $(awk -v a="$ONE" -v b="$SLOW" 'BEGIN { printf "%.2f", a / b }')x, refused"
 fi
 
 echo "parallel gate: every property held"

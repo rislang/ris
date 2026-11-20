@@ -60,9 +60,8 @@ def checksum(v : String) : UInt32
   hash = 5381_u32
   i = 0
   n = v.bytesize
-  p = v.to_unsafe
   while i < n
-    hash = (hash &* 33_u32) &+ p[i].to_u32
+    hash = (hash &* 33_u32) &+ v[i].to_u32
     i = i + 1
   end
   hash
@@ -401,21 +400,21 @@ class Bf2Program
     while i < n
       c = code[i]
       i = i + 1
-      if c == '+'
+      if c == 43_u8
         res << OpInc.new(1)
-      elsif c == '-'
+      elsif c == 45_u8
         res << OpInc.new(-1)
-      elsif c == '>'
+      elsif c == 62_u8
         res << OpMove.new(1)
-      elsif c == '<'
+      elsif c == 60_u8
         res << OpMove.new(-1)
-      elsif c == '.'
+      elsif c == 46_u8
         res << OpPrint.new
-      elsif c == '['
+      elsif c == 91_u8
         inner = parse(code, i)
         res << inner[0]
         i = inner[1]
-      elsif c == ']'
+      elsif c == 93_u8
         break
       end
     end
@@ -669,7 +668,7 @@ class Fasta
 
     while todo > 0
       m = todo < LINE_LENGTH ? todo : LINE_LENGTH
-      pick = String.new(m) do |buffer|
+      pick = String.from_bytes(m) do |buffer|
         i = 0
         while i < m
           buffer[i] = select_random(genelist).ord.to_u8
@@ -1641,7 +1640,7 @@ class Primes
     head = generate_trie(primes.to_list)
     i = 0
     while i < str_prefix.bytesize
-      nxt = head.children[str_prefix[i]]?
+      nxt = head.children[str_prefix[i].chr]?
       return [] of Int32 if nxt.nil?
       head = nxt
       i = i + 1
@@ -2356,7 +2355,7 @@ class Sudoku
       o = [] of Int32
       j = 0
       while j < 81
-        o << (s[j].ord - 49)
+        o << (s[j].to_i32 - 49)
         j = j + 1
       end
       j = 0

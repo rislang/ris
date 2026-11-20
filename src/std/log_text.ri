@@ -11,11 +11,11 @@ pub struct LogField
   def initialize(@key : String, @value : String)
   end
 
-  def self.text(value : String | String) : String
+  def self.text(value : String) : String
     value.as_tape
   end
 
-  def self.text(value) : String
+  def self.text(value : T) : String forall T
     w = ""
     w << value
     w
