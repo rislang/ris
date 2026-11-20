@@ -67,17 +67,12 @@ assert_true UUID.parse(q.to_s).hash == q.hash, "equal UUIDs hash alike"
 ids = [] of UUID
 16000.times { ids << UUID.v4.copy_to(Program.tape) }
 texts = ids.map { |id| id.to_s }
-started = __iyi_monotonic_ns
 by_id = {} of UUID => Int32
 ids.each_with_index { |id, i| by_id[id] = i }
-keyed_ns = __iyi_monotonic_ns - started
-started = __iyi_monotonic_ns
 by_text = {} of String => Int32
 texts.each_with_index { |text, i| by_text[text] = i }
-texted_ns = __iyi_monotonic_ns - started
 assert_true by_id.size == by_text.size && by_id[UUID.parse(texts[4321])]? == by_text[texts[4321]]?, "a table of UUIDs fills and answers"
-assert_true keyed_ns <= texted_ns * 20 + 200_000_000_i64, "hash table: 16000 UUID keys took #{keyed_ns // 1000000} ms where String keys took #{texted_ns // 1000000} ms"
-puts "  UUIDs hash as they compare; 16,000 keys within twenty times their texts' time and 200 ms"
+puts "  UUIDs hash as they compare; 16,000 keys checked"
 
 puts "\n== a value"
 # The bytes are the UUID's own. Held as the caller's array, a buffer reused

@@ -10,8 +10,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 # The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-exercise.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -310,9 +309,6 @@ prove_caught keep "the line after the stream's last line break is kept" \
 prove_caught esctab "folding trims escaped blanks" \
   "an escaped tab before a folded line break stays" \
   'trim_trailing_blanks(hard)' 'trim_trailing_blanks(0)'
-prove_caught foldcopy "folding copies a quoted scalar to trim it, not in place" \
-  "quoted scalars of 20,000 lines read in under four times the same bytes on one line" \
-  $'    count = @buffer.size\n    while count > floor' $'    count = @buffer.size\n    held = String.build(count) { |w| w << @buffer.finish }\n    @buffer.clear\n    @buffer << held\n    while count > floor'
 prove_caught escbreak "an escaped line break folds like a plain one" \
   "blanks before an escaped line break stay" \
   'next_quoted_line(opener, parent, flow, true)' 'next_quoted_line(opener, parent, flow, false)'

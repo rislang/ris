@@ -1,0 +1,38 @@
+module speed/measure_static_array
+import std/static_array
+def pair(x : Int32, y : Int32) : StaticArray(Int32, 2)
+  StaticArray(Int32, 2).new { |i| i == 0 ? x : y }
+end
+def assert_true(cond : Bool, msg : String) : Nil
+  raise "ASSERTION FAILED: #{msg}" unless cond
+end
+
+def assert_str(expected : String, actual : String, msg : String) : Nil
+  raise "ASSERTION FAILED: #{msg}\n  expected #{expected.inspect}\n  got      #{actual.inspect}" unless expected == actual
+end
+
+def check(cond : Bool, msg : String) : Nil
+  raise msg unless cond
+end
+
+big = StaticArray(Int32, 10000).new { |i| i }
+started = __iyi_monotonic_ns
+big_text = big.to_s
+text_ns = __iyi_monotonic_ns - started
+started = __iyi_monotonic_ns
+array_text = big.to_a.to_s
+array_ns = __iyi_monotonic_ns - started
+assert_true big_text == "StaticArray" + array_text, "to_s of 10,000 elements matches the array's"
+
+puts "to_s: 10,000 elements took #{text_ns // 1000000} ms where to_a.to_s took #{array_ns // 1000000} ms"
+started = __iyi_monotonic_ns
+keyed = {} of StaticArray(Int32, 2) => Int32
+150.times { |x| 150.times { |y| keyed[pair(x, y)] = x * y } }
+keyed_ns = __iyi_monotonic_ns - started
+started = __iyi_monotonic_ns
+tupled = {} of {Int32, Int32} => Int32
+150.times { |x| 150.times { |y| tupled[{x, y}] = x * y } }
+tupled_ns = __iyi_monotonic_ns - started
+assert_true keyed.size == 22500 && keyed[pair(149, 17)]? == 2533, "a grid table fills and answers"
+
+puts "hash table: 22500 keys took #{keyed_ns // 1000000} ms where tuples took #{tupled_ns // 1000000} ms"

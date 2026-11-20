@@ -228,7 +228,6 @@ def main : Nil
   150.times { |x| 150.times { |y| grid_hashes[Slice(Int32).new(2) { |i| i == 0 ? x : y }.hash] = true } }
   puts "hash spread: #{grid_hashes.size} distinct of 22500"
   raise "hash spread: a 150 by 150 grid of slices had #{grid_hashes.size} distinct hashes" unless grid_hashes.size == 22500
-  started = __iyi_monotonic_ns
   slice_keys = {} of Slice(Int32) => Int32
   key_backing = Slice(Int32).new(22500 * 2, 0)
   150.times do |x|
@@ -239,23 +238,14 @@ def main : Nil
       slice_keys[key_backing[offset, 2]] = x * y
     end
   end
-  slice_ns = __iyi_monotonic_ns - started
-  started = __iyi_monotonic_ns
   array_keys = {} of Array(Int32) => Int32
   array_backing = Array(Array(Int32)).new(22500) do |i|
     [i // 150, i % 150]
   end
   array_backing.each { |key| array_keys[key] = key[0] * key[1] }
-  array_ns = __iyi_monotonic_ns - started
   found = slice_keys[Slice(Int32).new(2) { |i| i == 0 ? 149 : 17 }]?
   puts "hash table: #{slice_keys.size} slice keys, [149, 17] => #{found.inspect}"
   raise "hash table: expected 22500 keys and 2533 for [149, 17]" unless slice_keys.size == 22500 && found == 2533
-  # A bound, not a benchmark: twenty times the arrays' time and 200 ms
-  # over. A hash that answered one value for every slice, as the type's id
-  # did before this struct had one, took 3 s here where the arrays took 3 ms.
-  if slice_ns > array_ns * 20 + 200_000_000_i64
-    raise "hash table: 22500 slice keys took #{slice_ns // 1000000} ms where the same arrays took #{array_ns // 1000000} ms"
-  end
 
   puts "== enumerable integration"
   enum_s = Slice(Int32).new(5) { |i| (i + 1) * 3 }

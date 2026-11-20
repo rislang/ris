@@ -1,0 +1,25 @@
+module speed/measure_slice
+import std/slice::{Slice}
+  started = __iyi_monotonic_ns
+  slice_keys = {} of Slice(Int32) => Int32
+  key_backing = Slice(Int32).new(22500 * 2, 0)
+  150.times do |x|
+    150.times do |y|
+      offset = (x * 150 + y) * 2
+      key_backing[offset] = x
+      key_backing[offset + 1] = y
+      slice_keys[key_backing[offset, 2]] = x * y
+    end
+  end
+  slice_ns = __iyi_monotonic_ns - started
+  started = __iyi_monotonic_ns
+  array_keys = {} of Array(Int32) => Int32
+  array_backing = Array(Array(Int32)).new(22500) do |i|
+    [i // 150, i % 150]
+  end
+  array_backing.each { |key| array_keys[key] = key[0] * key[1] }
+  array_ns = __iyi_monotonic_ns - started
+  found = slice_keys[Slice(Int32).new(2) { |i| i == 0 ? 149 : 17 }]?
+  puts "hash table: #{slice_keys.size} slice keys, [149, 17] => #{found.inspect}"
+  raise "hash table: expected 22500 keys and 2533 for [149, 17]" unless slice_keys.size == 22500 && found == 2533
+  puts "slice hash: #{slice_ns} ns; array hash: #{array_ns} ns"

@@ -1,0 +1,37 @@
+module speed/measure_compress
+import std/compress::{Gzip}
+def run_of(byte : Int32, n : Int32) : String
+  String.from_bytes(n) do |dst|
+    i = 0
+    while i < n
+      dst[i] = byte.to_u8
+      i = i + 1
+    end
+  end
+end
+def assert_true(cond : Bool, msg : String) : Nil
+  raise "ASSERTION FAILED: #{msg}" unless cond
+end
+
+def check(cond : Bool, msg : String) : Nil
+  raise msg unless cond
+end
+
+zeros = run_of(0, 8_000_000)
+one = Gzip.compress(zeros)
+many = Gzip.compress("x\n") * 1000 + one
+best_one = 0_i64
+best_many = 0_i64
+3.times do |k|
+  t0 = __iyi_monotonic_ns
+  inflated_one = Gzip.decompress(one)
+  t1 = __iyi_monotonic_ns
+  joined_many = Gzip.decompress(many)
+  t2 = __iyi_monotonic_ns
+  assert_true inflated_one == zeros && joined_many == "x\n" * 1000 + zeros, "8 MB of zeros, alone and behind a thousand members"
+  best_one = (t1 - t0).to_i64 if k == 0 || (t1 - t0).to_i64 < best_one
+  best_many = (t2 - t1).to_i64 if k == 0 || (t2 - t1).to_i64 < best_many
+end
+
+puts "a thousand members and one of 8 MB took #{best_many // 1000000} ms where that one took #{best_one // 1000000} ms"
+

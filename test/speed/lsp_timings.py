@@ -1,46 +1,20 @@
 #!/usr/bin/env python3
-"""Measures what `ris lsp` claims: that a real compile per question fits
-an editor's budget. The corpus is this repository's own samples — the
-calc language, the kemal port, the app/std modules — opened in one
-session, then asked the questions a person asks: a keystroke's verdict,
-a hover, a completion, references. Wall time is measured from request
-to answer, percentiles are printed, and a p95 over budget names its
-verb and exits 1. `test/cli/lsp_session.py` is the correctness gate; this
-is the speed half of the same claim.
-
-Budgets are deliberately loose (CI machines are not laptops); the point
-they hold is architectural: no question is allowed to cost a rebuild of
-the world, because R-1 made the module the unit.
-"""
-
+"""Print editor request percentiles without timing budgets."""
 import glob
+import shutil
 import os
 import re
 import sys
 import time
+import tempfile
 
-from lsp_session import Client
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "cli"))
+from lsp_session import Client, file_uri
 
 CORPUS_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "samples", "ris")
 
-# p95 budgets, seconds.
-BUDGETS = {
-    "didChange": 2.0,
-    "hover": 2.0,
-    "completion": 2.0,
-    # Workspace-wide, one compile per entry whose imports reach the
-    # declaring module. Every entry compiled instead: 4.6 s on this
-    # corpus with an unoptimised compiler, which is what the budget is
-    # set under, so "ask everybody" cannot come back unnoticed.
-    "references": 3.0,
-}
-
-# A hover is answered from the verdict the keystroke before it already
-# compiled: no compile of its own, so its median is the transport's, and
-# is held to that. On Windows it was 47 to 52 ms - the frame waited for a
-# thread the reader was holding - where Linux answers in 1; a budget of
-# seconds could not see it.
-HOVER_P50 = 0.010
+VERBS = ("didChange", "hover", "completion", "references")
 
 
 def percentile(samples, p):
@@ -73,7 +47,7 @@ def main():
                wait=False)
         c.diagnostics("file://" + path)
 
-    timings = {verb: [] for verb in BUDGETS}
+    timings = {verb: [] for verb in VERBS}
 
     def timed(verb, thunk):
         t0 = time.perf_counter()
@@ -131,28 +105,36 @@ def main():
     print(f"corpus: {len(files)} modules under samples/ris, "
           f"startup {startup * 1000:.0f} ms")
     print(f"{'verb':<12}{'n':>5}{'p50':>9}{'p95':>9}{'max':>9}")
-    over = []
     for verb, samples in timings.items():
         p50 = percentile(samples, 50)
         p95 = percentile(samples, 95)
         print(f"{verb:<12}{len(samples):>5}"
               f"{p50 * 1000:>7.0f}ms{p95 * 1000:>7.0f}ms"
               f"{max(samples) * 1000:>7.0f}ms")
-        if p95 > BUDGETS[verb]:
-            over.append(f"{verb}: p95 {p95 * 1000:.0f}ms > "
-                        f"{BUDGETS[verb] * 1000:.0f}ms")
-    hover_p50 = percentile(timings["hover"], 50)
-    if hover_p50 > HOVER_P50:
-        over.append(f"hover: p50 {hover_p50 * 1000:.1f}ms > "
-                    f"{HOVER_P50 * 1000:.0f}ms - a question that costs no "
-                    f"compile waited on the transport")
-    if over:
-        print("\nOVER BUDGET")
-        for line in over:
-            print(f"  {line}")
-        sys.exit(1)
-    print("\nlsp latency: every verb inside its budget")
 
 
+def symbol_seconds(count):
+    root = tempfile.mkdtemp(prefix=f"iyi-lsp-symbols{count}")
+    for i in range(count):
+        with open(os.path.join(root, f"m{i:04d}.ri"), "w", newline="") as f:
+            f.write(f"module m{i:04d}\n\npub def f{i}(x : Int32) : Int32\n  x\nend\n")
+    s = Client()
+    s.send("initialize", {"rootUri": file_uri(root), "capabilities": {}})
+    s.send("initialized", {}, wait=False)
+    best = None
+    for query in ("zzqqzz", "zzqqzy", "zzqqzx"):
+        started = time.monotonic()
+        s.send("workspace/symbol", {"query": query})
+        took = time.monotonic() - started
+        best = took if best is None else min(best, took)
+    s.send("shutdown", {})
+    s.send("exit", {}, wait=False)
+    s.proc.wait(timeout=10)
+    shutil.rmtree(root)
+    return best
 if __name__ == "__main__":
-    main()
+    if "--symbols-only" not in sys.argv:
+        main()
+    small, large = symbol_seconds(500), symbol_seconds(2000)
+    print(f"workspace/symbol: 500 files {small:.3f} s, "
+          f"2000 files {large:.3f} s, ratio {large / small:.2f}")

@@ -1,0 +1,31 @@
+module speed/protocol_server
+import std/http::{Server, Incoming, Outgoing, TlsStream}
+import std/websocket::{WebSocket}
+import std/socket::{IyiSocket}
+import std/file::{File}
+
+class BombHandler
+  def initialize(@ready : String)
+  end
+
+  def listening(port : Int32) : Nil
+    File.write(@ready, port.to_s)
+    nil
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    WebSocket.upgrade(req, res)
+  end
+
+  def take_over(socket : IyiSocket | TlsStream, leftover : String,
+                res : Outgoing) : Nil
+    WebSocket.serve(socket, leftover, res) do |ws|
+      ws.receive
+      nil
+    end
+  end
+end
+
+port = Program.args[0].to_i
+ready = Program.args[1]
+Server.answer("127.0.0.1", port, ready, BombHandler, max_connections: 2)

@@ -1,0 +1,159 @@
+module speed/measure_poller
+import std/static_array
+
+def fail(message : String) : Nil
+  raise message
+end
+
+# A pipe, for the poller check. The exercise's own binding, the way every
+# probe of a call the prelude does not carry yet gets one: raw `pipe2` on
+# Linux, libSystem's `pipe` on darwin, which is III.9's darwin rule
+# applied to a test probe.
+{% if flag?(:darwin) %}
+  lib LibC
+    fun pipe(fds : Int32*) : Int32
+  end
+
+  def make_pipe : StaticArray(Int32, 2)
+    fds = StaticArray(Int32, 2).new(0)
+    fail("pipe failed") if LibC.pipe(pointerof(fds).as(Pointer(Int32))) < 0
+    fds
+  end
+{% elsif flag?(:win32) %}
+  # Same as `runtime_exercise`: the prelude's `LibC` is wide-only now, and
+  # this pipe name is the exercise's own ASCII.
+  lib LibC
+    fun CreateFileA(name : UInt8*, access : Int32, share : Int32, security : Void*,
+                    disposition : Int32, flags : Int32, template : Void*) : Void*
+  end
+
+  def make_pipe : StaticArray(Int64, 2)
+    pipe_name = "\\\\.\\pipe\\iyi_conc_pipe_#{__iyi_monotonic_ns}".to_unsafe
+    h_read = LibC.CreateNamedPipeA(pipe_name, 0x40000001_i32, 0_i32, 1_i32, 4096_i32, 4096_i32, 0_i32, Pointer(Void).new(0_u64))
+    fail("CreateNamedPipeA failed") if h_read.address &+ 1_u64 == 0_u64
+    h_write = LibC.CreateFileA(pipe_name, 1073741824_i32, 0_i32, Pointer(Void).new(0_u64), 3_i32, 128_i32, Pointer(Void).new(0_u64))
+    fail("CreateFileA for pipe failed") if h_write.address &+ 1_u64 == 0_u64
+    fds = StaticArray(Int64, 2).new(0_i64)
+    fds[0] = h_read.address.to_i64
+    fds[1] = h_write.address.to_i64
+    fds
+  end
+{% else %}
+  {% if flag?(:x86_64) %}
+    EX_SYS_PIPE2 = 293_i64
+  {% else %}
+    EX_SYS_PIPE2 = 59_i64
+  {% end %}
+
+  def make_pipe : StaticArray(Int32, 2)
+    fds = StaticArray(Int32, 2).new(0)
+    result = __iyi_conc_syscall3(EX_SYS_PIPE2, pointerof(fds).address.to_i64, 0_i64, 0_i64)
+    fail("pipe2 failed (#{result})") if result < 0
+    fds
+  end
+{% end %}
+
+# A fixture write through bounded local storage.
+@[PointerUnsafe("writes the fixture local block to its pipe")]
+def write_fixture(fd, text : String) : Int64
+  local = uninitialized StaticArray(UInt8, 64)
+  raise "fixture write too large" if text.bytesize > 64
+  bytes = pointerof(local).as(Pointer(UInt8))
+  text.copy_to_local(0, bytes, text.bytesize)
+  __iyi_write(fd, bytes.as(Void*), text.bytesize.to_u64)
+end
+
+pub struct TaskFailed
+  def initialize
+  end
+end
+
+impl Error for TaskFailed
+  def message : String
+    "the failing task's error"
+  end
+end
+
+# Messages between the tasks below, on the board (SPEC 5.2): one
+# process-wide queue per type.
+record CPing, n : Int32
+record CPong, n : Int32
+record CRelease, n : Int32
+record CDrain, n : Int32
+record CThere, n : Int32
+record CBack, n : Int32
+record CBusy, n : Int32, quit : Bool
+record CBusyBack, n : Int32
+record CTwin, n : Int32
+record CSpin, n : Int32
+record CStop, n : Int32
+record CByte, n : Int32
+
+# Compare pipe round trips with and without idle readers.
+{% if flag?(:linux) %}
+  def round_trips(idle : Int32, rounds : Int32) : Int64
+    crowd = [] of typeof(make_pipe)
+    idle.times { crowd << make_pipe }
+    ping = make_pipe
+    pong = make_pipe
+    ping_read = ping[0]
+    ping_write = ping[1]
+    pong_read = pong[0]
+    pong_write = pong[1]
+    took = 0_i64
+    group do |g|
+      crowd.each do |pipe|
+        fd = pipe[0]
+        g.spawn do
+          buffer_store = StaticArray(UInt8, 1).new(0_u8)
+          buffer = pointerof(buffer_store).as(Pointer(UInt8))
+          iyi_read(fd, buffer.as(Void*), 1_u64)
+          0
+        end
+      end
+      g.spawn do
+        buffer_store = StaticArray(UInt8, 1).new(0_u8)
+        buffer = pointerof(buffer_store).as(Pointer(UInt8))
+        rounds.times do
+          iyi_read(ping_read, buffer.as(Void*), 1_u64)
+          __iyi_write(pong_write, buffer.as(Void*), 1_u64)
+        end
+        0
+      end
+      runner = g.spawn do
+        buffer_store = StaticArray(UInt8, 1).new(0_u8)
+        buffer = pointerof(buffer_store).as(Pointer(UInt8))
+        buffer.value = 1_u8
+        started = __iyi_monotonic_ns
+        rounds.times do
+          __iyi_write(ping_write, buffer.as(Void*), 1_u64)
+          iyi_read(pong_read, buffer.as(Void*), 1_u64)
+        end
+        __iyi_monotonic_ns - started
+      end
+      answer = runner.value
+      took = answer.is_a?(Int64) ? answer : -1_i64
+      crowd.each do |pipe|
+        write_fixture(pipe[1], "x")
+      end
+    end
+    (crowd + [ping, pong]).each do |pipe|
+      __iyi_close(pipe[0].to_i64)
+      __iyi_close(pipe[1].to_i64)
+    end
+    took
+  end
+
+  # The best of three each, so that a busy machine's one slow run is not
+  # read as a slow queue.
+  alone = round_trips(0, 5000)
+  crowded = round_trips(2000, 5000)
+  2.times do
+    again = round_trips(0, 5000)
+    alone = again if again < alone
+    again = round_trips(2000, 5000)
+    crowded = again if again < crowded
+  end
+  puts "5000 round trips took #{crowded // 1000000} ms with 2000 readers parked, #{alone // 1000000} ms alone"
+{% end %}
+

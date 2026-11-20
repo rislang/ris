@@ -1,0 +1,17 @@
+module speed/measure_text_scale
+
+def check(cond : Bool, msg : String) : Nil
+  raise msg unless cond
+end
+
+mega = "acgt" * 262144
+twin = "acgt" * 262144
+same = 0
+started = __iyi_monotonic_ns
+1000.times { same = same + 1 if mega == twin }
+check(same == 1000, "== of equal megabytes")
+{% if flag?(:release) %}
+  ms = (__iyi_monotonic_ns - started) // 1000000
+  puts "1,000 == of equal megabytes: #{ms} ms"
+{% end %}
+

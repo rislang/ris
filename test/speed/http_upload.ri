@@ -1,0 +1,89 @@
+module speed/measure_http_upload
+import std/http::{HTTP, Server, Incoming, Outgoing}
+import std/socket::{IyiSocket}
+
+def assert_true(cond : Bool, msg : String) : Nil
+  raise msg unless cond
+end
+
+def read_response(c : IyiSocket) : String
+  buf = ""
+  while true
+    if split = HTTP.find_headers_end(buf)
+      need = 0
+      HTTP.split_crlf(buf[0, split]).each do |line|
+        colon = line.index(':')
+        next unless colon
+        if HTTP.same_name?(line[0, colon], "Content-Length")
+          need = line[colon + 1, line.bytesize - colon - 1].strip.to_i
+        end
+      end
+      have = buf.bytesize - split - 4
+      return buf if have >= need
+    end
+    chunk = c.read(4096).or_panic
+    raise "the server closed mid-response" if chunk.bytesize == 0
+    buf << chunk
+  end
+end
+
+struct Ready
+end
+
+class UploadHandler
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+    nil
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    if req.path == "/echo"
+      res.body << req.body
+    else
+      res.body << req.body.bytesize.to_s
+    end
+    nil
+  end
+end
+
+probe = IyiSocket.listen("127.0.0.1", 0)
+sport = probe.local_port
+probe.close
+group do |g|
+  g.spawn do
+    Server.answer("127.0.0.1", sport, 0, UploadHandler, max_connections: 2)
+    0
+  end
+  puts "HTTP upload server starting"
+  RisBoard.take(Ready)
+  puts "HTTP upload server ready"
+  g.spawn do
+    upload = "u" * 24000000
+    upload_started = __iyi_monotonic_ns
+    r10 = HTTP.post("http://127.0.0.1:#{sport}/echo", upload).or_panic
+    upload_ms = (__iyi_monotonic_ns - upload_started) // 1000000_i64
+    assert_true r10.status == 200 && r10.body == upload, "a 24 MB upload echoed whole (#{r10.body.bytesize} bytes)"
+    puts "a 24 MB upload: #{upload_ms} ms"
+    # The same for a chunked body, which is decoded as it arrives: it was
+    # added to what came before and parsed again after every read, and
+    # 16 MB in 64 KB chunks took 8.8 s where this takes a tenth of one.
+    framed = String::Builder.new(16900000)
+    framed << "POST /size HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n"
+    piece = "c" * 65536
+    256.times { framed << "10000\r\n" << piece << "\r\n" }
+    framed << "0\r\n\r\n"
+    chunked_started = __iyi_monotonic_ns
+    up = IyiSocket.connect("127.0.0.1", sport).or_panic
+    up.write(framed.to_s).or_panic
+    r12 = HTTP.parse_response(read_response(up))
+    chunked_ms = (__iyi_monotonic_ns - chunked_started) // 1000000_i64
+    up.close
+    assert_true r12.status == 200 && r12.body == "16777216", "a 16 MB chunked upload arrived whole (#{r12.body} bytes)"
+    puts "a 16 MB chunked upload: #{chunked_ms} ms"
+    g.cancel_children
+    0
+  end
+end

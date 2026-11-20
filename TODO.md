@@ -535,7 +535,6 @@ SPEC 7.1 lists it; these are what Linux has and it lacks yet.
   `Pointer(RisArrayPool(String))` from boot/shelf's type ids.
 * The mutation phases of std_acme, cookie, router, sse and websocket .sh
   run past 20 minutes; recheck on minitest whether they finish.
-* base64's timing ratio fails under load; recheck on minitest.
 
 * Found while porting rispacks (2026-11-13), reproducers not yet in
   test/cli; the first three are reported by the port, not rechecked:

@@ -1,0 +1,8 @@
+module speed/measure_regex
+import std/regex::{Regex}
+
+text = "a" * 30000
+started = __iyi_monotonic_ns
+raise "match" unless Regex.compile("(a|a)*b").match(text).nil?
+raise "find" unless Regex.compile("(?:a|a)*b").find(text).nil?
+puts "regex pathological non-match: #{__iyi_monotonic_ns - started} ns"

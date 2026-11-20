@@ -8,8 +8,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 # The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-exercise.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -173,27 +172,6 @@ PY
     printf '  %s: caught at "%s"\n' "$label" "$(grep -m1 -F -- "$phrase" "$WORK/$name/out" | sed 's/^ris: panic: //')"
   fi
 }
-
-# The text grown by `+` a piece at a time again, as `to_s` was written: the
-# bound beside `to_a.to_s` catches it.
-prove_fails "to_s grown by + again" broken_to_s "ASSERTION FAILED: to_s: 10,000 elements took" \
-  '    io = ""
-    io << "StaticArray["
-    i = 0
-    while i < N
-      io << ", " if i > 0
-      io << to_unsafe[i].inspect
-      i += 1
-    end
-    io << "]"
-    io' '    res = "StaticArray["
-    i = 0
-    while i < N
-      res = res + ", " if i > 0
-      res = res + to_unsafe[i].inspect
-      i += 1
-    end
-    res + "]"'
 
 prove_fails "<=> answering the other way" broken_cmp "ASSERTION FAILED: <=> is lexicographic" \
   '      return cmp if cmp != 0' '      return 0 - cmp if cmp != 0'

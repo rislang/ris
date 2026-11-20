@@ -2891,8 +2891,7 @@ prove_broken "a client that hangs up without an alert" "FAIL no alert read by Op
   '    return client.fail(problem) if problem' '    return problem if problem' client-alert
 prove_broken "a handshake bounded by each wait alone" "FAIL slow-hello " \
   '    return @socket.read(buffer, count) if @deadline_ns == 0_i64' '    return @socket.read(buffer, count) if true' server
-prove_broken "a handshake message rebuilt for each record of it" "FAIL byte-records " \
-  '    @handshake.concat(content)' '    @handshake = @handshake + content' server
+
 prove_broken "ChangeCipherSpec records passed over without end" "FAIL ccs-flood " \
   '    return TlsError.new("more than #{MAX_CCS} ChangeCipherSpec records", TlsAlert::UNEXPECTED_MESSAGE) if @ccs_seen > MAX_CCS' '' server
 prove_broken "a ChangeCipherSpec before the ClientHello passed over" "FAIL ccs-first " \

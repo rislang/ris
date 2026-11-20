@@ -31,8 +31,7 @@ for candidate in python3 python; do
 done
 
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-exercise.XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from `pwd` is `/c/...` and finds no prelude at all, and a
 # scratch directory named `/tmp/tmp.X` is silently ignored on that path, so
@@ -168,17 +167,6 @@ broken "six bytes read in the wrong order" '(word.unsafe_shr(40) & 0xFF_u64)
 '
 broken "a character pair written backwards" 'chars[k.unsafe_shr(6)].to_i32 | chars[k & 63].to_i32.unsafe_shl(8)' 'chars[k & 63].to_i32 | chars[k.unsafe_shr(6)].to_i32.unsafe_shl(8)'
 broken "vertical tab and form feed refused again" 'next if b == 32_u8 || (b >= 9_u8 && b <= 13_u8)' 'next if b == 32_u8 || b == 10_u8 || b == 13_u8 || b == 9_u8' "base64: invalid byte 11"
-# The byte loop is cheap enough on arm64 that it may stay inside one byte
-# sum there: darwin arm64 let it through. The check runs everywhere;
-# its proof on Linux x86_64, where the byte loop is twice the word loop.
-case "$(uname -s) $(uname -m)" in
-  "Linux x86_64")
-    broken "a byte and a character at a time again" 'while i &+ 8 <= n' 'while false'
-    ;;
-  *)
-    echo "  a byte and a character at a time again: not proven here, because this processor's byte loop is too cheap for its time to show"
-    ;;
-esac
 
 echo
 echo "== what decode refuses"

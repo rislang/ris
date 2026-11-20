@@ -1,0 +1,42 @@
+module speed/measure_indexable
+import std/indexable::{Indexable}
+@[OnTape]
+pub struct IndexOnly
+  def initialize(@data : Array(Int32))
+  end
+end
+
+impl Indexable for IndexOnly
+  type Elem = Int32
+
+  def size : Int32
+    @data.size
+  end
+
+  def unsafe_fetch(index : Int32) : Int32
+    @data.unsafe_fetch(index)
+  end
+end
+
+def assert_true(cond : Bool, msg : String) : Nil
+  raise "assertion failed: #{msg}" unless cond
+end
+
+def assert_equal(expected : String, actual : String, msg : String) : Nil
+  raise "expected '#{expected}', got '#{actual}' in #{msg}" unless expected == actual
+end
+
+def check(cond : Bool, msg : String) : Nil
+  raise msg unless cond
+end
+
+long_data = Array(Int32).new(20000) { |i| i % 10 }
+join_started = __iyi_monotonic_ns
+long_joined = IndexOnly.new(long_data).join(",")
+seq_join_ns = __iyi_monotonic_ns - join_started
+join_started = __iyi_monotonic_ns
+array_joined = long_data.join(",")
+array_join_ns = __iyi_monotonic_ns - join_started
+assert_true(long_joined == array_joined, "indexable join of 20,000 elements matches the array's")
+
+puts "indexable join in linear time: 20,000 elements took #{seq_join_ns // 1000000} ms where the array's took #{array_join_ns // 1000000} ms"

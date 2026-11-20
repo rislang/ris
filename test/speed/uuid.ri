@@ -1,0 +1,30 @@
+module speed/measure_uuid
+import std/uuid::{UUID}
+def assert_true(cond : Bool, msg : String) : Nil
+  raise "ASSERTION FAILED: #{msg}" unless cond
+end
+
+def assert_str(expected : String, actual : String, msg : String) : Nil
+  raise "ASSERTION FAILED: #{msg}\n  expected #{expected.inspect}\n  got      #{actual.inspect}" unless expected == actual
+end
+
+def check(cond : Bool, msg : String) : Nil
+  raise msg unless cond
+end
+
+ids = [] of UUID
+16000.times { ids << UUID.v4.copy_to(Program.tape) }
+texts = ids.map { |id| id.to_s }
+started = __iyi_monotonic_ns
+by_id = {} of UUID => Int32
+ids.each_with_index { |id, i| by_id[id] = i }
+keyed_ns = __iyi_monotonic_ns - started
+started = __iyi_monotonic_ns
+by_text = {} of String => Int32
+texts.each_with_index { |text, i| by_text[text] = i }
+texted_ns = __iyi_monotonic_ns - started
+assert_true by_id.size == by_text.size && by_id[UUID.parse(texts[4321])]? == by_text[texts[4321]]?, "a table of UUIDs fills and answers"
+
+puts "hash table: 16000 UUID keys took #{keyed_ns // 1000000} ms where String keys took #{texted_ns // 1000000} ms"
+
+puts "\n== a value"

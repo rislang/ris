@@ -1,0 +1,33 @@
+module speed/measure_yaml
+import std/yaml::{YAML}
+def assert_true(cond : Bool, msg : String) : Nil
+  raise "ASSERTION FAILED: #{msg}" unless cond
+end
+
+def assert_str(expected : String, actual : String, msg : String) : Nil
+  raise "ASSERTION FAILED: #{msg}\n  expected #{expected.inspect}\n  got      #{actual.inspect}" unless expected == actual
+end
+
+def check(cond : Bool, msg : String) : Nil
+  raise msg unless cond
+end
+
+quoted_lines = "xxxxxxxxxx\n" * 20000
+quoted_line = "xxxxxxxxxx " * 20000
+lines_ns = 9223372036854775807_i64
+line_ns = 9223372036854775807_i64
+3.times do
+  quoted_started = __iyi_monotonic_ns
+  double_lines = YAML.parse("\"" + quoted_lines + "\"")
+  single_lines = YAML.parse("'" + quoted_lines + "'")
+  quoted_folded = __iyi_monotonic_ns
+  YAML.parse("\"" + quoted_line + "\"")
+  YAML.parse("'" + quoted_line + "'")
+  quoted_ended = __iyi_monotonic_ns
+  lines_ns = quoted_folded - quoted_started if quoted_folded - quoted_started < lines_ns
+  line_ns = quoted_ended - quoted_folded if quoted_ended - quoted_folded < line_ns
+
+  assert_true(double_lines.as_s == "xxxxxxxxxx " * 20000 && single_lines == double_lines, "quoted folding")
+end
+
+puts "quoted scalars, multiline vs one line: #{lines_ns // 1000000} ms against #{line_ns // 1000000} ms"

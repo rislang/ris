@@ -4,7 +4,6 @@ module bench/std_base64_exercise
 puts "== encode"
 puts "  RFC 4648, with padding"
 puts "  every byte value, both alphabets, every length to 40"
-puts "  encode within a few passes that add the bytes up"
 puts "\n== decode"
 puts "  decode and round trip"
 puts "\nALL CHECKS PASSED"

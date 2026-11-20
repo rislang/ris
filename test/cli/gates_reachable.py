@@ -87,6 +87,12 @@ TOOLS = {
     "tls_speed.sh",
     # Former collection gate timings, run by hand without budgets.
     "collections.sh",
+    # Former CLI timing budgets, printing observations only.
+    "std_timings.sh",
+    "cli_timings.py",
+    "protocol_timings.py",
+    "http_latency.sh",
+    "lsp_timings.py",
 }
 
 # A gate that fails on this tree: it stays out of CI until its TODO.md item

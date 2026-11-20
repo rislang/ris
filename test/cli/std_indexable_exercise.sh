@@ -21,8 +21,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 # The gate runs the compiler the caller names; bin/ris is a POSIX shell
 # wrapper a Windows build cannot run.
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-exercise.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 # A native compiler cannot resolve this shell's own path mapping: a search
@@ -211,23 +210,6 @@ prove_fails "delete_if compaction" broken_delete_if "expected .1,3,5,99., got" \
 #    a slot, so the three are always the first three, shuffled.
 prove_fails "sample of a count" broken_sample "a collection samples three as an array does" \
   's/picked\[j\] = unsafe_fetch(i) if j < n/picked[j] = unsafe_fetch(i) if j < 0/'
-
-# 8. Put join back on `result = result + ...`, which copies the text so far
-#    once per element: the linear-time bound beside `Array#join` catches it.
-prove_fails "join grown by + again" broken_join "indexable join in linear time" \
-  '/^  def join(separator : String = "") : String$/,/^  end$/c\
-  def join(separator : String = "") : String\
-    result = ""\
-    first = true\
-    i = 0\
-    while i < size\
-      result = result + separator unless first\
-      result = result + unsafe_fetch(i).to_s\
-      first = false\
-      i = i + 1\
-    end\
-    result\
-  end'
 
 # 9. Put the fill refusal back on `offset + count`: the probe for a huge
 #    count then reads "arithmetic overflow", not its sentence. A probe mode

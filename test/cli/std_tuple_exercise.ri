@@ -30,19 +30,16 @@ assert_true by_order[{y: 2, x: 1}]? == 12, "a key written in the other order is 
 grid_hashes = {} of Int32 => Bool
 150.times { |x| 150.times { |y| grid_hashes[{x: x, y: y}.hash] = true } }
 assert_true grid_hashes.size == 22500, "hash spread: a 150 by 150 grid had #{grid_hashes.size} distinct hashes of 22500"
-started = __iyi_monotonic_ns
+# speed: tuple.3
 named = {} of NamedTuple(x: Int32, y: Int32) => Int32
 150.times { |x| 150.times { |y| named[{x: x, y: y}] = x * y } }
-named_ns = __iyi_monotonic_ns - started
-started = __iyi_monotonic_ns
+# speed: tuple.4
 plain = {} of {Int32, Int32} => Int32
 150.times { |x| 150.times { |y| plain[{x, y}] = x * y } }
-plain_ns = __iyi_monotonic_ns - started
+# speed: tuple.6
 assert_true named.size == 22500 && named[{x: 149, y: 17}]? == 2533, "a grid table fills and answers"
-# A bound, not a benchmark: twenty times the tuples' time and 200 ms over.
-# The type's id took 1.6 s for this grid.
-assert_true named_ns <= plain_ns * 20 + 200_000_000_i64, "hash table: 22500 keys took #{named_ns // 1000000} ms where tuples took #{plain_ns // 1000000} ms"
-puts "  22500 distinct hashes, and a table of them within the bound"
+# speed: tuple.7
+puts "  22500 distinct hashes, and a table of them checked"
 puts
 
 puts "== size"

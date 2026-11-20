@@ -1,0 +1,13 @@
+module speed/measure_base64
+import std/base64::{Base64}
+
+bytes = "abcdefgh" * 131072
+started = __iyi_monotonic_ns
+encoded = Base64.encode(bytes)
+encode_ns = __iyi_monotonic_ns - started
+sum = 0_i64
+started = __iyi_monotonic_ns
+bytes.each_byte { |b| sum += b.to_i64 }
+sum_ns = __iyi_monotonic_ns - started
+raise "round trip" unless Base64.decode(encoded) == bytes
+puts "base64 encode: #{encode_ns} ns; byte sum: #{sum_ns} ns (#{sum})"

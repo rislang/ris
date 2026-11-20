@@ -1,0 +1,13 @@
+module bench/std_http_nodelay
+import std/socket::{IyiSocket}
+probe = IyiSocket.listen("127.0.0.1", 0)
+client = IyiSocket.connect("127.0.0.1", probe.local_port).or_panic
+accepted = probe.accept.or_panic
+raise "nodelay: the connected socket has Nagle on (TCP_NODELAY reads 0)" unless client.nodelay?
+raise "nodelay: the accepted socket has Nagle on (TCP_NODELAY reads 0)" unless accepted.nodelay?
+client.nodelay = false
+raise "nodelay: TCP_NODELAY still set after nodelay = false" if client.nodelay?
+client.close
+accepted.close
+probe.close
+puts "ALL CHECKS PASSED"

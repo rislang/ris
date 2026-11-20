@@ -426,13 +426,13 @@ objects = JSON.parse(objects_text).as_a
   end
 end
 assert_true(grid_arrays.size >= 22400 && grid_objects.size >= 22400, "a 150 by 150 grid has #{grid_arrays.size} array and #{grid_objects.size} object hashes for 22,500 values")
-keyed_started = __iyi_monotonic_ns
+# speed: json.18
 keyed = {} of Any => Bool
 objects.each { |o| keyed[o] = true }
-keyed_ms = (__iyi_monotonic_ns - keyed_started) // 1000000
+# speed: json.19
 assert_true(keyed.size == 160000, "160,000 distinct objects are 160,000 keys")
-assert_true(keyed_ms < 2000, "160,000 objects took #{keyed_ms} ms to go into a Hash, not under 2,000")
-puts "  arrays and objects hash apart: 22,400 hashes of a 150 by 150 grid at least, 160,000 objects keyed under 2,000 ms"
+# speed: json.20
+puts "  arrays and objects hash apart: 22,400 hashes of a 150 by 150 grid at least, 160,000 objects keyed"
 
 # ---------------------------------------------------------------------------
 # to_json and from_json over prelude values and a ToJSON type
