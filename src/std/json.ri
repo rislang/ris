@@ -271,13 +271,16 @@ pub macro serializable(declaration)
   # expands where it is called, so it names the type as the caller can: a
   # type its module does not export by its own name, as only that module
   # reaches it and a qualified name is refused there too (iyi SPEC R-2).
+  # Keep the receiver as written, including nested names and aliases.
   macro from_json(text)
     %doc = ::Std::Json::JSON.document(\{{ text }})
-    {% if @type.private? %}
-      {{ @type.name.split("::").last.id }}.new(%doc, %doc.root)
-    {% else %}
-      ::{{ @type }}.new(%doc, %doc.root)
-    {% end %}
+    \{% if @caller && @caller[0].receiver %}
+      \{{ @caller[0].receiver }}.new(%doc, %doc.root)
+    \{% elsif @type.private? %}
+      \{{ @type.name.split("::").last.id }}.new(%doc, %doc.root)
+    \{% else %}
+      ::\{{ @type }}.new(%doc, %doc.root)
+    \{% end %}
   end
 
   # Tells `JSON.read_value` and an outer derive that it reads itself.

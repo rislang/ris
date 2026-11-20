@@ -55,6 +55,7 @@ TOOLS = {
     # with CPU/startup/front-end times, and macro expansion overhead.
     # Run by hand for comparisons; none promises a pass/fail timing.
     "artifact_speed.py",
+    "parallel.sh",
     "incremental.py",
     "machine_probe.py",
     "macro_cost.py",
@@ -96,9 +97,6 @@ BROKEN = {
     "generic_boundary.py",
     "lsp_artifacts.py",
     "lsp_positions.py",
-    "mod_context.sh",
-    "parallel_exercise.sh",
-    "runtime_exercise.sh",
     "metric_port.sh",
 }
 

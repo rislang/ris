@@ -169,6 +169,7 @@ jobs:
           bash test/cli/cache_concurrency.sh
           bash test/cli/iyi_cache_dir.sh
           bash test/cli/mod_diff.sh
+          bash test/cli/mod_context.sh
         env:
           RIS: ${{ github.workspace }}/bin/ris
       - name: the enum, float text and format surfaces
@@ -184,6 +185,13 @@ jobs:
         run: |
           bash test/cli/value_exercise.sh
           bash test/cli/io_exercise.sh
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
+      - name: Runtime and parallel task properties
+        if: matrix.shard == 'heap'
+        run: |
+          bash test/cli/runtime_exercise.sh
+          bash test/cli/parallel_exercise.sh
         env:
           RIS: ${{ github.workspace }}/bin/ris
       - name: Collections on the caller's tape

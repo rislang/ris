@@ -28,8 +28,7 @@ case "$(uname -s)" in
 esac
 
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-gate.XXXXXX")"
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     REPO="$(cygpath -m "$REPO")"
@@ -623,6 +622,7 @@ cd "$WORK" || exit 1
 mkdir -p "$WORK/libs/m"
 cd "$WORK/libs" || exit 1
 cat > m/netty.ri <<'EOF'
+@[Ffi]
 module m/netty
 
 pub class Box

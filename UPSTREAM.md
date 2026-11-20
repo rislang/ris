@@ -264,3 +264,6 @@ resolution keep their output on the caller's tape in ris.
 IDNA and Punycode caller-builder overloads and RFC 3492 section 7.1
 proofs belong in iyi too (src/std/idna.ri). Inputs remain borrowed and
 writer results stay on the caller's tape in ris.
+
+* std/log_text: give exported generic `LogField.text` an explicit type
+  parameter so standalone interface compilation can carry its signature.

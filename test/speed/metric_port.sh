@@ -26,8 +26,7 @@ set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/speed/.work"
-WORK="$(mktemp -d "$REPO/test/speed/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-gate.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 case "$(uname -s)" in
