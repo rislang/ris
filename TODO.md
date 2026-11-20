@@ -25,12 +25,17 @@ sections below and are listed here in order:
 ## 1. Programs first
 
 * std on the tape, found porting the HTTP handlers (drift report in
-  doc/drafts/server-answer-features.md): Router's `Pattern.parse` (SPEC
-  1.9, router.ri:189), the HTTPS client (`records_handshake` returns
-  an owner, http.ri:4847; blocks samples/ris/autocert.ri),
-  `Zstd.decompress` (view check, zstd.ri:1410), `Cookie.parse_header`
-  and `HTTP.cookie_pairs` (a Hash from a def). Then give `Incoming`
-  back `form`, `multipart` and `cookies`, which `Request` had.
+  doc/drafts/server-answer-features.md). Done 2026-11-20: Pattern views
+  its text (no growing field, SPEC 2.1) and `match` writes into the
+  caller's pieces, builder and Captures; `Zstd.decompress` decodes in
+  answer_compress; `HTTP.cookie_pairs` fills a caller's Hash; `Incoming`
+  has `form` (a Query), `cookies(found)` and `multipart { |parts| }`.
+  Left: `Router#call` hands `Incoming` to an opaque handler Proc,
+  refused ("cannot prove opaque callback retain/escape effects",
+  router.ri `@handlers[found].call`; doc/drafts/checker-open-questions),
+  so std_router_exercise does not build. The HTTPS client
+  (`records_handshake` returns an owner, http.ri:4847; blocks
+  samples/ris/autocert.ri).
 
 * The user's own ris programs: each obstacle becomes an item here.
 

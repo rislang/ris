@@ -1404,7 +1404,6 @@ subset of RFC 9113.
   tape; Outgoing writes into caller-owned response storage. Retaining a body or
   field requires SPEC 1.7, and caller-created streaming/client resources require
   close.
-  <!-- todo: Needs proof -->
 
 ## http_head
 
@@ -2788,7 +2787,6 @@ Routes std/http requests using Go ServeMux patterns and path cleaning.
   missing paths, host braces, unclean paths, bad percent escapes,
   partial-segment wildcards, nonfinal rest or end wildcards, duplicate names and
   names outside ASCII identifiers. (test/cli/std_router_exercise.ri)
-  <!-- todo: TODO.md:32 records Pattern.parse failing SPEC 1.9. -->
 * router.4 Pattern relation compares method and path request sets as equivalent,
   more general, more specific, disjoint or overlapping. Same-host patterns with
   equivalent or overlapping sets conflict; registering the second panics with

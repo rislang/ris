@@ -142,7 +142,8 @@ pub struct Captures
   end
 end
 
-pub class Pattern
+@[OnTape]
+pub struct Pattern
   # A path segment's kind: a literal, `{name}`, `{name...}` or a trailing
   # slash (with no name), and `{$}`.
   LITERAL = 0
@@ -162,20 +163,23 @@ pub class Pattern
   getter method : String
   getter host : String
   @text : String
-  # Per segment its kind and its text: a literal decoded, a wildcard's
-  # name, "" for a trailing slash and for `{$}`.
-  @kinds : Array(Int32)
-  @names : Array(String)
+  # The path, a view of the text: its segments are read from it each time
+  # (a literal percent-decoded as it is compared), so a Pattern holds no
+  # data of its own and an Array(Pattern) is flat (SPEC 2.1).
+  @path : String
+  # How many segments the path has, and the kind of its last.
+  @count : Int32
+  @last : Int32
 
-  protected def kinds : Array(Int32)
-    @kinds
+  protected def path : String
+    @path
   end
 
-  protected def names : Array(String)
-    @names
+  protected def count : Int32
+    @count
   end
 
-  def initialize(@text : String, @method : String, @host : String, @kinds : Array(Int32), @names : Array(String))
+  protected def initialize(@text : String, @method : String, @host : String, @path : String, @count : Int32, @last : Int32)
   end
 
   # The pattern as it was written.
@@ -187,7 +191,8 @@ pub class Pattern
   # `/` to start the path, a `{` in the host, a path a request's cleaned
   # path never equals (`//`, `.`, `..`), a wildcard that is not a whole
   # segment, `{$}` or `{name...}` before the end, a name that is not an
-  # identifier or is used twice, a malformed percent escape.
+  # identifier or is used twice, a malformed percent escape. The Pattern
+  # views *text*.
   def self.parse(text : String) : Pattern | RouterError
     return refused(text, "it is empty") if text.empty?
     p = text
@@ -218,52 +223,127 @@ pub class Pattern
     # path is not clean could never match one.
     cleaned = Router.clean(path)
     return refused(text, "its path is not clean: a request for it is sent to #{cleaned.inspect}") unless cleaned == path
-    kinds = [] of Int32
-    names = [] of String
-    seen = [] of String
-    q = path
     size = path.bytesize
+    count = 0
+    last = LITERAL
     at = 0
     while at < size
-      first = at + 1
-      if first == size
-        kinds << MULTI
-        names << ""
-        break
-      end
-      stop = first
-      while stop < size && q[stop] != 47_u8
-        stop = stop + 1
-      end
-      segment = path[first, stop - first]
-      brace = segment.index('{')
-      if brace.nil?
-        decoded = URI.decode?(segment)
-        return refused(text, "#{segment.inspect} holds a malformed percent escape") unless decoded
-        kinds << LITERAL
-        names << decoded
-      else
-        return refused(text, "a wildcard is a whole segment, {name}, and #{segment.inspect} is not one") unless brace == 0 && segment.ends_with?("}")
+      stop = Pattern.segment_end(path, at)
+      kind = Pattern.kind_of(path, at, stop)
+      segment = path[at + 1, stop - at - 1]
+      if kind == LITERAL
+        return refused(text, "a wildcard is a whole segment, {name}, and #{segment.inspect} is not one") if segment.includes?("{")
+        return refused(text, "#{segment.inspect} holds a malformed percent escape") unless Pattern.escapes_ok?(segment)
+      elsif kind != MULTI || stop > at + 1
+        return refused(text, "a wildcard is a whole segment, {name}, and #{segment.inspect} is not one") unless segment.ends_with?("}")
         name = segment[1, segment.bytesize - 2]
-        if name == "$"
-          return refused(text, "{$} is not at the end") unless stop == size
-          kinds << ENDS
-          names << ""
-        else
-          multi = name.ends_with?("...")
-          name = name[0, name.bytesize - 3] if multi
-          return refused(text, "{#{name}...} is not at the end") if multi && stop != size
+        return refused(text, "{$} is not at the end") if kind == ENDS && stop != size
+        if kind != ENDS
+          name = name[0, name.bytesize - 3] if kind == MULTI
+          return refused(text, "{#{name}...} is not at the end") if kind == MULTI && stop != size
           return refused(text, "a wildcard has no name") if name.empty?
           return refused(text, "#{name.inspect} is not a wildcard name (a letter or _, then letters, digits and _)") unless Pattern.identifier?(name)
-          return refused(text, "two wildcards are named #{name.inspect}") if seen.includes?(name)
-          seen << name
-          kinds << (multi ? MULTI : WILD)
-          names << name
+          return refused(text, "two wildcards are named #{name.inspect}") if Pattern.named_before?(path, at, name)
         end
       end
+      count = count + 1
+      last = kind
       at = stop
     end
-    Pattern.new(text, method, host, kinds, names)
+    Pattern.new(text, method, host, path, count, last)
+  end
+
+  # Where the segment starting at the `/` at *at* of *path* ends: the next
+  # `/` or the end; a trailing slash ends at once.
+  protected def self.segment_end(path : String, at : Int32) : Int32
+    size = path.bytesize
+    stop = at + 1
+    return stop if stop == size
+    while stop < size && path[stop] != 47_u8
+      stop = stop + 1
+    end
+    stop
+  end
+
+  # The kind of the segment between *at* and *stop*: a trailing slash is
+  # MULTI; `{$}`, `{name...}`, `{...}` by their braces; else a literal.
+  protected def self.kind_of(path : String, at : Int32, stop : Int32) : Int32
+    return MULTI if at + 1 == path.bytesize
+    return LITERAL unless path[at + 1] == 123_u8
+    length = stop - at - 1
+    return ENDS if length == 3 && path[at + 2] == 36_u8 && path[at + 3] == 125_u8
+    return MULTI if length >= 5 && path[stop - 1] == 125_u8 && path[stop - 2] == 46_u8 && path[stop - 3] == 46_u8 && path[stop - 4] == 46_u8
+    WILD
+  end
+
+  # The segment's text: a literal still encoded, a wildcard's name, ""
+  # for a trailing slash and `{$}`. A view of *path*.
+  protected def self.name_of(path : String, at : Int32, stop : Int32, kind : Int32) : String
+    length = stop - at - 1
+    return path[at + 1, length] if kind == LITERAL
+    return path[at + 2, length - 2] if kind == WILD
+    return path[at + 2, length - 5] if kind == MULTI && length > 0
+    ""
+  end
+
+  # Whether a wildcard before *upto* in *path* is named *name*.
+  protected def self.named_before?(path : String, upto : Int32, name : String) : Bool
+    at = 0
+    while at < upto
+      stop = Pattern.segment_end(path, at)
+      kind = Pattern.kind_of(path, at, stop)
+      return true if (kind == WILD || kind == MULTI) && Pattern.name_of(path, at, stop, kind) == name
+      at = stop
+    end
+    false
+  end
+
+  # Whether every `%` in *segment* starts a two-digit hex escape.
+  protected def self.escapes_ok?(segment : String) : Bool
+    i = 0
+    size = segment.bytesize
+    while i < size
+      if segment[i] == 37_u8
+        return false if i + 2 >= size
+        return false if hex_value(segment[i + 1]) < 0 || hex_value(segment[i + 2]) < 0
+        i += 3
+      else
+        i += 1
+      end
+    end
+    true
+  end
+
+  # The byte of the encoded *raw* at *i* decoded, and where the next one
+  # starts; *raw*'s escapes were checked by `parse`.
+  protected def self.decoded_at(raw : String, i : Int32) : {UInt8, Int32}
+    return {raw[i], i + 1} unless raw[i] == 37_u8
+    {(hex_value(raw[i + 1]) * 16 + hex_value(raw[i + 2])).to_u8, i + 3}
+  end
+
+  # Whether the encoded literal *raw* decodes to *decoded*.
+  protected def self.decodes_to?(raw : String, decoded : String) : Bool
+    i = 0
+    j = 0
+    while i < raw.bytesize
+      return false if j >= decoded.bytesize
+      byte, i = Pattern.decoded_at(raw, i)
+      return false unless byte == decoded[j]
+      j += 1
+    end
+    j == decoded.bytesize
+  end
+
+  # Whether two encoded literals decode to the same text.
+  protected def self.same_literal?(a : String, b : String) : Bool
+    i = 0
+    j = 0
+    while i < a.bytesize && j < b.bytesize
+      x, i = Pattern.decoded_at(a, i)
+      y, j = Pattern.decoded_at(b, j)
+      return false unless x == y
+    end
+    i == a.bytesize && j == b.bytesize
   end
 
   private def self.refused(text : String, reason : String) : RouterError
@@ -288,65 +368,81 @@ pub class Pattern
     @method.empty? || @method == method || (@method == "GET" && method == "HEAD")
   end
 
-  # The wildcards' values when *path* - a request path, rooted and clean,
-  # still percent-encoded - matches this pattern's path; nil when it does
-  # not. The method and host are not looked at.
-  def match(path : String) : Captures?
-    pieces = Pattern.pieces(path)
-    pieces ? match_pieces(pieces) : nil
+  # Whether *path* - a request path, rooted and clean, still
+  # percent-encoded - matches this pattern's path. The method and host are not looked at. The path's segments go
+  # into the empty *pieces* and *text* as `pieces` writes them; the
+  # wildcards' values, viewing them, are added to *found*. False when it
+  # does not match: *found* may then hold some.
+  def match(path : String, pieces : Array(String), text : String::Builder, found : Captures?) : Bool
+    return false unless Pattern.pieces(path, pieces, text)
+    match_pieces(pieces, text.to_s, found)
   end
 
   # *path*'s segments after its first `/`, each percent-decoded: `/` is
   # one empty piece, and a trailing slash is a last empty one. Nil for a
   # path that is not rooted or holds a malformed escape. Decoded a segment
   # at a time, so `%2F` is inside a segment, never between two.
-  def self.pieces(path : String) : Array(String)?
-    return nil unless path.starts_with?("/")
-    pieces = Array(String).new
-    path[1, path.bytesize - 1].split('/').each do |segment|
-      decoded = Pattern.decode_piece(segment)
-      return nil unless decoded
-      pieces << decoded
+  # The pieces are appended to *into*, viewing *text*, an empty builder
+  # where they are written decoded and joined by `/`. False when *path*
+  # is not rooted or holds a malformed escape.
+  def self.pieces(path : String, into : Array(String), text : String::Builder) : Bool
+    return false unless path.starts_with?("/")
+    size = path.bytesize
+    at = 0
+    while at < size
+      stop = at + 1
+      while stop < size && path[stop] != 47_u8
+        stop = stop + 1
+      end
+      segment = path[at + 1, stop - at - 1]
+      text << "/" if at > 0
+      start = text.length
+      return false unless URI.decode?(segment, text)
+      into << text.to_s[start, text.length - start]
+      at = stop
     end
-    pieces
+    true
   end
 
-  # `match` on a path already cut into `pieces`.
-  def match_pieces(pieces : Array(String)) : Captures?
-    found = Captures.new
-    i = 0
+
+  # `match` on a path already cut into `pieces`, whose text is *joined*.
+  # The wildcards' values go to *found*, unless it is nil.
+  def match_pieces(pieces : Array(String), joined : String, found : Captures?) : Bool
+    size = @path.bytesize
+    at = 0
     j = 0
-    while i < @kinds.size
-      kind = @kinds[i]
+    # Whether the pattern took the whole path: a `{name...}` or trailing
+    # slash takes the rest, slashes and all, nothing included - but not
+    # past the end: `/x/` does not match `/x`.
+    whole = false
+    while at < size && !whole
+      stop = Pattern.segment_end(@path, at)
+      kind = Pattern.kind_of(@path, at, stop)
+      name = Pattern.name_of(@path, at, stop, kind)
+      return false if j >= pieces.size
+      piece = pieces[j]
       if kind == MULTI
-        # The rest, slashes and all, nothing included - but not past the
-        # end: `/x/` does not match `/x`.
-        return nil if j >= pieces.size
-        name = @names[i]
-        value = ""
-        k = j
-        while k < pieces.size
-          value << "/" if k > j
-          value << pieces[k]
+        # The rest is the end of *joined* past the pieces before it.
+        offset = 0
+        k = 0
+        while k < j
+          offset += pieces[k].bytesize + 1
           k += 1
         end
-        found.add(name.as_tape, value) unless name.empty?
-        return found
-      end
-      return nil if j >= pieces.size
-      piece = pieces[j]
-      if kind == ENDS
-        return nil unless piece.empty? && j == pieces.size - 1
+        found.add(name, joined[offset, joined.bytesize - offset]) if found && !name.empty?
+        whole = true
+      elsif kind == ENDS
+        return false unless piece.empty? && j == pieces.size - 1
       elsif kind == WILD
-        return nil if piece.empty?
-        found.add(@names[i].as_tape, piece)
+        return false if piece.empty?
+        found.add(name, piece) if found
       else
-        return nil unless piece == @names[i]
+        return false unless Pattern.decodes_to?(name, piece)
       end
-      i = i + 1
+      at = stop
       j = j + 1
     end
-    j == pieces.size ? found : nil
+    whole || j == pieces.size
   end
 
   private def self.hex_value(byte : UInt8) : Int32
@@ -356,32 +452,12 @@ pub class Pattern
     -1
   end
 
-  protected def self.decode_piece(text : String) : String?
-    return text unless text.index('%')
-    w = String::Builder.new(text.bytesize)
-    i = 0
-    while i < text.bytesize
-      if text[i] == 37_u8
-        return nil if i + 2 >= text.bytesize
-        hi = hex_value(text[i + 1])
-        lo = hex_value(text[i + 2])
-        return nil if hi < 0 || lo < 0
-        w.push((hi * 16 + lo).to_u8)
-        i += 3
-      else
-        w << text[i, 1]
-        i += 1
-      end
-    end
-    w.finish
-  end
-
   # Whether this pattern matched *pieces* without its trailing wildcard
   # taking anything: `/x/` on `/x/`, not on `/x/y`. What decides whether
   # `/x` is redirected to `/x/`.
   def exact?(pieces : Array(String)) : Bool
-    return true unless @kinds.last == MULTI
-    pieces.size == @kinds.size && pieces.last.empty?
+    return true unless @last == MULTI
+    pieces.size == @count && pieces.last.empty?
   end
 
   # Whether this pattern matches a strict subset of *other*'s requests,
@@ -434,27 +510,36 @@ pub class Pattern
   end
 
   private def compare_paths(other : Pattern) : Int32
-    theirs = other.kinds
-    their_names = other.names
-    mine_multi = @kinds.last == MULTI
-    theirs_multi = theirs.last == MULTI
+    theirs = other.path
+    their_count = other.count
+    mine_multi = @last == MULTI
+    theirs_multi = other.last_kind == MULTI
     # Without a trailing wildcard a path matches only paths of its own
     # number of segments.
-    return DISJOINT if @kinds.size != theirs.size && !mine_multi && !theirs_multi
+    return DISJOINT if @count != their_count && !mine_multi && !theirs_multi
     rel = EQUIVALENT
-    shared = @kinds.size < theirs.size ? @kinds.size : theirs.size
-    i = 0
-    while i < shared
-      rel = Pattern.combine(rel, compare_segments(@kinds[i], @names[i], theirs[i], their_names[i]))
+    at = 0
+    their_at = 0
+    while at < @path.bytesize && their_at < theirs.bytesize
+      stop = Pattern.segment_end(@path, at)
+      their_stop = Pattern.segment_end(theirs, their_at)
+      kind = Pattern.kind_of(@path, at, stop)
+      their_kind = Pattern.kind_of(theirs, their_at, their_stop)
+      rel = Pattern.combine(rel, compare_segments(kind, Pattern.name_of(@path, at, stop, kind), their_kind, Pattern.name_of(theirs, their_at, their_stop, their_kind)))
       return rel if rel == DISJOINT
-      i = i + 1
+      at = stop
+      their_at = their_stop
     end
-    return rel if @kinds.size == theirs.size
+    return rel if @count == their_count
     # The shorter can still match the longer's paths if it ends in a
     # wildcard that takes the rest.
-    return Pattern.combine(rel, MORE_GENERAL) if @kinds.size < theirs.size && mine_multi
-    return Pattern.combine(rel, MORE_SPECIFIC) if theirs.size < @kinds.size && theirs_multi
+    return Pattern.combine(rel, MORE_GENERAL) if @count < their_count && mine_multi
+    return Pattern.combine(rel, MORE_SPECIFIC) if their_count < @count && theirs_multi
     DISJOINT
+  end
+
+  protected def last_kind : Int32
+    @last
   end
 
   # One segment beside the one at the same place in another pattern.
@@ -466,7 +551,8 @@ pub class Pattern
     # `{x}` never matches the end that `{$}` matches: a segment is not empty.
     return (their_kind == ENDS ? DISJOINT : MORE_GENERAL) if kind == WILD
     return (kind == ENDS ? DISJOINT : MORE_SPECIFIC) if their_kind == WILD
-    kind == their_kind && name == their_name ? EQUIVALENT : DISJOINT
+    return DISJOINT unless kind == their_kind
+    kind == ENDS || Pattern.same_literal?(name, their_name) ? EQUIVALENT : DISJOINT
   end
 
   # Two relations of parts (methods, then each segment) as the relation
@@ -492,33 +578,45 @@ pub class Pattern
   # (a trailing wildcard taking nothing), and what the longer has left
   # after the shorter's trailing wildcard.
   private def common_path(other : Pattern) : String
-    theirs = other.kinds
-    their_names = other.names
+    theirs = other.path
     text = String::Builder.new
-    i = 0
-    while i < @kinds.size && i < theirs.size
-      mine = @kinds[i]
-      if mine == MULTI || (mine == WILD && theirs[i] != MULTI)
-        write_segment(text, theirs[i], their_names[i])
+    at = 0
+    their_at = 0
+    while at < @path.bytesize || their_at < theirs.bytesize
+      if at < @path.bytesize
+        stop = Pattern.segment_end(@path, at)
+        mine = Pattern.kind_of(@path, at, stop)
       else
-        write_segment(text, mine, @names[i])
+        stop = at
+        mine = -1
       end
-      i = i + 1
-    end
-    while i < @kinds.size
-      write_segment(text, @kinds[i], @names[i])
-      i = i + 1
-    end
-    while i < theirs.size
-      write_segment(text, theirs[i], their_names[i])
-      i = i + 1
+      if their_at < theirs.bytesize
+        their_stop = Pattern.segment_end(theirs, their_at)
+        their_kind = Pattern.kind_of(theirs, their_at, their_stop)
+      else
+        their_stop = their_at
+        their_kind = -1
+      end
+      if mine < 0 || (their_kind >= 0 && (mine == MULTI || (mine == WILD && their_kind != MULTI)))
+        Pattern.write_segment(text, their_kind, Pattern.name_of(theirs, their_at, their_stop, their_kind))
+      else
+        Pattern.write_segment(text, mine, Pattern.name_of(@path, at, stop, mine))
+      end
+      at = stop
+      their_at = their_stop
     end
     text.to_s
   end
 
-  private def write_segment(text : String::Builder, kind : Int32, name : String) : Nil
+  # A segment of a request both match: a literal decoded, a wildcard by
+  # its name.
+  protected def self.write_segment(text : String::Builder, kind : Int32, name : String) : Nil
     text << "/"
-    text << name if kind == LITERAL || kind == WILD
+    if kind == LITERAL
+      URI.decode?(name, text)
+    elsif kind == WILD
+      text << name
+    end
   end
 end
 
@@ -571,28 +669,57 @@ pub class Router
   def call(req : Incoming, res : Outgoing) : Nil
     @answering = true
     raw = req.path
-    return Router.plain(res, 404, "not found\n") unless raw.starts_with?("/")
-    return Router.plain(res, 400, "bad request\n") unless URI.decode?(raw)
-    path = Router.clean(raw)
-    host = Router.host_of(req.header("Host") || "")
-    pieces = Pattern.pieces(path) || [""]
-    found = find(host, req.method, pieces)
-    # `/x` where only `/x/`'s subtree would take it - or nothing would -
-    # is sent to `/x/` when `/x/` itself is a request a pattern matches
-    # exactly.
-    exact = found ? @patterns[found[0]].exact?(pieces) : false
-    unless exact || path.ends_with?("/")
-      slashed = Pattern.pieces(path + "/") || [""]
-      if (again = find(host, req.method, slashed)) && @patterns[again[0]].exact?(slashed)
-        return Router.redirect(res, path + "/", req.query)
+    # What answers, decided before anything is written into *res*: the
+    # handler is called first, as nothing has touched *res* yet.
+    # 0 the handler, 1 a 404, 2 a 400, 3 a 307 to the path and a slash,
+    # 4 a 307 to the cleaned path, 5 a 405 or a 404.
+    action = 5
+    found = -1
+    path = raw
+    host = ""
+    pieces = [] of String
+    text = String::Builder.new(raw.bytesize + 1)
+    if !raw.starts_with?("/")
+      action = 1
+    elsif !URI.decode?(raw)
+      action = 2
+    else
+      path = Router.clean(raw)
+      host = Router.host_of(req.header("Host") || "")
+      Pattern.pieces(path, pieces, text)
+      found = find(host, req.method, pieces, text.to_s)
+      # `/x` where only `/x/`'s subtree would take it - or nothing would -
+      # is sent to `/x/` when `/x/` itself is a request a pattern matches
+      # exactly.
+      exact = found >= 0 ? @patterns[found].exact?(pieces) : false
+      unless exact || path.ends_with?("/")
+        slashed = [] of String
+        more = String::Builder.new(raw.bytesize + 1)
+        Pattern.pieces(path + "/", slashed, more)
+        again = find(host, req.method, slashed, more.to_s)
+        action = 3 if again >= 0 && @patterns[again].exact?(slashed)
+      end
+      if action == 5
+        if path != raw
+          action = 4
+        elsif found >= 0
+          action = 0
+        end
       end
     end
-    return Router.redirect(res, path, req.query) unless path == raw
-    if found
-      @handlers[found[0]].call(req, res, found[1])
+    if action == 0
+      params = {} of String => String
+      got = Captures.new
+      @patterns[found].match_pieces(pieces, text.to_s, got)
+      got.entries.each { |entry| params[entry.name] = entry.value }
+      @handlers[found].call(req, res, params)
       return
     end
-    allowed = allowed(host, path, pieces)
+    return Router.plain(res, 404, "not found\n") if action == 1
+    return Router.plain(res, 400, "bad request\n") if action == 2
+    return Router.redirect(res, path + "/", req.query) if action == 3
+    return Router.redirect(res, path, req.query) if action == 4
+    allowed = allowed(host, path, pieces, text.to_s)
     unless allowed.empty?
       res.status = 405
       res.header("Allow", allowed.join(", "))
@@ -603,35 +730,30 @@ pub class Router
     Router.plain(res, 404, "not found\n")
   end
 
-  # The pattern that takes the request, and its wildcards: of the host's
+  # The index of the pattern that takes the request: of the host's
   # own patterns if one matches, else of those with no host, the one more
-  # specific than every other that matches.
-  private def find(host : String, method : String, pieces : Array(String)) : {Int32, Hash(String, String)}?
+  # specific than every other that matches; -1 when none does.
+  private def find(host : String, method : String, pieces : Array(String), joined : String) : Int32
     unless host.empty?
-      if found = best(host, method, pieces)
-        return found
-      end
+      found = best(host, method, pieces, joined)
+      return found if found >= 0
     end
-    best("", method, pieces)
+    best("", method, pieces, joined)
   end
 
-  private def best(host : String, method : String, pieces : Array(String)) : {Int32, Hash(String, String)}?
+  private def best(host : String, method : String, pieces : Array(String), joined : String) : Int32
     chosen = -1
-    values = {} of String => String
     i = 0
     while i < @patterns.size
       pattern = @patterns[i]
       # Of two that match, one is more specific: registration refused
       # every pair for which that is not so.
       if pattern.host == host && pattern.matches_method?(method) && (chosen < 0 || pattern.more_specific?(@patterns[chosen]))
-        if got = pattern.match_pieces(pieces)
-          chosen = i
-          values = got.to_h
-        end
+        chosen = i if pattern.match_pieces(pieces, joined, nil)
       end
       i = i + 1
     end
-    chosen < 0 ? nil : {chosen, values}
+    chosen
   end
 
   # The methods of the patterns whose host and path match, sorted, with
@@ -639,13 +761,15 @@ pub class Router
   # slash added counts too - the request the redirect above would have
   # been, had the method matched - so `POST /x` beside `GET /x/` is 405
   # rather than 404.
-  private def allowed(host : String, path : String, pieces : Array(String)) : Array(String)
-    slashed = path.ends_with?("/") ? nil : Pattern.pieces(path + "/")
+  private def allowed(host : String, path : String, pieces : Array(String), joined : String) : Array(String)
+    slashed = [] of String
+    text = String::Builder.new(path.bytesize + 1)
+    Pattern.pieces(path + "/", slashed, text) unless path.ends_with?("/")
     methods = [] of String
     @patterns.each do |pattern|
       next if pattern.method.empty? || methods.includes?(pattern.method)
       next unless pattern.host.empty? || pattern.host == host
-      if pattern.match_pieces(pieces) || (slashed && pattern.match_pieces(slashed))
+      if pattern.match_pieces(pieces, joined, nil) || (!slashed.empty? && pattern.match_pieces(slashed, text.to_s, nil))
         methods << pattern.method
       end
     end
@@ -724,4 +848,40 @@ spec 8.1  # A std module follows the standard its header names (an RFC, a fileâ€
   Router.clean("cafÃ©/../ok") == "/ok"
   kept == "/a/c/"
   Router.clean("/a//b/../c/./") == kept
+end
+
+# router.3 Parsing returns Pattern or RouterError. It refuses invalid methods,
+#   missing paths, host braces, unclean paths, bad percent escapes,
+#   partial-segment wildcards, nonfinal rest or end wildcards, duplicate names
+#   and names outside ASCII identifiers.
+spec router.3
+  hosted = Pattern.parse("PUT example.com/b/{bucket}/o/{rest...}").or_panic
+  hosted.method == "PUT" && hosted.host == "example.com"
+  hosted.to_s == "PUT example.com/b/{bucket}/o/{rest...}"
+  p1 = [] of String
+  t1 = String::Builder.new
+  got = Captures.new
+  hosted.match("/b/b%201/o/a/b/", p1, t1, got)
+  got["rest"] == "a/b/" && got["bucket"] == "b 1"
+  p2 = [] of String
+  t2 = String::Builder.new
+  !hosted.match("/b/x/o", p2, t2, nil)
+  escaped = Pattern.parse("/a%2Fb/{c}").or_panic
+  p3 = [] of String
+  t3 = String::Builder.new
+  escaped.match("/a%2fb/x", p3, t3, nil)
+  p4 = [] of String
+  t4 = String::Builder.new
+  !escaped.match("/a/b/x", p4, t4, nil)
+  Pattern.parse("/a%2Fb").or_panic.relation(Pattern.parse("/a%2fb").or_panic) == Pattern::EQUIVALENT
+  Pattern.parse("/a/").or_panic.relation(Pattern.parse("/a/{x...}").or_panic) == Pattern::EQUIVALENT
+  Pattern.parse("/{x}/{x}").is_a?(RouterError)
+  Pattern.parse("/{x}/{y...}/z").is_a?(RouterError)
+  Pattern.parse("/a%zz").is_a?(RouterError)
+  Pattern.parse("/a{x}").is_a?(RouterError)
+  Pattern.parse("/{$}/a").is_a?(RouterError)
+  Pattern.parse("/{...}").is_a?(RouterError)
+  Pattern.parse("G@T /a").is_a?(RouterError)
+  Pattern.parse("/{1x}").is_a?(RouterError)
+  Pattern.parse("/{a}/{b}/{$}").is_a?(Pattern)
 end

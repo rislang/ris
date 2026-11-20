@@ -964,9 +964,10 @@ def run_http1(input : Array(UInt8)) : String
   verdict = ""
   fields = Array(Field).new(16)
   parsed = Server.parse_head(t, 0, true, fields)
+  cookies = {} of String => String
   if parsed.is_a?(ParsedHead)
     parsed.each_field do |name, value|
-      HTTP.cookie_pairs(value) if name.compare("cookie", true) == 0
+      HTTP.cookie_pairs(value, cookies) if name.compare("cookie", true) == 0
     end
     verdict = "read #{parsed.method} #{parsed.target.bytesize}"
   elsif parsed.is_a?(HeadError)
@@ -983,7 +984,7 @@ def run_http1(input : Array(UInt8)) : String
     HTTP.hex(line)
   end
   HTTP.chunked_end(t)
-  HTTP.cookie_pairs(t)
+  HTTP.cookie_pairs(t, cookies)
   HTTP.has_token?(t, "chunked")
   HTTP.coding_weight(t, "gzip")
   HTTP.accepts?(t, "zstd")

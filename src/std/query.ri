@@ -18,28 +18,43 @@ pub struct Query
     new(query)
   end
 
+  # *query*'s pairs, then *more*'s (a form body's, read the same way).
+  def self.parse(query : String, more : String) : Query
+    new(query, more)
+  end
+
   # The pairs are made by the constructor, the query's own storage: what
   # it decodes goes into its builder, which grows in place.
-  def initialize(query : String)
+  def initialize(query : String, more : String = "")
     from = query.bytesize > 0 && query[0] == 63_u8 ? 1 : 0
     count = 0
     Query.each_part(query, from) { |_, _| count += 1 }
+    Query.each_part(more, 0) { |_, _| count += 1 }
     none = query[0, 0]
     pairs = Array(QueryPair).new(count) { QueryPair.new(none, none) }
-    text = String::Builder.new(query.bytesize + 1)
-    at = 0
-    Query.each_part(query, from) do |start, stop|
+    text = String::Builder.new(query.bytesize + more.bytesize + 1)
+    at = Query.fill(query, from, pairs, 0, text)
+    Query.fill(more, 0, pairs, at, text)
+    @pairs = pairs
+    @text = text
+  end
+
+  # *source*'s pairs from *from* written into *pairs* from *at*, decoded
+  # into *text*: the index after the last.
+  protected def self.fill(source : String, from : Int32, pairs : Array(QueryPair),
+                          at : Int32, text : String::Builder) : Int32
+    none = source[0, 0]
+    Query.each_part(source, from) do |start, stop|
       eq = start
-      while eq < stop && query[eq] != 61_u8
+      while eq < stop && source[eq] != 61_u8
         eq += 1
       end
-      key = Query.decoded(query, start, eq, text)
-      value = eq < stop ? Query.decoded(query, eq + 1, stop, text) : none
+      key = Query.decoded(source, start, eq, text)
+      value = eq < stop ? Query.decoded(source, eq + 1, stop, text) : none
       pairs[at] = QueryPair.new(key, value)
       at += 1
     end
-    @pairs = pairs
-    @text = text
+    at
   end
 
   # The bytes from *start* to *stop* decoded into the query's text (plain
