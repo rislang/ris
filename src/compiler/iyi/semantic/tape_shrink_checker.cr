@@ -720,8 +720,16 @@ class Iyi::TapeShrinkChecker
 
   # Resolve a borrowed intermediate field before following its children.
   # The field slot is a reference, not storage owned by the holder.
+  #
+  # ris: *done* keeps each root's answer for one call. Roots shared by
+  # several borrowed sources were walked once per path, which grew
+  # exponentially: the acme exercise built from its artifacts never ended.
   private def resolved_roots(root : UInt64, env : Env,
-                             seen = Set(UInt64).new) : Array(UInt64)
+                             seen = Set(UInt64).new,
+                             done = {} of UInt64 => Array(UInt64)) : Array(UInt64)
+    if found = done[root]?
+      return found
+    end
     return [root] unless seen.add?(root)
     type = root_type(root).try(&.remove_typedef)
     contents = env.slots[root]?
@@ -730,13 +738,13 @@ class Iyi::TapeShrinkChecker
         contains_root?([source], root)
       end
       unless borrowed.empty?
-        return borrowed.flat_map { |r| resolved_roots(r, env, seen.dup) }
+        return done[root] = borrowed.flat_map { |r| resolved_roots(r, env, seen.dup, done) }.uniq
       end
     end
     if parent = @parents[root]?
-      return resolved_roots(parent[0], env, seen).map do |base|
+      return done[root] = resolved_roots(parent[0], env, seen, done).map do |base|
         field_root(base, parent[1])
-      end
+      end.uniq
     end
     [root]
   end
@@ -2360,7 +2368,7 @@ class Iyi::TapeShrinkChecker
       # A struct copied onto the running tape that the def returns: KEEP
       # carries it. A class copy stays refused here, at the return.
       next if node.is_a?(Def) && current_copy?(source) &&
-              type.try(&.remove_typedef.struct?) &&
+              type.try { |t| struct_only?(t.remove_typedef) } &&
               TapeScopeChecker.keeps?(node.body)
       what = node.is_a?(Def) ? "def `#{node.name}`" : "block"
       refuse node, "cannot return a value made in this #{what}'s scratch: " \
@@ -2369,6 +2377,15 @@ class Iyi::TapeShrinkChecker
                  "parameter, grow a local in place and return it, or " \
                  "write copy_to(owner)", root_name(source)
     end
+  end
+
+  # A struct, or a union of structs and Nil (`SigningKey | X509Error`):
+  # no class instance a KEEP copy would leave in the scratch.
+  private def struct_only?(type : Type) : Bool
+    if type.is_a?(UnionType)
+      return type.union_types.all? { |t| t.nil_type? || struct_only?(t.remove_typedef) }
+    end
+    type.struct?
   end
 
   # Whether each tape member of *source* that *result* can hold is one

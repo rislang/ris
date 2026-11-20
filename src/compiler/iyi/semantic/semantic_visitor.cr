@@ -1590,7 +1590,10 @@ abstract class Iyi::SemanticVisitor < Iyi::Visitor
     when ClassDef
       iyi_type_body_initialiser?(node.body, true)
     when ModuleDef
-      iyi_type_body_initialiser?(node.body)
+      # ris: a module's `@field = value` is a field initialiser too: it runs
+      # in each includer's `initialize` and travels with the module's fields
+      # (std/x509's `RisCertificateStore::Storage` sizes its buffers so).
+      iyi_type_body_initialiser?(node.body, true)
     when VisibilityModifier
       iyi_type_body_initialiser?(node.exp, fields)
     when Assign

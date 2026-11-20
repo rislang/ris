@@ -1,0 +1,62 @@
+# An error struct with a view field, made in a loop round of a def
+# that is not one call, passed on by a caller that is not one call
+# either (acme's poll, TODO "Unsound, first" (c)). RESULT moved only
+# structs of texts, so the second return freed the detail:
+# RIS_TAPE_POISON=1 read 0xDB. Silent on success.
+@[OnTape]
+struct RoundError
+  getter detail : String
+  getter subs : Array::View(RoundError)?
+
+  def initialize(@detail : String, subs : Array(RoundError)? = nil)
+    @subs = subs ? subs.view : nil
+  end
+end
+
+impl Error for RoundError
+  def message : String
+    @detail
+  end
+end
+
+class RoundPoller
+  def initialize(@max : Int32)
+    @texts = String::Builder.new(4096)
+  end
+
+  private def keep(text : String) : String
+    at = @texts.bytesize
+    @texts << text
+    @texts.finish[at, text.bytesize]
+  end
+
+  def fetch(n : Int32) : String
+    "{\"status\":\"pending #{n}\"}"
+  end
+
+  def poll(what : String) : String | RoundError
+    polls = 0
+    body = keep(fetch(0))
+    while true
+      status = body[11, body.bytesize - 13]
+      return body.copy_to(RisCurrentTape.new) unless status.starts_with?("pending")
+      return RoundError.new("#{what} is still #{status} after #{polls} polls") if polls >= @max
+      polls = polls + 1
+      body = keep(fetch(polls))
+    end
+    raise "unreachable"
+  end
+end
+
+def round_outer(poller : RoundPoller, n : Int32) : String | RoundError
+  what = "the order #{n}"
+  body = poller.poll(what)
+  return body if body.is_a?(RoundError)
+  "ok"
+end
+
+poller = RoundPoller.new(3)
+got = round_outer(poller, 1)
+filler = Array(UInt8).new(4096) { |i| (i % 256).to_u8 }
+want = "the order 1 is still pending 3 after 3 polls"
+raise "detail #{got.inspect}" unless got.is_a?(RoundError) && got.detail == want && filler.size == 4096

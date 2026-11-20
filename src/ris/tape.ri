@@ -2585,59 +2585,46 @@ def __iyi_pending_pop(guard : Pointer(RisPendingGuard)) : Nil
   {% end %}
 end
 
-# A struct result whose tape fields are texts - String, String?, or a
-# struct (or nil) of those one level down, the rest plain numbers,
-# booleans, chars or enums: an error and its sentences. Its texts move
-# down as a String result moves (RisScopeMove.texts); any other struct
-# views older storage and the scratch is released.
+# A struct result's texts - String or String? fields, and those of a
+# struct (or nil) one level down - move down as a String result moves
+# (RisScopeMove.texts). Its other fields stay as they are: plain values,
+# or views of older storage, which the checker requires of a result
+# (SPEC 1.9). With no texts the scratch is released.
 def __iyi_text_move(mark : RisScopeMark, value : T) : T forall T
   {% begin %}
-  {% ok = true %}
+  {% texts = [] of MacroId %}
+  {% nested = [] of MacroId %}
   {% count = 0 %}
   {% for iv in T.instance_vars %}
     {% ty = iv.type %}
     {% if ty == ::String || (ty.union? && ty.nilable? && ty.union_types.size == 2 && ty.union_types.includes?(::String)) %}
+      {% texts << iv.name %}
       {% count = count + 1 %}
-    {% elsif ty < ::Number || ty == ::Bool || ty == ::Char || ty < ::Enum || ty == ::Nil %}
     {% else %}
       {% inner = ty.union? && ty.nilable? && ty.union_types.size == 2 ? ty.union_types.reject { |u| u == ::Nil }.first : ty %}
-      {% if inner < ::Number || inner == ::Bool || inner == ::Char || inner < ::Enum %}
-        # A plain value or nil: nothing to move.
-      {% elsif inner.struct? && !inner.union? && !inner.instance_vars.empty? %}
-        {% for jv in inner.instance_vars %}
-          {% jt = jv.type %}
-          {% if jt == ::String || (jt.union? && jt.nilable? && jt.union_types.size == 2 && jt.union_types.includes?(::String)) %}
-            {% count = count + 1 %}
-          {% elsif jt < ::Number || jt == ::Bool || jt == ::Char || jt < ::Enum || jt == ::Nil %}
-          {% else %}
-            {% ok = false %}
-          {% end %}
+      {% if !inner.union? && inner.struct? && !(inner < ::Number) && !(inner < ::Enum) && inner != ::Bool && inner != ::Char && inner != ::String %}
+        {% n = inner.instance_vars.select { |jv| jv.type == ::String || (jv.type.union? && jv.type.nilable? && jv.type.union_types.size == 2 && jv.type.union_types.includes?(::String)) }.size %}
+        {% if n > 0 %}
+          {% nested << iv.name %}
+          {% count = count + n %}
         {% end %}
-      {% else %}
-        {% ok = false %}
       {% end %}
     {% end %}
   {% end %}
-  {% if ok && count > 0 %}
+  {% if count > 0 %}
     moved = value
     slots = uninitialized StaticArray(String, {{count}})
     at = pointerof(slots).as(Pointer(String))
     {% k = 0 %}
     {% for iv in T.instance_vars %}
-      {% ty = iv.type %}
-      {% if ty == ::String %}
-        at[{{k}}] = moved.@{{iv.name}}
+      {% if texts.includes?(iv.name) %}
+        at[{{k}}] = moved.@{{iv.name}}{% if iv.type != ::String %} || ""{% end %}
         {% k = k + 1 %}
-      {% elsif ty.union? && ty.nilable? && ty.union_types.size == 2 && ty.union_types.includes?(::String) %}
-        at[{{k}}] = moved.@{{iv.name}} || ""
-        {% k = k + 1 %}
-      {% elsif ty < ::Number || ty == ::Bool || ty == ::Char || ty < ::Enum || ty == ::Nil %}
-      {% elsif ty.union? && (ty.union_types.reject { |u| u == ::Nil }.first < ::Number || ty.union_types.reject { |u| u == ::Nil }.first == ::Bool || ty.union_types.reject { |u| u == ::Nil }.first == ::Char || ty.union_types.reject { |u| u == ::Nil }.first < ::Enum) %}
-      {% else %}
-        {% inner = ty.union? ? ty.union_types.reject { |u| u == ::Nil }.first : ty %}
+      {% elsif nested.includes?(iv.name) %}
+        {% inner = iv.type.union? ? iv.type.union_types.reject { |u| u == ::Nil }.first : iv.type %}
         {% for jv in inner.instance_vars %}
           {% jt = jv.type %}
-          {% if jt == ::String || (jt.union? && jt.union_types.includes?(::String)) %}
+          {% if jt == ::String || (jt.union? && jt.nilable? && jt.union_types.size == 2 && jt.union_types.includes?(::String)) %}
             if held = moved.@{{iv.name}}
               at[{{k}}] = held.@{{jv.name}}{% if jt != ::String %} || ""{% end %}
             else
@@ -2656,24 +2643,22 @@ def __iyi_text_move(mark : RisScopeMark, value : T) : T forall T
     RisScopeMove.texts(mark, each, {{count}})
     {% k = 0 %}
     {% for iv in T.instance_vars %}
-      {% ty = iv.type %}
-      {% if ty == ::String %}
-        pointerof(moved.@{{iv.name}}).value = at[{{k}}]
+      {% if texts.includes?(iv.name) %}
+        {% if iv.type == ::String %}
+          pointerof(moved.@{{iv.name}}).value = at[{{k}}]
+        {% else %}
+          pointerof(moved.@{{iv.name}}).value = at[{{k}}] if moved.@{{iv.name}}
+        {% end %}
         {% k = k + 1 %}
-      {% elsif ty.union? && ty.nilable? && ty.union_types.size == 2 && ty.union_types.includes?(::String) %}
-        pointerof(moved.@{{iv.name}}).value = at[{{k}}] if moved.@{{iv.name}}
-        {% k = k + 1 %}
-      {% elsif ty < ::Number || ty == ::Bool || ty == ::Char || ty < ::Enum || ty == ::Nil %}
-      {% elsif ty.union? && (ty.union_types.reject { |u| u == ::Nil }.first < ::Number || ty.union_types.reject { |u| u == ::Nil }.first == ::Bool || ty.union_types.reject { |u| u == ::Nil }.first == ::Char || ty.union_types.reject { |u| u == ::Nil }.first < ::Enum) %}
-      {% else %}
-        {% inner = ty.union? ? ty.union_types.reject { |u| u == ::Nil }.first : ty %}
+      {% elsif nested.includes?(iv.name) %}
+        {% inner = iv.type.union? ? iv.type.union_types.reject { |u| u == ::Nil }.first : iv.type %}
         if held = moved.@{{iv.name}}
           {% for jv in inner.instance_vars %}
             {% jt = jv.type %}
             {% if jt == ::String %}
               pointerof(held.@{{jv.name}}).value = at[{{k}}]
               {% k = k + 1 %}
-            {% elsif jt.union? && jt.union_types.includes?(::String) %}
+            {% elsif jt.union? && jt.nilable? && jt.union_types.size == 2 && jt.union_types.includes?(::String) %}
               pointerof(held.@{{jv.name}}).value = at[{{k}}] if held.@{{jv.name}}
               {% k = k + 1 %}
             {% end %}
