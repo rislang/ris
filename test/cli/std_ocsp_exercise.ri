@@ -67,11 +67,11 @@ def hex_of(bytes : Array(UInt8) | Array::View(UInt8)) : String
   bytes.map { |x| (x < 16_u8 ? "0" : "") + x.to_s(16) }.join("")
 end
 
-# The certificates below live in this store, made for the program.
-CERT_STORE = RisCertificateStore.new
-
-def cert(hex : String) : Certificate
-  Certificate.new(Certificate.parse(b(hex)).or_panic, CERT_STORE)
+# A certificate copied into *store*. The certificates below are top-level
+# locals in one store: constants of certificates are program data made
+# through Zone#initialize, which the checker refuses (SPEC 1.8).
+def cert(store : RisCertificateStore, hex : String) : Certificate
+  Certificate.new(Certificate.parse(b(hex)).or_panic, store)
 end
 
 def bytes_of(path : String) : Array(UInt8)
@@ -198,17 +198,18 @@ RESP_NEXT_BEFORE_THIS           = "3082010d0a0100a08201063082010206092b060105050
 RESP_NAME_HASH_WRONG            = "3082010e0a0100a08201073082010306092b06010505073001010481f53081f2308199a11f301d311b301906035504030c124f43535020457865726369736520526f6f74180f32303236313033313030303030305a30653063303b300906052b0e03021a050004142d863b3403e06ffae17d994c3953af1a41346e560414887d9a73fad3dc60fe0ca44d7ef6fbfc3f876191020210018000180f32303236313033313030303030305aa011180f32303236313130373030303030305a300a06082a8648ce3d040302034800304502202f8fe8a76979eb0575f2be40426c70cd144bf33dcb2d1dacda0c1d854a766b24022100d25bf2aaee9a29d042e5eeeb6235950576ae50904a00dbe2d3153bb895f753f0"
 RESP_TRAILING                   = "3082010e0a0100a08201073082010306092b06010505073001010481f53081f2308199a11f301d311b301906035504030c124f43535020457865726369736520526f6f74180f32303236313033313030303030305a30653063303b300906052b0e03021a050004145d87907f09f60f8d305ab6d0697281005be2687e0414887d9a73fad3dc60fe0ca44d7ef6fbfc3f876191020210018000180f32303236313033313030303030305aa011180f32303236313130373030303030305a300a06082a8648ce3d0403020348003045022100b78fff92777e30f40edf983f79a57eed03c19a0e0839c822a2a7a3287e8c7894022062d89a45b863cb51fe8fa2f03e840e5d9ea31d97b2bb94a533346b0a24079e4600"
 
-ROOT      = cert(CERT_ROOT)
-OTHER_CA  = cert(CERT_OTHER_CA)
-GOOD      = cert(CERT_GOOD)
-REVOKED   = cert(CERT_REVOKED)
-OTHER     = cert(CERT_OTHER)
-MUST      = cert(CERT_MUST)
-RESPONDER = cert(CERT_RESPONDER)
-RSA_ROOT  = cert(CERT_RSA_ROOT)
-RSA_LEAF  = cert(CERT_RSA_LEAF)
-ED_ROOT   = cert(CERT_ED_ROOT)
-ED_LEAF   = cert(CERT_ED_LEAF)
+cert_store = RisCertificateStore.new
+root_cert      = cert(cert_store, CERT_ROOT)
+other_ca_cert  = cert(cert_store, CERT_OTHER_CA)
+good_cert      = cert(cert_store, CERT_GOOD)
+revoked_cert   = cert(cert_store, CERT_REVOKED)
+other_cert     = cert(cert_store, CERT_OTHER)
+must_cert      = cert(cert_store, CERT_MUST)
+responder_cert = cert(cert_store, CERT_RESPONDER)
+rsa_root_cert  = cert(cert_store, CERT_RSA_ROOT)
+rsa_leaf_cert  = cert(cert_store, CERT_RSA_LEAF)
+ed_root_cert   = cert(cert_store, CERT_ED_ROOT)
+ed_leaf_cert   = cert(cert_store, CERT_ED_LEAF)
 
 # GOOD_DELEGATED with the last byte of its responder's certificate - in
 # that certificate's signature - flipped: the response's own signature
@@ -228,66 +229,66 @@ end
 
 # Each response, the leaf and issuer it is asked of, and the verdict: a
 # status and who signed, or a phrase the refusal holds.
-CASES = [
-  {"a good response from the issuer, by name", RESP_GOOD_DIRECT, GOOD, ROOT, "good, from the issuer"},
-  {"a good response from the issuer, by key hash", RESP_GOOD_BYKEY, GOOD, ROOT, "good, from the issuer"},
-  {"a revoked response with its reason", RESP_REVOKED_DIRECT, REVOKED, ROOT, "revoked at 2026-10-01 00:00:00 UTC, keyCompromise, from the issuer"},
-  {"a revoked response without a reason", RESP_REVOKED_NOREASON, REVOKED, ROOT, "revoked at 2026-10-02 00:00:00 UTC, no reason, from the issuer"},
-  {"an unknown response", RESP_UNKNOWN_DIRECT, GOOD, ROOT, "unknown, from the issuer"},
-  {"a delegated responder with id-pkix-ocsp-nocheck", RESP_GOOD_DELEGATED, GOOD, ROOT, "good, from a delegated responder"},
-  {"a delegated responder named by its key hash", RESP_GOOD_DELEGATED_BYKEY, GOOD, ROOT, "good, from a delegated responder"},
-  {"a delegated responder without id-pkix-ocsp-nocheck", RESP_GOOD_DELEGATED_NOCHECKLESS, GOOD, ROOT, "good, from a delegated responder"},
-  {"a delegated responder without id-kp-OCSPSigning", RESP_DELEGATED_NOEKU, GOOD, ROOT, "refused: ocsp: the responder CN=OCSP Responder No EKU is not allowed id-kp-OCSPSigning"},
-  {"a delegated responder allowed only anyExtendedKeyUsage", RESP_DELEGATED_ANY, GOOD, ROOT, "refused: ocsp: the responder CN=OCSP Responder Any EKU is not allowed id-kp-OCSPSigning"},
-  {"a delegated responder out of its time", RESP_DELEGATED_EXPIRED, GOOD, ROOT, "refused: ocsp: the responder CN=OCSP Responder Expired is not valid at"},
-  {"a delegated responder issued by another CA", RESP_DELEGATED_FOREIGN, GOOD, ROOT, "refused: ocsp: the responder CN=OCSP Responder Foreign was not issued by CN=OCSP Exercise Root"},
-  {"a delegated responder not allowed digitalSignature", RESP_DELEGATED_NOSIGN, GOOD, ROOT, "refused: ocsp: the responder CN=OCSP Responder No Sign is not allowed digitalSignature"},
-  {"a delegated responder the response does not carry", RESP_DELEGATED_MISSING, GOOD, ROOT, "refused: ocsp: no certificate here is the responder, the name OCSP Exercise Responder"},
-  {"a delegated responder whose certificate the issuer did not sign", forged_responder, GOOD, ROOT, "refused: ocsp: the responder CN=OCSP Exercise Responder: CN=OCSP Exercise Responder's signature is not CN=OCSP Exercise Root's"},
-  {"a response signed by another key under the issuer's name", RESP_WRONG_KEY, GOOD, ROOT, "refused: ocsp: the OCSP response's signature is not CN=OCSP Exercise Root's"},
-  {"a response for another certificate", RESP_OTHER_SERIAL, GOOD, ROOT, "refused: ocsp: no response here is for CN=good.ocsp.test, serial 1001"},
-  {"a response for that other certificate, asked of it", RESP_OTHER_SERIAL, OTHER, ROOT, "good, from the issuer"},
-  {"a response for another issuer's key under the same name", RESP_IMPOSTOR_ISSUER, GOOD, ROOT, "refused: ocsp: no response here is for CN=good.ocsp.test"},
-  {"a response for another issuer's name", RESP_NAME_HASH_WRONG, GOOD, ROOT, "refused: ocsp: no response here is for CN=good.ocsp.test"},
-  {"a response past its nextUpdate", RESP_EXPIRED, GOOD, ROOT, "refused: ocsp: a response past its nextUpdate, 2026-10-08 00:00:00 UTC"},
-  {"a response whose thisUpdate is a day ahead", RESP_FUTURE, GOOD, ROOT, "refused: ocsp: a response whose thisUpdate, 2026-11-02 00:00:00 UTC, is past"},
-  {"a response whose thisUpdate is two minutes ahead, inside the skew", RESP_NEAR_FUTURE, GOOD, ROOT, "good, from the issuer"},
-  {"a response two minutes past its nextUpdate, inside the skew", RESP_JUST_PAST, GOOD, ROOT, "good, from the issuer"},
-  {"a response without nextUpdate from twelve hours ago", RESP_NONEXT_FRESH, GOOD, ROOT, "good, from the issuer"},
-  {"a response without nextUpdate from three days ago", RESP_NONEXT_OLD, GOOD, ROOT, "refused: ocsp: a response with no nextUpdate whose thisUpdate"},
-  {"a CertID under SHA-256", RESP_SHA256_CERTID, GOOD, ROOT, "good, from the issuer"},
-  {"a CertID under SHA-512", RESP_SHA512_CERTID, GOOD, ROOT, "good, from the issuer"},
-  {"a response with a nonce", RESP_NONCE, GOOD, ROOT, "good, from the issuer"},
-  {"a response signed under ECDSA with SHA-384", RESP_SHA384_SIGNED, GOOD, ROOT, "good, from the issuer"},
-  {"a response signed under SHA-1", RESP_SHA1_SIGNED, GOOD, ROOT, "refused: ocsp: the OCSP response is signed under SHA-1, which is refused"},
-  {"a response with a critical extension it does not understand", RESP_CRITICAL_EXT, GOOD, ROOT, "refused: ocsp: a critical extension 1.3.6.1.4.1.99999.1 in responseExtensions"},
-  {"an RSA issuer's response", RESP_RSA_GOOD, RSA_LEAF, RSA_ROOT, "good, from the issuer"},
-  {"an Ed25519 issuer's response", RESP_ED_GOOD, ED_LEAF, ED_ROOT, "good, from the issuer"},
-  {"a must-staple leaf's response", RESP_MUST_GOOD, MUST, ROOT, "good, from the issuer"},
-  {"a responder that answered tryLater", RESP_TRY_LATER, GOOD, ROOT, "refused: ocsp: the responder answered tryLater (3), with no response"},
-  {"a responder that answered unauthorized", RESP_UNAUTHORIZED, GOOD, ROOT, "refused: ocsp: the responder answered unauthorized (6), with no response"},
-  {"a response written by hand", RESP_HAND_GOOD, GOOD, ROOT, "good, from the issuer"},
-  {"a ResponseData whose version is written out", RESP_VERSION_WRITTEN, GOOD, ROOT, "refused: ocsp: a ResponseData whose version v1 is written out"},
-  {"a ResponseData of version 2", RESP_VERSION_2, GOOD, ROOT, "refused: ocsp: a ResponseData of version 2"},
-  {"a thisUpdate in UTCTime", RESP_UTC_THIS_UPDATE, GOOD, ROOT, "refused: ocsp: a thisUpdate that is UTCTime, where RFC 6960 writes a GeneralizedTime"},
-  {"a CertStatus of no kind", RESP_BAD_STATUS_TAG, GOOD, ROOT, "refused: ocsp: a CertStatus that is [3], none of good [0], revoked [1] and unknown [2]"},
-  {"a revocation reason of 7", RESP_REASON_7, REVOKED, ROOT, "refused: ocsp: a revocation reason of 7, which CRLReason does not have"},
-  {"a revoked response written by hand, superseded", RESP_REVOKED_HAND, REVOKED, ROOT, "revoked at 2026-10-01 00:00:00 UTC, superseded, from the issuer"},
-  {"another response type", RESP_OTHER_TYPE, GOOD, ROOT, "refused: ocsp: a response of type 1.3.6.1.5.5.7.48.1.99, where id-pkix-ocsp-basic"},
-  {"a responseStatus of 4", RESP_STATUS_4, GOOD, ROOT, "refused: ocsp: a responseStatus of 4, which RFC 6960 leaves unused"},
-  {"tryLater with responseBytes", RESP_TRYLATER_WITH_BYTES, GOOD, ROOT, "refused: ocsp: a responseStatus of tryLater with responseBytes"},
-  {"a CertID with a hash cut short", RESP_CERTID_SHORT_HASH, GOOD, ROOT, "refused: ocsp: a CertID whose hashes are 19 and 20 bytes"},
-  {"a CertID under MD5", RESP_CERTID_MD5, GOOD, ROOT, "refused: ocsp: a CertID hashed by 1.2.840.113549.2.5"},
-  {"an extension twice", RESP_DUP_EXT, GOOD, ROOT, "refused: ocsp: extension 1.3.6.1.5.5.7.48.1.2 twice in responseExtensions"},
-  {"a ResponderID of no kind", RESP_RESPONDER_TAG3, GOOD, ROOT, "refused: ocsp: a ResponderID that is [3] constructed, neither byName [1] nor byKey [2]"},
-  {"a responder key hash of 19 bytes", RESP_KEYHASH_SHORT, GOOD, ROOT, "refused: ocsp: a responder key hash of 19 bytes"},
-  {"a ResponseData with no SingleResponse", RESP_NO_SINGLE, GOOD, ROOT, "refused: ocsp: a ResponseData with no SingleResponse"},
-  {"a critical extension in a SingleResponse", RESP_SINGLE_CRITICAL_EXT, GOOD, ROOT, "refused: ocsp: a critical extension 1.3.6.1.4.1.99999.2 in singleExtensions"},
-  {"a non-critical extension in a SingleResponse", RESP_SINGLE_PLAIN_EXT, GOOD, ROOT, "good, from the issuer"},
-  {"a nonce that is not an OCTET STRING", RESP_NONCE_NOT_OCTET, GOOD, ROOT, "refused: ocsp: asn1: expected an OCTET STRING, found INTEGER"},
-  {"a nextUpdate before its thisUpdate", RESP_NEXT_BEFORE_THIS, GOOD, ROOT, "refused: ocsp: a response whose nextUpdate, 2026-10-30 00:00:00 UTC, is before its thisUpdate"},
-  {"a byte after the response", RESP_TRAILING, GOOD, ROOT, "refused: ocsp: asn1: 1 bytes after the value"},
-  {"the leaf asked of another CA as its issuer", RESP_GOOD_DIRECT, GOOD, OTHER_CA, "refused: ocsp: CN=good.ocsp.test was issued by CN=OCSP Exercise Root, not CN=Other Root"},
+cases = [
+  {"a good response from the issuer, by name", RESP_GOOD_DIRECT, good_cert, root_cert, "good, from the issuer"},
+  {"a good response from the issuer, by key hash", RESP_GOOD_BYKEY, good_cert, root_cert, "good, from the issuer"},
+  {"a revoked response with its reason", RESP_REVOKED_DIRECT, revoked_cert, root_cert, "revoked at 2026-10-01 00:00:00 UTC, keyCompromise, from the issuer"},
+  {"a revoked response without a reason", RESP_REVOKED_NOREASON, revoked_cert, root_cert, "revoked at 2026-10-02 00:00:00 UTC, no reason, from the issuer"},
+  {"an unknown response", RESP_UNKNOWN_DIRECT, good_cert, root_cert, "unknown, from the issuer"},
+  {"a delegated responder with id-pkix-ocsp-nocheck", RESP_GOOD_DELEGATED, good_cert, root_cert, "good, from a delegated responder"},
+  {"a delegated responder named by its key hash", RESP_GOOD_DELEGATED_BYKEY, good_cert, root_cert, "good, from a delegated responder"},
+  {"a delegated responder without id-pkix-ocsp-nocheck", RESP_GOOD_DELEGATED_NOCHECKLESS, good_cert, root_cert, "good, from a delegated responder"},
+  {"a delegated responder without id-kp-OCSPSigning", RESP_DELEGATED_NOEKU, good_cert, root_cert, "refused: ocsp: the responder CN=OCSP Responder No EKU is not allowed id-kp-OCSPSigning"},
+  {"a delegated responder allowed only anyExtendedKeyUsage", RESP_DELEGATED_ANY, good_cert, root_cert, "refused: ocsp: the responder CN=OCSP Responder Any EKU is not allowed id-kp-OCSPSigning"},
+  {"a delegated responder out of its time", RESP_DELEGATED_EXPIRED, good_cert, root_cert, "refused: ocsp: the responder CN=OCSP Responder Expired is not valid at"},
+  {"a delegated responder issued by another CA", RESP_DELEGATED_FOREIGN, good_cert, root_cert, "refused: ocsp: the responder CN=OCSP Responder Foreign was not issued by CN=OCSP Exercise Root"},
+  {"a delegated responder not allowed digitalSignature", RESP_DELEGATED_NOSIGN, good_cert, root_cert, "refused: ocsp: the responder CN=OCSP Responder No Sign is not allowed digitalSignature"},
+  {"a delegated responder the response does not carry", RESP_DELEGATED_MISSING, good_cert, root_cert, "refused: ocsp: no certificate here is the responder, the name OCSP Exercise Responder"},
+  {"a delegated responder whose certificate the issuer did not sign", forged_responder, good_cert, root_cert, "refused: ocsp: the responder CN=OCSP Exercise Responder: CN=OCSP Exercise Responder's signature is not CN=OCSP Exercise Root's"},
+  {"a response signed by another key under the issuer's name", RESP_WRONG_KEY, good_cert, root_cert, "refused: ocsp: the OCSP response's signature is not CN=OCSP Exercise Root's"},
+  {"a response for another certificate", RESP_OTHER_SERIAL, good_cert, root_cert, "refused: ocsp: no response here is for CN=good.ocsp.test, serial 1001"},
+  {"a response for that other certificate, asked of it", RESP_OTHER_SERIAL, other_cert, root_cert, "good, from the issuer"},
+  {"a response for another issuer's key under the same name", RESP_IMPOSTOR_ISSUER, good_cert, root_cert, "refused: ocsp: no response here is for CN=good.ocsp.test"},
+  {"a response for another issuer's name", RESP_NAME_HASH_WRONG, good_cert, root_cert, "refused: ocsp: no response here is for CN=good.ocsp.test"},
+  {"a response past its nextUpdate", RESP_EXPIRED, good_cert, root_cert, "refused: ocsp: a response past its nextUpdate, 2026-10-08 00:00:00 UTC"},
+  {"a response whose thisUpdate is a day ahead", RESP_FUTURE, good_cert, root_cert, "refused: ocsp: a response whose thisUpdate, 2026-11-02 00:00:00 UTC, is past"},
+  {"a response whose thisUpdate is two minutes ahead, inside the skew", RESP_NEAR_FUTURE, good_cert, root_cert, "good, from the issuer"},
+  {"a response two minutes past its nextUpdate, inside the skew", RESP_JUST_PAST, good_cert, root_cert, "good, from the issuer"},
+  {"a response without nextUpdate from twelve hours ago", RESP_NONEXT_FRESH, good_cert, root_cert, "good, from the issuer"},
+  {"a response without nextUpdate from three days ago", RESP_NONEXT_OLD, good_cert, root_cert, "refused: ocsp: a response with no nextUpdate whose thisUpdate"},
+  {"a CertID under SHA-256", RESP_SHA256_CERTID, good_cert, root_cert, "good, from the issuer"},
+  {"a CertID under SHA-512", RESP_SHA512_CERTID, good_cert, root_cert, "good, from the issuer"},
+  {"a response with a nonce", RESP_NONCE, good_cert, root_cert, "good, from the issuer"},
+  {"a response signed under ECDSA with SHA-384", RESP_SHA384_SIGNED, good_cert, root_cert, "good, from the issuer"},
+  {"a response signed under SHA-1", RESP_SHA1_SIGNED, good_cert, root_cert, "refused: ocsp: the OCSP response is signed under SHA-1, which is refused"},
+  {"a response with a critical extension it does not understand", RESP_CRITICAL_EXT, good_cert, root_cert, "refused: ocsp: a critical extension 1.3.6.1.4.1.99999.1 in responseExtensions"},
+  {"an RSA issuer's response", RESP_RSA_GOOD, rsa_leaf_cert, rsa_root_cert, "good, from the issuer"},
+  {"an Ed25519 issuer's response", RESP_ED_GOOD, ed_leaf_cert, ed_root_cert, "good, from the issuer"},
+  {"a must-staple leaf's response", RESP_MUST_GOOD, must_cert, root_cert, "good, from the issuer"},
+  {"a responder that answered tryLater", RESP_TRY_LATER, good_cert, root_cert, "refused: ocsp: the responder answered tryLater (3), with no response"},
+  {"a responder that answered unauthorized", RESP_UNAUTHORIZED, good_cert, root_cert, "refused: ocsp: the responder answered unauthorized (6), with no response"},
+  {"a response written by hand", RESP_HAND_GOOD, good_cert, root_cert, "good, from the issuer"},
+  {"a ResponseData whose version is written out", RESP_VERSION_WRITTEN, good_cert, root_cert, "refused: ocsp: a ResponseData whose version v1 is written out"},
+  {"a ResponseData of version 2", RESP_VERSION_2, good_cert, root_cert, "refused: ocsp: a ResponseData of version 2"},
+  {"a thisUpdate in UTCTime", RESP_UTC_THIS_UPDATE, good_cert, root_cert, "refused: ocsp: a thisUpdate that is UTCTime, where RFC 6960 writes a GeneralizedTime"},
+  {"a CertStatus of no kind", RESP_BAD_STATUS_TAG, good_cert, root_cert, "refused: ocsp: a CertStatus that is [3], none of good [0], revoked [1] and unknown [2]"},
+  {"a revocation reason of 7", RESP_REASON_7, revoked_cert, root_cert, "refused: ocsp: a revocation reason of 7, which CRLReason does not have"},
+  {"a revoked response written by hand, superseded", RESP_REVOKED_HAND, revoked_cert, root_cert, "revoked at 2026-10-01 00:00:00 UTC, superseded, from the issuer"},
+  {"another response type", RESP_OTHER_TYPE, good_cert, root_cert, "refused: ocsp: a response of type 1.3.6.1.5.5.7.48.1.99, where id-pkix-ocsp-basic"},
+  {"a responseStatus of 4", RESP_STATUS_4, good_cert, root_cert, "refused: ocsp: a responseStatus of 4, which RFC 6960 leaves unused"},
+  {"tryLater with responseBytes", RESP_TRYLATER_WITH_BYTES, good_cert, root_cert, "refused: ocsp: a responseStatus of tryLater with responseBytes"},
+  {"a CertID with a hash cut short", RESP_CERTID_SHORT_HASH, good_cert, root_cert, "refused: ocsp: a CertID whose hashes are 19 and 20 bytes"},
+  {"a CertID under MD5", RESP_CERTID_MD5, good_cert, root_cert, "refused: ocsp: a CertID hashed by 1.2.840.113549.2.5"},
+  {"an extension twice", RESP_DUP_EXT, good_cert, root_cert, "refused: ocsp: extension 1.3.6.1.5.5.7.48.1.2 twice in responseExtensions"},
+  {"a ResponderID of no kind", RESP_RESPONDER_TAG3, good_cert, root_cert, "refused: ocsp: a ResponderID that is [3] constructed, neither byName [1] nor byKey [2]"},
+  {"a responder key hash of 19 bytes", RESP_KEYHASH_SHORT, good_cert, root_cert, "refused: ocsp: a responder key hash of 19 bytes"},
+  {"a ResponseData with no SingleResponse", RESP_NO_SINGLE, good_cert, root_cert, "refused: ocsp: a ResponseData with no SingleResponse"},
+  {"a critical extension in a SingleResponse", RESP_SINGLE_CRITICAL_EXT, good_cert, root_cert, "refused: ocsp: a critical extension 1.3.6.1.4.1.99999.2 in singleExtensions"},
+  {"a non-critical extension in a SingleResponse", RESP_SINGLE_PLAIN_EXT, good_cert, root_cert, "good, from the issuer"},
+  {"a nonce that is not an OCTET STRING", RESP_NONCE_NOT_OCTET, good_cert, root_cert, "refused: ocsp: asn1: expected an OCTET STRING, found INTEGER"},
+  {"a nextUpdate before its thisUpdate", RESP_NEXT_BEFORE_THIS, good_cert, root_cert, "refused: ocsp: a response whose nextUpdate, 2026-10-30 00:00:00 UTC, is before its thisUpdate"},
+  {"a byte after the response", RESP_TRAILING, good_cert, root_cert, "refused: ocsp: asn1: 1 bytes after the value"},
+  {"the leaf asked of another CA as its issuer", RESP_GOOD_DIRECT, good_cert, other_ca_cert, "refused: ocsp: CN=good.ocsp.test was issued by CN=OCSP Exercise Root, not CN=Other Root"},
 ]
 
 args = Program.args
@@ -318,29 +319,30 @@ def serial_hex(bytes : Array(UInt8) | Array::View(UInt8)) : String
   text[at, text.size - at]
 end
 
-# What a response says, one line of fields.
-def dump_line(der : Array(UInt8)) : String
+# What a response says, one line of fields, written into *line_out*: a line
+# gathered in an Array kept each round's text past its round.
+def dump_line(der : Array(UInt8), line_out : String::Builder) : Nil
   store = RisOcspStore.new
   response = OcspResponse.parse(der, store)
   if response.is_a?(OcspError)
     status = response.response_status
-    return status ? "status=#{status}" : "refused"
+    line_out << (status ? "status=#{status}" : "refused")
+    return
   end
   name = response.responder_name
   key = response.responder_key_hash
-  parts = ["status=0", "responder=#{name ? "name:" + hex_of(name) : "key:" + hex_of(key || [] of UInt8)}",
-           "produced=#{response.produced_at.to_unix}", "sigalg=#{response.signature_algorithm}", "certs=#{response.certificates.size}"]
+  line_out << "status=0;responder=#{name ? "name:" + hex_of(name) : "key:" + hex_of(key || [] of UInt8)}"
+  line_out << ";produced=#{response.produced_at.to_unix};sigalg=#{response.signature_algorithm};certs=#{response.certificates.size}"
   nonce = response.nonce
-  parts << "nonce=#{nonce ? hex_of(nonce) : "-"}"
+  line_out << ";nonce=#{nonce ? hex_of(nonce) : "-"}"
   response.responses.each do |single|
     id = single.cert_id
     revoked = single.revocation_time
     reason = single.revocation_reason
     next_update = single.next_update
-    parts << "single=#{id.hash.oid},#{hex_of(id.issuer_name_hash)},#{hex_of(id.issuer_key_hash)},#{serial_hex(id.serial)},#{single.status.word}," \
-             "#{revoked ? revoked.to_unix : "-"},#{reason || "-"},#{single.this_update.to_unix},#{next_update ? next_update.to_unix : "-"}"
+    line_out << ";single=#{id.hash.oid},#{hex_of(id.issuer_name_hash)},#{hex_of(id.issuer_key_hash)},#{serial_hex(id.serial)},#{single.status.word}," \
+           "#{revoked ? revoked.to_unix : "-"},#{reason || "-"},#{single.this_update.to_unix},#{next_update ? next_update.to_unix : "-"}"
   end
-  parts.join(";")
 end
 
 # dump FILE: each line `name|response`.
@@ -348,7 +350,10 @@ if args.size > 1 && args[0] == "dump"
   File.read(args[1]).lines.each do |line|
     next if line.strip.empty?
     f = line.strip.split('|')
-    puts "#{f[0]}|#{dump_line(bytes_of(f[1]))}"
+    dumped = ""
+    dumped << f[0] << '|'
+    dump_line(bytes_of(f[1]), dumped)
+    puts dumped
   end
   exit 0
 end
@@ -361,7 +366,9 @@ if args.size > 5 && args[0] == "request"
   issuer_store = RisCertificateStore.new
   leaf = pem_cert(leaf_store, args[1])
   issuer = pem_cert(issuer_store, args[2])
-  File.write(args[5], text_of(Ocsp.request(leaf, issuer, hash, nonce)))
+  request = [] of UInt8
+  Ocsp.request(leaf, issuer, request, hash, nonce)
+  File.write(args[5], text_of(request))
   exit 0
 end
 
@@ -371,11 +378,11 @@ ocsp_store = RisOcspStore.new
 # vectors DIR
 if args.size > 1 && args[0] == "vectors"
   dir = args[1]
-  certificates = [{"root", ROOT}, {"other-ca", OTHER_CA}, {"good", GOOD}, {"revoked", REVOKED}, {"other", OTHER}, {"must", MUST},
-                  {"rsa-root", RSA_ROOT}, {"rsa-leaf", RSA_LEAF}, {"ed-root", ED_ROOT}, {"ed-leaf", ED_LEAF}]
+  certificates = [{"root", root_cert}, {"other-ca", other_ca_cert}, {"good", good_cert}, {"revoked", revoked_cert}, {"other", other_cert}, {"must", must_cert},
+                  {"rsa-root", rsa_root_cert}, {"rsa-leaf", rsa_leaf_cert}, {"ed-root", ed_root_cert}, {"ed-leaf", ed_leaf_cert}]
   certificates.each { |pair| File.write("#{dir}/#{pair[0]}.der", text_of(pair[1].raw)) }
-  lines = [] of String
-  CASES.each_with_index do |c, i|
+  lines = ""
+  cases.each_with_index do |c, i|
     File.write("#{dir}/#{i}.resp", text_of(b(c[1])))
     leaf = certificates.find { |pair| pair[1].raw == c[2].raw }
     issuer = certificates.find { |pair| pair[1].raw == c[3].raw }
@@ -384,33 +391,33 @@ if args.size > 1 && args[0] == "vectors"
     next unless leaf && issuer && c[2].issuer == c[3].subject
     read = OcspResponse.parse(b(c[1]), ocsp_store)
     hash = read.is_a?(OcspResponse) ? read.responses[0].cert_id.hash : OcspHash::SHA1
-    lines << "#{c[0]}|#{i}.resp|#{leaf[0]}|#{issuer[0]}|#{category(b(c[1]), c[2], c[3], fixed_now)}|#{hash.to_s.downcase}"
+    lines << "#{c[0]}|#{i}.resp|#{leaf[0]}|#{issuer[0]}|#{category(b(c[1]), c[2], c[3], fixed_now)}|#{hash.to_s.downcase}\n"
   end
-  File.write("#{dir}/list", lines.join("\n") + "\n")
+  File.write("#{dir}/list", lines)
   exit 0
 end
 
 puts "== responses judged at 2026-11-01"
-CASES.each do |c|
+cases.each do |c|
   got = outcome(b(c[1]), c[2], c[3])
   check got.starts_with?(c[4]), "#{c[0]}: expected #{c[4].inspect}, got #{got.inspect}"
 end
-puts "  #{CASES.size} responses, each judged as written here"
+puts "  #{cases.size} responses, each judged as written here"
 
 puts "== what a response says, read"
 read = OcspResponse.parse(b(RESP_REVOKED_DIRECT), ocsp_store).or_panic
-check read.responder_name == ROOT.subject && read.responder_key_hash.nil?, "a responder by name: its Name's DER"
-check read.responses.size == 1 && read.responses[0].cert_id.serial == REVOKED.serial, "one SingleResponse, for revoked.ocsp.test"
+check read.responder_name == root_cert.subject && read.responder_key_hash.nil?, "a responder by name: its Name's DER"
+check read.responses.size == 1 && read.responses[0].cert_id.serial == revoked_cert.serial, "one SingleResponse, for revoked.ocsp.test"
 check read.responses[0].revocation_reason == 1 && Ocsp.reason_name(1) == "keyCompromise", "the reason, keyCompromise (1)"
 check read.responses[0].this_update == Time.utc(2026, 10, 31) && read.responses[0].next_update == Time.utc(2026, 11, 7), "thisUpdate and nextUpdate"
 check read.signature_algorithm == "1.2.840.10045.4.3.2" && read.certificates.empty?, "ecdsa-with-SHA256, and no certificates carried"
 by_key = OcspResponse.parse(b(RESP_GOOD_BYKEY), ocsp_store).or_panic
-check by_key.responder_name.nil? && by_key.responder_key_hash == OcspHash::SHA1.digest(ROOT.public_key_bits), "a responder by key: the SHA-1 of its key"
+check by_key.responder_name.nil? && by_key.responder_key_hash == OcspHash::SHA1.digest(root_cert.public_key_bits), "a responder by key: the SHA-1 of its key"
 nonced = OcspResponse.parse(b(RESP_NONCE), ocsp_store).or_panic
 check nonced.nonce == Array(UInt8).new(16) { |i| (i + 1).to_u8 }, "the nonce, 01 to 10"
 delegated = OcspResponse.parse(b(RESP_GOOD_DELEGATED), ocsp_store).or_panic
-check delegated.certificates.size == 1 && delegated.certificates[0].raw == RESPONDER.raw, "the responder's certificate, carried"
-verdict = delegated.verify(GOOD, ROOT, fixed_now).or_panic
+check delegated.certificates.size == 1 && delegated.certificates[0].raw == responder_cert.raw, "the responder's certificate, carried"
+verdict = delegated.verify(good_cert, root_cert, fixed_now).or_panic
 check verdict.delegated && verdict.signer.subject_name == "CN=OCSP Exercise Responder" && verdict.signer.ocsp_nocheck, "signed by the responder, which carries id-pkix-ocsp-nocheck"
 late = OcspResponse.parse(b(RESP_TRY_LATER), ocsp_store)
 check late.is_a?(OcspError) && late.response_status == 3, "tryLater's status, 3, on the error"
@@ -419,29 +426,35 @@ check sha256.responses[0].cert_id.hash == OcspHash::SHA256 && sha256.responses[0
 puts "  responder by name and by key, the status, reason and times, the nonce, the certificates, an unsuccessful status"
 
 puts "== requests, as OpenSSL and Python's cryptography write them"
-check Ocsp.request(GOOD, ROOT) == b(REQ_SHA1), "the request for good.ocsp.test, as `openssl ocsp -no_nonce` writes it"
-check Ocsp.request(GOOD, ROOT, OcspHash::SHA256) == b(REQ_SHA256), "the request under SHA-256, as `openssl ocsp -sha256 -no_nonce` writes it"
-check Ocsp.request(GOOD, ROOT, nonce: Array(UInt8).new(16) { |i| (i + 1).to_u8 }) == b(REQ_NONCE), "the request with a nonce, as Python's OCSPRequestBuilder writes it"
-check OcspCertId.of(GOOD, ROOT).matches?(GOOD, ROOT) && !OcspCertId.of(GOOD, ROOT).matches?(OTHER, ROOT), "a CertID matches its own certificate and not another"
+req_sha1 = [] of UInt8
+Ocsp.request(good_cert, root_cert, req_sha1)
+check req_sha1 == b(REQ_SHA1), "the request for good.ocsp.test, as `openssl ocsp -no_nonce` writes it"
+req_sha256 = [] of UInt8
+Ocsp.request(good_cert, root_cert, req_sha256, OcspHash::SHA256)
+check req_sha256 == b(REQ_SHA256), "the request under SHA-256, as `openssl ocsp -sha256 -no_nonce` writes it"
+req_nonce = [] of UInt8
+Ocsp.request(good_cert, root_cert, req_nonce, nonce: Array(UInt8).new(16) { |i| (i + 1).to_u8 })
+check req_nonce == b(REQ_NONCE), "the request with a nonce, as Python's OCSPRequestBuilder writes it"
+check OcspCertId.of(good_cert, root_cert).matches?(good_cert, root_cert) && !OcspCertId.of(good_cert, root_cert).matches?(other_cert, root_cert), "a CertID matches its own certificate and not another"
 puts "  SHA-1 and SHA-256 CertIDs, a nonce"
 
 puts "== the TLS Feature extension and id-pkix-ocsp-nocheck"
-check MUST.must_staple? && MUST.tls_features == [5], "must.ocsp.test's TLS Feature: status_request (5)"
-check !GOOD.must_staple? && GOOD.tls_features.nil?, "good.ocsp.test carries no TLS Feature"
-check RESPONDER.ocsp_nocheck && !GOOD.ocsp_nocheck, "the responder's id-pkix-ocsp-nocheck, read"
+check must_cert.must_staple? && must_cert.tls_features == [5], "must.ocsp.test's TLS Feature: status_request (5)"
+check !good_cert.must_staple? && good_cert.tls_features.nil?, "good.ocsp.test carries no TLS Feature"
+check responder_cert.ocsp_nocheck && !good_cert.ocsp_nocheck, "the responder's id-pkix-ocsp-nocheck, read"
 puts "  must staple read, and nocheck"
 
 puts "== every truncation and flipped byte refused"
 [{"the issuer's response", RESP_GOOD_DIRECT}, {"the delegated responder's", RESP_GOOD_DELEGATED}].each do |entry|
   whole = b(entry[1])
   whole.size.times do |cut|
-    got = outcome(Array(UInt8).new(cut) { |i| whole[i] }, GOOD, ROOT)
+    got = outcome(Array(UInt8).new(cut) { |i| whole[i] }, good_cert, root_cert)
     check got.starts_with?("refused: "), "#{entry[0]} cut to #{cut} bytes: #{got}"
   end
   whole.size.times do |at|
     flipped = whole.dup
     flipped[at] = flipped[at] ^ 0x01_u8
-    got = outcome(flipped, GOOD, ROOT)
+    got = outcome(flipped, good_cert, root_cert)
     check got.starts_with?("refused: "), "#{entry[0]} with byte #{at} flipped: #{got}"
   end
   puts "  #{entry[0]}: #{whole.size} truncations and #{whole.size} flipped bytes, each refused"

@@ -2724,8 +2724,16 @@ pub macro yaml_serializable(declaration)
     ::Std::Yaml::YAML.dump(to_yaml_any)
   end
 
-  def self.from_yaml(text : String) : self
-    ::Std::Yaml::YAML.from_yaml(text, self)
+  # A macro, as std/json's `from_json`: the value is made in the scope
+  # that calls it, so its Array and Hash fields are that scope's. Made in
+  # a def, they were the def's scratch (SPEC 1.9).
+  macro from_yaml(text)
+    %doc = ::Std::Yaml::YAML.parse(\{{ text }})
+    {% if @type.private? %}
+      {{ @type.name.split("::").last.id }}.new(%doc)
+    {% else %}
+      ::{{ @type }}.new(%doc)
+    {% end %}
   end
 
   def initialize(yaml : ::Std::Yaml::TapeValue)
@@ -2749,43 +2757,18 @@ pub macro yaml_serializable(declaration)
         {% end %}
       \{% elsif {{ field[:type].nilable? }} %}
         {{ field[:name].id }} = yaml_found_{{ field[:name][1..].id }}.nil? || yaml_found_{{ field[:name][1..].id }}.null? ? nil : ::Std::Yaml::YAML.read_value(yaml_found_{{ field[:name][1..].id }}, typeof({{ field[:name].id }} || raise("")))
+      \{% elsif @type.instance_vars.any? { |ivar| ivar.name.stringify == {{ field[:name][1..] }} && !ivar.type.union? && ivar.type < ::Hash } %}
+        raise "YAML for #{ {{ declaration[:name] }} } has no key #{ {{ field[:name][1..] }}.inspect }" if yaml_found_{{ field[:name][1..].id }}.nil?
+        # Filled before it is stored, as std/json's derive fills a Hash:
+        # no def answers a Hash it made (SPEC 1.9).
+        yaml_hash_{{ field[:name][1..].id }} = typeof({{ field[:name].id }}).new
+        ::Std::Yaml::YAML.read_into(yaml_found_{{ field[:name][1..].id }}, yaml_hash_{{ field[:name][1..].id }})
+        {{ field[:name].id }} = yaml_hash_{{ field[:name][1..].id }}
       \{% else %}
         raise "YAML for #{ {{ declaration[:name] }} } has no key #{ {{ field[:name][1..] }}.inspect }" if yaml_found_{{ field[:name][1..].id }}.nil?
         {{ field[:name].id }} = ::Std::Yaml::YAML.read_value(yaml_found_{{ field[:name][1..].id }}, typeof({{ field[:name].id }}))
       \{% end %}
     {% end %}
-  end
-end
-
-@[OnTape]
-struct RisDecoded(T)
-  getter value : T
-
-  def initialize(value : TapeValue)
-    result = {% if T.nilable? %}
-      value.null? ? nil : YAML.read_value(value, {{ T.union_types.reject { |u| u == ::Nil }.first }})
-    {% elsif T < Hash %}
-      Hash({{ T.type_vars[0] }}, {{ T.type_vars[1] }}).new
-    {% else %}
-               T.new(value)
-             {% end %}
-    {% if T < Hash %}
-      entries = value.as_h
-      keys = Array(TapeValue).new(entries.size)
-      entries.each { |key, item| keys << key; nil }
-      decoded = Array({{ T.type_vars[1] }}).new(keys.size) do |i|
-        YAML.read_value(entries[keys[i]], {{ T.type_vars[1] }})
-      end
-      decoded_keys = Array({{ T.type_vars[0] }}).new(keys.size) do |i|
-        YAML.read_value(keys[i], {{ T.type_vars[0] }})
-      end
-      i = 0
-      while i < keys.size
-        result[decoded_keys[i]] = decoded[i]
-        i += 1
-      end
-    {% end %}
-    @value = result
   end
 end
 
@@ -2972,16 +2955,42 @@ pub struct YAML
       {% raise "YAML cannot read " + T.stringify + " inside an Array: a round's collection is freed with the round (SPEC 1.9). Read YAML.parse(text) and walk it with as_a, or declare the outer arrays and copy_to(owner)" %}
     {% end %}
     items = value.as_a
-    Array(T).new(items.size) { |i| read_value(items[i], T) }
+    ary = Array(T).new(items.size)
+    i = 0
+    while i < items.size
+      ary << read_value(items[i], T)
+      i += 1
+    end
+    ary
   end
 
+  # A Hash is a class instance, made where it is declared: no def answers
+  # one it made (SPEC 1.9).
   def self.read_value(value : TapeValue, type : Hash(K, V).class) : Hash(K, V) forall K, V
-    RisDecoded(Hash(K, V)).new(value).value
+    {% raise "YAML cannot answer a Hash: declare h = Hash(K, V).new and call YAML.read_into(value, h)" %}
   end
 
-  # Construct in the caller's scope, including nullable derived types.
+  # The mapping *value* into *h*, which the caller declared.
+  def self.read_into(value : TapeValue, h : Hash(K, V)) : Nil forall K, V
+    {% if !V.union? && (V < ::Array || V < ::Hash) %}
+      {% raise "YAML cannot read " + V.stringify + " into a Hash: each value is made in a round and freed with it (SPEC 1.9, 2.2). Walk YAML.parse(text) with as_h and as_a, or declare the inner collections and copy_to(owner)" %}
+    {% end %}
+    value.as_h.each do |key, item|
+      h[read_value(key, K)] = read_value(item, V)
+      nil
+    end
+  end
+
+  # A type that reads itself, the `initialize(yaml)` a `derive
+  # yaml_serializable` wrote, made by a tail call in the caller's scope; a
+  # nilable type reads null as nil.
   def self.read_value(value : TapeValue, type : T.class) : T forall T
-    RisDecoded(T).new(value).value
+    {% if T.nilable? %}
+      return nil if value.null?
+      read_value(value, {{ T.union_types.reject { |u| u == ::Nil }.first }})
+    {% else %}
+      T.new(value)
+    {% end %}
   end
 end
 
@@ -3014,7 +3023,7 @@ spec 8.1  # A std module follows the standard its header names (an RFC, a fileâ€
   doc = YAML.parse(text)
   YAML.parse("[1, 2]")[-1].as_i == 2
   YAML.read_value(doc["name"], String?) == "cafÃ©"
-  YAML.read_value(TapeValue.new(nil), Point?).nil?
+  YAML.read_value(TapeValue.new(nil), Int32?).nil?
   copied = doc.copy_to(Program.tape)
   copied == doc
   doc["name"].as_s == "cafÃ©"
@@ -3042,4 +3051,7 @@ spec 8.1  # A std module follows the standard its header names (an RFC, a fileâ€
   p = Point.from_yaml("name: p\nx: 3\ntags: [a, b]\n")
   puts "#{p.name} #{p.x} #{p.tags.join(",")} #{p.scale.nil?}"
   print p.to_yaml
+  counts = Hash(String, Int32).new
+  YAML.read_into(YAML.parse("a: 1\nb: 2\n"), counts)
+  counts["a"] == 1 && counts["b"] == 2
 end

@@ -1,0 +1,11 @@
+# A Time constant is refused at Time::Location::Zone#initialize as request
+# data on the program tape, copy_to(Program.tape) or not: the checker has
+# no constant-initializer context for the store (SPEC 1.8, an open hole in
+# TODO section 2; doc/drafts/checker-open-questions/, Q5). When that
+# lands, this moves to a passing test; until then make the Time in a def
+# (test/ris/time_in_def.ri).
+import std/time::{Time}
+
+NOW = Time.utc(2026, 1, 2)
+
+puts NOW.year

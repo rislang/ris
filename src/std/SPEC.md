@@ -1041,9 +1041,9 @@ descriptor positioning and locking.
   match? recognizes segment-local * and ?, ** segments, bracket classes, escaped
   characters and brace alternatives nested to ten levels.
   (test/cli/std_file_exercise.ri)
-* file.7 read_lines reads the whole file and returns line views without LF or
-  its preceding CR; a final unpaired CR is retained. each_line streams the same
-  lines and closes its file on every exit. (test/cli/std_file_exercise.ri)
+* file.7 each_line streams a file's lines without LF or its preceding CR; a
+  final unpaired CR is retained. It closes its file on every exit.
+  (test/cli/std_file_exercise.ri)
 * file.8 tempfile creates an exclusive empty file with owner-only permissions,
   using TMPDIR, TEMP, TMP then the platform temporary directory. The returned
   path remains until deleted; the block form deletes it on exit if it still

@@ -1,0 +1,12 @@
+# File.read_lines is gone (doc/drafts/checker-open-questions/, Q4): it
+# returned views of its own read (SPEC 1.9). A caller keeps lines from
+# File.each_line by copying each into an Array it declares. Silent on
+# success.
+import std/file::{File}
+
+path = (Program.env("TMPDIR") || "/tmp") + "/ris_each_line_kept.txt"
+File.write(path, "one\r\ntwo\nthree\r")
+kept = [] of String
+File.each_line(path) { |line| kept << line.copy_to(Program.tape) }
+File.delete(path)
+raise "each_line kept #{kept.inspect}" unless kept == ["one", "two", "three\r"]

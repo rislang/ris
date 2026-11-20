@@ -1,0 +1,8 @@
+# A line File.each_line yields views the reader's buffer: kept in an
+# Array from before the block without a copy, it would dangle when the
+# file closes (doc/drafts/checker-open-questions/, Q4).
+import std/file::{File}
+
+kept = [] of String
+File.each_line("/etc/hostname") { |line| kept << line }
+puts kept.size

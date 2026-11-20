@@ -1,0 +1,16 @@
+# A fixed Time is made in a def called where it is used: a Time constant
+# is refused at Time::Location::Zone#initialize (refused/time_constant.ri,
+# an open hole under SPEC 1.8, TODO section 2;
+# doc/drafts/checker-open-questions/, Q5). Silent on success.
+import std/time::{Time}
+
+def fixed_now : Time
+  Time.utc(2026, 1, 2)
+end
+
+def later(than : Time) : Bool
+  fixed_now < than
+end
+
+raise "fixed time year" unless fixed_now.year == 2026
+raise "fixed time order" unless later(Time.utc(2027, 1, 1))

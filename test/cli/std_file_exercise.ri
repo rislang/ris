@@ -79,8 +79,12 @@ assert_true !File.empty?(f_nonexistent), "empty? on a missing path is false"
 puts "  exists, size, and empty verified"
 
 puts "\n== line-wise reading"
-lines = File.read_lines(f1)
-assert_true lines.size == 2, "read_lines returned 2 lines"
+# Lines kept past the walk go into an Array the caller declares:
+# `read_lines` returned views of its own read (SPEC 1.9) and is gone. A
+# line views the reader's buffer, so a kept one is copied out.
+lines = [] of String
+File.each_line(f1) { |l| lines << l.copy_to(Program.tape) }
+assert_true lines.size == 2, "each_line kept 2 lines"
 assert_str "first line", lines[0], "line 0"
 assert_str "second line", lines[1], "line 1"
 
@@ -91,36 +95,34 @@ end
 assert_true count == 2, "each_line visited 2 lines"
 
 # A line at a time, off the file as it is read: `each_line` read the
-# whole file into an array of its lines first. Counted with the
-# collector held back, a pass over two megabytes may allocate the lines
-# and little else - under one and a half times the file - where reading
-# it whole first allocated the text, its doublings and the lines, past
-# three times.
+# whole file into an array of its lines first. The tape's top, asked in
+# each round, stays under half the file while streaming; reading it whole
+# first put the text below the first line, the file's size and more.
 big_path = sandbox + "/std_file_each_line_big.txt"
 File.write(big_path, ("0123456789abcdefghijklmnopqrstuvwxyz" * 3 + "\r\n") * 18000)
 walk_before = RisRegion.tape_bytes(1_u64)
+walk_peak = walk_before
 walked = 0
 walked_bytes = 0
 File.each_line(big_path) do |l|
   walked = walked + 1
   walked_bytes = walked_bytes + l.bytesize
+  top = RisRegion.tape_bytes(1_u64)
+  walk_peak = top if top > walk_peak
 end
-walk_after = RisRegion.tape_bytes(1_u64)
 assert_true walked == 18000 && walked_bytes == 18000 * 108, "each_line gave 18000 lines of 108 bytes, without their \\r\\n"
 file_bytes = File.size(big_path).to_u64
-assert_true walk_after - walk_before < file_bytes * 3_u64 // 2_u64, "each_line streams: #{walk_after - walk_before} bytes allocated for a #{file_bytes}-byte file"
+assert_true walk_peak - walk_before < file_bytes // 2_u64, "each_line streams: the tape rose #{walk_peak - walk_before} bytes for a #{file_bytes}-byte file"
 File.delete(big_path)
 # A `\r` that ends the file ends no line, and is kept as `each_line` and
-# the other library keep it: `read_lines` took it off the last line.
+# the other library keep it.
 cr_path = sandbox + "/std_file_ex_lone_cr.txt"
 File.write(cr_path, "one\r\ntwo\r")
-lone = File.read_lines(cr_path)
-assert_true lone.size == 2 && lone[0] == "one" && lone[1] == "two\r", "read_lines keeps a last line's lone \\r: #{lone.inspect}"
 streamed = [] of String
-File.each_line(cr_path) { |l| streamed << l }
-assert_true streamed == lone, "each_line and read_lines agree: #{streamed.inspect}"
+File.each_line(cr_path) { |l| streamed << l.copy_to(Program.tape) }
+assert_true streamed.size == 2 && streamed[0] == "one" && streamed[1] == "two\r", "each_line keeps a last line's lone \\r: #{streamed.inspect}"
 File.delete(cr_path)
-puts "  read_lines and each_line verified"
+puts "  each_line verified"
 
 puts "\n== truncation and overwrite"
 File.truncate(f1, 5_i64)

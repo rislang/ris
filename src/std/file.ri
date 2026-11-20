@@ -1664,43 +1664,17 @@ class ::File
     Path.new(first.to_s).join(second.to_s).join(third.to_s).to_s
   end
 
+  # Path#join's chain: a loop kept each round's Path past its round.
   def self.join(parts : Array(String)) : String
-    p = Path.new("")
-    parts.each do |part|
-      p = p.join(part)
-    end
-    p.to_s
-  end
-
-  def self.read_lines(path : String | Path) : Array(String)
-    content = File.read(path.to_s)
-    res = [] of String
-    len = content.bytesize
-    ptr = content
-    line_start = 0
-    i = 0
-    while i < len
-      if ptr[i] == 10_u8
-        line_len = i - line_start
-        # Strip CR if CRLF
-        line_len = line_len - 1 if line_len > 0 && ptr[line_start + line_len - 1] == 13_u8
-        res << content[line_start, line_len]
-        line_start = i + 1
-      end
-      i = i + 1
-    end
-    # A last line keeps a `\r` no `\n` follows, as `each_line` keeps it.
-    if line_start < len
-      rem_len = len - line_start
-      res << content[line_start, rem_len]
-    end
-    res
+    Path.new("").join(parts).to_s
   end
 
   # A line at a time, off the file as it is read: it read the whole file
   # into an array of its lines first, so a log of any size was the
-  # program's memory twice over before the first line was seen. Lines as
-  # `read_lines` gives them, without their `\n` or a `\r` before it.
+  # program's memory twice over before the first line was seen. Each line
+  # comes without its `\n` or a `\r` before it; a last line keeps a `\r`
+  # no `\n` follows. A caller keeps lines by appending them to an Array it
+  # declares (`read_lines` returned views of its own read: SPEC 1.9).
   def self.each_line(path : String | Path, &block : String -> Nil) : Nil
     raise "cannot read #{path}" unless File.exists?(path.to_s)
     # Asked before the open: Windows refuses to open a directory at all,
@@ -1708,7 +1682,11 @@ class ::File
     raise "cannot read #{path}: it is a directory, or the read failed" if File.directory?(path)
     io = File.open(path.to_s, "r", 65536)
     defer io.close
-    while line = io.read_line(chomp: true)
+    # Read in the round's body, so each round frees its line: read in the
+    # `while` condition, every line stayed on the tape to the end.
+    while true
+      line = io.read_line(chomp: true)
+      break unless line
       yield line
     end
     raise "cannot read #{path}: it is a directory, or the read failed" if io.read_failed?

@@ -1,0 +1,9 @@
+# An Array compares with a View of the same bytes element by element, as
+# a View compares with an Array: Array#== took only an Array, so the
+# other order fell to Object#== and answered false (std/ocsp's responder
+# by key hash was never found). Silent on success.
+bytes = [1_u8, 2_u8, 3_u8, 4_u8]
+view = bytes.view[1, 2]
+raise "array == view" unless [2_u8, 3_u8] == view
+raise "view == array" unless view == [2_u8, 3_u8]
+raise "array != other view" if [2_u8, 4_u8] == view

@@ -148,15 +148,15 @@ tempfile_broken() { # tempfile_broken <label> <dir> <phrase> <exclusive: yes|no>
   if ! EXCLUSIVE="$exclusive" "$PY" - "$REPO/src/std/file.ri" "$WORK/$dir/std/file.ri" <<'PY'
 import os, sys
 src = open(sys.argv[1]).read()
-old = '      path = tmpdir + File::SEPARATOR_STRING + prefix + "_" + temp_token + suffix'
+old = '      temp_token(path)'
 assert src.count(old) == 1
-src = src.replace(old, old.replace("temp_token", '(prefix == "plant" ? "0000000000000000" : temp_token)'), 1)
+src = src.replace(old, '      prefix == "plant" ? (path << "0000000000000000") : temp_token(path)', 1)
 if os.environ["EXCLUSIVE"] == "no":
     # Linux's O_EXCL dropped, and Windows' CREATE_NEW made OPEN_ALWAYS (4),
     # which opens what is at the name - through a symlink - and answers it.
-    old = "      fd = __iyi_openat(sys_path(path), 1 | 64 | 128 | 0x80000, 384)"
+    old = "      fd = __iyi_openat(sys_path(path).to_unsafe, 1 | 64 | 128 | 0x80000, 384)"
     assert src.count(old) == 1
-    src = src.replace(old, "      fd = __iyi_openat(sys_path(path), 1 | 64 | 0x80000, 384)", 1)
+    src = src.replace(old, "      fd = __iyi_openat(sys_path(path).to_unsafe, 1 | 64 | 0x80000, 384)", 1)
     old = "        Pointer(Void).new(0_u64), 1, 0x80, Pointer(Void).new(0_u64))"
     assert src.count(old) == 1
     src = src.replace(old, "        Pointer(Void).new(0_u64), 4, 0x80, Pointer(Void).new(0_u64))", 1)
@@ -367,10 +367,10 @@ elif ! "$PY" - <<PY
 from pathlib import Path
 path = Path("$WORK/patched_lines/std/file.ri")
 src = path.read_text()
-old = "    while line = io.read_line(chomp: true)\n      yield line\n    end\n"
+old = "    while true\n      line = io.read_line(chomp: true)\n      break unless line\n      yield line\n    end\n"
 if old not in src:
     raise SystemExit(f"each_line patch site missing: {old!r}")
-path.write_text(src.replace(old, "    io.close\n    read_lines(path).each { |line| yield line }\n", 1))
+path.write_text(src.replace(old, "    io.close\n    File.read(path.to_s).lines.each { |line| yield line }\n", 1))
 PY
 then
   echo "  the each_line patch did not apply"
@@ -438,12 +438,11 @@ exercise_broken() {
   fi
 }
 exercise_broken "a last line's lone \\r taken off" lone_cr std \
-  '      rem_len = len - line_start
-      res << ' \
-  '      rem_len = len - line_start
-      rem_len = rem_len - 1 if rem_len > 0 && ptr[line_start + rem_len - 1] == 13_u8
-      res << ' \
-  "read_lines keeps a last line's lone"
+  '      yield line
+    end' \
+  '      yield(line.ends_with?("\r") ? line[0, line.bytesize - 1] : line)
+    end' \
+  "each_line keeps a last line's lone"
 # File.open's modes, each mechanism taken out of a copy that compiles.
 exercise_broken "append that is not asked of the kernel" no_append prelude \
   '    append = flags & 16 != 0' '    append = false' \
@@ -639,11 +638,11 @@ refusal_broken() {
   fi
 }
 refusal_broken "a path cut short at its NUL" nul_cut prelude \
-  '    n = path.byte_index("\u0000") ? raise("path contains a NUL byte") : path.bytesize' \
-  '    n = path.bytesize' "$nul_write"
+  '      raise "path contains a NUL byte" if path.to_unsafe[i] == 0' \
+  '' "$nul_write"
 if [ "$(uname -s)" = Linux ]; then
   refusal_broken "a real_path that walks through a file" realpath_through std \
-    '        return Pointer(UInt8).new(0_u64) if rest.bytesize > 0 && (st.st_mode & 0o170000) != 0o040000' \
+    '        return nil if rest.bytesize > 0 && (st.st_mode & 0o170000) != 0o040000' \
     '' 'File.real_path("'"$WORK/rp_file/.."'")'
 
   # A FIFO nobody writes is there to `exists?` at once: opened to read,

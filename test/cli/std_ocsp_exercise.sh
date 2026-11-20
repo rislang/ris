@@ -716,7 +716,7 @@ prove_broken "an extension twice taken" "an extension twice: expected" \
 prove_broken "a version written out taken" "a ResponseData whose version is written out: expected" \
   '      return OcspError.new("a ResponseData whose version v1 is written out, which DER leaves out as the default")' '      data = data.reject { |value| value.context?(0) }'
 prove_broken "a UTCTime taken" "a thisUpdate in UTCTime: expected" \
-  '    return OcspError.new("a #{what} that is #{value.describe}, where RFC 6960 writes a GeneralizedTime") unless value.universal?(DerTag::GENERALIZED_TIME)' ''
+  '    if value.universal?(DerTag::GENERALIZED_TIME)' '    if true'
 prove_broken "CRLReason 7 taken" "a revocation reason of 7: expected" \
   'if code < 0 || code > 10 || code == 7' 'if code < 0 || code > 10'
 prove_broken "tryLater with responseBytes taken" "tryLater with responseBytes: expected" \
@@ -728,11 +728,11 @@ prove_broken "a leaf asked of a CA that did not issue it" "the leaf asked of ano
       return OcspError.new' '    if false
       return OcspError.new'
 prove_broken "a request's CertID without NULL parameters" "as \`openssl ocsp -no_nonce\` writes it" \
-  '    algorithm = OcspDer.sequence(OcspDer.oid(@hash.oid) + [0x05_u8, 0x00_u8])' '    algorithm = OcspDer.sequence(OcspDer.oid(@hash.oid))'
+  '    algorithm << 0x05_u8 << 0x00_u8' '    algorithm.size'
 prove_broken "the nonce read as the extension's whole value" "a nonce that is not an OCTET STRING: expected" \
-  '        nonce = bytes(inner.octet_string)!' '        nonce = body'
+  '        nonce = store.certificate_bytes(bytes(inner.octet_string)!)' '        nonce = store.certificate_bytes(body)'
 prove_broken "the TLS Feature extension passed over" "must.ocsp.test's TLS Feature" \
-  '        @tls_features = features' '' x509
+  '        @tls_features = @features' '' x509
 prove_broken "id-pkix-ocsp-nocheck passed over" "which carries id-pkix-ocsp-nocheck" \
   '        @ocsp_nocheck = true' '' x509
 for pid in $mutation_pids; do

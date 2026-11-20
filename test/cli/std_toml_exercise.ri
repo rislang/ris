@@ -1565,9 +1565,15 @@ assert_true(listener.port == 9090 && listener.host == "example.com", "present ke
 assert_str("{\"x\":5,\"label\":\"five\"}", Inner.new(5, "five").to_json, "std/json's derive beside it")
 assert_str("x: 5\nlabel: five\n", Inner.new(5, "five").to_yaml, "std/yaml's derive beside it")
 assert_str("x = 5\nlabel = \"five\"\n", Inner.new(5, "five").to_toml, "this derive")
-assert_true(TOML.from_toml("a = [1, 2]\n", Hash(String, Array(Int32)))["a"] == [1, 2], "from_toml into a hash of arrays")
+# A Hash is declared by its caller and filled (SPEC 1.9): no def answers
+# one it made.
+# A Hash of Arrays is refused at compile time: each Array would be made
+# in a round and freed with it (SPEC 2.2).
+of_ints = Hash(String, Int32).new
+TOML.read_into(TOML.parse("a = 1\nb = 2\n").or_panic, of_ints)
+assert_true(of_ints["a"] == 1 && of_ints["b"] == 2, "read_into a hash")
 assert_str("a = [1, 2]\n", TOML.to_toml({"a" => [1, 2]}), "to_toml of a hash")
-assert_str("integer 4294967296 out of Int32 range", panic_of(-> { Spot.from_toml("x = 1.0\nname = \"n\"\n").to_toml + TOML.from_toml("a = 4294967296", Hash(String, Int32)).to_s }), "an integer past Int32 is refused")
+assert_str("integer 4294967296 out of Int32 range", panic_of(-> { Spot.from_toml("x = 1.0\nname = \"n\"\n").to_toml + TOML.read_into(TOML.parse("a = 4294967296").or_panic, Hash(String, Int32).new).to_s }), "an integer past Int32 is refused")
 puts "  records written and read back, beside std/json's and std/yaml's derives"
 
 puts "ALL CHECKS PASSED"

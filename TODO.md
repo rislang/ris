@@ -22,9 +22,9 @@ sections below and are listed here in order:
 ## 1. Programs first
 
 * std on the tape, found porting the HTTP handlers (drift report in
-  doc/drafts/server-answer-features.md): Router's `Pattern.parse` (SPEC
-  1.9, router.ri:189), the HTTPS client (`records_handshake` returns
-  an owner, http.ri:4847; blocks samples/ris/autocert.ri),
+  doc/drafts/server-answer-features.md): the HTTPS client
+  (`records_handshake` returns an owner, http.ri:4847; blocks
+  samples/ris/autocert.ri),
   `Zstd.decompress` (view check, zstd.ri:1410), `Cookie.parse_header`
   and `HTTP.cookie_pairs` (a Hash from a def). Then give `Incoming`
   back `form`, `multipart` and `cookies`, which `Request` had.
@@ -33,7 +33,11 @@ sections below and are listed here in order:
 
 * `Iterator#to_a` (iterator.ri:225) stores each round's item past its
   round, so samples/ris/std_iterator.ri does not build and is left out
-  of the tarball with autocert.ri (Makefile, ris-tarball).
+  of the tarball with autocert.ri (Makefile, ris-tarball). Probe
+  (checker-open-questions Q6, 2026-11-20): `Iterator.of(array)` with
+  map, select and to_a builds; what is refused is `map` over
+  `Iterator.of_entries(hash)` (its tuples view the Hash), even when the
+  proc answers an Int32 (std_iterator_exercise.ri:292, :313).
 
 Breakage between steps is fine; no transition stages.
 
@@ -75,6 +79,14 @@ Unknown must be refused (SPEC 3.6).
 * A spawn block's non-flat value (a Tuple or Hash, task_tape_result)
   is refused: the block frees its scratch before the task copy takes
   the value. Copy the value at the boundary before the reset.
+
+* A constant made through a def that stores, as `NOW = Time.utc(...)`
+  through Time::Location::Zone#initialize, is refused as request data
+  on the program tape, copy_to(Program.tape) or not: TapeProgramChecker
+  has no constant-initializer context (`initializer`,
+  tape_program_checker.cr:108). SPEC 1.8. Until then a def makes the
+  value (test/ris/time_in_def.ri; refused/time_constant.ri moves to a
+  passing test when it lands). checker-open-questions Q5.
 
 * OptionParser.parse given an `args` shorter-lived than `found` is
   refused at the append inside std/option_parser, with a generic message:
@@ -224,8 +236,29 @@ Unknown must be refused (SPEC 3.6).
   - fuzz: no parse_request left; TLS API drift as before, plus
     `Server.handle` private and `String#compare`.
   - The checker questions toml/yaml, zip, router, file, log/ocsp/x509
-    and iterator: design draft doc/drafts/checker-open-questions/
-    (EGM-reviewed, not implemented).
+    and iterator (doc/drafts/checker-open-questions/), 2026-11-20:
+    file (Q4: read_lines gone), ocsp and x509 (Q5: values made in a
+    def, DER appended to the caller's Array), toml and yaml (Q1:
+    from_toml/from_yaml are macros as from_json; read_into; RisDecoded
+    gone; the round store is refused by 2.2) build. Router's patterns
+    live in the router (Q3); router is left on the opaque handler call
+    (router.ri:717). Found on the way: `Array == Array::View` was always
+    false (test/ris/array_equals_view.ri; ocsp's responder by key hash),
+    each_line kept every line on the tape to the end, ocsp's hex wrote
+    decimal bytes. Left:
+    - log: not a Time constant: `bound.for("x")` makes a program child
+      whose @parent is the request logger (log.ri:562, from
+      get_or_create_child). `for` is one def for both, so the checker
+      cannot split them: bound loggers need a type of their own.
+    - zip (Q2 probe): the first refusal is now the test's first_error
+      (std_zip_exercise.ri:78, a view stored past its owner), before the
+      decoder-refill blame.
+    - iterator (Q6 probe): see section 1.
+    - Run time, not checker: x509.sh fails at X509.self_signed (a
+      public key of 0 bytes) and 7 stale patch sites; toml.sh segfaults
+      in "what the reader refuses" and its refusal programs import
+      `Any`; yaml.sh fails "a 150 by 150 grid ... 4769 hashes". file.sh
+      and ocsp.sh pass.
 
   Fourth round (the TLS-owner group): benchmark and websocket build.
   benchmark: bm and ips answer Nil, Tms and Entry are `@[OnTape]`
@@ -342,12 +375,9 @@ Unknown must be refused (SPEC 3.6).
   - Procs outliving their tape, 4: file, router, http_https_records and
     benchmark (Job#report keeps a block's proc in an Entry; bm and ips
     return their owner job).
-  - Program-owned retained data, 3: log, ocsp and x509. A Time constant
-    (`NOW = Time.utc(...)`, even with copy_to(Program.tape)) and a
-    constant of certificates are refused at time.ri's Zone#initialize;
-    the same Time made in a def builds. x509's `cert(hex)` returns a
-    Certificate viewing its def's bytes.
-  - Scratch results, 2: toml and yaml (see above).
+  - Program-owned retained data: log (see the checker questions above;
+    ocsp and x509 build).
+  - Scratch results: toml and yaml build (checker questions above).
   - Reset/growth views, 1: zip (see above).
   - Retained def data, 1: acme.
   - API drift, 1: fuzz.

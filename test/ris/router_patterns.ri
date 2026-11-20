@@ -1,0 +1,21 @@
+# The router is the one owner of its patterns
+# (doc/drafts/checker-open-questions/, Q3): `Router#parse` reads a pattern
+# into the router's flat storage and answers a PatternView, an index. A
+# refused pattern leaves no segments behind. Silent on success.
+import std/router::{Router, PatternView, RouterError}
+
+router = Router.new
+a = router.parse("GET /users/{id}").or_panic
+bad = router.parse("/{id}/x/{id}")
+raise "a doubled name is refused" unless bad.is_a?(RouterError) && bad.message.includes?("two wildcards")
+b = router.parse("/users/").or_panic
+c = router.parse("/a/{x}").or_panic
+d = router.parse("/{y}/b").or_panic
+
+raise "to_s #{a.to_s}" unless a.to_s == "GET /users/{id}" && a.method == "GET" && a.host == ""
+raise "relation" unless a.relation(b) == Router::MORE_SPECIFIC && b.more_specific?(a) == false
+raise "conflict" unless (c.conflict(d) || "").includes?("neither is more specific")
+raise "matches" unless a.matches?("/users/42") && !a.matches?("/users/")
+
+router.handle("GET /items/{name}") { |_, res, params| res.body << params["name"] }
+raise "registered #{router.patterns.size}" unless router.patterns.size == 1 && router.patterns[0].to_s == "GET /items/{name}"

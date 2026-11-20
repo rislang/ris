@@ -2467,8 +2467,16 @@ pub macro toml_serializable(declaration)
     ::Std::Toml::TOML.dump(to_toml_any)
   end
 
-  def self.from_toml(text : String) : self
-    ::Std::Toml::TOML.from_toml(text, self)
+  # A macro, as std/json's `from_json`: the value is made in the scope
+  # that calls it, so its Array and Hash fields are that scope's. Made in
+  # a def, they were the def's scratch (SPEC 1.9).
+  macro from_toml(text)
+    %doc = ::Std::Toml::TOML.parse(\{{ text }}).or_panic
+    {% if @type.private? %}
+      {{ @type.name.split("::").last.id }}.new(%doc)
+    {% else %}
+      ::{{ @type }}.new(%doc)
+    {% end %}
   end
 
   def initialize(toml : ::Std::Toml::TapeAny)
@@ -2490,40 +2498,18 @@ pub macro toml_serializable(declaration)
         {% end %}
       \{% elsif {{ field[:type].nilable? }} %}
         {{ field[:name].id }} = toml_found_{{ field[:name][1..].id }}.nil? ? nil : ::Std::Toml::TOML.read_value(toml_found_{{ field[:name][1..].id }}, typeof({{ field[:name].id }} || raise("")))
+      \{% elsif @type.instance_vars.any? { |ivar| ivar.name.stringify == {{ field[:name][1..] }} && !ivar.type.union? && ivar.type < ::Hash } %}
+        raise "TOML for #{ {{ declaration[:name] }} } has no key #{ {{ field[:name][1..] }}.inspect }" if toml_found_{{ field[:name][1..].id }}.nil?
+        # Filled before it is stored, as std/json's derive fills a Hash:
+        # no def answers a Hash it made (SPEC 1.9).
+        toml_hash_{{ field[:name][1..].id }} = typeof({{ field[:name].id }}).new
+        ::Std::Toml::TOML.read_into(toml_found_{{ field[:name][1..].id }}, toml_hash_{{ field[:name][1..].id }})
+        {{ field[:name].id }} = toml_hash_{{ field[:name][1..].id }}
       \{% else %}
         raise "TOML for #{ {{ declaration[:name] }} } has no key #{ {{ field[:name][1..] }}.inspect }" if toml_found_{{ field[:name][1..].id }}.nil?
         {{ field[:name].id }} = ::Std::Toml::TOML.read_value(toml_found_{{ field[:name][1..].id }}, typeof({{ field[:name].id }}))
       \{% end %}
     {% end %}
-  end
-end
-
-@[OnTape]
-struct RisDecoded(T)
-  getter value : T
-
-  def initialize(value : TapeAny)
-    result = {% if T.nilable? %}
-      TOML.read_value(value, {{ T.union_types.reject { |u| u == ::Nil }.first }})
-    {% elsif T < Hash %}
-      Hash(String, {{ T.type_vars[1] }}).new
-    {% else %}
-               T.new(value)
-             {% end %}
-    {% if T < Hash %}
-      entries = value.as_h
-      keys = Array(String).new(entries.size)
-      entries.each { |key, item| keys << key; nil }
-      decoded = Array({{ T.type_vars[1] }}).new(keys.size) do |i|
-        TOML.read_value(entries[keys[i]], {{ T.type_vars[1] }})
-      end
-      i = 0
-      while i < keys.size
-        result[keys[i]] = decoded[i]
-        i += 1
-      end
-    {% end %}
-    @value = result
   end
 end
 
@@ -2702,16 +2688,41 @@ pub struct TOML
       {% raise "TOML cannot read " + T.stringify + " inside an Array: a round's collection is freed with the round (SPEC 1.9). Read TOML.parse(text) and walk it with as_a, or declare the outer arrays and copy_to(owner)" %}
     {% end %}
     items = value.as_a
-    Array(T).new(items.size) { |i| read_value(items[i], T) }
+    ary = Array(T).new(items.size)
+    i = 0
+    while i < items.size
+      ary << read_value(items[i], T)
+      i += 1
+    end
+    ary
   end
 
+  # A Hash is a class instance, made where it is declared: no def answers
+  # one it made (SPEC 1.9).
   def self.read_value(value : TapeAny, type : Hash(String, V).class) : Hash(String, V) forall V
-    RisDecoded(Hash(String, V)).new(value).value
+    {% raise "TOML cannot answer a Hash: declare h = Hash(String, V).new and call TOML.read_into(value, h)" %}
   end
 
-  # Construct in the caller's scope, including nullable derived types.
+  # The table *value* into *h*, which the caller declared.
+  def self.read_into(value : TapeAny, h : Hash(String, V)) : Nil forall V
+    {% if !V.union? && (V < ::Array || V < ::Hash) %}
+      {% raise "TOML cannot read " + V.stringify + " into a Hash: each value is made in a round and freed with it (SPEC 1.9, 2.2). Walk TOML.parse(text) with as_h and as_a, or declare the inner collections and copy_to(owner)" %}
+    {% end %}
+    value.as_h.each do |key, item|
+      h[key] = read_value(item, V)
+      nil
+    end
+  end
+
+  # A type that reads itself, the `initialize(toml)` a `derive
+  # toml_serializable` wrote, made by a tail call in the caller's scope; a
+  # nilable type reads its other type (TOML has no null).
   def self.read_value(value : TapeAny, type : T.class) : T forall T
-    RisDecoded(T).new(value).value
+    {% if T.nilable? %}
+      read_value(value, {{ T.union_types.reject { |u| u == ::Nil }.first }})
+    {% else %}
+      T.new(value)
+    {% end %}
   end
 end
 
@@ -3018,4 +3029,7 @@ spec 8.1  # A std module follows the standard its header names (an RFC, a fileâ€
   server.port == 8080
   server.tags == ["a", "b"]
   server.ratio.nil?
+  counts = Hash(String, Int32).new
+  TOML.read_into(TOML.parse("a = 1\nb = 2\n").or_panic, counts)
+  counts["a"] == 1 && counts["b"] == 2
 end

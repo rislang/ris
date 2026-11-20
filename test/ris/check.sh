@@ -118,6 +118,21 @@ expect def_scratch_struct 'cannot store data made in this block'
 expect owner_reference_view 'cannot shrink tape storage with a live view'
 expect refill_branch_loop_view 'cannot shrink tape storage with a live view'
 expect refill_branch_loop_kept 'cannot shrink tape storage with a live view'
+# doc/drafts/checker-open-questions/: each question's passing case runs
+# silent, and what stays refused is refused.
+for name in each_line_kept time_in_def router_patterns array_equals_view \
+    derive_array_field; do
+  out=$("$RIS" run "test/ris/$name.ri" 2>&1); code=$?
+  if [ "$code" -eq 0 ] && [ -z "$out" ]; then
+    echo "runs     $name"
+  else
+    echo "FAILED   $name: $out"; status=1
+  fi
+done
+expect each_line_view_kept 'cannot store data made in this block'
+expect time_constant 'cannot store request tape data on the program tape'
+expect pattern_view_kept 'cannot return a value made in this def'
+expect round_struct_array_field 'cannot contain growing values'
 # A joined task borrows one value of its spawner (SPEC 5.1), no more.
 expect borrow_used_in_group 'inside the group whose task spawned'
 expect borrow_two_tasks 'inside the group whose task spawned'

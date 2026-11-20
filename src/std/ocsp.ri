@@ -8,7 +8,8 @@
 #     response = OcspResponse.parse(der, store).or_panic
 #     verdict = response.verify(leaf, issuer).or_panic
 #     verdict.status                                # Good, Revoked or Unknown
-#     request = Ocsp.request(leaf, issuer)          # an OCSPRequest's DER
+#     request = [] of UInt8
+#     Ocsp.request(leaf, issuer, request)           # an OCSPRequest's DER
 #
 # `OcspResponse.parse` reads an OCSPResponse: its responseStatus, and for a
 # successful one the BasicOCSPResponse - ResponseData (version, the
@@ -175,11 +176,18 @@ pub struct OcspCertId
     @issuer_name_hash == @hash.digest(leaf.issuer) && @issuer_key_hash == @hash.digest(issuer.public_key_bits)
   end
 
-  # Its DER: the hash's AlgorithmIdentifier with NULL parameters, as
-  # OpenSSL writes it.
-  def der : Array(UInt8)
-    algorithm = OcspDer.sequence(OcspDer.oid(@hash.oid) + [0x05_u8, 0x00_u8])
-    OcspDer.sequence(algorithm + OcspDer.tlv(0x04_u8, @issuer_name_hash) + OcspDer.tlv(0x04_u8, @issuer_key_hash) + OcspDer.tlv(0x02_u8, @serial))
+  # Its DER, appended to *into*: the hash's AlgorithmIdentifier with NULL
+  # parameters, as OpenSSL writes it.
+  def der(into : Array(UInt8)) : Nil
+    algorithm = [] of UInt8
+    OcspDer.oid(@hash.oid, algorithm)
+    algorithm << 0x05_u8 << 0x00_u8
+    body = [] of UInt8
+    OcspDer.sequence(algorithm, body)
+    OcspDer.tlv(0x04_u8, @issuer_name_hash, body)
+    OcspDer.tlv(0x04_u8, @issuer_key_hash, body)
+    OcspDer.tlv(0x02_u8, @serial, body)
+    OcspDer.sequence(body, into)
   end
 end
 
@@ -230,14 +238,30 @@ pub struct Ocsp
 
   # An OCSPRequest (RFC 6960 section 4.1.1) for *leaf*, *issuer* its
   # issuer's certificate: one Request, unsigned, and a nonce extension
-  # holding *nonce* when one is given.
-  def self.request(leaf : Certificate, issuer : Certificate, hash : OcspHash = OcspHash::SHA1, nonce : Array(UInt8)? = nil) : Array(UInt8)
-    list = OcspDer.sequence(OcspDer.sequence(OcspCertId.of(leaf, issuer, hash).der))
+  # holding *nonce* when one is given. Appended to *der*, the caller's
+  # (SPEC 1.5): returned, the bytes were made in this def's scratch.
+  def self.request(leaf : Certificate, issuer : Certificate, der : Array(UInt8), hash : OcspHash = OcspHash::SHA1, nonce : Array(UInt8)? = nil) : Nil
+    cert_id = [] of UInt8
+    OcspCertId.of(leaf, issuer, hash).der(cert_id)
+    one = [] of UInt8
+    OcspDer.sequence(cert_id, one)
+    tbs = [] of UInt8
+    OcspDer.sequence(one, tbs)
     if nonce
-      extension = OcspDer.sequence(OcspDer.oid(NONCE) + OcspDer.tlv(0x04_u8, OcspDer.tlv(0x04_u8, nonce)))
-      list = list + OcspDer.tlv(0xA2_u8, OcspDer.sequence(extension))
+      octets = [] of UInt8
+      OcspDer.tlv(0x04_u8, nonce, octets)
+      extension = [] of UInt8
+      OcspDer.oid(NONCE, extension)
+      OcspDer.tlv(0x04_u8, octets, extension)
+      list = [] of UInt8
+      OcspDer.sequence(extension, list)
+      extensions = [] of UInt8
+      OcspDer.sequence(list, extensions)
+      OcspDer.tlv(0xA2_u8, extensions, tbs)
     end
-    OcspDer.sequence(OcspDer.sequence(list))
+    request = [] of UInt8
+    OcspDer.sequence(tbs, request)
+    OcspDer.sequence(request, der)
   end
 
   # A responseStatus by the name RFC 6960 gives it.
@@ -610,8 +634,10 @@ struct OcspAsn1
   def self.hex(bytes : Array::View(UInt8)) : String
     io = ""
     bytes.each do |b|
-      io << "0123456789abcdef"[b.to_i32 >> 4]
-      io << "0123456789abcdef"[b.to_i32 & 15]
+      # One byte of text each: `[i]` is a byte, and appended it read as
+      # its decimal number.
+      io << "0123456789abcdef"[b.to_i32 >> 4, 1]
+      io << "0123456789abcdef"[b.to_i32 & 15, 1]
     end
     io
   end
@@ -650,32 +676,49 @@ end
 
 # The DER a request is written in: what `Ocsp.request` needs, and no more.
 struct OcspDer
-  def self.tlv(tag : UInt8, content : Array::View(UInt8)) : Array(UInt8)
+  # A tag, its length and *content*, appended to *into*.
+  def self.tlv(tag : UInt8, content : Array::View(UInt8), into : Array(UInt8)) : Nil
     size = content.size
-    return [tag, size.to_u8] + content if size < 128
-    length = [] of UInt8
-    n = size
-    while n > 0
-      length = [(n & 0xFF).to_u8] + length
-      n = n >> 8
+    into << tag
+    if size < 128
+      into << size.to_u8
+    else
+      count = 0
+      n = size
+      while n > 0
+        count += 1
+        n = n >> 8
+      end
+      into << (0x80 | count).to_u8
+      while count > 0
+        count -= 1
+        into << ((size >> (8 * count)) & 0xFF).to_u8
+      end
     end
-    [tag, (0x80 | length.size).to_u8] + length + content
+    into.concat(content)
+    nil
   end
 
-  def self.sequence(content : Array(UInt8)) : Array(UInt8)
-    tlv(0x30_u8, content)
+  def self.sequence(content : Array(UInt8), into : Array(UInt8)) : Nil
+    tlv(0x30_u8, content, into)
   end
 
-  def self.oid(dotted : String) : Array(UInt8)
-    arcs = dotted.split('.').map { |part| part.to_i.to_i64 }
+  def self.oid(dotted : String, into : Array(UInt8)) : Nil
     body = [] of UInt8
-    arc(arcs[0] * 40 + arcs[1], body)
-    i = 2
-    while i < arcs.size
-      arc(arcs[i], body)
-      i = i + 1
+    first = 0_i64
+    i = 0
+    dotted.split('.').each do |part|
+      value = part.to_i.to_i64
+      if i == 0
+        first = value
+      elsif i == 1
+        arc(first * 40 + value, body)
+      else
+        arc(value, body)
+      end
+      i += 1
     end
-    tlv(0x06_u8, body)
+    tlv(0x06_u8, body, into)
   end
 
   # One subidentifier, base 128, most significant first.

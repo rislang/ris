@@ -1,0 +1,19 @@
+# A struct whose Array field is made in a block round, kept by the Array
+# the block fills: the round would free the field's elements and the kept
+# struct read `[]` (doc/drafts/checker-open-questions/, Q1). SPEC 2.2
+# refuses the collection's type, a runtime-sized one of growing values;
+# toml and yaml read such fields with derive and read_into, as std/json.
+@[OnTape]
+struct RoundInner
+  getter items : Array(Int32)
+
+  def initialize(@items : Array(Int32))
+  end
+end
+
+def make(i : Int32) : RoundInner
+  RoundInner.new([i, i + 1])
+end
+
+kept = Array(RoundInner).new(3) { |i| make(i) }
+puts kept[0].items.size

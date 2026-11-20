@@ -504,8 +504,11 @@ puts "  defaults kept for a missing key and for a null their type does not admit
 kinds = Kinds.from_yaml("any: {a: [1, x]}\nby_number: {1: one, -2: two}\nmaybes: [1, null, ~, 3]\nempty: []\n")
 assert_str("any:\n  a:\n    - 1\n    - x\nby_number:\n  1: one\n  -2: two\nmaybes:\n  - 1\n  - null\n  - null\n  - 3\nempty: []\n", kinds.to_yaml, "TapeValue, integer keys, nil entries and an empty array written")
 assert_str(kinds.to_yaml, Kinds.from_yaml(kinds.to_yaml).to_yaml, "TapeValue, integer keys and nil entries read back")
-numbered = YAML.from_yaml(YAML.to_yaml({3 => [1.5, nil], 4 => [] of Float64?}), Hash(Int32, Array(Float64?)))
-assert_true(numbered[3][0] == 1.5 && numbered[3][1].nil? && numbered[4].empty?, "YAML.to_yaml and from_yaml of a Hash(Int32, Array(Float64?))")
+# A Hash is declared by its caller and filled (SPEC 1.9); a Hash of
+# Arrays is refused at compile time, each Array made in a round (2.2).
+numbered = Hash(Int32, Float64?).new
+YAML.read_into(YAML.parse(YAML.to_yaml({3 => 1.5, 4 => nil})), numbered)
+assert_true(numbered[3] == 1.5 && numbered[4].nil? && numbered.size == 2, "YAML.to_yaml and read_into of a Hash(Int32, Float64?)")
 puts "  TapeValue, Hash(Int32, String), Array(Int32?) and empty collections read and written"
 
 assert_str("YAML for Spot has no key \"name\"", panic_of(-> { Spot.from_yaml("x: 1\n").to_yaml }), "a missing field refused by name")
@@ -513,7 +516,7 @@ assert_str("expected a mapping for Spot, not a sequence", panic_of(-> { Spot.fro
 assert_str("expected a float, not null", panic_of(-> { Spot.from_yaml("x:\nname: a\n").to_yaml }), "a null for a field without a default refused as not its type")
 assert_str("expected a string, not an integer", panic_of(-> { Spot.from_yaml("x: 1\nname: 5\n").to_yaml }), "an integer refused for a String field")
 assert_str("integer 3000000000 out of Int32 range", panic_of(-> { Inner.from_yaml("x: 3000000000\n").to_yaml }), "an integer past Int32 refused")
-assert_str("expected an integer, not a string", panic_of(-> { YAML.from_yaml("{x: 1}", Hash(Int32, Int32)).size.to_s }), "a string key refused for Hash(Int32, V)")
+assert_str("expected an integer, not a string", panic_of(-> { keyed = Hash(Int32, Int32).new; YAML.read_into(YAML.parse("{x: 1}"), keyed); keyed.size.to_s }), "a string key refused for Hash(Int32, V)")
 assert_str("the UInt64 9223372036854775808 is past 9223372036854775807, the largest integer YAML reads back", panic_of(-> { YAML.to_yaml(9223372036854775808_u64) }), "a UInt64 past Int64 refused when written")
 assert_str("duplicate key \"x\" at line 2, column 1", panic_of(-> { Spot.from_yaml("x: 1\nx: 2\nname: a\n").to_yaml }), "a document the parser refuses is refused with its sentence")
 puts "  a missing key, a sequence, a null, a wrong kind, Int32 and UInt64 ranges and a bad document refused"

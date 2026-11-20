@@ -210,8 +210,10 @@ struct String
 end
 
 struct Array(T)
-  # Element by element, as Array#== compares.
-  def ==(other : Array) : Bool
+  # Element by element, as Array#== compares; a View too: without it an
+  # Array asked of a View fell to Object#== and answered false
+  # (test/ris/array_equals_view.ri).
+  def ==(other : Array | Array::View) : Bool
     return false unless size == other.size
     i = 0
     while i < size

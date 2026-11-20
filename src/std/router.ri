@@ -85,7 +85,7 @@ module std/router
 import std/http::{HTTP, Incoming, Outgoing}
 import std/uri::{URI}
 
-# Why a pattern is refused: `Pattern.parse`'s answer for text that is not
+# Why a pattern is refused: `Router#parse`'s answer for text that is not
 # a pattern. `Router#handle` panics with its `message`.
 @[OnTape]
 pub struct RouterError
@@ -105,10 +105,7 @@ impl Error for RouterError
   end
 end
 
-# A route's pattern, `[METHOD ][HOST]/[PATH]`, parsed: what `Router#handle`
-# registers. `match` reads a request path's wildcards; `relation` and
-# `conflict` are the comparisons that decide precedence and refuse two
-# patterns neither of which is more specific.
+# A wildcard's name and value, as `Router#match_pieces` reads them.
 @[OnTape]
 pub struct Capture
   getter name : String
@@ -130,6 +127,10 @@ pub struct Captures
     @entries << Capture.new(name, value)
   end
 
+  def clear : Nil
+    @entries.clear
+  end
+
   def [](name : String) : String
     @entries.each { |entry| return entry.value if entry.name == name }
     raise "no route capture #{name}"
@@ -142,7 +143,87 @@ pub struct Captures
   end
 end
 
-pub class Pattern
+# One pattern a router read, by its index: what `Router#parse` answers and
+# `Router#patterns` lists. It views its router's storage and lives no
+# longer than its router. `matches?` asks a request path; `relation` and `conflict` are the comparisons that decide precedence
+# and refuse two patterns neither of which is more specific.
+@[OnTape]
+pub struct PatternView
+  getter index : Int32
+
+  def initialize(@router : Router, @index : Int32)
+  end
+
+  protected def router : Router
+    @router
+  end
+
+  # The pattern as it was written.
+  def to_s : String
+    @router.pattern_text(@index)
+  end
+
+  def method : String
+    @router.pattern_method(@index)
+  end
+
+  def host : String
+    @router.pattern_host(@index)
+  end
+
+  # Whether *path* - a request path, rooted and clean, still
+  # percent-encoded - matches this pattern's path. The method and host
+  # are not looked at; a handler is handed the wildcards' values.
+  def matches?(path : String) : Bool
+    pieces = [] of String
+    text = String::Builder.new(path.bytesize)
+    return false unless Router.pieces(path, pieces, text)
+    @router.match_pieces(@index, pieces, text, Captures.new)
+  end
+
+  # How this pattern's requests relate to *other*'s, methods and paths
+  # together: `Router::EQUIVALENT`, `MORE_GENERAL`, `MORE_SPECIFIC`,
+  # `DISJOINT` or `OVERLAPS`.
+  def relation(other : PatternView) : Int32
+    @router.relation(@index, same(other))
+  end
+
+  def more_specific?(other : PatternView) : Bool
+    relation(other) == Router::MORE_SPECIFIC
+  end
+
+  # The sentence refusing this pattern beside *other*, nil when the two
+  # can be registered together.
+  def conflict(other : PatternView) : String?
+    @router.conflict(@index, same(other))
+  end
+
+  private def same(other : PatternView) : Int32
+    raise "Router: two patterns of different routers are not compared" unless other.router.same?(@router)
+    other.index
+  end
+end
+
+# Requests sent to handlers by pattern, Go 1.22's `ServeMux`:
+#
+#     router = Router.new
+#     router.handle("GET /users/{id}") { |req, res, params| res.body << params["id"] }
+#     # Files: FileServer.serve(root, req, res) inside a handler.
+#     # Build this router inside Handler.new(copied_config), and in
+#     # Handler#call(req, res) run @router.call(req, res).
+#     Server.answer("0.0.0.0", 3000, config, Handler)
+#
+# `handle` panics on a pattern that is not one, on one that conflicts with
+# a pattern already registered, and after the router has answered a
+# request. `call` answers with the most specific pattern's handler, or
+# writes a 307 (to the cleaned path, or to a subtree's `/`), a 405 with
+# `Allow`, a 400 for a malformed escape, a 404 into *res*.
+#
+# The router is the one owner of its patterns (SPEC 2.1, 2.2): each
+# pattern's text and decoded segments are copied into `@text`, and its
+# parts sit in flat arrays, a pattern being an index. A Pattern class per
+# route was N owners, each returned from the def that made it.
+pub class Router
   # A path segment's kind: a literal, `{name}`, `{name...}` or a trailing
   # slash (with no name), and `{$}`.
   LITERAL = 0
@@ -159,37 +240,103 @@ pub class Pattern
   DISJOINT      = 3
   OVERLAPS      = 4
 
-  getter method : String
-  getter host : String
-  @text : String
+  # Every pattern's text, method, host and decoded literals and names,
+  # each a view of this one builder, which never moves as it grows.
+  @text : String::Builder
+  @sources : Array(String)
+  @methods : Array(String)
+  @hosts : Array(String)
+  # Per pattern its first segment in @kinds and @names, and their count.
+  @firsts : Array(Int32)
+  @counts : Array(Int32)
   # Per segment its kind and its text: a literal decoded, a wildcard's
   # name, "" for a trailing slash and for `{$}`.
   @kinds : Array(Int32)
   @names : Array(String)
+  # The registered patterns' indexes, and their handlers in that order.
+  @routes : Array(Int32)
+  @handlers : Array(Proc(Incoming, Outgoing, Hash(String, String), Nil))
+  @answering : Bool
 
-  protected def kinds : Array(Int32)
-    @kinds
+  def initialize
+    @text = String::Builder.new(4096)
+    @sources = [] of String
+    @methods = [] of String
+    @hosts = [] of String
+    @firsts = [] of Int32
+    @counts = [] of Int32
+    @kinds = [] of Int32
+    @names = [] of String
+    @routes = [] of Int32
+    @handlers = [] of Proc(Incoming, Outgoing, Hash(String, String), Nil)
+    @answering = false
   end
 
-  protected def names : Array(String)
-    @names
+  protected def same?(other : Router) : Bool
+    object_id == other.object_id
   end
 
-  def initialize(@text : String, @method : String, @host : String, @kinds : Array(Int32), @names : Array(String))
+  # *value* copied into @text; the answer views the copy.
+  private def keep(value : String) : String
+    at = @text.bytesize
+    @text << value
+    @text.finish[at, value.bytesize]
   end
 
-  # The pattern as it was written.
-  def to_s : String
-    @text
+  def pattern_text(index : Int32) : String
+    @sources[index]
   end
 
-  # *text* read as a pattern, or why it is not one: an invalid method, no
-  # `/` to start the path, a `{` in the host, a path a request's cleaned
-  # path never equals (`//`, `.`, `..`), a wildcard that is not a whole
-  # segment, `{$}` or `{name...}` before the end, a name that is not an
-  # identifier or is used twice, a malformed percent escape.
-  def self.parse(text : String) : Pattern | RouterError
-    return refused(text, "it is empty") if text.empty?
+  def pattern_method(index : Int32) : String
+    @methods[index]
+  end
+
+  def pattern_host(index : Int32) : String
+    @hosts[index]
+  end
+
+  # Sends the requests *pattern* matches to the block, with the request,
+  # the answer to write and the wildcards' values by name.
+  def handle(pattern : String, &handler : Incoming, Outgoing, Hash(String, String) -> Nil) : Nil
+    raise "Router: #{pattern.inspect} is registered after the router answered a request; patterns are registered before it serves" if @answering
+    parsed = parse(pattern).or_panic
+    @routes.each do |known|
+      if sentence = conflict(parsed.index, known)
+        raise sentence
+      end
+    end
+    @routes << parsed.index
+    @handlers << handler
+  end
+
+  # The patterns registered, in the order they were.
+  def patterns : Array(PatternView)
+    views = Array(PatternView).new(@routes.size)
+    @routes.each { |index| views << PatternView.new(self, index) }
+    views
+  end
+
+  # *text* read as a pattern into this router's storage, not registered,
+  # or why it is not one: an invalid method, no `/` to start the path, a
+  # `{` in the host, a path a request's cleaned path never equals (`//`,
+  # `.`, `..`), a wildcard that is not a whole segment, `{$}` or
+  # `{name...}` before the end, a name that is not an identifier or is
+  # used twice, a malformed percent escape.
+  def parse(text : String) : PatternView | RouterError
+    first = @kinds.size
+    problem = read_pattern(text)
+    if problem
+      while @kinds.size > first
+        @kinds.pop
+        @names.pop
+      end
+      return problem
+    end
+    PatternView.new(self, @sources.size - 1)
+  end
+
+  private def read_pattern(text : String) : RouterError?
+    return Router.refused(text, "it is empty") if text.empty?
     p = text
     n = text.bytesize
     # The method ends at the first space or tab; Go's reading, so a space
@@ -202,7 +349,7 @@ pub class Pattern
     end
     if cut < n
       method = text[0, cut]
-      return refused(text, "#{method.inspect} is not a method") unless HTTP.token?(method)
+      return Router.refused(text, "#{method.inspect} is not a method") unless HTTP.token?(method)
       start = cut
       while start < n && (p[start] == 32_u8 || p[start] == 9_u8)
         start = start + 1
@@ -210,63 +357,70 @@ pub class Pattern
       rest = text[start, n - start]
     end
     slash = rest.index('/')
-    return refused(text, "it has no path, which starts with /") unless slash
+    return Router.refused(text, "it has no path, which starts with /") unless slash
     host = rest[0, slash]
-    return refused(text, "its host #{host.inspect} holds a { (is the / before it missing?)") if host.includes?("{")
+    return Router.refused(text, "its host #{host.inspect} holds a { (is the / before it missing?)") if host.includes?("{")
     path = rest[slash, rest.bytesize - slash]
     # A request's path is cleaned before it is matched, so a pattern whose
     # path is not clean could never match one.
     cleaned = Router.clean(path)
-    return refused(text, "its path is not clean: a request for it is sent to #{cleaned.inspect}") unless cleaned == path
-    kinds = [] of Int32
-    names = [] of String
-    seen = [] of String
+    return Router.refused(text, "its path is not clean: a request for it is sent to #{cleaned.inspect}") unless cleaned == path
+    first = @kinds.size
     q = path
     size = path.bytesize
     at = 0
     while at < size
-      first = at + 1
-      if first == size
-        kinds << MULTI
-        names << ""
+      start = at + 1
+      if start == size
+        @kinds << MULTI
+        @names << ""
         break
       end
-      stop = first
+      stop = start
       while stop < size && q[stop] != 47_u8
         stop = stop + 1
       end
-      segment = path[first, stop - first]
+      segment = path[start, stop - start]
       brace = segment.index('{')
       if brace.nil?
-        decoded = URI.decode?(segment)
-        return refused(text, "#{segment.inspect} holds a malformed percent escape") unless decoded
-        kinds << LITERAL
-        names << decoded
+        from = @text.bytesize
+        return Router.refused(text, "#{segment.inspect} holds a malformed percent escape") unless Router.decode_piece(segment, @text)
+        @kinds << LITERAL
+        @names << @text.finish[from, @text.bytesize - from]
       else
-        return refused(text, "a wildcard is a whole segment, {name}, and #{segment.inspect} is not one") unless brace == 0 && segment.ends_with?("}")
+        return Router.refused(text, "a wildcard is a whole segment, {name}, and #{segment.inspect} is not one") unless brace == 0 && segment.ends_with?("}")
         name = segment[1, segment.bytesize - 2]
         if name == "$"
-          return refused(text, "{$} is not at the end") unless stop == size
-          kinds << ENDS
-          names << ""
+          return Router.refused(text, "{$} is not at the end") unless stop == size
+          @kinds << ENDS
+          @names << ""
         else
           multi = name.ends_with?("...")
           name = name[0, name.bytesize - 3] if multi
-          return refused(text, "{#{name}...} is not at the end") if multi && stop != size
-          return refused(text, "a wildcard has no name") if name.empty?
-          return refused(text, "#{name.inspect} is not a wildcard name (a letter or _, then letters, digits and _)") unless Pattern.identifier?(name)
-          return refused(text, "two wildcards are named #{name.inspect}") if seen.includes?(name)
-          seen << name
-          kinds << (multi ? MULTI : WILD)
-          names << name
+          return Router.refused(text, "{#{name}...} is not at the end") if multi && stop != size
+          return Router.refused(text, "a wildcard has no name") if name.empty?
+          return Router.refused(text, "#{name.inspect} is not a wildcard name (a letter or _, then letters, digits and _)") unless Router.identifier?(name)
+          k = first
+          while k < @kinds.size
+            twice = (@kinds[k] == WILD || @kinds[k] == MULTI) && @names[k] == name
+            return Router.refused(text, "two wildcards are named #{name.inspect}") if twice
+            k = k + 1
+          end
+          @kinds << (multi ? MULTI : WILD)
+          @names << keep(name)
         end
       end
       at = stop
     end
-    Pattern.new(text, method, host, kinds, names)
+    @sources << keep(text)
+    @methods << keep(method)
+    @hosts << keep(host)
+    @firsts << first
+    @counts << @kinds.size - first
+    nil
   end
 
-  private def self.refused(text : String, reason : String) : RouterError
+  protected def self.refused(text : String, reason : String) : RouterError
     RouterError.new("#{text.inspect} is not a pattern: #{reason}")
   end
 
@@ -283,70 +437,87 @@ pub class Pattern
     name.bytesize > 0
   end
 
-  # Whether a request of *method* is one this pattern's method takes.
-  def matches_method?(method : String) : Bool
-    @method.empty? || @method == method || (@method == "GET" && method == "HEAD")
+  private def kind(index : Int32, at : Int32) : Int32
+    @kinds[@firsts[index] + at]
   end
 
-  # The wildcards' values when *path* - a request path, rooted and clean,
-  # still percent-encoded - matches this pattern's path; nil when it does
-  # not. The method and host are not looked at.
-  def match(path : String) : Captures?
-    pieces = Pattern.pieces(path)
-    pieces ? match_pieces(pieces) : nil
+  private def name(index : Int32, at : Int32) : String
+    @names[@firsts[index] + at]
   end
 
-  # *path*'s segments after its first `/`, each percent-decoded: `/` is
-  # one empty piece, and a trailing slash is a last empty one. Nil for a
-  # path that is not rooted or holds a malformed escape. Decoded a segment
-  # at a time, so `%2F` is inside a segment, never between two.
-  def self.pieces(path : String) : Array(String)?
-    return nil unless path.starts_with?("/")
-    pieces = Array(String).new
+  private def last_multi?(index : Int32) : Bool
+    kind(index, @counts[index] - 1) == MULTI
+  end
+
+  # Whether a request of *method* is one pattern *index*'s method takes.
+  def matches_method?(index : Int32, method : String) : Bool
+    mine = @methods[index]
+    mine.empty? || mine == method || (mine == "GET" && method == "HEAD")
+  end
+
+  # *path*'s segments after its first `/`, each percent-decoded, appended
+  # to *into* as views of *text*: `/` is one empty piece, and a trailing
+  # slash is a last empty one. False for a path that is not rooted or
+  # holds a malformed escape. Decoded a segment at a time, so `%2F` is
+  # inside a segment, never between two.
+  def self.pieces(path : String, into : Array(String), text : String::Builder) : Bool
+    return false unless path.starts_with?("/")
     path[1, path.bytesize - 1].split('/').each do |segment|
-      decoded = Pattern.decode_piece(segment)
-      return nil unless decoded
-      pieces << decoded
+      from = text.bytesize
+      return false unless Router.decode_piece(segment, text)
+      into << text.finish[from, text.bytesize - from]
+      nil
     end
-    pieces
+    true
   end
 
-  # `match` on a path already cut into `pieces`.
-  def match_pieces(pieces : Array(String)) : Captures?
-    found = Captures.new
+  # `pieces`, or the one empty piece when *path* has none: what a request
+  # is matched on.
+  protected def self.pieces_or_root(path : String, into : Array(String), text : String::Builder) : Nil
+    return if pieces(path, into, text)
+    into.clear
+    into << ""
+  end
+
+  # Whether pattern *index* matches a path already cut into `pieces`; its
+  # wildcards' values are added to *found* (cleared first). A trailing
+  # wildcard's value is joined into *text*; the others view *pieces*.
+  def match_pieces(index : Int32, pieces : Array(String), text : String::Builder, found : Captures) : Bool
+    found.clear
+    count = @counts[index]
     i = 0
     j = 0
-    while i < @kinds.size
-      kind = @kinds[i]
+    while i < count
+      kind = kind(index, i)
       if kind == MULTI
         # The rest, slashes and all, nothing included - but not past the
         # end: `/x/` does not match `/x`.
-        return nil if j >= pieces.size
-        name = @names[i]
-        value = ""
+        return false if j >= pieces.size
+        name = name(index, i)
+        from = text.bytesize
         k = j
         while k < pieces.size
-          value << "/" if k > j
-          value << pieces[k]
+          text << "/" if k > j
+          text << pieces[k]
           k += 1
         end
-        found.add(name.as_tape, value) unless name.empty?
-        return found
+        found.add(name.as_tape, text.finish[from, text.bytesize - from]) unless name.empty?
+        return true
       end
-      return nil if j >= pieces.size
+      return false if j >= pieces.size
       piece = pieces[j]
       if kind == ENDS
-        return nil unless piece.empty? && j == pieces.size - 1
+        return false unless piece.empty? && j == pieces.size - 1
       elsif kind == WILD
-        return nil if piece.empty?
-        found.add(@names[i].as_tape, piece)
+        return false if piece.empty?
+        found.add(name(index, i).as_tape, piece)
       else
-        return nil unless piece == @names[i]
+        return false unless piece == name(index, i)
       end
       i = i + 1
       j = j + 1
     end
-    j == pieces.size ? found : nil
+    j == pieces.size
   end
 
   private def self.hex_value(byte : UInt8) : Int32
@@ -356,16 +527,15 @@ pub class Pattern
     -1
   end
 
-  protected def self.decode_piece(text : String) : String?
-    return text unless text.index('%')
-    w = String::Builder.new(text.bytesize)
+  # *text* percent-decoded into *w*; false at a malformed escape.
+  protected def self.decode_piece(text : String, w : String::Builder) : Bool
     i = 0
     while i < text.bytesize
       if text[i] == 37_u8
-        return nil if i + 2 >= text.bytesize
+        return false if i + 2 >= text.bytesize
         hi = hex_value(text[i + 1])
         lo = hex_value(text[i + 2])
-        return nil if hi < 0 || lo < 0
+        return false if hi < 0 || lo < 0
         w.push((hi * 16 + lo).to_u8)
         i += 3
       else
@@ -373,48 +543,41 @@ pub class Pattern
         i += 1
       end
     end
-    w.finish
+    true
   end
 
-  # Whether this pattern matched *pieces* without its trailing wildcard
-  # taking anything: `/x/` on `/x/`, not on `/x/y`. What decides whether
-  # `/x` is redirected to `/x/`.
-  def exact?(pieces : Array(String)) : Bool
-    return true unless @kinds.last == MULTI
-    pieces.size == @kinds.size && pieces.last.empty?
+  # Whether pattern *index* matched *pieces* without its trailing
+  # wildcard taking anything: `/x/` on `/x/`, not on `/x/y`. What decides
+  # whether `/x` is redirected to `/x/`.
+  def exact?(index : Int32, pieces : Array(String)) : Bool
+    return true unless last_multi?(index)
+    pieces.size == @counts[index] && pieces.last.empty?
   end
 
-  # Whether this pattern matches a strict subset of *other*'s requests,
-  # methods and paths together; hosts are not compared.
-  def more_specific?(other : Pattern) : Bool
-    relation(other) == MORE_SPECIFIC
-  end
-
-  # How this pattern's requests relate to *other*'s, methods and paths
-  # together: `EQUIVALENT`, `MORE_GENERAL`, `MORE_SPECIFIC`, `DISJOINT` or
-  # `OVERLAPS`.
-  def relation(other : Pattern) : Int32
-    methods = compare_methods(other)
+  # How pattern *mine*'s requests relate to pattern *theirs*'s, methods
+  # and paths together; hosts are not compared.
+  def relation(mine : Int32, theirs : Int32) : Int32
+    methods = compare_methods(mine, theirs)
     return DISJOINT if methods == DISJOINT
-    Pattern.combine(methods, compare_paths(other))
+    Router.combine(methods, compare_paths(mine, theirs))
   end
 
-  # The sentence refusing this pattern beside *other*, nil when the two
+  # The sentence refusing pattern *mine* beside *theirs*, nil when the two
   # can be registered together: when they have the same host and match
   # the same requests, or some requests in common with neither more
   # specific. It names both and a request both match.
-  def conflict(other : Pattern) : String?
-    return nil unless @host == other.host
-    methods = compare_methods(other)
+  def conflict(mine : Int32, theirs : Int32) : String?
+    return nil unless @hosts[mine] == @hosts[theirs]
+    methods = compare_methods(mine, theirs)
     return nil if methods == DISJOINT
-    paths = compare_paths(other)
-    rel = Pattern.combine(methods, paths)
+    paths = compare_paths(mine, theirs)
+    rel = Router.combine(methods, paths)
     return nil unless rel == EQUIVALENT || rel == OVERLAPS
-    head = "Router: #{@text.inspect} conflicts with #{other.to_s.inspect}"
+    head = "Router: #{@sources[mine].inspect} conflicts with #{@sources[theirs].inspect}"
     return head + ": both match the same requests" if rel == EQUIVALENT
-    verb = @method
-    verb = other.method if verb.empty? || (verb == "GET" && !other.method.empty?)
-    request = (verb.empty? ? "" : verb + " ") + common_path(other).inspect
+    verb = @methods[mine]
+    verb = @methods[theirs] if verb.empty? || (verb == "GET" && !@methods[theirs].empty?)
+    request = (verb.empty? ? "" : verb + " ") + common_path(mine, theirs).inspect
     if paths == OVERLAPS
       head + ": both match #{request}, and neither is more specific than the other"
     elsif methods == MORE_GENERAL
@@ -424,36 +587,38 @@ pub class Pattern
     end
   end
 
-  private def compare_methods(other : Pattern) : Int32
-    return EQUIVALENT if @method == other.method
-    return MORE_GENERAL if @method.empty?
-    return MORE_SPECIFIC if other.method.empty?
-    return MORE_GENERAL if @method == "GET" && other.method == "HEAD"
-    return MORE_SPECIFIC if @method == "HEAD" && other.method == "GET"
+  private def compare_methods(mine : Int32, theirs : Int32) : Int32
+    a = @methods[mine]
+    b = @methods[theirs]
+    return EQUIVALENT if a == b
+    return MORE_GENERAL if a.empty?
+    return MORE_SPECIFIC if b.empty?
+    return MORE_GENERAL if a == "GET" && b == "HEAD"
+    return MORE_SPECIFIC if a == "HEAD" && b == "GET"
     DISJOINT
   end
 
-  private def compare_paths(other : Pattern) : Int32
-    theirs = other.kinds
-    their_names = other.names
-    mine_multi = @kinds.last == MULTI
-    theirs_multi = theirs.last == MULTI
+  private def compare_paths(mine : Int32, theirs : Int32) : Int32
+    size = @counts[mine]
+    their_size = @counts[theirs]
+    mine_multi = last_multi?(mine)
+    theirs_multi = last_multi?(theirs)
     # Without a trailing wildcard a path matches only paths of its own
     # number of segments.
-    return DISJOINT if @kinds.size != theirs.size && !mine_multi && !theirs_multi
+    return DISJOINT if size != their_size && !mine_multi && !theirs_multi
     rel = EQUIVALENT
-    shared = @kinds.size < theirs.size ? @kinds.size : theirs.size
+    shared = size < their_size ? size : their_size
     i = 0
     while i < shared
-      rel = Pattern.combine(rel, compare_segments(@kinds[i], @names[i], theirs[i], their_names[i]))
+      rel = Router.combine(rel, compare_segments(kind(mine, i), name(mine, i), kind(theirs, i), name(theirs, i)))
       return rel if rel == DISJOINT
       i = i + 1
     end
-    return rel if @kinds.size == theirs.size
+    return rel if size == their_size
     # The shorter can still match the longer's paths if it ends in a
     # wildcard that takes the rest.
-    return Pattern.combine(rel, MORE_GENERAL) if @kinds.size < theirs.size && mine_multi
-    return Pattern.combine(rel, MORE_SPECIFIC) if theirs.size < @kinds.size && theirs_multi
+    return Router.combine(rel, MORE_GENERAL) if size < their_size && mine_multi
+    return Router.combine(rel, MORE_SPECIFIC) if their_size < size && theirs_multi
     DISJOINT
   end
 
@@ -491,26 +656,26 @@ pub class Pattern
   # segment the literal of whichever has one, else a wildcard by its name
   # (a trailing wildcard taking nothing), and what the longer has left
   # after the shorter's trailing wildcard.
-  private def common_path(other : Pattern) : String
-    theirs = other.kinds
-    their_names = other.names
+  private def common_path(mine : Int32, theirs : Int32) : String
+    size = @counts[mine]
+    their_size = @counts[theirs]
     text = String::Builder.new
     i = 0
-    while i < @kinds.size && i < theirs.size
-      mine = @kinds[i]
-      if mine == MULTI || (mine == WILD && theirs[i] != MULTI)
-        write_segment(text, theirs[i], their_names[i])
+    while i < size && i < their_size
+      k = kind(mine, i)
+      if k == MULTI || (k == WILD && kind(theirs, i) != MULTI)
+        write_segment(text, kind(theirs, i), name(theirs, i))
       else
-        write_segment(text, mine, @names[i])
+        write_segment(text, k, name(mine, i))
       end
       i = i + 1
     end
-    while i < @kinds.size
-      write_segment(text, @kinds[i], @names[i])
+    while i < size
+      write_segment(text, kind(mine, i), name(mine, i))
       i = i + 1
     end
-    while i < theirs.size
-      write_segment(text, theirs[i], their_names[i])
+    while i < their_size
+      write_segment(text, kind(theirs, i), name(theirs, i))
       i = i + 1
     end
     text.to_s
@@ -519,51 +684,6 @@ pub class Pattern
   private def write_segment(text : String::Builder, kind : Int32, name : String) : Nil
     text << "/"
     text << name if kind == LITERAL || kind == WILD
-  end
-end
-
-# Requests sent to handlers by pattern, Go 1.22's `ServeMux`:
-#
-#     router = Router.new
-#     router.handle("GET /users/{id}") { |req, res, params| res.body << params["id"] }
-#     # Files: FileServer.serve(root, req, res) inside a handler.
-#     # Build this router inside Handler.new(copied_config), and in
-#     # Handler#call(req, res) run @router.call(req, res).
-#     Server.answer("0.0.0.0", 3000, config, Handler)
-#
-# `handle` panics on a pattern that is not one, on one that conflicts with
-# a pattern already registered, and after the router has answered a
-# request. `call` answers with the most specific pattern's handler, or
-# writes a 307 (to the cleaned path, or to a subtree's `/`), a 405 with
-# `Allow`, a 400 for a malformed escape, a 404 into *res*.
-pub class Router
-  @patterns : Array(Pattern)
-  @handlers : Array(Proc(Incoming, Outgoing, Hash(String, String), Nil))
-  @answering : Bool
-
-  def initialize
-    @patterns = [] of Pattern
-    @handlers = [] of Proc(Incoming, Outgoing, Hash(String, String), Nil)
-    @answering = false
-  end
-
-  # Sends the requests *pattern* matches to the block, with the request,
-  # the answer to write and the wildcards' values by name.
-  def handle(pattern : String, &handler : Incoming, Outgoing, Hash(String, String) -> Nil) : Nil
-    raise "Router: #{pattern.inspect} is registered after the router answered a request; patterns are registered before it serves" if @answering
-    parsed = Pattern.parse(pattern).or_panic
-    @patterns.each do |known|
-      if sentence = parsed.conflict(known)
-        raise sentence
-      end
-    end
-    @patterns << parsed
-    @handlers << handler
-  end
-
-  # The patterns registered, in the order they were.
-  def patterns : Array(Pattern)
-    @patterns.dup
   end
 
   # The answer to *req*, written into *res*: its handler's, or the
@@ -575,24 +695,29 @@ pub class Router
     return Router.plain(res, 400, "bad request\n") unless URI.decode?(raw)
     path = Router.clean(raw)
     host = Router.host_of(req.header("Host") || "")
-    pieces = Pattern.pieces(path) || [""]
-    found = find(host, req.method, pieces)
+    piece_text = String::Builder.new(path.bytesize * 2 + 2)
+    pieces = [] of String
+    Router.pieces_or_root(path, pieces, piece_text)
+    captures = Captures.new
+    found = find(host, req.method, pieces, piece_text, captures)
     # `/x` where only `/x/`'s subtree would take it - or nothing would -
     # is sent to `/x/` when `/x/` itself is a request a pattern matches
     # exactly.
-    exact = found ? @patterns[found[0]].exact?(pieces) : false
+    exact = found >= 0 ? exact?(@routes[found], pieces) : false
     unless exact || path.ends_with?("/")
-      slashed = Pattern.pieces(path + "/") || [""]
-      if (again = find(host, req.method, slashed)) && @patterns[again[0]].exact?(slashed)
+      slashed = [] of String
+      Router.pieces_or_root(path + "/", slashed, piece_text)
+      again = find(host, req.method, slashed, piece_text, Captures.new)
+      if again >= 0 && exact?(@routes[again], slashed)
         return Router.redirect(res, path + "/", req.query)
       end
     end
     return Router.redirect(res, path, req.query) unless path == raw
-    if found
-      @handlers[found[0]].call(req, res, found[1])
+    if found >= 0
+      @handlers[found].call(req, res, captures.to_h)
       return
     end
-    allowed = allowed(host, path, pieces)
+    allowed = allowed(host, path, pieces, piece_text)
     unless allowed.empty?
       res.status = 405
       res.header("Allow", allowed.join(", "))
@@ -603,35 +728,32 @@ pub class Router
     Router.plain(res, 404, "not found\n")
   end
 
-  # The pattern that takes the request, and its wildcards: of the host's
-  # own patterns if one matches, else of those with no host, the one more
-  # specific than every other that matches.
-  private def find(host : String, method : String, pieces : Array(String)) : {Int32, Hash(String, String)}?
+  # The route that takes the request, its index in @routes or -1, its
+  # wildcards in *found*: of the host's own patterns if one matches, else
+  # of those with no host, the one more specific than every other that
+  # matches.
+  private def find(host : String, method : String, pieces : Array(String), text : String::Builder, found : Captures) : Int32
     unless host.empty?
-      if found = best(host, method, pieces)
-        return found
-      end
+      chosen = best(host, method, pieces, text, found)
+      return chosen if chosen >= 0
     end
-    best("", method, pieces)
+    best("", method, pieces, text, found)
   end
 
-  private def best(host : String, method : String, pieces : Array(String)) : {Int32, Hash(String, String)}?
+  private def best(host : String, method : String, pieces : Array(String), text : String::Builder, found : Captures) : Int32
     chosen = -1
-    values = {} of String => String
     i = 0
-    while i < @patterns.size
-      pattern = @patterns[i]
+    while i < @routes.size
+      pattern = @routes[i]
       # Of two that match, one is more specific: registration refused
       # every pair for which that is not so.
-      if pattern.host == host && pattern.matches_method?(method) && (chosen < 0 || pattern.more_specific?(@patterns[chosen]))
-        if got = pattern.match_pieces(pieces)
-          chosen = i
-          values = got.to_h
-        end
+      if @hosts[pattern] == host && matches_method?(pattern, method) && (chosen < 0 || relation(pattern, @routes[chosen]) == MORE_SPECIFIC)
+        chosen = i if match_pieces(pattern, pieces, text, found)
       end
       i = i + 1
     end
-    chosen < 0 ? nil : {chosen, values}
+    match_pieces(@routes[chosen], pieces, text, found) if chosen >= 0
+    chosen
   end
 
   # The methods of the patterns whose host and path match, sorted, with
@@ -639,14 +761,17 @@ pub class Router
   # slash added counts too - the request the redirect above would have
   # been, had the method matched - so `POST /x` beside `GET /x/` is 405
   # rather than 404.
-  private def allowed(host : String, path : String, pieces : Array(String)) : Array(String)
-    slashed = path.ends_with?("/") ? nil : Pattern.pieces(path + "/")
+  private def allowed(host : String, path : String, pieces : Array(String), piece_text : String::Builder) : Array(String)
+    slashed = [] of String
+    with_slash = !path.ends_with?("/") && Router.pieces(path + "/", slashed, piece_text)
     methods = [] of String
-    @patterns.each do |pattern|
-      next if pattern.method.empty? || methods.includes?(pattern.method)
-      next unless pattern.host.empty? || pattern.host == host
-      if pattern.match_pieces(pieces) || (slashed && pattern.match_pieces(slashed))
-        methods << pattern.method
+    scratch = Captures.new
+    @routes.each do |pattern|
+      method = @methods[pattern]
+      next if method.empty? || methods.includes?(method)
+      next unless @hosts[pattern].empty? || @hosts[pattern] == host
+      if match_pieces(pattern, pieces, piece_text, scratch) || (with_slash && match_pieces(pattern, slashed, piece_text, scratch))
+        methods << method
       end
     end
     methods << "HEAD" if methods.includes?("GET") && !methods.includes?("HEAD")
@@ -724,4 +849,16 @@ spec 8.1  # A std module follows the standard its header names (an RFC, a fileâ€
   Router.clean("cafÃ©/../ok") == "/ok"
   kept == "/a/c/"
   Router.clean("/a//b/../c/./") == kept
+  router = Router.new
+  view = router.parse("GET /users/{id}").or_panic
+  view.method == "GET" && view.host == ""
+  view.matches?("/users/42") && !view.matches?("/users/")
+  router.pattern_text(view.index) == "GET /users/{id}"
+  router.pattern_method(view.index) == "GET"
+  router.pattern_host(view.index) == ""
+  caps = Captures.new
+  caps.add("id", "42")
+  caps["id"] == "42"
+  caps.clear
+  caps.entries.empty?
 end

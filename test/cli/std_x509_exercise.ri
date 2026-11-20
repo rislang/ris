@@ -50,13 +50,24 @@ def b(hex : String) : Array(UInt8)
   end
 end
 
-def cert(hex : String) : Certificate
-  Certificate.parse(b(hex)).or_panic
+# A macro: the certificate views bytes made in the caller's scope. A def
+# returned a Certificate viewing its own scratch (SPEC 1.9).
+macro cert(hex)
+  Certificate.parse(b({{hex}})).or_panic
 end
 
-def certs(list : String) : Array(Certificate)
-  return [] of Certificate if list == "-"
-  list.split(',').map { |hex| cert(hex) }
+# The certificates of a comma-separated hex list ("-" for none), copied
+# into *store*: a block's certificates viewed bytes made in its round.
+def certs(store : RisCertificateStore, list : String) : Array(Certificate)
+  store.clear_certificates
+  list.split(',').each do |hex|
+    next if hex == "-"
+    if problem = store.append_certificate(b(hex))
+      raise problem.message
+    end
+    nil
+  end
+  store.kept_certificates
 end
 
 def refused(der : String, phrase : String, label : String) : Nil
@@ -65,7 +76,12 @@ def refused(der : String, phrase : String, label : String) : Nil
   check answer.message.includes?(phrase), "#{label}: refused with #{answer.message.inspect}, not #{phrase.inspect}"
 end
 
-NOW = Time.utc(2026, 6, 1)
+# A Time constant is refused at Zone#initialize as request data on the
+# program tape (SPEC 1.8, TODO section 2): the time is made where it is
+# used.
+def at_now : Time
+  Time.utc(2026, 6, 1)
+end
 
 CERTS = [
   "308201a030820145a00302010202147e6cb33e09a4c12a0a685c1ce2404accba4a4fca300a06082a8648ce3d04030230123110300e06035504030c07496e7465722041301e170d3236303530323030303030305a170d3237303332383030303030305a300f310d300b06035504030c046c6561663059301306072a8648ce3d020106082a8648ce3d030107034200044aef5c1fad4a5e950eee58f92304b0cfcc969751f4bb3aed88d63c0ab7b198a5afd73211241fb991748dab1b3f12e937ff8d1712f29acf4e5704d27fdea91e71a37c307a300c0603551d130101ff04023000300e0603551d0f0101ff040403020780301a0603551d1104133011820f7777772e6578616d706c652e636f6d301d0603551d0e04160414cada5c21fb95d15e4b471d0d7cfd2feab6c01358301f0603551d230418301680148f7019e8331eed7667b3493c4fd11feb616b46f8300a06082a8648ce3d0403020349003046022100c8db1643e4e4a593ce73f3af5eeeed6fe486a751a30416c02633adf376d2a692022100c7d079cce44740a3d8d57c053859272172def9d01c6de664ec3b782cfffc9f82",
@@ -214,10 +230,12 @@ DUP_TBS_EXT = "3082012e3081d6a003020102020107300a06082a8648ce3d040302300e310c300
 args = Program.args
 
 if args.size > 0 && args[0] == "verify"
+  middle_store = RisCertificateStore.new
+  root_store = RisCertificateStore.new
   File.read(args[1]).lines.each do |line|
     next if line.empty?
     f = line.split(' ')
-    answer = X509.verify(cert(f[1]), certs(f[2]), certs(f[3]), f[0], NOW)
+    answer = X509.verify(cert(f[1]), certs(middle_store, f[2]), certs(root_store, f[3]), f[0], at_now)
     puts answer.is_a?(X509Error) ? "false: #{answer.message}" : "true"
   end
   exit 0
@@ -247,7 +265,7 @@ scenarios.each do |s|
   intermediates << cert(CERTS[s[2]]) if s[2] >= 0
   intermediates << cert(CERTS[s[3]]) if s[3] >= 0
   roots = [cert(CERTS[s[4]])]
-  answer = X509.verify(leaf, intermediates, roots, s[5], NOW)
+  answer = X509.verify(leaf, intermediates, roots, s[5], at_now)
   if s[6]
     check !answer.is_a?(X509Error), "#{s[0]}: refused: #{answer.is_a?(X509Error) ? answer.message : ""}"
     if answer.is_a?(Array(Certificate))
@@ -330,11 +348,11 @@ ed_leaf = cert(ED_LEAF)
 ed_key = ed_leaf.public_key
 check ed_key.is_a?(Ed25519PublicKey) && ed_key.bytes == b(ED_LEAF_KEY), "an Ed25519 leaf's key read as its 32 bytes"
 check ed_root.signature_algorithm == "1.3.101.112", "an Ed25519 signature's algorithm: #{ed_root.signature_algorithm}"
-held_ed = X509.verify(ed_leaf, [] of Certificate, [ed_root], "ed.example", NOW)
+held_ed = X509.verify(ed_leaf, [] of Certificate, [ed_root], "ed.example", at_now)
 check held_ed.is_a?(Array(Certificate)) && held_ed.size == 2, "an Ed25519 leaf under an Ed25519 root: #{held_ed.is_a?(X509Error) ? held_ed.message : ""}"
-mixed = X509.verify(cert(ED_LEAF_UNDER_EC), [] of Certificate, [cert(EC_ROOT_FOR_ED)], "mixed.example", NOW)
+mixed = X509.verify(cert(ED_LEAF_UNDER_EC), [] of Certificate, [cert(EC_ROOT_FOR_ED)], "mixed.example", at_now)
 check mixed.is_a?(Array(Certificate)), "an Ed25519 leaf under an ECDSA root: #{mixed.is_a?(X509Error) ? mixed.message : ""}"
-mixed = X509.verify(cert(EC_LEAF_UNDER_ED), [] of Certificate, [ed_root], "ec.example", NOW)
+mixed = X509.verify(cert(EC_LEAF_UNDER_ED), [] of Certificate, [ed_root], "ec.example", at_now)
 check mixed.is_a?(Array(Certificate)), "an ECDSA leaf under an Ed25519 root: #{mixed.is_a?(X509Error) ? mixed.message : ""}"
 
 def ed_refused(answer : Array(Certificate) | X509Error, phrase : String, label : String) : Nil
@@ -342,11 +360,11 @@ def ed_refused(answer : Array(Certificate) | X509Error, phrase : String, label :
   check answer.message.includes?(phrase), "#{label}: refused with #{answer.message.inspect}, not #{phrase.inspect}"
 end
 
-ed_refused X509.verify(cert(ED_LEAF_BY_OTHER), [] of Certificate, [ed_root], "ed.example", NOW),
+ed_refused X509.verify(cert(ED_LEAF_BY_OTHER), [] of Certificate, [ed_root], "ed.example", at_now),
   "CN=ed leaf's signature is not CN=Ed Root's", "an Ed25519 leaf signed by another key under the root's name"
-ed_refused X509.verify(cert(ECDSA_NAMING_ED), [] of Certificate, [ed_root], "odd.example", NOW),
+ed_refused X509.verify(cert(ECDSA_NAMING_ED), [] of Certificate, [ed_root], "odd.example", at_now),
   "an ECDSA signature under CN=Ed Root's Ed25519 key", "an ECDSA signature naming an Ed25519 issuer"
-ed_refused X509.verify(cert(ED_SIGNATURE_PARAMS), [] of Certificate, [ed_root], "ec.example", NOW),
+ed_refused X509.verify(cert(ED_SIGNATURE_PARAMS), [] of Certificate, [ed_root], "ec.example", at_now),
   "1.3.101.112 with parameters", "an Ed25519 signature whose algorithm carries parameters"
 refused ED_KEY_PARAMS, "an Ed25519 key with parameters", "an Ed25519 key whose algorithm carries parameters refused"
 refused ED_KEY_OFF_CURVE, "not a point on the curve", "an Ed25519 key off the curve refused"
@@ -365,7 +383,7 @@ puts "== RSA keys under 2048 bits (OpenSSL's security level 2)"
 # and the gate script holds fresh chains to OpenSSL's own.
 [{60, 59, "CN=leaf's RSA key is 1024 bits, under the 2048 a chain is held to", "a leaf whose key is 1024-bit RSA"},
  {62, 61, "CN=Inter Weak's RSA key is 1024 bits, under the 2048 a chain is held to", "an intermediate whose key is 1024-bit RSA"}].each do |c|
-  answer = X509.verify(cert(CERTS[c[0]]), [cert(CERTS[c[1]])], [cert(CERTS[47])], "www.example.com", NOW)
+  answer = X509.verify(cert(CERTS[c[0]]), [cert(CERTS[c[1]])], [cert(CERTS[47])], "www.example.com", at_now)
   raise "ASSERTION FAILED: #{c[3]}: expected a refusal, got a chain" unless answer.is_a?(X509Error)
   check answer.message.includes?(c[2]), "#{c[3]}: refused with #{answer.message.inspect}, not #{c[2].inspect}"
 end
@@ -375,8 +393,10 @@ puts "== a client's certificate (X509Purpose::Client)"
 
 # The same chains as above, checked for clientAuth: what is for clientAuth
 # alone holds, and a leaf for serverAuth alone does not.
-def for_client(leaf : Int32, intermediates : Array(Int32)) : Array(Certificate) | X509Error
-  X509.verify(cert(CERTS[leaf]), intermediates.map { |i| cert(CERTS[i]) }, [cert(CERTS[2])], nil, NOW, X509Purpose::Client)
+# A macro: the chain views certificates in the caller's store.
+macro for_client(leaf, intermediates)
+  %store = RisCertificateStore.new
+  X509.verify(cert(CERTS[{{leaf}}]), certs(%store, {{intermediates}}.map { |i| CERTS[i] }.join(",")), [cert(CERTS[2])], nil, at_now, X509Purpose::Client)
 end
 
 { {27, [1], "a leaf for clientAuth only"}, {0, [28], "an intermediate for clientAuth only"}, {0, [1], "a chain with no extKeyUsage"} }.each do |c|
@@ -407,7 +427,8 @@ FAN      = [
   "3081da30818da003020102020207d5300506032b6570300c310a300806035504030c0158301e170d3236303130313030303030305a170d3237303130313030303030305a300c310a300806035504030c0158302a300506032b657003210071aa48636b2a423e63c5a3409e8b771f7fd581e58e6459e6428d5b1a897e89e2a3133011300f0603551d130101ff040530030101ff300506032b6570034100e25e06f34d8ded64f043b358f38c951d2916f443498c72b9e3ff5d4496b8d586f3e5b6feb6ed2a8a848ca8c3acce637a8985fe760b4cef771d034e5b478d5d0f",
   "3081da30818da003020102020207d6300506032b6570300c310a300806035504030c0158301e170d3236303130313030303030305a170d3237303130313030303030305a300c310a300806035504030c0158302a300506032b657003210071aa48636b2a423e63c5a3409e8b771f7fd581e58e6459e6428d5b1a897e89e2a3133011300f0603551d130101ff040530030101ff300506032b6570034100897da9e521fd1371faed0b5341d6ca982a83d3814e4544c5e8ff5cedf5a51cbf5e4701de6f30f87de1149cd31cd14fff592d962ab383781ab2439268d7bbbd0d",
 ]
-fan = X509.verify(cert(FAN_LEAF), FAN.map { |h| cert(h) }, [cert(FAN_ROOT)], "www.example.com", NOW)
+fan_store = RisCertificateStore.new
+fan = X509.verify(cert(FAN_LEAF), certs(fan_store, FAN.join(",")), [cert(FAN_ROOT)], "www.example.com", at_now)
 raise "ASSERTION FAILED: seven intermediates signing each other: expected a refusal" unless fan.is_a?(X509Error)
 check fan.message.includes?("within 100 signature checks"), "seven intermediates signing each other: refused with #{fan.message.inspect}"
 puts "  seven intermediates signing each other: given up within 100 signature checks"
@@ -468,19 +489,21 @@ STACK_PEM = <<-PEM
   EVfzur+OpePLpAcQtq+Km3lRrg==
   -----END CERTIFICATE-----
   PEM
-PEM_STORE_3 = RisCertificateStore.new
-STACK_CERTS = pem_certs(PEM_STORE_3, STACK_PEM)
 STACK_DEPTH = 100
 
 # *depth* frames of a kilobyte array each, then the signature (*chain*
-# false) or the chain from the leaf to the root (*chain* true).
+# false) or the chain from the leaf to the root (*chain* true). The
+# certificates are read there: a constant of certificates is program data
+# made through Zone#initialize, which the checker refuses (SPEC 1.8).
 def stacked(depth : Int32, chain : Bool) : Bool
   pad = uninitialized StaticArray(UInt8, 1000)
   mark = pointerof(pad).as(Pointer(UInt8))
   mark[depth % 1000] = 1_u8
   if depth == 0
-    return STACK_CERTS[1].signed_by?(STACK_CERTS[0]) unless chain
-    return X509.verify(STACK_CERTS[1], [] of Certificate, [STACK_CERTS[0]], nil, Time.utc(2027, 1, 1)).is_a?(Array(Certificate))
+    store = RisCertificateStore.new
+    stack_certs = pem_certs(store, STACK_PEM)
+    return stack_certs[1].signed_by?(stack_certs[0]) unless chain
+    return X509.verify(stack_certs[1], [] of Certificate, [stack_certs[0]], nil, Time.utc(2027, 1, 1)).is_a?(Array(Certificate))
   end
   stacked(depth - 1, chain) && mark[depth % 1000] == 1_u8
 end

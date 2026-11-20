@@ -1,0 +1,30 @@
+# A derived struct with Array and Hash fields reads from TOML and YAML in
+# the caller's scope: `from_toml` and `from_yaml` are macros, as std/json's
+# `from_json`, so the fields are the caller's and outlive no def
+# (doc/drafts/checker-open-questions/, Q1). Silent on success.
+import std/toml::{TOML, toml_serializable}
+import std/yaml::{YAML, yaml_serializable}
+
+@[OnTape]
+struct Tagged
+  getter tags : Array(String)
+  getter weights : Hash(String, Float64)
+
+  def initialize(@tags : Array(String), @weights : Hash(String, Float64))
+  end
+
+  derive toml_serializable, yaml_serializable
+end
+
+def churn : Int32
+  a = Array(Int32).new(256) { |i| i * 7 }
+  a.sum
+end
+
+t = Tagged.from_toml("tags = [\"a\", \"b c\"]\n[weights]\nw = 1.5\n")
+y = Tagged.from_yaml("tags: [x, y, z]\nweights: {v: 2.5}\n")
+churn
+raise "toml tags #{t.tags.inspect}" unless t.tags == ["a", "b c"]
+raise "toml weights" unless t.weights["w"] == 1.5
+raise "yaml tags #{y.tags.inspect}" unless y.tags == ["x", "y", "z"]
+raise "yaml weights" unless y.weights["v"] == 2.5
