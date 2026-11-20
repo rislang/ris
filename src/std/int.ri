@@ -59,9 +59,9 @@ pub struct RisBits
     end
   {% end %}
 
-# Keep the generated absolute type declarations inside a declaration so
-# the spec runner does not mistake this macro for executable program code.
-{% begin %}
+  # Keep the generated absolute type declarations inside a declaration so
+  # the spec runner does not mistake this macro for executable program code.
+  {% begin %}
   {% types = [
        {"Int8", 8, true, "i8"},
        {"Int16", 16, true, "i16"},

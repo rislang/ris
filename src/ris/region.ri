@@ -13,13 +13,13 @@ class RisRegion
   OFF_PREV = 40_u64
   # This tape's growing payload reservations (`growing_state`), linked
   # through their OFF_PARENT words and released with it.
-  OFF_SIDE  =         48_u64
+  OFF_SIDE = 48_u64
   # End of the writable prefix of a Linux side reservation.
-  OFF_COMMIT =        56_u64
-  DATA      =         64_u64
-  UNDER     =         16_u64
-  CAPACITY  =   67108864_u64
-  MAX_COUNT = 2147483647_u64
+  OFF_COMMIT =         56_u64
+  DATA       =         64_u64
+  UNDER      =         16_u64
+  CAPACITY   =   67108864_u64
+  MAX_COUNT  = 2147483647_u64
   # A mapping's length is a whole number of these: 64 KiB covers the
   # 4 KiB pages of x86_64, the 16 KiB of Apple's and Asahi's arm64, the
   # 64 KiB of some arm64 servers and Windows' allocation granularity,

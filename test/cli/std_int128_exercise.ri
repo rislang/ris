@@ -16,44 +16,44 @@ if Program.args.size > 0
   raise "refusal did not happen"
 end
 
-  w = String::Builder.new(140)
-  minimum = -170141183460469231731687303715884105728_i128
-  maximum = 340282366920938463463374607431768211455_u128
-  ok = true
-  (2..36).each do |base|
-    [minimum, -1_i128, 0_i128, 1_i128,
-     170141183460469231731687303715884105727_i128].each do |value|
-      w.clear
-      w << "prefix:"
-      value.to_s(w, base)
-      text = w.finish[7, w.bytesize - 7]
-      ok = false unless text.to_i128?(base) == value
-      ok = false unless value.to_s(base) == text
-    end
-    [0_u128, 1_u128, maximum].each do |value|
-      w.clear
-      w << "prefix:"
-      value.to_s(w, base)
-      text = w.finish[7, w.bytesize - 7]
-      ok = false unless text.to_u128?(base) == value
-      ok = false unless value.to_s(base) == text
-    end
+w = String::Builder.new(140)
+minimum = -170141183460469231731687303715884105728_i128
+maximum = 340282366920938463463374607431768211455_u128
+ok = true
+(2..36).each do |base|
+  [minimum, -1_i128, 0_i128, 1_i128,
+   170141183460469231731687303715884105727_i128].each do |value|
+    w.clear
+    w << "prefix:"
+    value.to_s(w, base)
+    text = w.finish[7, w.bytesize - 7]
+    ok = false unless text.to_i128?(base) == value
+    ok = false unless value.to_s(base) == text
   end
-  raise "failed: int128" unless ok == true
-  raise "failed: int128" unless minimum.to_s == "-170141183460469231731687303715884105728"
-  raise "failed: int128" unless maximum.to_s == "340282366920938463463374607431768211455"
-  raise "failed: int128" unless " +FF ".to_i128(16) == 255_i128
-  raise "known digits" unless (-35_i128).to_s(36) == "-z"
-  raise "known digits" unless 0x123456789abcdef_u128.to_s(16) == "123456789abcdef"
-  raise "known digits" unless minimum.to_s(16) == "-80000000000000000000000000000000"
-  raise "known digits" unless maximum.to_s(16) == "ffffffffffffffffffffffffffffffff"
-  raise "failed: int128" unless "\t+FF\n".to_u128(16) == 255_u128
-  raise "failed: int128" unless "170141183460469231731687303715884105728".to_i128?.nil?
-  raise "failed: int128" unless "-170141183460469231731687303715884105729".to_i128?.nil?
-  raise "failed: int128" unless "340282366920938463463374607431768211456".to_u128?.nil?
-  raise "failed: int128" unless "-0".to_u128?.nil?
-  valid = ["", "+", "-", "12x", "1_0", "0x10"].all? do |text|
-    text.to_i128?.nil? && text.to_u128?.nil?
+  [0_u128, 1_u128, maximum].each do |value|
+    w.clear
+    w << "prefix:"
+    value.to_s(w, base)
+    text = w.finish[7, w.bytesize - 7]
+    ok = false unless text.to_u128?(base) == value
+    ok = false unless value.to_s(base) == text
   end
-  raise "invalid input accepted" unless valid
+end
+raise "failed: int128" unless ok == true
+raise "failed: int128" unless minimum.to_s == "-170141183460469231731687303715884105728"
+raise "failed: int128" unless maximum.to_s == "340282366920938463463374607431768211455"
+raise "failed: int128" unless " +FF ".to_i128(16) == 255_i128
+raise "known digits" unless (-35_i128).to_s(36) == "-z"
+raise "known digits" unless 0x123456789abcdef_u128.to_s(16) == "123456789abcdef"
+raise "known digits" unless minimum.to_s(16) == "-80000000000000000000000000000000"
+raise "known digits" unless maximum.to_s(16) == "ffffffffffffffffffffffffffffffff"
+raise "failed: int128" unless "\t+FF\n".to_u128(16) == 255_u128
+raise "failed: int128" unless "170141183460469231731687303715884105728".to_i128?.nil?
+raise "failed: int128" unless "-170141183460469231731687303715884105729".to_i128?.nil?
+raise "failed: int128" unless "340282366920938463463374607431768211456".to_u128?.nil?
+raise "failed: int128" unless "-0".to_u128?.nil?
+valid = ["", "+", "-", "12x", "1_0", "0x10"].all? do |text|
+  text.to_i128?.nil? && text.to_u128?.nil?
+end
+raise "invalid input accepted" unless valid
 puts "int128: ALL CHECKS PASSED"

@@ -199,17 +199,17 @@ RESP_NAME_HASH_WRONG            = "3082010e0a0100a08201073082010306092b060105050
 RESP_TRAILING                   = "3082010e0a0100a08201073082010306092b06010505073001010481f53081f2308199a11f301d311b301906035504030c124f43535020457865726369736520526f6f74180f32303236313033313030303030305a30653063303b300906052b0e03021a050004145d87907f09f60f8d305ab6d0697281005be2687e0414887d9a73fad3dc60fe0ca44d7ef6fbfc3f876191020210018000180f32303236313033313030303030305aa011180f32303236313130373030303030305a300a06082a8648ce3d0403020348003045022100b78fff92777e30f40edf983f79a57eed03c19a0e0839c822a2a7a3287e8c7894022062d89a45b863cb51fe8fa2f03e840e5d9ea31d97b2bb94a533346b0a24079e4600"
 
 cert_store = RisCertificateStore.new
-root_cert      = cert(cert_store, CERT_ROOT)
-other_ca_cert  = cert(cert_store, CERT_OTHER_CA)
-good_cert      = cert(cert_store, CERT_GOOD)
-revoked_cert   = cert(cert_store, CERT_REVOKED)
-other_cert     = cert(cert_store, CERT_OTHER)
-must_cert      = cert(cert_store, CERT_MUST)
+root_cert = cert(cert_store, CERT_ROOT)
+other_ca_cert = cert(cert_store, CERT_OTHER_CA)
+good_cert = cert(cert_store, CERT_GOOD)
+revoked_cert = cert(cert_store, CERT_REVOKED)
+other_cert = cert(cert_store, CERT_OTHER)
+must_cert = cert(cert_store, CERT_MUST)
 responder_cert = cert(cert_store, CERT_RESPONDER)
-rsa_root_cert  = cert(cert_store, CERT_RSA_ROOT)
-rsa_leaf_cert  = cert(cert_store, CERT_RSA_LEAF)
-ed_root_cert   = cert(cert_store, CERT_ED_ROOT)
-ed_leaf_cert   = cert(cert_store, CERT_ED_LEAF)
+rsa_root_cert = cert(cert_store, CERT_RSA_ROOT)
+rsa_leaf_cert = cert(cert_store, CERT_RSA_LEAF)
+ed_root_cert = cert(cert_store, CERT_ED_ROOT)
+ed_leaf_cert = cert(cert_store, CERT_ED_LEAF)
 
 # GOOD_DELEGATED with the last byte of its responder's certificate - in
 # that certificate's signature - flipped: the response's own signature
@@ -341,7 +341,7 @@ def dump_line(der : Array(UInt8), line_out : String::Builder) : Nil
     reason = single.revocation_reason
     next_update = single.next_update
     line_out << ";single=#{id.hash.oid},#{hex_of(id.issuer_name_hash)},#{hex_of(id.issuer_key_hash)},#{serial_hex(id.serial)},#{single.status.word}," \
-           "#{revoked ? revoked.to_unix : "-"},#{reason || "-"},#{single.this_update.to_unix},#{next_update ? next_update.to_unix : "-"}"
+                "#{revoked ? revoked.to_unix : "-"},#{reason || "-"},#{single.this_update.to_unix},#{next_update ? next_update.to_unix : "-"}"
   end
 end
 
