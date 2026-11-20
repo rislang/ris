@@ -177,7 +177,19 @@ class Iyi::Path
   # finds that module instead of an undefined constant.
   IYI_STD_DECLARERS = {"pub class ", "pub struct ", "pub module ", "pub trait ", "pub enum ", "pub alias "}
 
+  # ris: cached per name. A lookup that fails and is rescued still builds
+  # this, and an artifact build resolving its numbered types fails many:
+  # reading all of std each time made `--use-rimod` take hours.
+  @@iyi_std_declares_hints = {} of String => String?
+
   def iyi_std_declares_hint(program, name : String) : String?
+    key = "#{program.iyi_path.entries.join('\0')}\0#{name}"
+    @@iyi_std_declares_hints.fetch(key) do
+      @@iyi_std_declares_hints[key] = iyi_std_declares_hint_uncached(program, name)
+    end
+  end
+
+  private def iyi_std_declares_hint_uncached(program, name : String) : String?
     program.iyi_path.entries.each do |entry|
       dir = File.join(entry, "std")
       next unless Dir.exists?(dir)

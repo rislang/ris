@@ -81,15 +81,15 @@ Unknown must be refused (SPEC 3.6).
   made by a call, a callee's copy_to(RisCurrentTape.new) included,
   returned from a def that is not one call: RESULT moves only texts
   (refused/kept_struct_returned; acme's error paths, x509.read_pem and
-  time's Location.load now end in copy_to(RisCurrentTape.new));
-  (b) std/http's supervise spawned a task
-  whose @[TaskClosureUnsafe] closure lived on supervise's tape (now in
-  prefork). Open: (c) `return AcmeError.new("#{x}")` from a loop round
-  in a def that is not one call passes, and its detail read poison
-  (acme's poll): check_leaving drops a struct value's root
-  (struct_value?), and __iyi_text_move skips a struct with a view
-  field, so the text stays in the freed scratch. A small repro did not
-  show it. The other shapes (a constructor's view, a loop round's key,
+  time's Location.load now end in copy_to(RisCurrentTape.new)); (b)
+  std/http's supervise spawned a task whose @[TaskClosureUnsafe]
+  closure lived on supervise's tape (now in
+  prefork); (c) an error with a view field made in a loop round and
+  passed on by a caller that is not one call (acme's poll): RESULT
+  moved only structs of texts, so the detail read poison. Now
+  __iyi_text_move moves a struct's texts whatever else it holds
+  (test/ris/struct_view_round_error.ri, plain and poisoned). The
+  other shapes (a constructor's view, a loop round's key,
   JSON-viewing strings, builder growth) do not reproduce poisoned.
 
 * A def's result that holds a value an earlier call of the def made is
@@ -114,6 +114,11 @@ Unknown must be refused (SPEC 3.6).
   builds from source, yet from its artifacts is refused in std/json's
   Builder ("live view of Std::Json::Builder ... (opaque contract)",
   serializable:498). std_toml_exercise.sh's artifacts step fails on it.
+  acme's too: TlsServer#accept's opaque contract shrinks the receiver
+  whole, so config.alpn after accept is refused (exercise :1281). A
+  precise field contract (2026-11-20, patch kept aside) then stops at
+  http's Response#initialize, and checking stores into parameters in
+  both phases made the artifact build run past 20 minutes.
 
 * A one-call def's value moves down only when it is one fresh flat
   value: a tuple or two locals do not. Bzip2.decompress tags its String

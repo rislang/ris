@@ -2645,6 +2645,17 @@ if [ "$plain" = "kept 120" ] && [ "$poisoned" = "poisoned" ]; then
 else
   echo "FAILED   tape_poison: $plain / $poisoned"; status=1
 fi
+# A struct with a view field passed on from a loop round: its texts
+# move down, so poisoned freed tape is never read.
+for poison in "" 1; do
+  out=$(RIS_TAPE_POISON=$poison "$RIS" run \
+    test/ris/struct_view_round_error.ri 2>&1); code=$?
+  if [ "$code" -eq 0 ] && [ -z "$out" ]; then
+    echo "runs     struct_view_round_error${poison:+ (poisoned)}"
+  else
+    echo "FAILED   struct_view_round_error $poison: $out"; status=1
+  fi
+done
 # What a tape block may still do; its scratch is freed when it ends.
 out=$(RIS_TAPE_STATS=1 "$RIS" run test/ris/tape_block_reset.ri 2>&1)
 code=$?
