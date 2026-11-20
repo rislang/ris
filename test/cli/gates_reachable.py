@@ -93,14 +93,12 @@ BROKEN = {
     "collector_free_floor.sh",
     "debug_info.py",
     "generic_boundary.py",
-    "io_exercise.sh",
     "lsp_artifacts.py",
     "lsp_positions.py",
     "mod_context.sh",
     "parallel_exercise.sh",
     "runtime_exercise.sh",
     "socket_exercise.sh",
-    "value_exercise.sh",
     "metric_port.sh",
 }
 

@@ -20,8 +20,7 @@ case "$(uname -s)" in
 esac
 
 RIS="${RIS:-$REPO/bin/ris}"
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-socket.XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from `pwd` is `/c/...` and finds no prelude at all, and a
 # scratch directory named `/tmp/tmp.X` is silently ignored on that path, so

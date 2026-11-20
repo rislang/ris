@@ -81,7 +81,8 @@ Unknown must be refused (SPEC 3.6).
   made by a call, a callee's copy_to(RisCurrentTape.new) included,
   returned from a def that is not one call: RESULT moves only texts
   (refused/kept_struct_returned; acme's error paths, x509.read_pem and
-  time's Location.load now end in copy_to(RisCurrentTape.new)); (b) std/http's supervise spawned a task
+  time's Location.load now end in copy_to(RisCurrentTape.new));
+  (b) std/http's supervise spawned a task
   whose @[TaskClosureUnsafe] closure lived on supervise's tape (now in
   prefork). Open: (c) `return AcmeError.new("#{x}")` from a loop round
   in a def that is not one call passes, and its detail read poison
@@ -193,22 +194,29 @@ Unknown must be refused (SPEC 3.6).
 
 ## 7. Benches
 
-* Unrun check scripts sorted (2026-11-20): 12 run in CI, windows, wasm
-  and sandbox scripts deleted, bounded_gate and 3 timings are TOOLS. The
-  16 below fail and sit in gates_reachable.py's BROKEN; each moves to a
-  CI step and off BROKEN when it passes.
-* collections_exercise.sh: `{{1, 2} => 5}` prints without the space
-  `{ {1, 2} => 5 }`; a missing key panics without "no such key";
-  "tape bad size: -1".
-* value_exercise.sh: a tuple whose first item is a tuple prints
-  `{{1, 2}, 3}`, expected `{ {1, 2}, 3 }`.
+* Unrun check scripts sorted (2026-11-20): windows, wasm and sandbox
+  scripts deleted, bounded_gate and 3 timings are TOOLS. The gates below
+  fail and sit in gates_reachable.py's BROKEN; each moves to a CI step
+  and off BROKEN when it passes.
+* collections_exercise.sh: brace padding and missing-key text fixed.
+  The typed Hash constructor now takes capacity, not a default; port
+  default-map calls to with_default. Mutations still name the removed
+  array.ri/hash.ri; nested Hash arrays are refused by the tape rules.
+  Decision: the gate requires insertion under 1 s and draining under
+  50 ms without a SPEC promise. Move measurements to test/speed/ rather
+  than inventing a timing guarantee; then port the correctness proofs.
 * collector_free_floor.sh: "a collector is still linked"; samples/ris/
   autocert.ri fails "cannot store a view beyond its owner scope"; "the
   default build broke".
 * debug_info.py: no sample builds with --debug (autocert, basics, calc…).
-* io_exercise.sh: the break-it proofs pass broken (short reads, read_all,
-  puts on an ended line): the exercise does not test them.
-* socket_exercise.sh: "accept after close" exits 1 at "socket is closed".
+* socket_exercise.sh: plain and release programs pass; mutation proofs
+  fail. The small-read proof subtracts allocator addresses across loop
+  scopes; its injected temporary is now correctly reclaimed at def end.
+  Decision: specify an allocation metric or replace this old cursor
+  budget with a result-lifetime proof. Do not retain temporaries merely
+  to make the mutation fail. Localhost and IPv6 mutations name removed
+  code; refusal probes still call the forbidden to_unsafe. The SIGPIPE
+  proof inherits an ignored signal in this runner.
 * parallel_exercise.sh: shares_array is refused for the tape-proc reason,
   not the one the script expects.
 * runtime_exercise.sh: dependency floor: the runtime puts undefined

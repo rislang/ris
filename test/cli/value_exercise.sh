@@ -32,8 +32,7 @@ case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT) PSEP=';' ;;
   *) PSEP=':' ;;
 esac
-mkdir -p "$REPO/test/cli/.work"
-WORK="$(mktemp -d "$REPO/test/cli/.work/XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ris-value.XXXXXX")"
 # A native compiler cannot resolve this shell's own path mapping: a search
 # path built from the shell's `pwd` finds no prelude at all, and a scratch
 # directory named `/tmp/tmp.X` is silently ignored on the search path, so
@@ -106,10 +105,11 @@ echo "== proving the checks can fail, one broken method at a time"
 # at the check that names the method.
 prove_fails() { # prove_fails <label> <dir> <phrase> <sed script>
   local label="$1" dir="$2" phrase="$3" script="$4"
+  local file="${5:-object.ri}"
   mkdir -p "$WORK/$dir/ris"
   cp -R "$REPO/src/ris/." "$WORK/$dir/ris/"
-  sed -e "$script" "$REPO/src/ris/object.ri" > "$WORK/$dir/ris/object.ri"
-  if cmp -s "$REPO/src/ris/object.ri" "$WORK/$dir/ris/object.ri"; then
+  sed -e "$script" "$REPO/src/ris/$file" > "$WORK/$dir/ris/$file"
+  if cmp -s "$REPO/src/ris/$file" "$WORK/$dir/ris/$file"; then
     echo "  $label: the patch changed nothing, so this proves nothing"
     status=1
     return
@@ -273,11 +273,11 @@ prove_fails "index by value" bad_index "tuple: index by value" \
 
 # 7. `to_s`, which prints a tuple as its members written down.
 prove_fails "to_s without members" bad_to_s "tuple: to_s" \
-  's/^      result = result + self\[{{i}}\].inspect$/      result = result + "?"/'
+  's/^      append_inspect(value\[{{i}}\])$/      append("?")/' tape_core.ri
 
 # 7b. A tuple first, printed flush against the brace again: `{{1, 2}, 3}`.
 prove_fails "to_s without the padding" bad_to_s_pad "tuple: a tuple first is padded" \
-  's/ ? " " : "" {% else %}/ ? "" : "" {% else %}/'
+  's/^    push(32_u8) if padded$/    # padding removed/' tape_core.ri
 
 # 8. And the range's own pair, in the file it lives in.
 # The macro file, for `record`: a block it drops is a method the program

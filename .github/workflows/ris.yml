@@ -179,6 +179,13 @@ jobs:
           bash test/cli/format_exercise.sh
         env:
           RIS: ${{ github.workspace }}/bin/ris
+      - name: values and buffered IO
+        if: matrix.shard == 'heap'
+        run: |
+          bash test/cli/value_exercise.sh
+          bash test/cli/io_exercise.sh
+        env:
+          RIS: ${{ github.workspace }}/bin/ris
       - name: numbers, server load, editor tokens, named parses
         if: matrix.shard == 'heap'
         run: |

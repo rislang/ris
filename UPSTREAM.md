@@ -209,6 +209,10 @@ a rename after 0.1.0 would break callers (doc/drafts/pool-t, Q5).
 * Task launch validates ended state atomically with adoption; completed
   tasks stay live through tape cleanup before waking the group joiner.
 
+* Hash missing-key diagnostics say `no such key` and inspect the key,
+  matching the collection exercise's inherited contract. Take this
+  wording fix upstream to iyi; tape brace formatting stays in ris.
+
 ## Stays in ris
 
 * Tape: std/http `parse_head` and `ParsedHead`, the tape list in
