@@ -2314,7 +2314,11 @@ pub struct Outgoing
       raise "HTTP: #{name} is the server's own line"
     end
     @state[2] = 1
-    named = @text.append_span(name)
+    # The span is counted on @text, not taken from *name*: it holds no
+    # view of the caller's text, which may be a def's scratch.
+    start = @text.length
+    @text << name
+    named = String::Span.new(start, @text.length - start)
     from = @text.length
     yield @text
     value = String::Span.new(from, @text.length - from)

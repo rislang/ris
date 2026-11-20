@@ -33,9 +33,15 @@ sections below and are listed here in order:
   so std_router_exercise does not build. The HTTPS client: done
   2026-11-20, `records_handshake` builds (std_http_resume.ri does);
   AutocertIssuer keeps no HTTPClient or AcmeClient in fields: `issue`
-  makes them on its own tape and hands them down. autocert.ri still
-  waits for the acme/x509 port (x509.ri `SigningKey.from_pem`, acme.ri
-  `object` return scratch, SPEC 1.9; see the acme item below).
+  makes them on its own tape and hands them down. The acme/x509 port:
+  done 2026-11-20, std_acme_exercise builds (results end in a call or
+  `copy_to(RisCurrentTape.new)`, the test's script server writes into
+  the Outgoing). autocert.ri and std_autocert_exercise still stop at
+  tls.ri `@identity = chosen` and `identity12`: an identity a
+  TlsIdentitySource makes per handshake is kept by the connection (an
+  API question: copy it into a connection-owned TlsIdentity with
+  `read_identity`, or have the source yield it); the exercise also at
+  lines 40, 208-229.
 
 * The user's own ris programs: each obstacle becomes an item here.
 
@@ -55,6 +61,15 @@ Fix a checker hole below only when a cluster hits it.
 ## 2. Checker holes (ordered: those programs hit first)
 
 Unknown must be refused (SPEC 3.6).
+
+* Unsound, first: five shapes built but read freed memory at run time
+  (found porting acme, 2026-11-20; section 7 "acme:" lists them): a
+  struct a constructor keeps viewing the constructor's answer; a
+  callee's KEEP copy returned or stored from a def that is not one
+  call; a key made in a loop round; a def returning strings viewing
+  JSON it parsed; String::Builder views kept across its growth. Each
+  gets a refused/ fixture that runs under ASan or reads poison, then
+  the checker refuses it.
 
 * A one-call def's value moves down only when it is one fresh flat
   value: a tuple or two locals do not. Bzip2.decompress tags its String
@@ -192,12 +207,26 @@ Unknown must be refused (SPEC 3.6).
   ~/.cache/ris check results: set RIS_CACHE_DIR to a fresh dir when
   testing a checker change.
   Left, with their cause:
-  - acme: past the read-after-shrink; now ~15 retained-def-data sites in
-    acme.ri (from, new_order, finalize_order, post, take_nonce, object,
-    problem), x509.ri:1716 from_pem and the test's request_fields: a
-    port, as big's was.
-  - autocert: tls.ri:6626 and :7005 (`identity_for` returns an owner)
-    and the test at line 40.
+  - acme: ported 2026-11-20 (see section 1). Checker questions found on
+    the way: `String::Builder#append_span(name)` counts as a view of
+    *name* (Outgoing#header now counts the span on its own text); a
+    `copy_to(RisCurrentTape.new)` result is refused unless it is the
+    def's last expression; and these built but read freed memory at
+    run time (a checker that passes them is unsound): a struct a
+    constructor keeps that views the constructor's answer
+    (AcmeClient's directory), a callee's KEEP copy returned or stored
+    from a def that is not one call (poll's object, finalize's order,
+    a challenge's problem), a key made in a loop round
+    (`SigningKey.p256`), a def returning JSON strings it parsed
+    (the test's `jws_parts`), and `String::Builder` views kept across
+    its growth (AcmeClient keeps its texts in a builder sized up front).
+  - The HTTPClient pool: a second request on a pooled HTTPS connection
+    segfaults (std_acme_exercise's clients use `idle: 0` until fixed).
+  - std_acme_exercise.sh "the artifacts did not build": x509.ri's
+    `module Storage` assigns its fields in the module body (lines
+    128-135), which `--use-rimod` reads as type-body code to run.
+  - autocert: tls.ri:6636 and :7015 (`identity_for` returns an owner)
+    and the test at lines 40, 208-229.
   - tls: the group tasks borrow their config and answer through
     `value`; left: `crafted`'s `Array({Int32, Array(UInt8)})` is a
     runtime-sized collection of growing values (SPEC 2.2).
