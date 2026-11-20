@@ -3577,6 +3577,8 @@ end
 
 # A client's response, decoders and unpooled transport share its scope.
 pub class RisHttpClientExchange
+  # Reserved before dialing: another task may run while connect waits.
+  property connecting : Bool = false
   getter socket : IyiSocket
   getter response : Response
   getter conn : Conn
@@ -3703,10 +3705,10 @@ end
 #
 # A connection goes back once its answer has been read to the end (inside
 # `open`, up to 64 KiB left unread is read past for it) and the answer
-# allows it; at most *idle* wait per server, and the rest close. A server
-# may close an idle connection whenever it likes (RFC 9112 §9.3.1), so a
-# request whose kept connection turns out closed - the write fails, or it
-# ends before a byte of an answer - is sent again once on a new one, when
+# allows it; at most *idle* wait per server, 16 in all; the rest close.
+# A server may close an idle connection whenever it likes (RFC 9112
+# §9.3.1), so a request whose kept connection turns out closed - the write
+# fails, or it ends before a byte of an answer - is sent again once, when
 # its method is idempotent (RFC 9110 §9.2.2) and its body a string;
 # anything else answers the failure. One task at a time per request: two
 # tasks sending at once take two connections, and a client is not for
@@ -3808,6 +3810,10 @@ end
 # and port, which is the program's to ask for.
 pub class HTTPClient
   MAX_SESSION_ORIGINS = 64
+  # Transport slots live as long as the client. Requests past this bound
+  # still work, but their caller-owned transports cannot enter the pool.
+  MAX_POOLED = 16
+  @transports : Array(RisHttpClientExchange)
   # The kept connections, a key's together: a few origins, scanned.
   @idle : Array({String, Conn})
   @idle_keys : String::Builder
@@ -3860,6 +3866,13 @@ pub class HTTPClient
     @idle = [] of {String, Conn}
     @idle_keys = String::Builder.new(256)
     @limit = idle
+    transports = Array(RisHttpClientExchange).new(MAX_POOLED)
+    {% for i in 0...MAX_POOLED %}
+      response{{i}} = Response.new(0)
+      transport{{i}} = RisHttpClientExchange.new(response{{i}})
+      transports << transport{{i}}
+    {% end %}
+    @transports = transports
     @made = 0
     @reused = 0
     @resumed = 0
@@ -3991,6 +4004,21 @@ pub class HTTPClient
     nil
   end
 
+  # A live socket reserves its slot until closed or returned to idle.
+  # Overflow uses the caller's exchange and is closed instead of pooled.
+  protected def transport(fallback : RisHttpClientExchange) : RisHttpClientExchange
+    return fallback if @limit == 0
+    @transports.each do |slot|
+      # HTTP/2 owns compression tables and flow windows for one socket;
+      # a closed HTTP/2 slot stays retired until those can be reset.
+      if !slot.connecting && slot.socket.closed? && slot.conn.h2.nil?
+        slot.connecting = true
+        return slot
+      end
+    end
+    fallback
+  end
+
   protected def made : Nil
     @made = @made + 1
   end
@@ -4027,6 +4055,10 @@ pub class HTTPClient
   end
 
   protected def give_back(key : String, conn : Conn) : Nil
+    unless @transports.any? { |slot| slot.conn.state_address == conn.state_address }
+      conn.close
+      return
+    end
     count = 0
     @idle.each { |kept| count = count + 1 if kept[0] == key }
     if count >= @limit
@@ -4897,12 +4929,6 @@ pub struct HTTP
     upgrade_config.identity = under.identity
     recorded = dialer.records? && secure && route.nil? && upgrade.nil? && !client.nil? && client.use_https_records
     client.read_system if recorded && client && client.resolver.nil?
-    connection_slot = state.conn
-    tls_slot = state.tls
-    tls_stream = state.stream
-    snapshot = state.snapshot
-    snapshot.configure(under)
-    h2_slot = state.h2
     while true
       conn = nil.as(Conn?)
       if (keeping = client) && !upgrade
@@ -4915,10 +4941,17 @@ pub struct HTTP
       end
       reused = !conn.nil?
       unless conn
+        transport = client && !upgrade ? client.transport(state) : state
+        defer transport.connecting = false
+        connection_slot = transport.conn
+        tls_slot = transport.tls
+        tls_stream = transport.stream
+        snapshot = transport.snapshot
+        h2_slot = transport.h2
         wait = timeout_ms > 0 ? timeout_ms : -1
         made = nil.as(IyiSocket?)
         if recorded && (keeping = client)
-          found = dialer.by_records(state, keeping, origin, host, port, under, timeout_ms)
+          found = dialer.by_records(transport, keeping, origin, host, port, under, timeout_ms)
           return found if found.is_a?(Cancelled) || found.is_a?(SocketError) || found.is_a?(HTTPError)
           made = found
         end
@@ -4934,7 +4967,7 @@ pub struct HTTP
           conn.made_under = snapshot
           speaks_h2 = tls.alpn_protocol == "h2"
         else
-          socket = state.connect(dialer, client, dial_host, dial_port, wait)!
+          socket = transport.connect(dialer, client, dial_host, dial_port, wait)!
           client.made if client
           if tunneled && (via = route)
             unopened = tunnel(socket, via, named + ":" + port.to_s, tunnel_credential, timeout_ms, secure)
@@ -4961,7 +4994,10 @@ pub struct HTTP
             tls = tls_slot
             tls.configure(socket, host, offered, session)
             problem = tls.over(timeout_ms > 0 ? timeout_ms : TlsClient::HANDSHAKE_TIMEOUT_MS)
-            return HTTPError.new(problem.message) if problem
+            if problem
+              socket.close
+              return HTTPError.new(problem.message)
+            end
             client.resumed if client && tls.resumed?
             tls_stream.configure(tls, tls.host)
             connection_slot.configure(socket, tls_stream)

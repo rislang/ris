@@ -1499,6 +1499,12 @@ if [ "$out" = "$want" ]; then
 else
   echo "FAILED   answer_tls: $out"; status=1
 fi
+out=$("$RIS" run test/ris/client_pool_tls.ri 2>&1)
+if [ "$out" = 'PASS: two HTTPS requests on one pooled connection' ]; then
+  echo "runs     client_pool_tls"
+else
+  echo "FAILED   client_pool_tls: $out"; status=1
+fi
 # An echo over take_over, a WebSocket over TLS, an ACME challenge.
 out=$("$RIS" run test/ris/answer_upgrade.ri 2>&1)
 want='HTTP/1.1 101 true true

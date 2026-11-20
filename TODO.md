@@ -70,39 +70,24 @@ Unknown must be refused (SPEC 3.6).
   "holder" a clear must refuse is a SPEC question: decide it (EGM),
   then refuse both forms or drop this item.
 
-## 4. SSE stable storage, then HTTPClient pooling
+## 4. SSE stable storage and HTTPS records
 
 * test/ris/sse.ri needs stable storage, then inclusion
   in check.sh: EventParser replaces
   `@line` and `@data` with a new builder in a round, and keeps `@type` and
   `@id_buffer` from `SSE.clean`'s scratch. Give them stable storage.
 
-* HTTPClient pooling: HTTPClient owns one exchange per pooled
-  connection with `@idle` as indexes into them, not `{String, Conn}`
-  made per request; SSE.open keeps one exchange beside its parser; gate:
-  two requests over one connection, `reused` 1. Today `client.open` is
-  refused at open_by: the exchange it makes is its own, and give_back
-  would keep its Conn in the client. A try (exchanges made in
-  initialize, `lend`/`release` by index, `take` given the exchange)
-  got past these, in order:
-  - `connect_by_records` made and answered a TlsClient and a tuple: it
-    takes the exchange, moves the socket into it (an `adopt` beside
-    `take_connection`), handshakes on its `tls` slot and answers the
-    socket; the caller reads the config back with `https_current`.
-  - Exchanges made under `if i <= idle` in initialize (macro-unrolled)
-    and pushed into `@exchanges` are refused ("cannot store a view
-    beyond its owner scope"). Taking branches out of the checker's
-    scopes passes them but breaks refused/root_branch_escape and
-    root_store_join: SPEC 3.2 says branch-local storage cannot escape,
-    while 1.1 frees only per def, round and block. Decide with EGM, or
-    make all MAX_POOLED exchanges (16 resolvers and buffers a client).
-  - The resolver refill: read once a request before the loop (done).
-  - SvcbStore kept views of the DNS message (done).
-  Next: `HTTP.https_endpoints` stores `ech` bytes and the `ordered`
-  alpn made in its block into the endpoints, and passes Arrays where
-  HttpsEndpoint takes views: build them into caller-owned storage.
-  Unknown what follows; the HTTPS-records path never compiled behind a
-  client before.
+* HTTPClient HTTPS-records path: `HTTP.https_endpoints` stores `ech`
+  bytes and the `ordered` alpn made in its block into the endpoints,
+  and passes Arrays where HttpsEndpoint takes views: build them into
+  caller-owned storage. Unknown what follows; this path never compiled
+  behind a client before. Ordinary pooling now keeps its transport on
+  the client's tape; test/ris/client_pool_tls.ri gates two HTTPS
+  requests, one connection made and one reused.
+
+* HTTPClient retires a closed HTTP/2 transport slot: its HPACK tables,
+  stream IDs and flow windows belong to that connection. Add an in-place
+  reset before recycling those slots; overflow safely closes on return.
 
 ## 5. Tighten heap_trap
 
