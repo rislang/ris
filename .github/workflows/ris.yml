@@ -81,6 +81,11 @@ jobs:
         run: python3 test/cli/agent_loop.py
         env:
           RIS: ./bin/ris
+      - name: Context packs omit bodies and reduce grounding bytes
+        if: matrix.shard == 'heap'
+        run: python3 test/cli/context_pack.py
+        env:
+          RIS: ./bin/ris
       - name: 128-bit text and URI resolution
         if: matrix.shard == 'heap'
         run: bash test/cli/std_int128_uri_resolution.sh
