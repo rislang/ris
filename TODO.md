@@ -81,14 +81,14 @@ Unknown must be refused (SPEC 3.6).
   made by a call, a callee's copy_to(RisCurrentTape.new) included,
   returned from a def that is not one call: RESULT moves only texts
   (refused/kept_struct_returned; acme's error paths, x509.read_pem and
-  time's Location.load now end in copy_to(RisCurrentTape.new)); (b) std/http's supervise spawned a task
-  whose @[TaskClosureUnsafe] closure lived on supervise's tape (now in
-  prefork). Open: (c) `return AcmeError.new("#{x}")` from a loop round
-  in a def that is not one call passes, and its detail read poison
-  (acme's poll): check_leaving drops a struct value's root
-  (struct_value?), and __iyi_text_move skips a struct with a view
-  field, so the text stays in the freed scratch. A small repro did not
-  show it. The other shapes (a constructor's view, a loop round's key,
+  time's Location.load now end in copy_to(RisCurrentTape.new)); (b)
+  std/http's supervise spawned a task whose @[TaskClosureUnsafe] closure lived on supervise's tape (now in
+  prefork); (c) an error with a view field made in a loop round and
+  passed on by a caller that is not one call (acme's poll): RESULT
+  moved only structs of texts, so the detail read poison. Now
+  __iyi_text_move moves a struct's texts whatever else it holds
+  (test/ris/struct_view_round_error.ri, plain and poisoned). The
+  other shapes (a constructor's view, a loop round's key,
   JSON-viewing strings, builder growth) do not reproduce poisoned.
 
 * A def's result that holds a value an earlier call of the def made is

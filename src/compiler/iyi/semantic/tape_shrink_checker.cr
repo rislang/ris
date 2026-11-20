@@ -2360,7 +2360,7 @@ class Iyi::TapeShrinkChecker
       # A struct copied onto the running tape that the def returns: KEEP
       # carries it. A class copy stays refused here, at the return.
       next if node.is_a?(Def) && current_copy?(source) &&
-              type.try(&.remove_typedef.struct?) &&
+              type.try { |t| struct_only?(t.remove_typedef) } &&
               TapeScopeChecker.keeps?(node.body)
       what = node.is_a?(Def) ? "def `#{node.name}`" : "block"
       refuse node, "cannot return a value made in this #{what}'s scratch: " \
@@ -2369,6 +2369,15 @@ class Iyi::TapeShrinkChecker
                  "parameter, grow a local in place and return it, or " \
                  "write copy_to(owner)", root_name(source)
     end
+  end
+
+  # A struct, or a union of structs and Nil (`SigningKey | X509Error`):
+  # no class instance a KEEP copy would leave in the scratch.
+  private def struct_only?(type : Type) : Bool
+    if type.is_a?(UnionType)
+      return type.union_types.all? { |t| t.nil_type? || struct_only?(t.remove_typedef) }
+    end
+    type.struct?
   end
 
   # Whether each tape member of *source* that *result* can hold is one
