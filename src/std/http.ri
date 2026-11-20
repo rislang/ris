@@ -850,6 +850,15 @@ struct Conn
     head
   end
 
+  # Wait for a request head without making a String in this def. The
+  # caller copies these bytes onto its tape before consuming or refilling.
+  # Negative results have head_end's meaning.
+  @[NoSpec("Internal buffer boundary; test/ris/http_answer_split.ri")]
+  def request_head_size(limit : Int32) : Int32
+    at = head_end(limit, true)
+    at < 0 ? at : at + 4 - @state.value.start
+  end
+
   # Where the held head's blank line starts; -1 when the connection
   # ends first, -2 past *limit* bytes.
   private def head_end(limit : Int32, blank_first : Bool) : Int32
@@ -3170,22 +3179,22 @@ pub struct Server
     # *between*: an earlier request was answered, so a new connection may
     # take this one's place while no byte of the head has come (SPEC 5.6).
     conn.awaiting_head = between
-    got = conn.read_head(MAX_HEAD, "request", true)
+    got = conn.request_head_size(MAX_HEAD)
     conn.awaiting_head = false
     conn.no_deadline
-    case got
-    in Nil
+    if got == -1
       # Ended to let a new one in: this side wrote last.
       return conn.yielded? ? 1 : 2
-    in HTTPError
-      refuse(conn.transport, got)
+    elsif got == -2
+      refuse(conn.transport, HTTPError.new("request headers past #{MAX_HEAD} bytes", 431))
       return 1
-    in String
-      text = got.copy_to(RisCurrentTape.new)
+    else
+      text = conn.tape_copy(0, got)
+      conn.consume(got)
       fields = Array(Field).new(16)
       texts = String::Builder.new(256)
       parsed = HTTPError.new("incomplete request")
-      case seen = parse_head(text.as_tape, 0, true, fields)
+      case seen = parse_head(text, 0, true, fields)
       in ParsedHead
         parsed = request_head_view(seen, fields, texts)
       in HeadError

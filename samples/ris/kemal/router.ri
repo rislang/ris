@@ -14,6 +14,7 @@
 @[NoSpec("sample program; its defs are shown, not promised")]
 module kemal/router
 
+@[OnTape]
 pub struct Context
   getter method : String
   getter path : String
@@ -60,17 +61,20 @@ FILTER_METHODS = %w(get post put patch delete options)
 pub class Router
   alias Handler = Context -> String
 
+  @[OnTape]
   private record RouteDefinition,
     method : String,
     path : String,
     handler : Handler
 
+  @[OnTape]
   private record FilterDefinition,
     kind : Symbol,
     method : String,
     path : String,
     handler : Handler
 
+  @[OnTape]
   private record SubRouter,
     path : String,
     router : Router

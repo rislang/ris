@@ -26,6 +26,7 @@ import app/formal::{address}
 # taking both whole would make every unqualified `title` in this module
 # ambiguous.
 
+@[OnTape]
 pub struct User
   getter name : String
 

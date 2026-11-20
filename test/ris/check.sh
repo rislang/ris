@@ -1754,6 +1754,14 @@ else
   echo "FAILED   http_keepalive_scope: $out"; status=1
 fi
 rm -f "$exe"
+# A split head on the slow answer path retains fields across body reads.
+out=$(RIS="$RIS" bash test/ris/http_answer_split.sh 2>&1)
+if [ $? -eq 0 ] &&
+   grep -qx 'PASS: split slow head, 0 growth moves, 0 side regions' <<<"$out"; then
+  echo "runs     http_answer_split (0 growth moves)"
+else
+  echo "FAILED   http_answer_split: $out"; status=1
+fi
 # The same for Server.answer's loop (tape_connection): plain requests
 # answered in place and chunked ones read the slow way, alternating.
 exe=$(mktemp)
@@ -3711,6 +3719,13 @@ else
   echo "FAILED   spec module dir: $out"; status=1
 fi
 
+out=$("$RIS" check test src/std/int.ri 2>&1)
+if [ "$?" -eq 0 ]; then
+  echo 'runs     spec module int'
+else
+  echo "FAILED   spec module int: $out"; status=1
+fi
+
 out=$("$RIS" check test src/std/io.ri 2>&1)
 if [ "$?" -eq 0 ]; then
   echo 'runs     spec module io'
@@ -3799,6 +3814,14 @@ for name in std_big_exercise std_websocket_exercise; do
       <<<"$out")"; status=1
   fi
 done
+
+# Macro evaluation sees literals inside program-owned initializers.
+out=$("$RIS" run test/ris/macro_literal_constant.ri 2>&1)
+if [ "$out" = "macro_literal_constant ok" ]; then
+  echo "runs     macro_literal_constant"
+else
+  echo "FAILED   macro_literal_constant: $out"; status=1
+fi
 
 # Run heap workloads after the other gates to avoid compiler contention.
 # Keep their fixed timeouts: a hung census must still fail.

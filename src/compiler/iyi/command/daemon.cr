@@ -321,7 +321,7 @@ class Iyi::Command
       server = UNIXServer.new(path)
 
       elapsed = Time.instant
-      preanalysed = Compiler.new.preanalyse_prelude
+      preanalysed = daemon_default_compiler.preanalyse_prelude
       Compiler.preanalysed[preanalysed.key] = preanalysed
 
       STDERR.puts "#{Command.program_name} daemon listening on #{path}"
@@ -334,7 +334,7 @@ class Iyi::Command
           # Every cached prelude came from the same sources, so they are all
           # stale together.
           Compiler.preanalysed.clear
-          preanalysed = Compiler.new.preanalyse_prelude
+          preanalysed = daemon_default_compiler.preanalyse_prelude
           Compiler.preanalysed[preanalysed.key] = preanalysed
           STDERR.puts "prelude changed, re-analysed in #{elapsed.elapsed.total_seconds.round(3)}s"
           STDERR.flush
@@ -344,6 +344,13 @@ class Iyi::Command
   end
 
   {% if flag?(:without_mt) %}
+    private def daemon_default_compiler : Compiler
+      compiler = Compiler.new
+      # There is no entry filename at startup to select the ris prelude.
+      compiler.prelude = "ris/prelude" if Command.program_name == "ris"
+      compiler
+    end
+
     # `poll(2)`, because the server has to wait on many descriptors from a single
     # fiber. Crystal has no `IO.select`, and a fiber per stream is what broke the
     # first attempt at concurrency: a forked child inherits the parent's live

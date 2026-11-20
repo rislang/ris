@@ -13,6 +13,10 @@ a rename after 0.1.0 would break callers (doc/drafts/pool-t, Q5).
 
 ## To take to iyi
 
+* std/int keeps its type-generation macro inside RisBits, with absolute
+  type names. Pure spec blocks then avoid program runners and their
+  filesystem imports. Gate: test/ris/check.sh, spec module int.
+
 * Formatter macro fragments retain their enclosing def and local-variable
   scope. Regex literals beginning with `=` also retokenize `/=` as a
   delimiter. Gates: test/compiler/formatter/iyi_formatter_test.cr.
@@ -248,3 +252,7 @@ Spec builds recognize complete declarations around nested macro branches,
 including platform branches inside classes. SPEC.md todo markers track
 clauses no module keeps without changing their text hashes. Both changes
 belong upstream in iyi (doc/drafts/spec-port/, phases 3-4).
+
+128-bit text parsing and RFC 3986 resolution example coverage belong in
+iyi as well (src/std/int.ri and src/std/uri.ri). Builder formatting and
+resolution keep their output on the caller's tape in ris.

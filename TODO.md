@@ -188,17 +188,10 @@ Unknown must be refused (SPEC 3.6).
 * generic_boundary.py: reads samples/ris now; samples/ris/calc does not
   build: String indexes are UInt8 (calc.ri:37, calc/parser.ri:92 passes
   a byte as Binary's Char op).
-* daemon_agrees.py: names fixed (bin/ris, `make ris-daemon`), still
-  fails: samples/ris/modules.ri does not build (User's `@name : String`
-  holds the tape type String), and the daemon is gone after the first
-  build ("no daemon listening").
 * test/speed/metric_port.sh: std/gc dropped from the port and
   `Array.new(n) { }` fixed; the port still needs String indexes as bytes
   (`.ord` on UInt8, Hash(Char) keys) and Coordinates.from_json refers to
   a private constant.
-* test/speed/rebuild_speed.py: reads samples/ris now; kemal/router.ri:93
-  `{% for method in HTTP_METHODS %}` is refused: the constant reaches the
-  macro as `__ris_program_init` call, not an array literal.
 
 * Build each test/cli program, group refusals by message, fix per group.
   2026-11-20 (seventh round): 123 of 131 build; left acme, autocert,
@@ -459,8 +452,6 @@ change. Gates stay structural.
 
 ## 10. std
 
-* HTTP answer's slow request path still uses String-based read_head and
-  body readers. Recheck prefork, TLS and samples/ris/web after it.
 * TlsConfig system roots: check whether SystemRoots (00130b97e) already
   keeps them. If still read per handshake, make Certificate copyable to
   Program.tape to keep them once.
@@ -469,8 +460,7 @@ change. Gates stay structural.
   mutation checks (part A's gates: test/ris/autocert.ri, autocert_wire.ri).
 * std_process: the `handlers` mutation proof (child keeps this program's
   TERM handler) is not caught.
-* Add 128-bit formatting, IDNA and URI resolution.
-* src/ris/float.ri's parser has a copy in src/ris/tape.ri: merge them.
+* Add IDNA.
 
 ## 11. macOS arm64
 

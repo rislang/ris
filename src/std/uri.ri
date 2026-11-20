@@ -285,6 +285,11 @@ pub struct ParsedURI
     t
   end
 
+  # Append the complete resolved reference to the caller's builder.
+  def resolve_to(ref : ParsedURI | String, writer : String::Builder) : Nil
+    resolve(ref).to_s(writer)
+  end
+
   # A `new`, so the URI is built in the caller's destination (SPEC 1.5).
   def to_uri : URI
     URI.new(self)
@@ -1121,11 +1126,15 @@ pub class URI
 
   def self.resolved_path(path : String, texts : String::Builder) : String
     at = texts.bytesize
-    texts << remove_dot_segments(path)
+    remove_dot_segments(path, texts)
     texts.finish[at, texts.bytesize - at]
   end
 
   def self.remove_dot_segments(path : String) : String
+    String.build(path.bytesize) { |w| remove_dot_segments(path, w) }
+  end
+
+  def self.remove_dot_segments(path : String, w : String::Builder) : Nil
     raw = path
     len = path.bytesize
     capacity = 1
@@ -1180,7 +1189,8 @@ pub class URI
         i = j
       end
     end
-    String.build(path.bytesize) { |w| output_segments.join(w) }
+    output_segments.join(w)
+    nil
   end
 
   # The dot segments of a relative reference's path taken out as resolving
@@ -1275,6 +1285,11 @@ pub class URI
 
     t.fragment = r.fragment
     t
+  end
+
+  def resolve_to(ref : URI | String, writer : String::Builder) : Nil
+    reference = ref.is_a?(URI) ? ref.as_tape : URI.parse(ref)
+    as_tape.resolve_to(reference, writer)
   end
 
   # RFC 3986 Section 5.2.3: Merge Paths
@@ -1413,4 +1428,76 @@ spec 8.1  # A std module follows the standard its header names (an RFC, a fileâ€
   w.finish.empty?
   Params.parse("=&a=%&b=%0&c=%GG&plus=%2B".as_tape).to_s(w)
   w.finish == "=&a=%25&b=%250&c=%25GG&plus=%2B"
+end
+
+# uri.5 Resolution applies RFC 3986 section 5.2, including authority, query and
+#   fragment inheritance and dot-segment removal. Normalization returns a new
+#   reference with lowercase scheme and host, uppercase host escape digits,
+#   default ports removed and dot segments removed.
+spec uri.5
+  base = URI.parse("http://a/b/c/d;p?q")
+  w = String::Builder.new(256)
+  cases = [
+    {"g:h", "g:h"},
+    {"g", "http://a/b/c/g"},
+    {"./g", "http://a/b/c/g"},
+    {"g/", "http://a/b/c/g/"},
+    {"/g", "http://a/g"},
+    {"//g", "http://g"},
+    {"?y", "http://a/b/c/d;p?y"},
+    {"g?y", "http://a/b/c/g?y"},
+    {"#s", "http://a/b/c/d;p?q#s"},
+    {"g#s", "http://a/b/c/g#s"},
+    {"g?y#s", "http://a/b/c/g?y#s"},
+    {";x", "http://a/b/c/;x"},
+    {"g;x", "http://a/b/c/g;x"},
+    {"g;x?y#s", "http://a/b/c/g;x?y#s"},
+    {"", "http://a/b/c/d;p?q"},
+    {".", "http://a/b/c/"},
+    {"./", "http://a/b/c/"},
+    {"..", "http://a/b/"},
+    {"../", "http://a/b/"},
+    {"../g", "http://a/b/g"},
+    {"../..", "http://a/"},
+    {"../../", "http://a/"},
+    {"../../g", "http://a/g"},
+    {"../../../g", "http://a/g"},
+    {"../../../../g", "http://a/g"},
+    {"/./g", "http://a/g"},
+    {"/../g", "http://a/g"},
+    {"g.", "http://a/b/c/g."},
+    {".g", "http://a/b/c/.g"},
+    {"g..", "http://a/b/c/g.."},
+    {"..g", "http://a/b/c/..g"},
+    {"./../g", "http://a/b/g"},
+    {"./g/.", "http://a/b/c/g/"},
+    {"g/./h", "http://a/b/c/g/h"},
+    {"g/../h", "http://a/b/c/h"},
+    {"g;x=1/./y", "http://a/b/c/g;x=1/y"},
+    {"g;x=1/../y", "http://a/b/c/y"},
+    {"g?y/./x", "http://a/b/c/g?y/./x"},
+    {"g?y/../x", "http://a/b/c/g?y/../x"},
+    {"g#s/./x", "http://a/b/c/g#s/./x"},
+    {"g#s/../x", "http://a/b/c/g#s/../x"},
+    {"http:g", "http:g"},
+  ]
+  ok = true
+  cases.each do |pair|
+    w.clear
+    w << "prefix:"
+    base.resolve_to(pair[0], w)
+    ok = false unless w.finish == "prefix:" + pair[1]
+    w.clear
+    base.to_uri.resolve_to(pair[0], w)
+    ok = false unless w.finish == pair[1]
+    w.clear
+    ok = false unless base.resolve(URI.parse(pair[0]), w).to_s == pair[1]
+  end
+  ok == true
+  w.clear
+  URI.parse("http://a").resolve_to("g", w)
+  w.finish == "http://a/g"
+  w.clear
+  URI.parse("http://u:p@a/x?q#old").resolve_to("?#", w)
+  w.finish == "http://u:p@a/x?#"
 end

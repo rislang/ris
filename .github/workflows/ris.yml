@@ -60,6 +60,14 @@ jobs:
         run: bash .github/ci-setup.sh
       - name: Build ris
         run: make ris
+      - name: Daemon and plain builds agree
+        if: matrix.shard == 'heap'
+        run: |
+          make ris-daemon
+          python3 test/cli/daemon_agrees.py
+      - name: Rebuild from source and artifacts
+        if: matrix.shard == 'heap'
+        run: python3 test/speed/rebuild_speed.py
       - name: The respond sample runs
         if: matrix.shard == 'heap'
         run: ./bin/ris run samples/ris/respond.ri
@@ -71,6 +79,11 @@ jobs:
       - name: The agent loop
         if: matrix.shard == 'heap'
         run: python3 test/cli/agent_loop.py
+        env:
+          RIS: ./bin/ris
+      - name: 128-bit text and URI resolution
+        if: matrix.shard == 'heap'
+        run: bash test/cli/std_int128_uri_resolution.sh
         env:
           RIS: ./bin/ris
       - name: ris spec
