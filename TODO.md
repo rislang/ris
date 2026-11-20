@@ -18,9 +18,6 @@ What CHANGELOG's 0.1.0 promises must work; the items stay in their
 sections below and are listed here in order:
 
 * Benches build (section 7), including `HTTP.tls_config=` callers.
-* SPEC todos all proved (decided 2026-11-15,
-  doc/drafts/release-0.1-todos/triage.md), in order: 2.3, 4.2, 6.6,
-  6.4, capsule.8, 5.4, 6.2, then 6.1 Pool(T) after an EGM draft.
 
 ## 1. Programs first
 
