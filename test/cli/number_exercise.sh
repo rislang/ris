@@ -252,28 +252,30 @@ prove_fails() { # prove_fails <label> <dir> <file> <phrase> <sed script>
 
 # 1. The parser accumulating a positive magnitude again, which is what could
 #    not read `Int32::MIN`.
-prove_fails "parser accumulates positively" pos_parse string.ri \
+prove_fails "parser accumulates positively" pos_parse tape_text.ri \
   "arithmetic overflow" \
-  's/^      value = value \* 10 - digit$/      value = value * 10 + digit/'
+  's/^      value = value \* base - digit$/      value = value * base + digit/'
 
 # 2. The range guard removed, so a string that does not fit reaches the
 #    checked arithmetic and panics where a `nil` was promised. That panic is
 #    the old behaviour, and it is what this proof reads.
-prove_fails "range guard removed" no_guard string.ri \
+prove_fails "range guard removed" no_guard tape_text.ri \
   "arithmetic overflow" \
-  's/^      return nil if value < -214748364 || (value == -214748364 \&\& digit > 8)$/      # unguarded/'
+  's/^      return nil if value < bound || (value == bound \&\& digit > cutoff)$/      # unguarded/'
 
 # 3. The magnitude that only exists as a negative handed back as a positive,
 #    so `"2147483648"` answers a number instead of nil.
-prove_fails "min accepted as a positive" min_pos string.ri \
+prove_fails "min accepted as a positive" min_pos tape_text.ri \
   "number: max plus one is nil" \
-  's/^    return nil if value == -2147483648$/    return 0 if value == -2147483648/'
+  's/^    return nil if value == limit$/    return 0 if value == limit/'
 
 # 4. Truncation turned into a floor, so `//` and `%` stop agreeing. Anchored
 #    on the Int32 overflow guard, which is the one line only `Int32#//` has.
+#    Only for a divisor of 2: the text parser divides by its base first, and
+#    a floor there overflows before the exercise reaches its check.
 prove_fails "division floors instead" floor_div number.ri \
   "number: division truncates toward zero" \
-  's/^    raise "arithmetic overflow" if self == -2147483648 \&\& other == -1$/    return unsafe_div(other) - 1 if self < 0/'
+  's/^    raise "arithmetic overflow" if self == -2147483648 \&\& other == -1$/    return unsafe_div(other) - 1 if self < 0 \&\& other == 2 \&\& unsafe_mod(other) != 0/'
 
 # 5. And the remainder beside it, anchored the same way on `Int32#%`.
 prove_fails "remainder takes the divisor sign" mod_sign number.ri \
@@ -282,9 +284,9 @@ prove_fails "remainder takes the divisor sign" mod_sign number.ri \
 
 # 6. `to_s` in a base, the other direction of the round trip: the letters
 #    written from the wrong offset.
-prove_fails "base printing broken" bad_base number.ri \
+prove_fails "base printing broken" bad_base tape.ri \
   "number: hex" \
-  's/^        buffer\[at\] = d < 10 ? (48 + d).to_u8 : (87 + d).to_u8$/        buffer[at] = d < 10 ? (48 + d).to_u8 : (55 + d).to_u8/'
+  's/^      bytes\[63 - count\] = (digit < 10 ? 48 + digit : 87 + digit).to_u8$/      bytes[63 - count] = (digit < 10 ? 48 + digit : 55 + digit).to_u8/'
 
 # 7. The rounding a column of numbers reads, in the file it lives in: the
 #    conversion's floor truncating, with the instruction out of the way.

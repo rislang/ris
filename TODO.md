@@ -114,7 +114,7 @@ Unknown must be refused (SPEC 3.6).
 
 * Unrun check scripts sorted (2026-11-20): 12 run in CI, windows, wasm
   and sandbox scripts deleted, bounded_gate and 3 timings are TOOLS. The
-  20 below fail and sit in gates_reachable.py's BROKEN; each moves to a
+  16 below fail and sit in gates_reachable.py's BROKEN; each moves to a
   CI step and off BROKEN when it passes.
 * collections_exercise.sh: `{{1, 2} => 5}` prints without the space
   `{ {1, 2} => 5 }`; a missing key panics without "no such key";
@@ -132,25 +132,25 @@ Unknown must be refused (SPEC 3.6).
   not the one the script expects.
 * runtime_exercise.sh: dependency floor: the runtime puts undefined
   symbols back on the link line (__gmon_start__, _ITM_*…).
-* server_load.sh: the failure proof copies to patched/ris/, which is not
-  there (`cp: target 'patched/ris/'`).
-* number_exercise.sh: the break-it step edits src/ris/string.ri, gone;
-  "remainder without its guard" dies of signal 8.
-* language_is_named.py: two Parser.new calls without filename in
-  syntax/parser.cr (lines 493, 905).
 * mod_context.sh: imports left ungrounded (autocert calc logline webapp);
   tool dependencies fail on webapp.
 * lsp_artifacts.py: the workspace does not build (with source and
   artifact-only); no interface hash.
 * lsp_positions.py: hangs (killed after 15 min, no output).
-* lsp_token_boundaries.py: reads samples/iyi, gone.
-* generic_boundary.py: builds immutable.ri from the wrong directory
-  ("no such file: immutable.ri").
-* daemon_agrees.py: runs bin/iyi, gone; use bin/ris.
-* test/speed/measured_numbers.py: reads README.iyi.md, gone.
-* test/speed/metric_port.sh: the port imports std/gc, refused.
-* test/speed/rebuild_speed.py: copies samples/iyi; "can't find module
-  calc/lexer".
+* generic_boundary.py: reads samples/ris now; samples/ris/calc does not
+  build: String indexes are UInt8 (calc.ri:37, calc/parser.ri:92 passes
+  a byte as Binary's Char op).
+* daemon_agrees.py: names fixed (bin/ris, `make ris-daemon`), still
+  fails: samples/ris/modules.ri does not build (User's `@name : String`
+  holds the tape type String), and the daemon is gone after the first
+  build ("no daemon listening").
+* test/speed/metric_port.sh: std/gc dropped from the port and
+  `Array.new(n) { }` fixed; the port still needs String indexes as bytes
+  (`.ord` on UInt8, Hash(Char) keys) and Coordinates.from_json refers to
+  a private constant.
+* test/speed/rebuild_speed.py: reads samples/ris now; kemal/router.ri:93
+  `{% for method in HTTP_METHODS %}` is refused: the constant reaches the
+  macro as `__ris_program_init` call, not an array literal.
 
 * Build each test/cli program, group refusals by message, fix per group.
   2026-11-14 (fifth round): 114 of 130 programs pass

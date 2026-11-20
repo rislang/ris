@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A build served by the daemon answers what a plain build answers.
 
-    make iyi iyi-daemon
+    make ris ris-daemon
     python3 test/cli/daemon_agrees.py
 
 `test/cli/daemon_protocol.py` asks what the daemon does when a client is not a
@@ -42,7 +42,7 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-RIS = os.path.join(ROOT, "bin", "iyi")
+RIS = os.path.join(ROOT, "bin", "ris")
 
 BASE = """module app/base
 
@@ -188,7 +188,7 @@ def package_workspace(where):
 
 
 def main():
-    work = tempfile.mkdtemp(prefix="iyi-daemon-agrees")
+    work = tempfile.mkdtemp(prefix="ris-daemon-agrees")
     socket = os.path.join(work, "daemon.sock")
     daemon = subprocess.Popen([RIS, "daemon", "start", "--socket", socket],
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -207,7 +207,7 @@ def main():
             return status
 
         # The ordinary shape, from the corpus every other gate uses.
-        samples = os.path.join(ROOT, "samples", "iyi")
+        samples = os.path.join(ROOT, "samples", "ris")
         compare("a sample with imports", os.path.join(samples, "modules.ri"),
                 samples, dict(os.environ, RIS_PATH=os.path.join(ROOT, "src")),
                 socket, work)
@@ -247,8 +247,8 @@ def main():
         # minutes in a job that has thirty-five of them.
         elsewhere = os.path.join(work, "other-library")
         other_library = os.path.join(elsewhere, "src")
-        os.makedirs(os.path.join(other_library, "iyi"), exist_ok=True)
-        for name in (os.path.join("iyi", "prelude.ri"), "prelude.cr"):
+        os.makedirs(os.path.join(other_library, "ris"), exist_ok=True)
+        for name in (os.path.join("ris", "prelude.ri"), "prelude.cr"):
             with open(os.path.join(other_library, name), "w") as f:
                 f.write("# not this tree's prelude\n")
         entry = os.path.join(elsewhere, "x.ri")

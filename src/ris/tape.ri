@@ -1163,8 +1163,8 @@ struct Array(T)
   # *count* elements, the block giving each by index, in room of exactly
   # that size. Linux reserves stable storage even if later appended to;
   # the block may allocate other growing values while filling it.
-  def self.new(count : Int32 | Int64, & : Int32 -> T) : self
-    array = new(count)
+  def self.new(count : Int32 | Int64, & : Int32 -> T) : Array(T)
+    array = Array(T).new(count)
     index = 0
     while index < count
       array.push(yield index)
@@ -1174,8 +1174,8 @@ struct Array(T)
   end
 
   # *count* copies of *value*, as `Array.new(size, value)`.
-  def self.new(count : Int32, value : T) : self
-    new(count) { |index| value }
+  def self.new(count : Int32, value : T) : Array(T)
+    Array(T).new(count) { |index| value }
   end
 
   # Unchecked: `Tape.grown` keeps the room, and so the size, an Int32.

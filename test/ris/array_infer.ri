@@ -89,5 +89,14 @@ tape do
   hash_assignment = {}
   hash_assignment = {1 => 2}
   raise "hash assignment" unless hash_assignment[1] == 2
+
+  # Array.new(count) { ... } takes T from the block (metric_port.sh).
+  floats = Array.new(2) { 0.5 }
+  raise "block new" unless floats[1] == 0.5
+  rows2 = Array.new(3) { [] of Int32 }
+  rows2[0] = [1, 2]
+  raise "block new nested" unless rows2[0][1] == 2 && rows2.size == 3
+  copies = Array.new(2, 7)
+  raise "value new" unless copies[1] == 7
 end
 puts "PASS: first-store array and hash inference"

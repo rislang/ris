@@ -35,7 +35,7 @@ def name_char(ch):
 
 def main():
     root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "samples", "iyi"))
+        os.path.join(os.path.dirname(__file__), "..", "..", "samples", "ris"))
     files = sorted(glob.glob(root + "/**/*.ri", recursive=True))
     if not files:
         sys.exit(f"no corpus under {root}")
