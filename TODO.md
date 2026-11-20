@@ -460,7 +460,11 @@ change. Gates stay structural.
   mutation checks (part A's gates: test/ris/autocert.ri, autocert_wire.ri).
 * std_process: the `handlers` mutation proof (child keeps this program's
   TERM handler) is not caught.
-* Add 128-bit formatting, IDNA and URI resolution.
+* Add IDNA.
+
+* std/int's spec blocks never run: `ris test src/std/int.ri` stops on
+  the import cycle int -> ris_spec -> dir -> path -> int. int.6 and
+  int.7 are proved by test/cli/std_int128_uri_resolution.sh meanwhile.
 
 ## 11. macOS arm64
 

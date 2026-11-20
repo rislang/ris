@@ -248,3 +248,7 @@ Spec builds recognize complete declarations around nested macro branches,
 including platform branches inside classes. SPEC.md todo markers track
 clauses no module keeps without changing their text hashes. Both changes
 belong upstream in iyi (doc/drafts/spec-port/, phases 3-4).
+
+128-bit text parsing and RFC 3986 resolution example coverage belong in
+iyi as well (src/std/int.ri and src/std/uri.ri). Builder formatting and
+resolution keep their output on the caller's tape in ris.

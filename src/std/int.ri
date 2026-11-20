@@ -449,45 +449,36 @@ end
             {% if bits < 32 || signed %} to_i32 {% else %} unsafe_shr(1).to_i32 ^ (self & 1).to_i32 {% end %}
           end
         {% else %}
-          # Digits backward, the negative magnitude divided rather than
-          # negated so the smallest value prints (its negation is not one of
-          # the type).
           def to_s : String
             to_s(10)
           end
 
           def to_s(base : Int32) : String
-            raise "base out of range" if base < 2 || base > 36
-            return "0" if self == 0
+            String.build(130) { |w| to_s(w, base) }
+          end
 
-            radix = base.{{ (signed ? "to_i128" : "to_u128").id }}
-            negative = self < 0
-            digits = [] of Int32
-            temp = self
-            while temp != 0
-              rem = temp % radix
-              {% if signed %}
-                digits << (rem < 0 ? (-rem).to_i32 : rem.to_i32)
-              {% else %}
-                digits << rem.to_i32
-              {% end %}
-              temp = temp // radix
+          # Append directly; division uses an unsigned magnitude so MIN fits.
+          def to_s(writer : String::Builder, base : Int32 = 10) : Nil
+            raise "base out of range (2..36)" if base < 2 || base > 36
+            {% if signed %}
+              negative = self < 0
+              magnitude = negative ? 0_u128 &- unsafe_to_u128 : to_u128
+            {% else %}
+              negative = false
+              magnitude = self
+            {% end %}
+            writer << "-" if negative
+            divisor = 1_u128
+            radix = base.to_u128
+            while divisor <= magnitude.unsafe_div(radix)
+              divisor *= radix
             end
-
-            bytesize = negative ? digits.size + 1 : digits.size
-            String.new(bytesize) do |buffer|
-              at = 0
-              if negative
-                buffer[0] = 45_u8
-                at = 1
-              end
-              rev = digits.size - 1
-              while rev >= 0
-                d = digits[rev]
-                buffer[at] = d < 10 ? (48 + d).to_u8 : (87 + d).to_u8
-                at = at + 1
-                rev = rev - 1
-              end
+            loop do
+              digit = magnitude.unsafe_div(divisor).to_i32
+              writer.push((digit < 10 ? 48 + digit : 87 + digit).to_u8)
+              magnitude = magnitude.unsafe_mod(divisor)
+              break if divisor == 1
+              divisor = divisor.unsafe_div(radix)
             end
           end
 
@@ -601,4 +592,112 @@ struct ::Int
     raise "#{self} is out of char range" if self < 0 || self > 0x10FFFF || (self >= 0xD800 && self <= 0xDFFF)
     to_i32.unsafe_chr
   end
+end
+
+# Match the prelude's 64-bit readers: trimmed whitespace, optional sign,
+# case-insensitive digits, checked range and no partial parses.
+struct ::String
+  {% for signed in [true, false] %}
+    {% name = signed ? "to_i128" : "to_u128" %}
+    {% type = signed ? "Int128" : "UInt128" %}
+    def {{ name.id }}(base : Int32 = 10) : {{ type.id }}
+      {{ name.id }}?(base) || raise "not a 128-bit number"
+    end
+
+    def {{ name.id }}?(base : Int32 = 10) : {{ type.id }}?
+      raise "base out of range (2..36)" if base < 2 || base > 36
+      text = strip
+      return nil if text.empty?
+      index = 0
+      negative = text[0] == 45_u8
+      {% unless signed %}
+        return nil if negative
+      {% end %}
+      index += 1 if negative || text[0] == 43_u8
+      return nil if index == text.bytesize
+      {% if signed %}
+        limit = negative ? (1_u128 << 127) : (1_u128 << 127) - 1_u128
+      {% else %}
+        limit = 340282366920938463463374607431768211455_u128
+      {% end %}
+      radix = base.to_u128
+      value = 0_u128
+      while index < text.bytesize
+        b = text[index]
+        digit = if b >= 48_u8 && b <= 57_u8
+                  (b - 48_u8).to_u128
+                elsif b >= 65_u8 && b <= 90_u8
+                  (b - 65_u8).to_u128 + 10_u128
+                elsif b >= 97_u8 && b <= 122_u8
+                  (b - 97_u8).to_u128 + 10_u128
+                else
+                  return nil
+                end
+        return nil if digit >= radix
+        return nil if value > (limit - digit).unsafe_div(radix)
+        value = value * radix + digit
+        index += 1
+      end
+      {% if signed %}
+        negative ? (0_u128 &- value).unsafe_to_i128 : value.to_i128
+      {% else %}
+        value
+      {% end %}
+    end
+  {% end %}
+end
+
+# int.6 to_s accepts bases 2 through 36 and emits a sign and lowercase digits;
+#   other bases panic. chr accepts Unicode scalar values and rejects surrogates
+#   and values outside 0 through 0x10FFFF; unsafe_chr bypasses that check.
+spec int.6
+  w = String::Builder.new(140)
+  minimum = -170141183460469231731687303715884105728_i128
+  maximum = 340282366920938463463374607431768211455_u128
+  ok = true
+  (2..36).each do |base|
+    [minimum, -1_i128, 0_i128, 1_i128,
+     170141183460469231731687303715884105727_i128].each do |value|
+      w.clear
+      w << "prefix:"
+      value.to_s(w, base)
+      text = w.finish[7, w.bytesize - 7]
+      ok = false unless text.to_i128?(base) == value
+      ok = false unless value.to_s(base) == text
+    end
+    [0_u128, 1_u128, maximum].each do |value|
+      w.clear
+      w << "prefix:"
+      value.to_s(w, base)
+      text = w.finish[7, w.bytesize - 7]
+      ok = false unless text.to_u128?(base) == value
+      ok = false unless value.to_s(base) == text
+    end
+  end
+  ok == true
+  minimum.to_s == "-170141183460469231731687303715884105728"
+  maximum.to_s == "340282366920938463463374607431768211455"
+  " +FF ".to_i128(16) == 255_i128
+  (-35_i128).to_s(36) == "-z"
+  0x123456789abcdef_u128.to_s(16) == "123456789abcdef"
+  minimum.to_s(16) == "-80000000000000000000000000000000"
+  maximum.to_s(16) == "ffffffffffffffffffffffffffffffff"
+  "\t+FF\n".to_u128(16) == 255_u128
+  "170141183460469231731687303715884105728".to_i128?.nil?
+  "-170141183460469231731687303715884105729".to_i128?.nil?
+  "340282366920938463463374607431768211456".to_u128?.nil?
+  "-0".to_u128?.nil?
+  ["", "+", "-", "12x", "1_0", "0x10"].all? do |text|
+    text.to_i128?.nil? && text.to_u128?.nil?
+  end
+end
+
+# int.7 Numeric results are values; printed strings and digit arrays use the
+#   caller destination (SPEC 1.5) and own no external resource.
+spec int.7
+  w = String::Builder.new(140)
+  tape do
+    340282366920938463463374607431768211455_u128.to_s(w)
+  end
+  w.finish == "340282366920938463463374607431768211455"
 end

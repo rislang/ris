@@ -81,6 +81,11 @@ jobs:
         run: python3 test/cli/agent_loop.py
         env:
           RIS: ./bin/ris
+      - name: 128-bit text and URI resolution
+        if: matrix.shard == 'heap'
+        run: bash test/cli/std_int128_uri_resolution.sh
+        env:
+          RIS: ./bin/ris
       - name: ris spec
         if: matrix.shard == 'heap'
         run: python3 test/cli/spec_verb.py
