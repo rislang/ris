@@ -1754,6 +1754,14 @@ else
   echo "FAILED   http_keepalive_scope: $out"; status=1
 fi
 rm -f "$exe"
+# A split head on the slow answer path retains fields across body reads.
+out=$(RIS="$RIS" bash test/ris/http_answer_split.sh 2>&1)
+if [ $? -eq 0 ] &&
+   grep -qx 'PASS: split slow head, 0 growth moves, 0 side regions' <<<"$out"; then
+  echo "runs     http_answer_split (0 growth moves)"
+else
+  echo "FAILED   http_answer_split: $out"; status=1
+fi
 # The same for Server.answer's loop (tape_connection): plain requests
 # answered in place and chunked ones read the slow way, alternating.
 exe=$(mktemp)

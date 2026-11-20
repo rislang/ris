@@ -1,0 +1,72 @@
+# A split HTTP/1.0 head forces the slow answer path. Its fields must
+# survive the body refilling the connection buffer.
+module test/ris/http_answer_split
+
+import std/socket::{IyiSocket}
+import std/http::{Server, Incoming, Outgoing}
+
+struct Ready
+end
+
+struct Handler
+  def initialize(config : Int32)
+  end
+
+  def listening(port : Int32) : Nil
+    RisBoard.post(Ready.new)
+  end
+
+  def call(req : Incoming, res : Outgoing) : Nil
+    w = res.body
+    w.append(req.path)
+    w.append(" ")
+    raise "body" unless req.body.bytesize == 32768
+    req.body.each_byte { |byte| raise "body byte" unless byte == 120_u8 }
+    w.append_int(req.body.bytesize)
+    raise "lost head" unless req.header("X-Split") == "kept"
+  end
+end
+
+# Reads one answer whose body is Content-Length long.
+def answer(socket : IyiSocket) : String
+  got = ""
+  while true
+    at = got.index("\r\n\r\n")
+    if at
+      head = got[0, at]
+      marker = "Content-Length: "
+      from = (head.index(marker) || 0) + marker.bytesize
+      upto = head.index("\r\n", from) || head.bytesize
+      length = head[from, upto - from].to_i
+      return got[at + 4, length] if got.bytesize >= at + 4 + length
+    end
+    piece = socket.read(65536).or_panic
+    raise "closed early" if piece.empty?
+    got << piece
+  end
+end
+
+probe = IyiSocket.listen(0)
+port = probe.local_port
+probe.close
+group do |g|
+  g.spawn do
+    Server.answer("127.0.0.1", port, 0, Handler, max_connections: 1)
+    0
+  end
+  RisBoard.take(Ready).or_panic
+  socket = IyiSocket.connect("127.0.0.1", port).or_panic
+  socket.read_timeout_ms = 5000
+  socket.write("POST /split HTTP/1.0\r\nX-Spl").or_panic
+  sleep 20
+  socket.write("it: kept\r\nContent-Length: 32768\r\n").or_panic
+  sleep 20
+  socket.write("\r\n").or_panic
+  sleep 20
+  body = String.build(32768) { |w| 32768.times { w << "x" } }
+  socket.write(body).or_panic
+  raise "answer" unless answer(socket) == "/split 32768"
+  socket.close
+  g.cancel_children
+end
+puts "PASS: split slow head"

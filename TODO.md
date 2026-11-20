@@ -452,8 +452,6 @@ change. Gates stay structural.
 
 ## 10. std
 
-* HTTP answer's slow request path still uses String-based read_head and
-  body readers. Recheck prefork, TLS and samples/ris/web after it.
 * TlsConfig system roots: check whether SystemRoots (00130b97e) already
   keeps them. If still read per handshake, make Certificate copyable to
   Program.tape to keep them once.
