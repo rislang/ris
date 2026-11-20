@@ -30,9 +30,12 @@ sections below and are listed here in order:
   Left: `Router#call` hands `Incoming` to an opaque handler Proc,
   refused ("cannot prove opaque callback retain/escape effects",
   router.ri `@handlers[found].call`; doc/drafts/checker-open-questions),
-  so std_router_exercise does not build. The HTTPS client
-  (`records_handshake` returns an owner, http.ri:4847; blocks
-  samples/ris/autocert.ri).
+  so std_router_exercise does not build. The HTTPS client: done
+  2026-11-20, `records_handshake` builds (std_http_resume.ri does);
+  AutocertIssuer keeps no HTTPClient or AcmeClient in fields: `issue`
+  makes them on its own tape and hands them down. autocert.ri still
+  waits for the acme/x509 port (x509.ri `SigningKey.from_pem`, acme.ri
+  `object` return scratch, SPEC 1.9; see the acme item below).
 
 * The user's own ris programs: each obstacle becomes an item here.
 
